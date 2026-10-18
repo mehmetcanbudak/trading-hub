@@ -2,7 +2,7 @@
 
 # Port Trading Hub to Windows with Claude
 
-.NET 10, Avalonia and SkiaSharp are cross-platform. Most data/feed/chart/backtest/strategy/indicator logic is OS-independent, but the current distribution targets Apple Silicon macOS. **This is an implementation plan, not a working or tested Windows release.**
+.NET 10, Avalonia and SkiaSharp are cross-platform. Most data/feed/chart/backtest/strategy/indicator logic is OS-independent, but the current distribution targets Apple Silicon macOS. The English branch now passes a shared Windows build, all 221 regression tests and English source/documentation auditing in CI, plus win-x64 cross-publishing. Native Windows startup, secure credentials, power/tray/shell integration and packaging remain unverified. **This is still an implementation plan, not a tested Windows desktop release.**
 
 On the target PC, install 64-bit Windows 10/11 (x64 or ARM64), [Git](https://git-scm.com), [.NET SDK 10](https://dotnet.microsoft.com/download) and a supported [Claude Code](https://claude.com/claude-code) distribution, then sign in. Use the provider's current Windows installation instructions.
 

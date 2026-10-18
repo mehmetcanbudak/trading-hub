@@ -2,7 +2,7 @@
 
 **Reviewed:** 2026-10-19
 **Branch:** `feat/english-localization`
-**Implementation:** reviewed built-in English coverage plus a user-authorized five-sample source migration, installed and visually verified in the native app. Expanded local checks pass; hosted Windows follow-up is being verified. This is not a guarantee about arbitrary user/provider content or trading safety.
+**Implementation:** reviewed built-in English coverage plus a user-authorized five-sample source migration, installed and visually verified in the native app. Expanded local and hosted macOS/Windows shared-runtime checks pass. This is not a guarantee about arbitrary user/provider content, Windows desktop integration or trading safety.
 
 ## Scope and provenance
 
@@ -26,13 +26,13 @@ Completed coverage includes navigation, controls/tooltips, secondary windows, sa
 | Existing sample migration | Passed locally | Five original files backed up and hash-verified outside watched folders. Explicitly authorized English filenames/classes/parameters/private/local names; no saved references existed. All non-text tokens match after the identifier map; four old/new strategies retain identical trades/equity with default and customized parameters (143–589 trades per replay). Indicator threshold default and series ID unchanged. |
 | Claude bridge, without paid usage | Passed | Fake CLI exercises actual bridge success/session parsing, authentication recognition and empty-response fallback. Both new-code prompts request English identifiers. No real model call or session was used. |
 | Closed-lid helper, without power changes | Passed | Fake RunAdminScript captures the English administrator explanation and verifies assertion/flag state and cleanup. No privileged helper or pmset change executed. |
-| Windows | Build and 221 shared tests passed; audit follow-up pending | Hosted run 39170947948 confirms all 221 tests pass after fixing Unix-only fixture assumptions: a leaked lock and concurrent-file damage setup. Production locks and recovery assertions are unchanged. Windows CRLF checkout exposed fingerprint-only differences in raw strings; normalization has a red/green regression and preserves numeric-mutation detection. Updated audit CI is being rerun. Desktop/system integration remains outside this evidence. |
+| Windows | Passed for shared runtime | Hosted run 39171525478 builds the solution, passes all 221 tests and validates English source/documentation. Unix-only test-fixture assumptions and CRLF-sensitive fingerprints were repaired without changing production locks or recovery assertions; numeric/raw-code mutation checks remain active. Native Windows desktop/system integration remains outside this evidence. |
 | Report generation/export | Passed | Backtest, optimization, walk-forward and portfolio prose; parameter display names; fallback verdict metadata; self-contained English HTML with embedded charts. |
 | Test isolation guards | Passed | Direct production-data root and a symlink alias both refused before application startup. Sleep guard disabled; fake Keychain/providers used. |
 | Installer syntax | Passed | `zsh -n build-app.sh`; only comments/messages translated, packaging behavior unchanged. |
 | Broader scenarios / narrow-window visual review | Passed | Final **16-scenario** run exited 0 with **65 screenshots**; fresh **1100×760** run exited 0 with 120 English checks. Main pages, secondary windows and safety dialogs visually inspected. |
 | Negative audit gates | Passed | Unaccented Spanish, accented Spanish and new unreviewed English source were rejected. Temporary probes removed. |
-| Hosted GitHub workflow | Passed | [Workflow](../../.github/workflows/english-translation-validation.yml), [run 39163792434](https://github.com/mehmetcanbudak/trading-hub/actions/runs/39163792434) validates implementation commit `2dd4ed9`: Release build, 221 tests, source/docs checks and all 16 UI scenarios, including 93 English checks. Isolated screenshots and HTML reports uploaded as `tradinghub-english-ui`; this is this fork's previous implementation evidence, not older TradeDock CI. The sample follow-up will run both macOS and shared Windows jobs on this fork. |
+| Hosted GitHub workflow | Passed | [Workflow](../../.github/workflows/english-translation-validation.yml), [run 39171525478](https://github.com/mehmetcanbudak/trading-hub/actions/runs/39171525478) validates commit `bad8c5e`: Windows shared build/221 tests/source-doc audit; macOS Release build/221 tests/source-doc audit and all 16 UI scenarios, including 120 English checks. Isolated screenshots and HTML reports uploaded as `tradinghub-english-ui`. This is this fork's evidence, not older TradeDock CI. |
 | Installed English app | Passed | Updated bundle installed and strict signature verification passed. Native Backtesting shows compiled DeltaAbsorption.cs with English code, and Custom indicator editor shows compiled DeltaPercentageExample.cs with English code. All five files migrated with permission; no saved references needed rewriting. Previous bundle/source/state rollback remains outside watched folders, and real-order permissions remain disabled. |
 
 ## Compatibility is not missing translation
@@ -65,12 +65,14 @@ Personal history, existing reports/conversations, third-party indicators, arbitr
 - A concurrent fake Tradovate request log was made thread-safe without changing real broker execution.
 - Existing Spanish sample source was migrated with explicit permission, and all future strategy/indicator generators now use English filenames and code identifiers, including the separate New indicator template.
 - English guide code examples and Claude new-code instructions now use English identifiers too; arbitrary existing user code is still preserved unless a rename is requested.
+- Shared Windows validation exposed two fixture lifetime/locking assumptions; tests now model historical damage offline and dispose every acquired lock. Production locking was not weakened.
+- Source-review fingerprints now ignore LF/CRLF differences, with an observed red/green raw-string regression and unchanged numeric/code-mutation gates.
 
 ## Limits and deliberate exclusions
 
 Two existing warnings remain: CS0414 in CumulativeDeltaCandles and CS0108 for ChartTraderPanel.Template. They are not introduced language failures.
 
-No real-money orders, real provider credentials, actual paid Claude calls or privileged closed-lid operation are used as translation tests. Existing fake broker scenarios, the fake Claude bridge and captured power-helper script test built-in English paths safely. Windows cross-publishing is checked, and shared Windows runtime tests are added to CI, but a complete Windows desktop port is not certified. Real brokerage connectivity/fills, provider licensing/model availability, actual paid-model output, physical closed-lid/thermal behavior and arbitrary extensions remain unverified. Raw vendor/model/system responses can have their own language; diagnostics are not silently rewritten or discarded.
+No real-money orders, real provider credentials, actual paid Claude calls or privileged closed-lid operation are used as translation tests. Existing fake broker scenarios, the fake Claude bridge and captured power-helper script test built-in English paths safely. Windows cross-publishing and hosted shared-runtime build/tests/source auditing pass, but a complete Windows desktop port is not certified. Real brokerage connectivity/fills, provider licensing/model availability, actual paid-model output, physical closed-lid/thermal behavior and arbitrary extensions remain unverified. Raw vendor/model/system responses can have their own language; diagnostics are not silently rewritten or discarded.
 
 A language heuristic and passing tests cannot prove arbitrary runtime content is English or certify trading safety. Completion claims apply to the reviewed built-in surfaces and full English guides, with the explicit compatibility/content exclusions above.
 
