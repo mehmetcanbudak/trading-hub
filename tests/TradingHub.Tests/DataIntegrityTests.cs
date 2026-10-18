@@ -46,31 +46,29 @@ public class DataIntegrityTests
             var trades = Stream(60_000);
             var byId = trades.ToDictionary(t => t.Id);
 
-            // como el 3/10: el Trading Hub del usuario (A) graba; arranca otro proceso (B) sobre el mismo archivo y cada
-            // uno escribe en su propia posición, pisándose a pedazos; después A se cierra y un Trading Hub nuevo (C)
-            // sigue grabando al final. El archivo queda con registros cortados y cadenas de diferencias mezcladas.
-            var a = new TickFile.Writer(path, Btc);
-            for (int i = 0; i < 20_000; i++)
+            // Reproduce historical overlapping writes offline: Windows prevents two writers opening one path.
+            int sharedOffset, resumedOffset;
+            using (var a = new TickFile.Writer(path, Btc))
             {
-                a.Write(trades[i]);
-                if (i % 20 == 0) a.Flush();
+                for (int i = 0; i < 20_000; i++) a.Write(trades[i]);
+                a.Flush();
+                sharedOffset = checked((int)new FileInfo(path).Length);
+                for (int i = 20_000; i < 21_000; i++) a.Write(trades[i]);
+                a.Flush();
+                resumedOffset = checked((int)new FileInfo(path).Length);
+                for (int i = 21_000; i < 22_000; i++) a.Write(trades[i]);
             }
-
-            a.Flush();
-            var b = new TickFile.Writer(path, Btc);
-            for (int i = 20_000; i < 21_000; i++) a.Write(trades[i]);
-            a.Flush();
-            // B iba adelantado (como en el archivo real: 812 operaciones) y escribe en la misma posición
-            for (int i = 20_812; i < 30_000; i++) b.Write(trades[i]);
-            b.Flush();
-            for (int i = 21_000; i < 22_000; i++)
+            byte[] firstWriter = File.ReadAllBytes(path);
+            string secondPath = Path.Combine(dir, "second-writer.vtk");
+            File.WriteAllBytes(secondPath, firstWriter[..sharedOffset]);
+            using (var b = new TickFile.Writer(secondPath, Btc))
+                for (int i = 20_812; i < 30_000; i++) b.Write(trades[i]);
+            File.Copy(secondPath, path, overwrite: true);
+            using (var overlap = new FileStream(path, FileMode.Open, FileAccess.Write))
             {
-                a.Write(trades[i]);
-                if (i % 50 == 0) a.Flush();
+                overlap.Position = resumedOffset;
+                overlap.Write(firstWriter.AsSpan(resumedOffset));
             }
-
-            a.Dispose();
-            b.Dispose();
             using (var c = new TickFile.Writer(path, Btc))
                 for (int i = 30_000; i < trades.Count; i++) c.Write(trades[i]);
 
@@ -130,7 +128,8 @@ public class DataIntegrityTests
             using var first = TickFile.TryLock(dir, "binance-futures", "BTCUSDT");
             Assert.NotNull(first);
             Assert.Null(TickFile.TryLock(dir, "binance-futures", "BTCUSDT"));
-            Assert.NotNull(TickFile.TryLock(dir, "binance-futures", "ETHUSDT")); // otro instrumento sí
+            using var otherInstrument = TickFile.TryLock(dir, "binance-futures", "ETHUSDT");
+            Assert.NotNull(otherInstrument); // otro instrumento sí
             first!.Dispose();
             using var again = TickFile.TryLock(dir, "binance-futures", "BTCUSDT");
             Assert.NotNull(again);
