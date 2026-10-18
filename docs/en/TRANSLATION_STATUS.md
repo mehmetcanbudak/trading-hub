@@ -28,7 +28,7 @@ Completed coverage includes navigation, controls/tooltips, secondary windows, sa
 | Installer syntax | Passed | `zsh -n build-app.sh`; only comments/messages translated, packaging behavior unchanged. |
 | Broader scenarios / narrow-window visual review | Passed | Final **16-scenario** run exited 0 with **65 screenshots**; fresh **1100×760** run exited 0 with 93 English checks. Main pages, secondary windows and safety dialogs visually inspected. |
 | Negative audit gates | Passed | Unaccented Spanish, accented Spanish and new unreviewed English source were rejected. Temporary probes removed. |
-| Hosted GitHub workflow | Updated; publication validation pending | [Workflow](../../.github/workflows/english-translation-validation.yml); do not substitute older TradeDock CI for this working tree. |
+| Hosted GitHub workflow | Passed | [Run 39163792434](https://github.com/mehmetcanbudak/trading-hub/actions/runs/39163792434) validates implementation commit `2dd4ed9`: Release build, 221 tests, source/docs checks and all 16 UI scenarios, including 93 English checks. Isolated screenshots and HTML reports uploaded as `tradinghub-english-ui`; this is this fork's evidence, not older TradeDock CI. |
 | Installed English app | Passed | Previous app and all 11 local data/document files backed up and hash-verified; install and strict signature verification passed. Native English startup verified with the existing profile after the user approved macOS Documents access. Existing scripts/indicators unchanged; real-order permissions remain disabled. |
 
 ## Compatibility is not missing translation

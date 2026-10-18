@@ -75,7 +75,7 @@ Without `--install`, Applications is untouched.
 
 ## Ad-hoc signing
 
-Without a developer certificate the script signs ad hoc. The locally built app normally opens on its build machine without an additional prompt.
+Without a developer certificate the script signs ad hoc. The locally built app normally opens on its build machine without an additional Gatekeeper prompt. macOS privacy permissions are separate: a changed ad-hoc signature can request **Documents-folder access** again after an update. Review that prompt and allow it if you want to use the standard strategy/indicator folders; startup may wait for your response.
 
 - On another Mac, use **Right-click → Open** for the first launch if required.
 - To use a certificate, create the git-ignored `build.local.env` in the repository:
@@ -176,4 +176,5 @@ These are optional destructive instructions, **not part of installation or trans
 
 - **`dotnet` not found:** the script uses `~/.dotnet` automatically. Confirm that `~/.dotnet/dotnet --list-sdks` lists SDK 10.
 - **Build failure:** read the first actual error. Check internet access for package restore and SDK version 10.
+- **Process running but no window after an update:** first check for the macOS Documents-folder permission prompt. It can hold filesystem-watcher initialization until you respond, without creating a crash log.
 - **Crash or unresponsive app:** inspect `crash.log` in the data directory. Never use a real trading account as a test fixture.
