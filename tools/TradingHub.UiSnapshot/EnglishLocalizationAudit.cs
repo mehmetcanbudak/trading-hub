@@ -35,7 +35,7 @@ internal static class EnglishLocalizationAudit
     internal static string Structure(string source, bool templateFile)
     {
         var pieces = new List<string>();
-        foreach (var token in Parse(source).DescendantTokens())
+        foreach (var token in Parse(source.ReplaceLineEndings("\n")).DescendantTokens())
         {
             if (templateFile && RawTemplate(token) is { } raw)
             {
@@ -78,6 +78,10 @@ internal static class EnglishLocalizationAudit
         string rawOne = "class A { string Code => $$\"\"\"class {{name}} { int Size => 1; }\"\"\"; }";
         if (Structure(rawOne, true) == Structure(rawOne.Replace("=> 1", "=> 2"), true))
             throw new InvalidOperationException("Raw template fingerprint self-check failed.");
+        string multiline = "class A { string Code => $$\"\"\"\nclass {{name}} { int Size => 1; }\n\"\"\"; }";
+        if (Structure(multiline, true) != Structure(multiline.ReplaceLineEndings("\r\n"), true)
+            || Structure(multiline, false) != Structure(multiline.ReplaceLineEndings("\r\n"), false))
+            throw new InvalidOperationException("Source fingerprint must ignore LF/CRLF differences.");
         if (!LooksSpanish("Cerrar la cuenta") || LooksSpanish("Close account")
             || Structure("class A { string Name => \"Hola\"; }", false) != Structure("class A { string Name => \"Hello\"; }", false)
             || Structure("class A { int Size => 1; }", false) == Structure("class A { int Size => 2; }", false)
