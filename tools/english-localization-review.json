@@ -2,10 +2,11 @@
   "baseline": "9ee74a4c527ac43120423acd41e006ec9d7877ad",
   "reviewNotes": [
     "Non-text changes are reviewed display-only EnglishText calls, SDK lookup precedence, ignored display metadata, English formatting/pluralization, and exact legacy compatibility recognition.",
-    "Trading/account/storage identifiers are not translated. Existing and added regression tests cover ledger recovery, legacy drawing alerts, report recognition and parameter/template serialization.",
+    "Trading/account/storage identities remain stable. New shipped samples use English code identifiers; existing user code is not renamed automatically. The explicitly authorized local five-file migration had backups, no saved references, token-equivalence checks and identical default/custom-parameter replays. Existing regression tests still cover legacy ledger/parameter/template recovery.",
     "Template raw C# is fingerprinted recursively, ignoring only comments and string text, so indicator/strategy math is not hidden by the raw-string envelope.",
     "This file is a reviewed allowlist, not a request to suppress future failures. Investigate and review every new exception or structural hash.",
-    "Final visual review: live-launch dropdown refreshes compiled display metadata; the data-page action row sits below the full-width title to avoid narrow-window clipping."
+    "Final visual review: live-launch dropdown refreshes compiled display metadata; the data-page action row sits below the full-width title to avoid narrow-window clipping.",
+    "Reviewed sample-only identifier renames in StrategyCatalog, UserScripts and CodeEditorWindow: class/file/parameter/private/local names are English; numeric expressions and control flow are unchanged after the explicit old-to-new identifier map. No trading-engine or provider protocol change. The actual New indicator template has a red/green regression check."
   ],
   "allowedLiterals": [
     {
@@ -666,6 +667,7 @@
     }
   ],
   "approvedStructure": {
+    "src/TradingHub.App/Windows/CodeEditorWindow.cs": "6B7051D05401129CDF8D9B080885793C9351350EE5263AE6AB0AF49FCAACF437",
     "src/TradingHub.App/App.cs": "81E94D28D8C20217883A4EF72438061D04C319DB8563338BF4ECEDE02F079A4E",
     "src/TradingHub.App/Controls/PropertyGrid.cs": "3E9A35ECEF5D5325220D8F4421F0223468212C89EE52CE9A699FD837A3374CBC",
     "src/TradingHub.App/Lab/ReportBuilder.cs": "4FD02EF323054CC01D0C520B5F0632722B32C031B67B781B1AE27BEF2BFB2CF3",
@@ -698,6 +700,8 @@
     "src/TradingHub.Strategies/Robustness.cs": "1D0C5C80D8370A8E82D83087A56A5DF9D5C29E79201100E2C50B15CC2BFC812F",
     "src/TradingHub.Strategies/Strategy.cs": "BAD783F94D287657926963D58A3D5E4E3BB8EF01D8012DA10801867AB585818A",
     "src/TradingHub.Core/Common/EnglishText.cs": "8F68A7B19AC07F2B4BDC37B88E2B6538FF575D3C780784036A52AF16E6D9A986",
-    "src/TradingHub.Sdk/Localization/Strings.English.cs": "535169FBA6AE3ED79A59EB6A3E19E3442BB46E3F3293AEB96D9CC637F4F9E8C7"
+    "src/TradingHub.Sdk/Localization/Strings.English.cs": "535169FBA6AE3ED79A59EB6A3E19E3442BB46E3F3293AEB96D9CC637F4F9E8C7",
+    "src/TradingHub.App/Services/StrategyCatalog.cs": "8E4B42D2C8EF71EB1F2A59D793950594C800879C7AD72E948D7DD8CB53F5FFDF",
+    "src/TradingHub.App/Services/UserScripts.cs": "47ACE330252B05EBC90E2B7D9BEE14E6DBCBCF50D51D3EE80779C6F19767721E"
   }
 }

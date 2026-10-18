@@ -29,7 +29,7 @@ TradingHub.Indicators.Technical supports locally importing the public ATAS techn
 
 ## Custom indicators
 
-- Place C# files in `~/Documents/Trading Hub/Indicadores`. Subfolders are supported; bin/obj are ignored. The initial example is `EjemploDeltaPorcentual.cs`, displayed as **Example: delta % per bar**.
+- Place C# files in `~/Documents/Trading Hub/Indicadores`. Subfolders are supported; bin/obj are ignored. The initial example is `DeltaPercentageExample.cs`, displayed as **Example: delta % per bar**.
 - File create/save/delete/rename triggers recompilation after about 0.6 seconds without changes; **Code → Recompile indicators** forces it.
 - Files compile together. On failure the last successful assembly remains available and the first error is shown. Success reports compile duration.
 - Custom indicators appear first in **My indicators**, with a star/custom badge. Remove and re-add an already loaded instance to use updated code.
@@ -40,7 +40,7 @@ Open **Code → Indicator editor** (⇧⌘E) or the library code button. New cre
 
 ### Example
 
-Existing example class/property/series identifiers are retained below; display metadata is English.
+New examples use English class/property/series identifiers and display metadata. Existing user indicators keep their identifiers unless an explicitly requested migration has checked saved chart and template references.
 
 ```csharp
 using System.ComponentModel;
@@ -50,35 +50,35 @@ using TradingHub.Indicators;
 
 [DisplayName("Average range")]
 [Category("My indicators")]
-public class RangoPromedio : Indicator
+public class AverageRange : Indicator
 {
-    private readonly ValueDataSeries _serie = new("Rango", "Average range") { Color = Color.Orange, Width = 2 };
-    private int _periodo = 14;
+    private readonly ValueDataSeries _series = new("Range", "Average range") { Color = Color.Orange, Width = 2 };
+    private int _period = 14;
 
     [Display(Name = "Period", GroupName = "Settings")]
     [Range(1, 1000)]
-    public int Periodo
+    public int Period
     {
-        get => _periodo;
-        set { _periodo = value; RecalculateValues(); }
+        get => _period;
+        set { _period = value; RecalculateValues(); }
     }
 
-    public RangoPromedio()
+    public AverageRange()
     {
         Panel = IndicatorDataProvider.NewPanel; // Separate panel below price.
-        DataSeries[0] = _serie;
+        DataSeries[0] = _series;
     }
 
     protected override void OnCalculate(int bar, decimal value)
     {
-        if (bar < Periodo - 1) return; // Wait for enough bars.
-        decimal suma = 0;
-        for (int i = 0; i < Periodo; i++)
+        if (bar < Period - 1) return; // Wait for enough bars.
+        decimal sum = 0;
+        for (int i = 0; i < Period; i++)
         {
-            var vela = GetCandle(bar - i);
-            suma += vela.High - vela.Low;
+            var candle = GetCandle(bar - i);
+            sum += candle.High - candle.Low;
         }
-        _serie[bar] = suma / Periodo;
+        _series[bar] = sum / Period;
     }
 }
 ```

@@ -111,7 +111,7 @@ internal static class LabServer
 
     private static readonly (string Name, string Type, string Description, bool Required)[] RangeProps =
     {
-        ("file", "string", "Strategy filename without .cs (e.g. CruceDeMedias)", true),
+        ("file", "string", "Strategy filename without .cs (e.g. MovingAverageCrossover)", true),
         ("feed", "string", "Data connection (e.g. binance-futures); see list_data", true),
         ("symbol", "string", "Symbol (e.g. BTCUSDT)", true),
         ("from", "string", "From (YYYY-MM-DD, UTC)", true),

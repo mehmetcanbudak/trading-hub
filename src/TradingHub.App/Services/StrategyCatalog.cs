@@ -108,105 +108,105 @@ public static class StrategyTemplates
 {
     public static readonly StrategyTemplate[] All =
     {
-        new("Moving-average crossover", "Long when the fast average crosses above the slow average; short on the reverse. A starting example.", "CruceDeMedias", true, c => $$"""
+        new("Moving-average crossover", "Long when the fast average crosses above the slow average; short on the reverse. A starting example.", "MovingAverageCrossover", true, c => $$"""
             using TradingHub.Strategies;
 
             [Strategy("__NOMBRE__", Description = "Two exponential moving averages with stop and target distances in ticks.")]
             public class {{c}} : Strategy
             {
                 [Parameter("Fast average"), Optimize(5, 30, 5)]
-                public int Rapida { get; set; } = 10;
+                public int FastPeriod { get; set; } = 10;
 
                 [Parameter("Slow average"), Optimize(20, 100, 10)]
-                public int Lenta { get; set; } = 40;
+                public int SlowPeriod { get; set; } = 40;
 
-                private Ema _rapida = null!, _lenta = null!;
+                private Ema _fast = null!, _slow = null!;
 
                 protected override void OnInit()
                 {
-                    _rapida = Ema(Rapida);
-                    _lenta = Ema(Lenta);
+                    _fast = Ema(FastPeriod);
+                    _slow = Ema(SlowPeriod);
                 }
 
                 protected override void OnBar(Bar bar)
                 {
-                    if (!_lenta.IsReady) return;
+                    if (!_slow.IsReady) return;
 
-                    if (CrossAbove(_rapida, _lenta)) EnterLong();
-                    else if (CrossBelow(_rapida, _lenta)) EnterShort();
+                    if (CrossAbove(_fast, _slow)) EnterLong();
+                    else if (CrossBelow(_fast, _slow)) EnterShort();
                 }
             }
             """),
 
-        new("Range breakout", "Buys a breakout of the N-bar high and sells a breakout of the low, with an ATR stop.", "RupturaDeRango", true, c => $$"""
+        new("Range breakout", "Buys a breakout of the N-bar high and sells a breakout of the low, with an ATR stop.", "RangeBreakout", true, c => $$"""
             using TradingHub.Strategies;
 
             [Strategy("__NOMBRE__", Description = "Donchian channel breakout with an ATR exit.")]
             public class {{c}} : Strategy
             {
                 [Parameter("Channel bars"), Optimize(10, 60, 10)]
-                public int Canal { get; set; } = 20;
+                public int ChannelPeriod { get; set; } = 20;
 
                 [Parameter("Stop distance (ATR multiple)"), Optimize(1, 4, 0.5)]
-                public double MultiploAtr { get; set; } = 2;
+                public double StopAtrMultiple { get; set; } = 2;
 
-                private Highest _maximo = null!;
-                private Lowest _minimo = null!;
+                private Highest _highest = null!;
+                private Lowest _lowest = null!;
                 private Atr _atr = null!;
                 private decimal _stop;
 
                 protected override void OnInit()
                 {
-                    _maximo = Highest(Canal);
-                    _minimo = Lowest(Canal);
+                    _highest = Highest(ChannelPeriod);
+                    _lowest = Lowest(ChannelPeriod);
                     _atr = Atr(14);
                 }
 
                 protected override void OnBar(Bar bar)
                 {
-                    if (Bars.Count <= Canal || !_atr.IsReady) return;
-                    decimal techo = _maximo[1], piso = _minimo[1];
-                    decimal distancia = _atr.Value * (decimal)MultiploAtr;
+                    if (Bars.Count <= ChannelPeriod || !_atr.IsReady) return;
+                    decimal upper = _highest[1], lower = _lowest[1];
+                    decimal stopDistance = _atr.Value * (decimal)StopAtrMultiple;
 
                     if (IsFlat)
                     {
-                        if (bar.Close > techo) { EnterLong(); _stop = bar.Close - distancia; }
-                        else if (bar.Close < piso) { EnterShort(); _stop = bar.Close + distancia; }
+                        if (bar.Close > upper) { EnterLong(); _stop = bar.Close - stopDistance; }
+                        else if (bar.Close < lower) { EnterShort(); _stop = bar.Close + stopDistance; }
                     }
                     else if (IsLong)
                     {
-                        _stop = Math.Max(_stop, bar.Close - distancia);
+                        _stop = Math.Max(_stop, bar.Close - stopDistance);
                         if (bar.Close < _stop) ClosePosition("ATR stop");
                     }
                     else
                     {
-                        _stop = Math.Min(_stop, bar.Close + distancia);
+                        _stop = Math.Min(_stop, bar.Close + stopDistance);
                         if (bar.Close > _stop) ClosePosition("ATR stop");
                     }
                 }
             }
             """),
 
-        new("Delta absorption", "Order flow: a strongly negative-delta bar closes higher (sell absorption) → buy, and vice versa.", "AbsorcionConDelta", true, c => $$"""
+        new("Delta absorption", "Order flow: a strongly negative-delta bar closes higher (sell absorption) → buy, and vice versa.", "DeltaAbsorption", true, c => $$"""
             using TradingHub.Strategies;
 
             [Strategy("__NOMBRE__", Description = "Detects absorption: strong opposing aggressive volume fails to move the price.")]
             public class {{c}} : Strategy
             {
                 [Parameter("Volume average period")]
-                public int Promedio { get; set; } = 20;
+                public int VolumeLookback { get; set; } = 20;
 
                 [Parameter("Minimum volume (× average)"), Optimize(1.0, 3.0, 0.5)]
-                public double VolumenMinimo { get; set; } = 1.5;
+                public double MinimumVolumeMultiple { get; set; } = 1.5;
 
                 [Parameter("Minimum delta (% of volume)"), Optimize(10, 40, 10)]
-                public int DeltaMinimo { get; set; } = 20;
+                public int MinimumDeltaPercent { get; set; } = 20;
 
                 [Parameter("Maximum bars per trade")]
-                public int VelasMaximas { get; set; } = 6;
+                public int MaxBarsInTrade { get; set; } = 6;
 
-                private Sma _volumen = null!;
-                private int _barEntrada;
+                private Sma _volume = null!;
+                private int _entryBar;
 
                 public {{c}}()
                 {
@@ -217,51 +217,51 @@ public static class StrategyTemplates
                 protected override void OnInit()
                 {
                     UseFootprint = true; // Per-price volume in each bar (bar.Levels, bar.PocPrice).
-                    _volumen = Sma(Promedio, PriceSource.Volume);
+                    _volume = Sma(VolumeLookback, PriceSource.Volume);
                 }
 
                 protected override void OnBar(Bar bar)
                 {
-                    if (!_volumen.IsReady) return;
+                    if (!_volume.IsReady) return;
 
-                    if (!IsFlat && CurrentBar - _barEntrada >= VelasMaximas)
+                    if (!IsFlat && CurrentBar - _entryBar >= MaxBarsInTrade)
                     {
                         ClosePosition("Time");
                         return;
                     }
 
-                    bool volumenAlto = bar.Volume >= _volumen[1] * (decimal)VolumenMinimo;
+                    bool highVolume = bar.Volume >= _volume[1] * (decimal)MinimumVolumeMultiple;
                     decimal deltaPct = bar.Volume > 0 ? 100 * bar.Delta / bar.Volume : 0;
 
                     // Strong aggressive selling, but a close above POC indicates absorption.
-                    if (IsFlat && volumenAlto && deltaPct <= -DeltaMinimo && bar.Close > bar.PocPrice && bar.IsBullish)
+                    if (IsFlat && highVolume && deltaPct <= -MinimumDeltaPercent && bar.Close > bar.PocPrice && bar.IsBullish)
                     {
                         EnterLong();
-                        _barEntrada = CurrentBar;
+                        _entryBar = CurrentBar;
                     }
-                    else if (IsFlat && volumenAlto && deltaPct >= DeltaMinimo && bar.Close < bar.PocPrice && bar.IsBearish)
+                    else if (IsFlat && highVolume && deltaPct >= MinimumDeltaPercent && bar.Close < bar.PocPrice && bar.IsBearish)
                     {
                         EnterShort();
-                        _barEntrada = CurrentBar;
+                        _entryBar = CurrentBar;
                     }
                 }
             }
             """),
 
-        new("VWAP mean reversion", "Trades a return to session VWAP after price moves too far away, within a defined schedule.", "ReversionVwap", true, c => $$"""
+        new("VWAP mean reversion", "Trades a return to session VWAP after price moves too far away, within a defined schedule.", "VwapReversion", true, c => $$"""
             using TradingHub.Strategies;
 
             [Strategy("__NOMBRE__", Description = "Sells extensions above VWAP and buys below; exits at VWAP.")]
             public class {{c}} : Strategy
             {
                 [Parameter("Distance (× ATR)"), Optimize(1.0, 3.0, 0.5)]
-                public double Distancia { get; set; } = 2;
+                public double DistanceAtrMultiple { get; set; } = 2;
 
                 [Parameter("From (local hour)")]
-                public int HoraDesde { get; set; } = 10;
+                public int StartHour { get; set; } = 10;
 
                 [Parameter("To (local hour)")]
-                public int HoraHasta { get; set; } = 20;
+                public int EndHour { get; set; } = 20;
 
                 private Vwap _vwap = null!;
                 private Atr _atr = null!;
@@ -280,24 +280,24 @@ public static class StrategyTemplates
                 protected override void OnBar(Bar bar)
                 {
                     if (!_atr.IsReady) return;
-                    bool horario = TimeBetween(TimeSpan.FromHours(HoraDesde), TimeSpan.FromHours(HoraHasta));
-                    decimal banda = _atr.Value * (decimal)Distancia;
+                    bool withinTradingHours = TimeBetween(TimeSpan.FromHours(StartHour), TimeSpan.FromHours(EndHour));
+                    decimal band = _atr.Value * (decimal)DistanceAtrMultiple;
 
                     if (IsLong && bar.Close >= _vwap.Value) ClosePosition("VWAP");
                     else if (IsShort && bar.Close <= _vwap.Value) ClosePosition("VWAP");
-                    else if (IsFlat && horario)
+                    else if (IsFlat && withinTradingHours)
                     {
-                        if (bar.Close < _vwap.Value - banda) EnterLong();
-                        else if (bar.Close > _vwap.Value + banda) EnterShort();
+                        if (bar.Close < _vwap.Value - band) EnterLong();
+                        else if (bar.Close > _vwap.Value + band) EnterShort();
                     }
 
                     // Do not hold a position outside trading hours.
-                    if (!horario && !IsFlat) ClosePosition("End of trading hours");
+                    if (!withinTradingHours && !IsFlat) ClosePosition("End of trading hours");
                 }
             }
             """),
 
-        new("Empty", "Minimal skeleton with available lifecycle methods.", "MiEstrategia", false, c => $$"""
+        new("Empty", "Minimal skeleton with available lifecycle methods.", "MyStrategy", false, c => $$"""
             using TradingHub.Strategies;
 
             [Strategy("__NOMBRE__", Description = "")]
@@ -305,14 +305,14 @@ public static class StrategyTemplates
             {
                 // [Parameter("Name"), Optimize(min, max, step)] exposes a parameter to optimization.
                 [Parameter("Period"), Optimize(10, 50, 10)]
-                public int Periodo { get; set; } = 20;
+                public int Period { get; set; } = 20;
 
-                private Sma _media = null!;
+                private Sma _average = null!;
 
                 protected override void OnInit()
                 {
                     // Indicators: Sma, Ema, Rsi, Atr, Vwap, Bollinger, Macd, Highest, Lowest, CumulativeDelta…
-                    _media = Sma(Periodo);
+                    _average = Sma(Period);
                 }
 
                 protected override void OnBar(Bar bar)

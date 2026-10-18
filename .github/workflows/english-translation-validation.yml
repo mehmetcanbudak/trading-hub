@@ -13,6 +13,24 @@ permissions:
   contents: read
 
 jobs:
+  windows-shared-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install .NET SDK 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build shared solution on Windows
+        run: dotnet build TradingHub.slnx --configuration Release
+      - name: Run shared regression tests on Windows
+        run: dotnet test tests/TradingHub.Tests --configuration Release --no-restore
+      - name: Verify English source and documentation on Windows
+        run: python tools/check_english_translation.py
+
   macos-build-and-tests:
     runs-on: macos-15
     timeout-minutes: 30

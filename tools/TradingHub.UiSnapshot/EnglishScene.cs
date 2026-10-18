@@ -100,13 +100,88 @@ internal static class EnglishScene
         var compiler = new ScriptCompiler();
         var examples = Path.Combine(AppPaths.Root, "EnglishExamples");
         Directory.CreateDirectory(examples);
+        var parameterNames = new Dictionary<string, string[]>
+        {
+            ["MovingAverageCrossover"] = new[] { "FastPeriod", "SlowPeriod" },
+            ["RangeBreakout"] = new[] { "ChannelPeriod", "StopAtrMultiple" },
+            ["DeltaAbsorption"] = new[] { "VolumeLookback", "MinimumVolumeMultiple", "MinimumDeltaPercent", "MaxBarsInTrade" },
+            ["VwapReversion"] = new[] { "DistanceAtrMultiple", "StartHour", "EndHour" },
+            ["MyStrategy"] = new[] { "Period" },
+        };
+        Check(StrategyTemplates.All.Select(t => t.FileName).ToHashSet().SetEquals(parameterNames.Keys), "all template filenames use English identifiers");
         int index = 0;
         foreach (var template in StrategyTemplates.All)
         {
             string file = Path.Combine(examples, template.FileName + ".cs");
-            File.WriteAllText(file, template.Code(template.FileName).Replace("__NOMBRE__", template.Name));
+            string code = template.Code(template.FileName).Replace("__NOMBRE__", template.Name);
+            File.WriteAllText(file, code);
             var result = compiler.Compile(new[] { file }, "EnglishTemplate" + index++);
             Check(result.Success, template.Name + " template compiles: " + string.Join("; ", result.Diagnostics.Where(d => d.Severity == "error")));
+            var type = result.Assembly?.GetTypes().FirstOrDefault(t => typeof(Strategy).IsAssignableFrom(t));
+            Check(type?.Name == template.FileName && parameterNames.TryGetValue(template.FileName, out var expected)
+                && ((Strategy)Activator.CreateInstance(type)!).GetParameters().Keys.ToHashSet().IsSupersetOf(expected), template.Name + " class and parameter names are English");
+            Check(!Regex.IsMatch(code, @"\b(?:Rapida|Lenta|Promedio|Canal|MultiploAtr|VolumenMinimo|DeltaMinimo|VelasMaximas|Distancia|HoraDesde|HoraHasta|Periodo|_rapida|_lenta|_maximo|_minimo|_volumen|_barEntrada|_media|volumenAlto|techo|piso|distancia|horario|banda)\b"), template.Name + " source has no legacy Spanish identifiers");
+        }
+        string indicatorFile = Path.Combine(AppPaths.UserIndicators, "DeltaPercentageExample.cs");
+        Check(File.Exists(indicatorFile), "initial indicator filename is English");
+        var indicatorResult = compiler.Compile(new[] { indicatorFile }, "EnglishIndicatorExample");
+        var indicatorType = indicatorResult.Assembly?.GetTypes().FirstOrDefault(t => typeof(Indicator).IsAssignableFrom(t));
+        Check(indicatorResult.Success && indicatorType?.Name == "DeltaPercentageExample" && indicatorType.GetProperty("HighlightThreshold") != null, "initial indicator class and parameter identifiers are English");
+        Check(!Regex.IsMatch(UserScripts.ExampleSource, @"\b(?:EjemploDeltaPorcentual|Umbral|_serie|vela)\b"), "initial indicator source has no legacy Spanish identifiers");
+        string newIndicatorCode = (string)typeof(CodeEditorWindow).GetMethod("IndicatorTemplate", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, new object[] { "EnglishIndicator", "English indicator" })!;
+        string newIndicatorFile = Path.Combine(examples, "EnglishIndicator.cs");
+        File.WriteAllText(newIndicatorFile, newIndicatorCode);
+        Check(compiler.Compile(new[] { newIndicatorFile }, "EnglishNewIndicator").Success, "New indicator editor template compiles");
+        Check(!Regex.IsMatch(newIndicatorCode, @"\b(?:Periodo|_serie|suma)\b"), "New indicator editor template uses English parameter/private/local identifiers");
+        string? adminScript = null;
+        string guardFolder = Path.Combine(examples, "PowerGuard");
+        using (var guard = new SleepGuard { FlagDirectory = guardFolder, RunAdminScript = script => { adminScript = script; return null; } })
+        {
+            guard.Update(true, true, true, "Fixture strategies running");
+            Check(guard.Awake && guard.LidHelperRunning, "fake power helper enters the requested state without privileges");
+            string prompt = Regex.Match(adminScript ?? "", "with prompt \\\"(.*?)\\\" with administrator privileges").Groups[1].Value;
+            Check(prompt.Contains("needs permission", StringComparison.Ordinal) && prompt.Contains("restored", StringComparison.Ordinal) && !EnglishLocalizationAudit.LooksSpanish(prompt), "closed-lid administrator explanation is English");
+            guard.Update(false, false, false, null);
+            Check(!guard.Awake && !guard.LidHelperRunning, "fake power helper releases its assertion and flag");
+        }
+        Check(!Directory.EnumerateFiles(guardFolder).Any(), "fake power test leaves no active flags");
+
+        if (!OperatingSystem.IsWindows())
+        {
+            string fakeCli = Path.Combine(examples, "fake-claude");
+            File.WriteAllText(fakeCli, "#!/bin/sh\nif [ \"$1\" = \"--help\" ]; then printf '%s\\n' '--effort VALUE' '--add-dir DIR'; else /bin/cat claude-fixture.json; fi\n");
+            File.SetUnixFileMode(fakeCli, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            string? previousCli = Environment.GetEnvironmentVariable("TRADINGHUB_CLAUDE_CLI");
+            Environment.SetEnvironmentVariable("TRADINGHUB_CLAUDE_CLI", fakeCli);
+            var bridge = new ClaudeCodeBridge();
+            ClaudeResult? reply = null;
+            bridge.Finished += result => reply = result;
+            void FakeReply(string json)
+            {
+                reply = null;
+                bridge.NewConversation();
+                File.WriteAllText(Path.Combine(examples, "claude-fixture.json"), json);
+                var task = bridge.SendAsync("Fixture only; no network or paid model.", examples, ClaudeCodeBridge.StrategySystemPrompt);
+                for (int i = 0; i < 500 && (!task.IsCompleted || reply == null); i++) pump(0.01);
+                Check(task.IsCompletedSuccessfully && reply != null, "fake Claude request completes through the real bridge");
+                if (!task.IsCompleted) bridge.Cancel();
+            }
+            try
+            {
+                FakeReply("{\"type\":\"result\",\"session_id\":\"fixture-session\",\"result\":\"English fixture response.\",\"is_error\":false,\"total_cost_usd\":0}");
+                Check(reply is { IsError: false, Text: "English fixture response.", CostUsd: 0 } && bridge.SessionId == "fixture-session", "Claude response/session parsing works without a paid call");
+                FakeReply("{\"type\":\"result\",\"result\":\"Not logged in. Run /login.\",\"is_error\":true}");
+                Check(reply is { IsError: true, NeedsLogin: true } && !EnglishLocalizationAudit.LooksSpanish(reply.Text), "Claude authentication failure is English and recognized");
+                FakeReply("not a JSON response\n");
+                Check(reply is { IsError: true } && reply.Text.Contains("exited without a response", StringComparison.Ordinal), "Claude empty-result fallback is English");
+                Check(ClaudeCodeBridge.StrategySystemPrompt.Contains("English filenames, class/parameter/local identifiers", StringComparison.Ordinal)
+                    && ClaudeCodeBridge.IndicatorSystemPrompt.Contains("English filenames, class/parameter/local identifiers", StringComparison.Ordinal), "new Claude strategy and indicator code is instructed to use English identifiers");
+            }
+            finally
+            {
+                bridge.Cancel();
+                Environment.SetEnvironmentVariable("TRADINGHUB_CLAUDE_CLI", previousCli);
+            }
         }
         string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
         foreach (string guide in new[] { "estrategias.md", "indicadores.md" })

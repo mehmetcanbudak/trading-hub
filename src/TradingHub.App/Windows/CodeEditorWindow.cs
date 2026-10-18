@@ -166,24 +166,24 @@ internal sealed class CodeEditorWindow : Window
         [Category("My indicators")]
         public class {{cls}} : Indicator
         {
-            private readonly ValueDataSeries _serie = new("Series", "Value") { Color = System.Drawing.Color.Orange, Width = 2 };
+            private readonly ValueDataSeries _series = new("Series", "Value") { Color = System.Drawing.Color.Orange, Width = 2 };
 
             [Display(Name = "Period", GroupName = "Settings")]
             [Range(1, 1000)]
-            public int Periodo { get; set; } = 20;
+            public int Period { get; set; } = 20;
 
             public {{cls}}()
             {
-                DataSeries[0] = _serie;
+                DataSeries[0] = _series;
             }
 
             protected override void OnCalculate(int bar, decimal value)
             {
                 // Example: simple moving average of closing prices.
-                if (bar < Periodo) return;
-                decimal suma = 0;
-                for (int i = 0; i < Periodo; i++) suma += GetCandle(bar - i).Close;
-                _serie[bar] = suma / Periodo;
+                if (bar < Period) return;
+                decimal sum = 0;
+                for (int i = 0; i < Period; i++) sum += GetCandle(bar - i).Close;
+                _series[bar] = sum / Period;
             }
         }
         """;

@@ -99,7 +99,7 @@ public sealed class UserScripts : IDisposable
     private void WriteExampleIfEmpty()
     {
         if (Directory.EnumerateFiles(Folder, "*.cs", SearchOption.AllDirectories).Any()) return;
-        File.WriteAllText(Path.Combine(Folder, "EjemploDeltaPorcentual.cs"), ExampleSource);
+        File.WriteAllText(Path.Combine(Folder, "DeltaPercentageExample.cs"), ExampleSource);
     }
 
     public const string ExampleSource = """
@@ -112,28 +112,28 @@ public sealed class UserScripts : IDisposable
 
         [DisplayName("Example: delta % per bar")]
         [Category("My indicators")]
-        public class EjemploDeltaPorcentual : Indicator
+        public class DeltaPercentageExample : Indicator
         {
-            private readonly ValueDataSeries _serie = new("DeltaPct", "Delta %")
+            private readonly ValueDataSeries _series = new("DeltaPct", "Delta %")
             {
                 VisualType = VisualMode.Histogram,
             };
 
             [Display(Name = "Highlight threshold (%)", GroupName = "Settings")]
-            public decimal Umbral { get; set; } = 30;
+            public decimal HighlightThreshold { get; set; } = 30;
 
-            public EjemploDeltaPorcentual()
+            public DeltaPercentageExample()
             {
                 Panel = IndicatorDataProvider.NewPanel;
-                DataSeries[0] = _serie;
+                DataSeries[0] = _series;
             }
 
             protected override void OnCalculate(int bar, decimal value)
             {
-                var vela = GetCandle(bar);
-                var pct = vela.Volume > 0 ? vela.Delta / vela.Volume * 100 : 0;
-                _serie[bar] = pct;
-                _serie.Colors[bar] = Math.Abs(pct) >= Umbral
+                var candle = GetCandle(bar);
+                var pct = candle.Volume > 0 ? candle.Delta / candle.Volume * 100 : 0;
+                _series[bar] = pct;
+                _series.Colors[bar] = Math.Abs(pct) >= HighlightThreshold
                     ? (pct > 0 ? Color.FromArgb(255, 73, 209, 73) : Color.FromArgb(255, 232, 69, 72))
                     : Color.FromArgb(255, 110, 120, 140);
             }

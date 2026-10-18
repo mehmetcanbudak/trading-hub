@@ -129,34 +129,34 @@ Outside the filter, orders cannot open/increase exposure: only the closing porti
 
 ## Example 1: Moving-average crossover with trading hours
 
-The original examples' class/property identifiers below are retained to preserve existing saved-history and parameter identities. Labels, comments, order descriptions and drawing text are English.
+New examples use English filenames, class/property identifiers, labels, comments and drawing text. Existing user scripts are not renamed automatically: back them up and check saved-history, chart and parameter references before explicitly migrating them.
 
 ```csharp
 using TradingHub.Strategies;
 
 [Strategy("Moving-average crossover with hours", Description = "Trade fast/slow crosses only within configured hours.")]
-public class CruceDeMediasHorario : Strategy
+public class MovingAverageCrossoverWithHours : Strategy
 {
-    [Parameter("Fast average"), Optimize(5, 30, 5)] public int Rapida { get; set; } = 10;
-    [Parameter("Slow average"), Optimize(20, 100, 10)] public int Lenta { get; set; } = 40;
-    [Parameter("From (local hour)")] public int HoraDesde { get; set; } = 9;
-    [Parameter("To (local hour)")] public int HoraHasta { get; set; } = 16;
-    private Ema _rapida = null!, _lenta = null!;
+    [Parameter("Fast average"), Optimize(5, 30, 5)] public int FastPeriod { get; set; } = 10;
+    [Parameter("Slow average"), Optimize(20, 100, 10)] public int SlowPeriod { get; set; } = 40;
+    [Parameter("From (local hour)")] public int StartHour { get; set; } = 9;
+    [Parameter("To (local hour)")] public int EndHour { get; set; } = 16;
+    private Ema _fast = null!, _slow = null!;
 
     // Protective stop at 40 ticks and target at 80 ticks, managed as OCO.
-    public CruceDeMediasHorario() { StopLossTicks = 40; TakeProfitTicks = 80; }
-    protected override void OnInit() { _rapida = Ema(Rapida); _lenta = Ema(Lenta); }
+    public MovingAverageCrossoverWithHours() { StopLossTicks = 40; TakeProfitTicks = 80; }
+    protected override void OnInit() { _fast = Ema(FastPeriod); _slow = Ema(SlowPeriod); }
     protected override void OnBar(Bar bar)
     {
-        if (!_lenta.IsReady) return;
-        Plot("Fast", _rapida[0], "#00BFFF");
-        Plot("Slow", _lenta[0], "#FFA500");
-        if (!TimeBetween(new TimeSpan(HoraDesde, 0, 0), new TimeSpan(HoraHasta, 0, 0)))
+        if (!_slow.IsReady) return;
+        Plot("Fast", _fast[0], "#00BFFF");
+        Plot("Slow", _slow[0], "#FFA500");
+        if (!TimeBetween(new TimeSpan(StartHour, 0, 0), new TimeSpan(EndHour, 0, 0)))
         {
             if (!IsFlat) ClosePosition("End of trading hours");
         }
-        else if (CrossAbove(_rapida, _lenta)) EnterLong();
-        else if (CrossBelow(_rapida, _lenta)) EnterShort();
+        else if (CrossAbove(_fast, _slow)) EnterLong();
+        else if (CrossBelow(_fast, _slow)) EnterShort();
     }
 }
 ```
@@ -169,61 +169,61 @@ Measure the initial range and place a stop on each side. For US index futures, u
 using TradingHub.Strategies;
 
 [Strategy("Opening-range breakout", Description = "Trade range breaks with stop orders and flatten at closing time.")]
-public class RupturaRangoApertura : Strategy
+public class OpeningRangeBreakout : Strategy
 {
-    [Parameter("Opening hour (local)")] public int HoraApertura { get; set; } = 9;
-    [Parameter("Opening minute")] public int MinutoApertura { get; set; } = 30;
-    [Parameter("Range minutes"), Optimize(15, 60, 15)] public int MinutosRango { get; set; } = 30;
-    [Parameter("Closing hour (local)")] public int HoraCierre { get; set; } = 16;
-    [Parameter("Range buffer (ticks)"), Optimize(0, 8, 2)] public int Margen { get; set; } = 2;
-    private DateOnly _dia;
-    private DateTime _inicioRango;
-    private decimal _techo, _piso;
-    private bool _hayRango, _ordenesPuestas;
-    private StrategyOrder? _compra, _venta;
+    [Parameter("Opening hour (local)")] public int OpeningHour { get; set; } = 9;
+    [Parameter("Opening minute")] public int OpeningMinute { get; set; } = 30;
+    [Parameter("Range minutes"), Optimize(15, 60, 15)] public int RangeMinutes { get; set; } = 30;
+    [Parameter("Closing hour (local)")] public int ClosingHour { get; set; } = 16;
+    [Parameter("Range buffer (ticks)"), Optimize(0, 8, 2)] public int BufferTicks { get; set; } = 2;
+    private DateOnly _day;
+    private DateTime _rangeStart;
+    private decimal _high, _low;
+    private bool _hasRange, _ordersPlaced;
+    private StrategyOrder? _buy, _sell;
 
     // With no fixed stop, trailing protection starts 60 ticks away.
-    public RupturaRangoApertura() => TrailingStopTicks = 60;
+    public OpeningRangeBreakout() => TrailingStopTicks = 60;
     protected override void OnBar(Bar bar)
     {
-        DateTime abrio = bar.Time + (LocalTime - Time);
-        var apertura = new TimeSpan(HoraApertura, MinutoApertura, 0);
-        var finRango = apertura + new TimeSpan(0, MinutosRango, 0);
-        var cierre = new TimeSpan(HoraCierre, 0, 0);
-        var ahora = LocalTime.TimeOfDay;
-        var dia = DateOnly.FromDateTime(abrio);
-        if (dia != _dia)
+        DateTime opened = bar.Time + (LocalTime - Time);
+        var opening = new TimeSpan(OpeningHour, OpeningMinute, 0);
+        var rangeEnd = opening + new TimeSpan(0, RangeMinutes, 0);
+        var closing = new TimeSpan(ClosingHour, 0, 0);
+        var now = LocalTime.TimeOfDay;
+        var day = DateOnly.FromDateTime(opened);
+        if (day != _day)
         {
             CancelAll();
             if (!IsFlat) ClosePosition("Day close");
-            (_dia, _techo, _piso, _hayRango, _ordenesPuestas) = (dia, decimal.MinValue, decimal.MaxValue, false, false);
+            (_day, _high, _low, _hasRange, _ordersPlaced) = (day, decimal.MinValue, decimal.MaxValue, false, false);
         }
         // Only bars opening inside the initial window define the range.
-        if (abrio.TimeOfDay >= apertura && abrio.TimeOfDay < finRango)
+        if (opened.TimeOfDay >= opening && opened.TimeOfDay < rangeEnd)
         {
-            if (!_hayRango) _inicioRango = bar.Time;
-            _hayRango = true;
-            _techo = Math.Max(_techo, bar.High);
-            _piso = Math.Min(_piso, bar.Low);
-            DrawBox($"rango-{dia:yyyyMMdd}", _inicioRango, _techo, bar.CloseTime, _piso, "#0000FF", 15, "Range");
+            if (!_hasRange) _rangeStart = bar.Time;
+            _hasRange = true;
+            _high = Math.Max(_high, bar.High);
+            _low = Math.Min(_low, bar.Low);
+            DrawBox($"rango-{day:yyyyMMdd}", _rangeStart, _high, bar.CloseTime, _low, "#0000FF", 15, "Range");
         }
-        if (_hayRango && !_ordenesPuestas && ahora >= finRango && ahora < cierre && IsFlat)
+        if (_hasRange && !_ordersPlaced && now >= rangeEnd && now < closing && IsFlat)
         {
-            _compra = BuyStop(_techo + Ticks(Margen), name: "Break above");
-            _venta = SellStop(_piso - Ticks(Margen), name: "Break below");
-            _ordenesPuestas = true;
-            Log($"Daily range: {_piso} to {_techo}");
+            _buy = BuyStop(_high + Ticks(BufferTicks), name: "Break above");
+            _sell = SellStop(_low - Ticks(BufferTicks), name: "Break below");
+            _ordersPlaced = true;
+            Log($"Daily range: {_low} to {_high}");
         }
-        bool niveles = _ordenesPuestas && ahora < cierre;
-        Plot("Range high", niveles ? _techo : (decimal?)null, "#00FF00");
-        Plot("Range low", niveles ? _piso : (decimal?)null, "#FF0000");
-        if (ahora >= cierre) { CancelAll(); if (!IsFlat) ClosePosition("Day close"); }
+        bool showLevels = _ordersPlaced && now < closing;
+        Plot("Range high", showLevels ? _high : (decimal?)null, "#00FF00");
+        Plot("Range low", showLevels ? _low : (decimal?)null, "#FF0000");
+        if (now >= closing) { CancelAll(); if (!IsFlat) ClosePosition("Day close"); }
     }
     protected override void OnOrderFilled(StrategyOrder order)
     {
-        if (order != _compra && order != _venta) return;
-        var otra = order == _compra ? _venta : _compra;
-        if (otra is { IsActive: true }) Cancel(otra);
+        if (order != _buy && order != _sell) return;
+        var other = order == _buy ? _sell : _buy;
+        if (other is { IsActive: true }) Cancel(other);
         if (order.Side == OrderSide.Buy) DrawArrowUp($"in-{order.Id}", order.FillTime, order.FillPrice, "#00FF00", "Breakout");
         else DrawArrowDown($"in-{order.Id}", order.FillTime, order.FillPrice, "#FF0000", "Breakout");
     }

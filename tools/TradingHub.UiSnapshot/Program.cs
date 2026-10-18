@@ -979,12 +979,12 @@ foreach (var page in pages)
             var strategiesDir = Path.GetFullPath(TradingHub.App.Services.AppPaths.Strategies);
             if (strategiesDir != Path.GetFullPath(Path.Combine(TradingHub.Common.Product.Documents, "Estrategias")))
             {
-                var example = TradingHub.App.Services.StrategyTemplates.All.First(t => t.FileName == "CruceDeMedias");
-                File.WriteAllText(Path.Combine(strategiesDir, "CruceDeMedias.cs"), example.Code("CruceDeMedias").Replace("__NOMBRE__", "Moving-average crossover"));
+                var example = TradingHub.App.Services.StrategyTemplates.All.First(t => t.FileName == "MovingAverageCrossover");
+                File.WriteAllText(Path.Combine(strategiesDir, "MovingAverageCrossover.cs"), example.Code("MovingAverageCrossover").Replace("__NOMBRE__", "Moving-average crossover"));
             }
 
             App.Services.Strategies.Refresh();
-            var file = App.Services.Strategies.Files.First(f => f.FileName == "CruceDeMedias");
+            var file = App.Services.Strategies.Files.First(f => f.FileName == "MovingAverageCrossover");
             // el gráfico sin las estrategias que trae el espacio de trabajo copiado: se mide solo la de la prueba
             foreach (var old in ch.Strategies.ToList()) tv.RemoveStrategy(ch, old);
             var add = tv.AddStrategyAsync(ch, file, openSettings: false);
@@ -1041,7 +1041,7 @@ foreach (var page in pages)
             }
             TradingHub.App.Services.Workspace.Save(tv);
             var ws = File.ReadAllText(TradingHub.App.Services.AppPaths.WorkspaceFile);
-            Console.WriteLine($"Guardada en el espacio de trabajo: {ws.Contains("CruceDeMedias") || ws.Contains("Cruce")} (Live={ws.Contains("\"Live\": true")})");
+            Console.WriteLine($"Guardada en el espacio de trabajo: {ws.Contains("MovingAverageCrossover")} (Live={ws.Contains("\"Live\": true")})");
             var runner = cs.Runner!;
             tv.RemoveStrategy(ch, cs);
             Pump(0.5);

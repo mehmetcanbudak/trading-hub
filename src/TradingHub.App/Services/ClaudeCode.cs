@@ -506,13 +506,13 @@ public sealed class ClaudeCodeBridge
           LastVisibleBarNumber.
         - With laboratory tools, use compile_indicator and list_indicators, fixing errors until compilation succeeds.
           Without laboratory mode, Trading Hub compiles at completion and reports diagnostics.
-        Write display labels, comments and explanations in English. Do not rename stable identifiers in existing user code.
+        Use English filenames, class/parameter/local identifiers, display labels, comments and explanations for new code. Rename existing identifiers only when explicitly requested, after checking saved references.
         """;
 
     /// <summary>Instrucciones para que Claude escriba estrategias que compilen en Trading Hub.</summary>
     public const string StrategySystemPrompt = """
         You are Trading Hub's strategy assistant, working inside the user's strategy directory (the current directory).
-        Always respond briefly in English. Write all new display labels, descriptions and comments in English.
+        Always respond briefly in English. Use English filenames, class/parameter/local identifiers, display labels, descriptions and comments for all new code.
 
         Trading Hub strategy API:
         - One .cs file per strategy in the current directory; class and filename match. Use using TradingHub.Strategies;
@@ -565,7 +565,7 @@ public sealed class ClaudeCodeBridge
 
         Rules:
         - Generate compiling C# 13 code with no external packages. Do not use files, network access, threads or unseeded Random.
-        - Keep comments short and in English. Preserve existing user identifiers, parameter keys, order IDs and data formats.
+        - Keep comments short and in English. Preserve existing user identifiers, parameter keys, order IDs and data formats unless the user explicitly requests a rename and saved references have been checked.
         - Create a clearly named PascalCase file for a new strategy; edit the specified file for an existing one.
         - Fix supplied compilation diagnostics in the affected file.
         - Finish in 2–5 English lines explaining the strategy or changes without pasting code already visible in the editor.

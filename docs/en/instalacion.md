@@ -132,7 +132,7 @@ Spanish folder names are compatibility identifiers, not untranslated UI. Do not 
 | `Backtests/`, `Live/` | Saved backtests and live-strategy state. |
 | `crash.log` | Unexpected errors for troubleshooting. |
 
-The first launch creates the Documents folders, including `EjemploDeltaPorcentual.cs`. Example strategies are created when the strategy folder is empty. Existing user files are not overwritten merely to translate them.
+The first launch creates the Documents folders, including `DeltaPercentageExample.cs`. Example strategies are created when the strategy folder is empty. Existing user files are not overwritten merely to translate them.
 
 Open folders using **File → Open data folder**, **Code → Open indicators folder**, **Code → Open strategies folder**, or the **Open** buttons under **Settings → Data**.
 
