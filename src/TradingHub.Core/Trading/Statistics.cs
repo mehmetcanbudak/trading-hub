@@ -22,7 +22,7 @@ namespace TradingHub.Trading.Statistics
         public decimal MaxRunUp { get; set; }
         public decimal MaxDrawDown { get; set; }
 
-        public override string ToString() => $"{(OpenVolume > 0 ? "Largo" : "Corto")} {Math.Abs(OpenVolume)} {OpenPrice}->{ClosePrice} PnL {PnL}";
+        public override string ToString() => $"{(OpenVolume > 0 ? "Long" : "Short")} {Math.Abs(OpenVolume)} {OpenPrice}->{ClosePrice} PnL {PnL}";
     }
 
     /// <summary>Lista que avisa cuando se agrega un elemento.</summary>

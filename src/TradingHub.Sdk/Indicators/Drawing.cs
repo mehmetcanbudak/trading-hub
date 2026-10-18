@@ -38,7 +38,7 @@ namespace TradingHub.Indicators
         [Browsable(false)]
         public string DescriptionKey { get; set; }
 
-        [Display(Name = "Valor", Order = 10)]
+        [Display(Name = "Value", Order = 10)]
         public decimal Value
         {
             get => _value;
@@ -52,21 +52,21 @@ namespace TradingHub.Indicators
             set => Set(ref _color, value);
         }
 
-        [Display(Name = "Grosor", Order = 30)]
+        [Display(Name = "Width", Order = 30)]
         public int Width
         {
             get => _width;
             set => Set(ref _width, Math.Max(1, value));
         }
 
-        [Display(Name = "Estilo", Order = 40)]
+        [Display(Name = "Style", Order = 40)]
         public LineDashStyle LineDashStyle
         {
             get => _lineDashStyle;
             set => Set(ref _lineDashStyle, value);
         }
 
-        [Display(Name = "Incluir en escala", Order = 50)]
+        [Display(Name = "Include in scale", Order = 50)]
         public bool UseScale
         {
             get => _useScale;

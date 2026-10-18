@@ -57,7 +57,7 @@ internal sealed class LiveLaunchWindow : Window
         var catalog = svc.Strategies;
         if (catalog.Files.Count == 0) catalog.Refresh();
         foreach (var f in catalog.Files.OrderBy(f => f.DisplayName))
-            _strategy.Items.Add(new ComboBoxItem { Content = f.DisplayName + (f.LastCompile?.Success == false ? " (con errores)" : ""), Tag = f });
+            _strategy.Items.Add(new ComboBoxItem { Content = f.DisplayName + (f.LastCompile?.Success == false ? " (with errors)" : ""), Tag = f });
         foreach (var p in new[] { "M1", "M2", "M3", "M5", "M10", "M15", "M30", "H1", "H4" }) _period.Items.Add(p);
         _period.SelectedItem = "M5";
 
@@ -95,13 +95,13 @@ internal sealed class LiveLaunchWindow : Window
 
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(22, 18, 22, 18) };
         body.Children.Add(Ui.V(4, Ui.H2("New live strategy"),
-            Note("Recibe el mercado en tiempo real y opera en la cuenta elegida. Antes de empezar arma sus indicadores con la historia (sin operar). Probala primero en la cuenta simulada.")));
-        body.Children.Add(Section("What and where", Ui.Field("Strategy", _strategy), Ui.Field("Instrumento", _picker), Ui.Field("Account", _account), _warning,
-            Ui.Field("Velas", _period), _session));
+            Note("Receives live market data and trades on the selected account. Warms up indicators from historical data without trading before starting. Test with simulation first.")));
+        body.Children.Add(Section("What and where", Ui.Field("Strategy", _strategy), Ui.Field("Instrument", _picker), Ui.Field("Account", _account), _warning,
+            Ui.Field("Candles", _period), _session));
         body.Children.Add(Section("Parameters", _params, Note("Uses the latest parameters from its backtest.")));
         body.Children.Add(Section("Market condition", _conditions,
             Note("Only opens trades in selected market conditions, using closed bars for trend and volatility. You can adjust this in Live without restarting.")));
-        body.Children.Add(Section("Riesgo", riskGrid, _closeOnLimit,
+        body.Children.Add(Section("Risk", riskGrid, _closeOnLimit,
             Note("Daily loss limit stops new entries until the next session; drawdown limit stops the strategy. Exits must close only its open size.")));
         body.Children.Add(Section("Portfolio", _portfolio));
 
@@ -167,10 +167,12 @@ internal sealed class LiveLaunchWindow : Window
         if (file.Type == null)
         {
             _params.Load(null, new Dictionary<string, object?>());
-            _status($"«{file.FileName}» tiene errores: arreglala en Backtesting.");
+            _status($"«{file.FileName}» has errors: fix them in Backtesting.");
             return;
         }
 
+        if (_strategy.SelectedItem is ComboBoxItem selected && ReferenceEquals(selected.Tag, file))
+            selected.Content = file.DisplayName;
         var saved = LiveCenter.SavedBacktest(file, _svc.Settings.TimeZoneId);
         var values = saved.Parameters;
         _timeZoneId = saved.TimeZoneId;
@@ -189,7 +191,7 @@ internal sealed class LiveLaunchWindow : Window
         var probe = file.Type != null ? (Strategy)Activator.CreateInstance(file.Type)! : null;
         probe?.SetParameters(values);
         _conditions.Load(probe?.RegimeFilter ?? RegimeFilter.All, probe?.MinVolatilityRank ?? 0, probe?.MaxVolatilityRank ?? 100);
-        _session.Text = $"Sesión: {(_timeZoneId ?? "UTC")} desde las {_sessionStart:hh\\:mm} (la del backtest; define el «día» para la pérdida máxima del día).";
+        _session.Text = $"Session: {(_timeZoneId ?? "UTC")} starting at {_sessionStart:hh\\:mm} (from the backtest; defines the day for daily loss limits).";
     }
 
     /// <summary>Los parámetros con la condición de mercado elegida.</summary>
@@ -235,8 +237,8 @@ internal sealed class LiveLaunchWindow : Window
         }
 
         if (acc.IsReal && !await ConfirmDialog.ShowAsync(this, "Execute on REAL account",
-                $"«{file.DisplayName}» va a operar {_instrument.Symbol} en {acc.Name} con órdenes reales y sin confirmación individual. La detenés desde En vivo.",
-                "Ejecutar con dinero real", danger: true))
+                $"«{file.DisplayName}» will trade {_instrument.Symbol} on {acc.Name} with real orders and no individual confirmation. Stop it from Live.",
+                "Execute with real money", danger: true))
             return;
 
         _start.IsEnabled = false;

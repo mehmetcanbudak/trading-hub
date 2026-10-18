@@ -16,7 +16,7 @@ internal sealed partial class StrategiesView
     private readonly MarkdownView _reportView = new();
     private readonly TextBlock _reportEmpty = new()
     {
-        Text = "Todavía no hay reportes. En Código, activá «Laboratorio» en el panel de Claude y pedile que investigue y optimice una estrategia: al terminar guarda el reporte acá.",
+        Text = "No reports yet. Enable Laboratory in the Code tab's Claude panel and ask it to research and optimize a strategy; the completed report appears here.",
         Classes = { "muted" },
         TextWrapping = TextWrapping.Wrap,
         MaxWidth = 460,
@@ -35,11 +35,11 @@ internal sealed partial class StrategiesView
         {
             var html = ReportExport.Export(_report);
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("open", $"\"{html}\"") { UseShellExecute = false });
-            _status($"Informe exportado: {System.IO.Path.GetFileName(html)} (en el navegador: Archivo → Exportar como PDF)");
+            _status($"Report exported: {System.IO.Path.GetFileName(html)} (in your browser: File → Export as PDF)");
         }
         catch (Exception ex)
         {
-            _status("No se pudo exportar: " + ex.Message);
+            _status("Could not export: " + ex.Message);
         }
     }
 
@@ -58,7 +58,7 @@ internal sealed partial class StrategiesView
         var brush = VerdictBrush(verdict);
         return new Border
         {
-            Child = new TextBlock { Text = verdict.ToUpperInvariant(), FontSize = 10, FontWeight = FontWeight.Bold, Foreground = brush },
+            Child = new TextBlock { Text = TradingHub.Common.EnglishText.Of(verdict).ToUpperInvariant(), FontSize = 10, FontWeight = FontWeight.Bold, Foreground = brush },
             BorderBrush = brush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
@@ -75,8 +75,8 @@ internal sealed partial class StrategiesView
         };
 
         _reportView.Paper = true;
-        var refresh = Ui.IconButton(MaterialIconKind.Refresh, "Actualizar", RefreshReports, 16);
-        var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, "Abrir la carpeta de reportes", () =>
+        var refresh = Ui.IconButton(MaterialIconKind.Refresh, "Refresh", RefreshReports, 16);
+        var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, "Open reports folder", () =>
         {
             System.IO.Directory.CreateDirectory(AppPaths.Reports);
             Windows.Shell.OpenFolder(AppPaths.Reports);
@@ -85,7 +85,7 @@ internal sealed partial class StrategiesView
         var tools = Ui.H(4, refresh, folder);
         DockPanel.SetDock(tools, Dock.Right);
         head.Children.Add(tools);
-        head.Children.Add(Ui.H3("Reportes del laboratorio"));
+        head.Children.Add(Ui.H3("Laboratory reports"));
         var left = new DockPanel();
         DockPanel.SetDock(head, Dock.Top);
         left.Children.Add(head);
@@ -103,9 +103,9 @@ internal sealed partial class StrategiesView
             HorizontalAlignment = HorizontalAlignment.Center,
             BoxShadow = BoxShadows.Parse("0 6 28 0 #66000000"),
         };
-        var export = Ui.Button("Exportar PDF / HTML", MaterialIconKind.FileExportOutline, ExportReport, "primary");
-        ToolTip.SetTip(export, "Guarda el informe como HTML con los gráficos incluidos y lo abre en el navegador (desde ahí: Archivo → Exportar como PDF o Imprimir)");
-        var finder = Ui.Button("Mostrar en Finder", MaterialIconKind.FolderOutline, () =>
+        var export = Ui.Button("Export PDF / HTML", MaterialIconKind.FileExportOutline, ExportReport, "primary");
+        ToolTip.SetTip(export, "Save an HTML report with embedded charts and open it in your browser (then use File → Export as PDF or Print)");
+        var finder = Ui.Button("Show in Finder", MaterialIconKind.FolderOutline, () =>
         {
             if (_report != null) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("open", $"-R \"{_report.Path}\"") { UseShellExecute = false });
         });
@@ -170,7 +170,7 @@ internal sealed partial class StrategiesView
         }
         catch (Exception ex)
         {
-            _reportView.Markdown = "No se pudo leer el reporte: " + ex.Message;
+            _reportView.Markdown = "Could not read report: " + ex.Message;
         }
 
         _reportEmpty.IsVisible = false;

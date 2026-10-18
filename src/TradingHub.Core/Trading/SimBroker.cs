@@ -47,6 +47,7 @@ public sealed class SimBroker : TradingManager, ITradingAccount, IDisposable
     public Instrument Instrument => _data.Instrument;
 
     /// <summary>Nombre de la cuenta (cada estrategia puede usar una propia).</summary>
+    // Persisted live-ledger keys include this legacy name; localize it only for display.
     public string Name { get; init; } = "Cuenta simulada";
     public bool IsReal => false;
     public decimal LastPrice => _data.LastPrice;
@@ -193,16 +194,16 @@ public sealed class SimBroker : TradingManager, ITradingAccount, IDisposable
     {
         CancelAll();
         var pos = Position!.Volume;
-        if (pos > 0) Market(OrderDirections.Sell, pos, "Cerrar");
-        else if (pos < 0) Market(OrderDirections.Buy, -pos, "Cerrar");
+        if (pos > 0) Market(OrderDirections.Sell, pos, "Close");
+        else if (pos < 0) Market(OrderDirections.Buy, -pos, "Close");
     }
 
     /// <summary>Da vuelta la posición (de largo a corto o viceversa).</summary>
     public void Reverse()
     {
         var pos = Position!.Volume;
-        if (pos > 0) Market(OrderDirections.Sell, pos * 2, "Revertir");
-        else if (pos < 0) Market(OrderDirections.Buy, -pos * 2, "Revertir");
+        if (pos > 0) Market(OrderDirections.Sell, pos * 2, "Reverse");
+        else if (pos < 0) Market(OrderDirections.Buy, -pos * 2, "Reverse");
     }
 
     // ===================================================================== motor de llenado

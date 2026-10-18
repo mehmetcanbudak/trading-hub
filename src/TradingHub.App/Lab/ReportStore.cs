@@ -28,8 +28,8 @@ internal static class ReportStore
         if (!body.StartsWith("# ", StringComparison.Ordinal))
         {
             var meta = new List<string> { DateTime.Now.ToString("dd/MM/yyyy HH:mm") };
-            if (strategy != null) meta.Insert(0, $"Estrategia: {strategy}");
-            if (verdict.Length > 0) meta.Add($"Veredicto: {verdict.ToUpperInvariant()}");
+            if (strategy != null) meta.Insert(0, $"Strategy: {strategy}");
+            if (verdict.Length > 0) meta.Add($"Verdict: {TradingHub.Common.EnglishText.Of(verdict).ToUpperInvariant()}");
             body = $"# {title}\n\n> {string.Join(" · ", meta)}\n\n{body}";
         }
 

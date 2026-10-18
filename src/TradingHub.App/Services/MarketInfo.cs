@@ -70,21 +70,21 @@ public static class MarketInfo
     public static string Describe(string market)
     {
         var (feed, sym) = Split(market);
-        if (IsCrypto(feed)) return feed == "binance-spot" ? "cripto spot de Binance, 24/7" : feed == "bybit-linear" ? "futuro perpetuo de Bybit, 24/7" : "futuro perpetuo de Binance, 24/7";
-        if (IsFutures(feed)) return (TradingHub.Market.FuturesCatalog.Find(sym) is { } p ? $"futuro {p.Name} ({p.Exchange}, horario Globex)" : "futuro de CME Group") + FuturesSource(feed);
-        if (feed == CsvImport.FeedId) return "CFD importado de archivos (velas de 1 minuto convertidas en operaciones: sin volumen ni lado agresor reales, no sirve para flujo de órdenes)";
-        if (feed == TradingHub.Feeds.Oanda.OandaFeed.FeedId) return "CFD/forex de OANDA (velas de 5 segundos convertidas en operaciones: sin volumen ni lado agresor reales, no sirve para flujo de órdenes)";
-        if (feed.StartsWith(TradingHub.Feeds.CTrader.CTraderFeed.FeedId, StringComparison.Ordinal)) return "CFD/forex de un broker de cTrader (ticks bid: sin volumen ni lado agresor reales, no sirve para flujo de órdenes)";
-        if (IsStocks(feed)) return "acción/ETF de EE.UU. por Alpaca (operaciones reales de todas las bolsas, lado por regla del tick; horario 9:30-16:00 de Nueva York más pre y post)";
+        if (IsCrypto(feed)) return feed == "binance-spot" ? "Binance spot crypto, 24/7" : feed == "bybit-linear" ? "Bybit perpetual futures, 24/7" : "Binance perpetual futures, 24/7";
+        if (IsFutures(feed)) return (TradingHub.Market.FuturesCatalog.Find(sym) is { } p ? $"futures {p.Name} ({p.Exchange}, Globex hours)" : "CME Group futures") + FuturesSource(feed);
+        if (feed == CsvImport.FeedId) return "Imported CFD history (1-minute bars converted to synthetic trades: no real traded volume or aggressor side; unsuitable for order flow)";
+        if (feed == TradingHub.Feeds.Oanda.OandaFeed.FeedId) return "OANDA CFD/forex (5-second bars converted to synthetic trades: no real traded volume or aggressor side; unsuitable for order flow)";
+        if (feed.StartsWith(TradingHub.Feeds.CTrader.CTraderFeed.FeedId, StringComparison.Ordinal)) return "cTrader broker CFD/forex (bid quotes: no real traded volume or aggressor side; unsuitable for order flow)";
+        if (IsStocks(feed)) return "US stock/ETF via Alpaca (exchange trades, tick-rule side; New York 09:30–16:00 plus extended hours)";
         return feed;
     }
 
     private static string FuturesSource(string feed) => feed switch
     {
         RithmicFeed.FeedId => "",
-        HistorySources.Databento => " (historia de Databento)",
-        _ when feed.EndsWith(HistorySources.OnlySuffix, StringComparison.Ordinal) => $" (solo la historia de {(HistorySources.Folder(feed) == RithmicFeed.FeedId ? "Rithmic" : "Tradovate")})",
-        _ => " por Tradovate",
+        HistorySources.Databento => " (Databento history)",
+        _ when feed.EndsWith(HistorySources.OnlySuffix, StringComparison.Ordinal) => $" (history only from {(HistorySources.Folder(feed) == RithmicFeed.FeedId ? "Rithmic" : "Tradovate")})",
+        _ => " via Tradovate",
     };
 
     /// <summary>
@@ -170,7 +170,7 @@ public static class MarketInfo
         };
         if (c.CommissionPerUnit > 0)
             parts.Add($"commission_per_unit {c.CommissionPerUnit.ToString(Inv)}" +
-                      (!IsFutures(feed) ? "" : Commission(symbol).Confirmed ? " (la real: la confirmó el trader)" : " (estimada: el trader todavía no la confirmó; no se la preguntes)"));
+                      (!IsFutures(feed) ? "" : Commission(symbol).Confirmed ? " (actual: confirmed by trader)" : " (estimated: not yet confirmed by trader; do not ask)"));
         parts.Add($"slippage_ticks {c.SlippageTicks}");
         parts.Add(c.TimeZoneId != null ? $"timezone {c.TimeZoneId} · session_start_hour {c.SessionStartHours.ToString(Inv)}" : "timezone UTC");
         return string.Join(" · ", parts);

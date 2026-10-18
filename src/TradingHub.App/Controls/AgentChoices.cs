@@ -12,7 +12,7 @@ internal static class AgentChoices
 
     internal static readonly (string Id, string Label)[] Efforts =
     {
-        ("low", "Bajo"), ("medium", "Medio"), ("high", "Alto"), ("xhigh", "Extra"), ("max", "Máximo"),
+        ("low", "Low"), ("medium", "Medium"), ("high", "High"), ("xhigh", "Extra"), ("max", "Maximum"),
     };
 
     internal static ComboBox Combo((string Id, string Label)[] options, string current, Action<string> changed, double width = 150)

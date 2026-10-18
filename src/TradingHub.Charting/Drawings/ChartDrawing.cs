@@ -134,18 +134,18 @@ public sealed class ChartDrawing
 
     public static string KindName(DrawingKind k) => k switch
     {
-        DrawingKind.HorizontalLine => "Línea horizontal",
-        DrawingKind.HorizontalRay => "Rayo horizontal",
-        DrawingKind.VerticalLine => "Línea vertical",
-        DrawingKind.TrendLine => "Línea de tendencia",
-        DrawingKind.Ray => "Rayo",
-        DrawingKind.ExtendedLine => "Línea extendida",
-        DrawingKind.Rectangle => "Rectángulo / zona",
-        DrawingKind.FibRetracement => "Retroceso de Fibonacci",
-        DrawingKind.Text => "Texto",
-        DrawingKind.Ruler => "Regla",
-        DrawingKind.LongPosition => "Posición larga",
-        DrawingKind.ShortPosition => "Posición corta",
+        DrawingKind.HorizontalLine => "Horizontal line",
+        DrawingKind.HorizontalRay => "Horizontal ray",
+        DrawingKind.VerticalLine => "Vertical line",
+        DrawingKind.TrendLine => "Trend line",
+        DrawingKind.Ray => "Ray",
+        DrawingKind.ExtendedLine => "Extended line",
+        DrawingKind.Rectangle => "Rectangle / zone",
+        DrawingKind.FibRetracement => "Fibonacci retracement",
+        DrawingKind.Text => "Text",
+        DrawingKind.Ruler => "Ruler",
+        DrawingKind.LongPosition => "Long position",
+        DrawingKind.ShortPosition => "Short position",
         _ => k.ToString(),
     };
 
@@ -234,8 +234,8 @@ public sealed class ChartDrawing
             double hi = (double)series.TicksToPrice(c.HighTicks), lo = (double)series.TicksToPrice(c.LowTicks);
             bool hitStop = isLong ? lo <= stop : hi >= stop;
             bool hitTarget = isLong ? hi >= target : lo <= target;
-            if (hitStop) return ("Stop tocado", -1); // si toca los dos en la misma vela, se toma el peor caso
-            if (hitTarget) return ("Objetivo tocado", 1);
+            if (hitStop) return ("Stop touched", -1); // si toca los dos en la misma vela, se toma el peor caso
+            if (hitTarget) return ("Target touched", 1);
         }
 
         return ("", 0);
@@ -401,7 +401,7 @@ public sealed class ChartDrawing
                 break;
             }
             case DrawingKind.Text:
-                canvas.DrawText(string.IsNullOrEmpty(Text) ? "Texto" : Text, x0, y0, labelFont, text);
+                canvas.DrawText(string.IsNullOrEmpty(Text) ? "Text" : Text, x0, y0, labelFont, text);
                 break;
             case DrawingKind.Ruler:
             {
@@ -420,7 +420,7 @@ public sealed class ChartDrawing
                     int bars = Math.Abs(layout.BarAt(x1) - layout.BarAt(x0));
                     var span = Points[1].Time - Points[0].Time;
                     string l1 = $"{(diff >= 0 ? "+" : "")}{Format(diff, decimals)} ({pct:+0.00;-0.00}%)  {ticks} ticks";
-                    string l2 = $"{bars} barras · {FormatSpan(span)}";
+                    string l2 = $"{bars} bars · {FormatSpan(span)}";
                     DrawBox(canvas, font, (x0 + x1) / 2, Math.Max(y0, y1) + 6, SKColors.White, l1, l2);
                 }
 
@@ -487,13 +487,13 @@ public sealed class ChartDrawing
         var plotRect = main.Rect;
         float vx0 = Math.Max(x0, plotRect.Left), vx1 = Math.Min(x1, plotRect.Right);
         float cx = vx1 > vx0 ? (vx0 + vx1) / 2 : (x0 + x1) / 2;
-        string tl = $"Objetivo {Format(target, decimals)}  +{Format(reward, decimals)}{Pct(reward)}{Ticks(reward)}{Money(reward)}";
+        string tl = $"Target {Format(target, decimals)}  +{Format(reward, decimals)}{Pct(reward)}{Ticks(reward)}{Money(reward)}";
         string sl = $"Stop {Format(stop, decimals)}  −{Format(riskAmt, decimals)}{Pct(riskAmt)}{Ticks(riskAmt)}{Money(riskAmt)}";
         float boxH = font.Spacing + 8;
         // la etiqueta del objetivo va del lado de afuera (arriba en la larga, abajo en la corta)
         DrawBox(canvas, font, cx, isLong ? yT - boxH - 4 : yT + 4, theme.UpCandle, tl);
         DrawBox(canvas, font, cx, isLong ? yS + 4 : yS - boxH - 4, theme.DownCandle, sl);
-        string mid = $"{(isLong ? "Larga" : "Corta")} {Format(entry, decimals)} · R:R {rr.ToString("0.00", ic)}" + (Quantity > 0 ? $" · Cant {Quantity.ToString(ic)}" : "") + (status.Length > 0 ? $" · {status}" : "");
+        string mid = $"{(isLong ? "Long" : "Short")} {Format(entry, decimals)} · R:R {rr.ToString("0.00", ic)}" + (Quantity > 0 ? $" · Qty {Quantity.ToString(ic)}" : "") + (status.Length > 0 ? $" · {status}" : "");
         var midCol = outcome == 1 ? theme.UpCandle : outcome == -1 ? theme.DownCandle : SKColors.White;
         DrawBox(canvas, font, cx, yE - boxH / 2, midCol, mid);
     }

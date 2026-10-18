@@ -37,13 +37,13 @@ internal sealed class LiveEntry
 
     public bool Paused => Runner?.Paused ?? Info.Paused;
 
-    public string SourceLabel => Source == "chart" ? "Gráfico" : "En vivo";
+    public string SourceLabel => Source == "chart" ? "Chart" : "Live";
 
     public string StateLabel =>
-        Running ? Runner!.DailyLimitActive ? "Frenada por hoy" : Paused ? "Pausada" : "Corriendo"
-        : WaitingResume ? "Esperando que la reanudes"
-        : Runner?.IsClosing == true ? "Cerrando la posición"
-        : "Detenida";
+        Running ? Runner!.DailyLimitActive ? "Stopped for today" : Paused ? "Paused" : "Running"
+        : WaitingResume ? "Awaiting manual resume"
+        : Runner?.IsClosing == true ? "Closing position"
+        : "Stopped";
 
     public decimal OpenPnL => Running ? Ledger.OpenPnL(Runner!.Data.LastPrice) : 0;
     public decimal Net => Ledger.Realized + OpenPnL;
@@ -52,16 +52,16 @@ internal sealed class LiveEntry
 /// <summary>La próxima orden de una estrategia: cuántos contratos, de cuál y si es el micro (con su equivalente en el mini).</summary>
 internal readonly record struct OrderPlan(decimal Units, string Symbol, string SignalSymbol, bool Micro, bool AtMinimum, decimal Equivalent)
 {
-    private static readonly System.Globalization.CultureInfo Es = System.Globalization.CultureInfo.GetCultureInfo("es-AR");
+    private static readonly System.Globalization.CultureInfo Es = System.Globalization.CultureInfo.GetCultureInfo("en-US");
 
     /// <summary>«5 MNQ», «1 NQ» o «en cero».</summary>
-    public string Text => Units <= 0 ? "en cero" : $"{Units.ToString("0.####", Es)} {Symbol}";
+    public string Text => Units <= 0 ? "zero" : $"{Units.ToString("0.####", Es)} {Symbol}";
 
     /// <summary>Aclaración: «micro · equivale a 0,5 NQ», «mínimo: no llega a 1 contrato» o vacío.</summary>
     public string Detail =>
-        Units <= 0 ? "no abre operaciones nuevas"
-        : Micro ? $"micro · equivale a {Equivalent.ToString("0.####", Es)} {SignalSymbol}"
-        : AtMinimum ? "mínimo: el tamaño no llega a 1 contrato"
+        Units <= 0 ? "no new entries"
+        : Micro ? $"micro · equivalent to {Equivalent.ToString("0.####", Es)} {SignalSymbol}"
+        : AtMinimum ? "minimum: size is below 1 contract"
         : "";
 }
 
@@ -269,7 +269,7 @@ internal sealed partial class LiveCenter
             r.MaxDailyLoss = Math.Max(0, maxDailyLoss);
             r.MaxDrawdown = Math.Max(0, maxDrawdown);
             r.CloseOnLimit = closeOnLimit;
-            r.Log($"Riesgo cambiado: tamaño ×{size.ToString("0.##", Inv)} · pérdida máx. del día {(maxDailyLoss > 0 ? maxDailyLoss.ToString("0.##", Inv) : "sin límite")} · drawdown máx. {(maxDrawdown > 0 ? maxDrawdown.ToString("0.##", Inv) : "sin límite")}");
+            r.Log($"Risk changed: size ×{size.ToString("0.##", Inv)} · max daily loss {(maxDailyLoss > 0 ? maxDailyLoss.ToString("0.##", Inv) : "no limit")} · max drawdown {(maxDrawdown > 0 ? maxDrawdown.ToString("0.##", Inv) : "no limit")}");
             _svc.SaveLiveState();
         }
 
@@ -310,7 +310,7 @@ internal sealed partial class LiveCenter
     public void ClosePosition(LiveEntry e)
     {
         var r = e.Runner ?? Running(e.Key);
-        r?.ClosePosition("Cierre manual");
+        r?.ClosePosition("Manual close");
         _svc.SaveLiveState();
     }
 
@@ -321,7 +321,7 @@ internal sealed partial class LiveCenter
         var r = e.Runner;
         if (r is { IsRunning: true })
         {
-            r.StopReason = "La detuviste";
+            r.StopReason = "Stopped manually";
             r.Stop(close);
         }
 
@@ -397,9 +397,9 @@ internal sealed partial class LiveCenter
         }
 
         var parts = new List<string>();
-        if (resumed.Count > 0) parts.Add($"Reanudé {resumed.Count} estrategia(s) en vivo que corrían al cerrar Trading Hub: {string.Join(", ", resumed)}");
-        if (waiting.Count > 0) parts.Add($"Esperan que las reanudes (cuenta real): {string.Join(", ", waiting)}");
-        if (failed.Count > 0) parts.Add($"No pude reanudar {string.Join("; ", failed)}");
+        if (resumed.Count > 0) parts.Add($"Resumed {resumed.Count} live strategy/strategies that were running when Trading Hub closed: {string.Join(", ", resumed)}");
+        if (waiting.Count > 0) parts.Add($"Awaiting manual resume (real account): {string.Join(", ", waiting)}");
+        if (failed.Count > 0) parts.Add($"Could not resume {string.Join("; ", failed)}");
         if (parts.Count > 0) Notify(string.Join(" · ", parts));
         _svc.SaveLiveState();
     }
@@ -410,17 +410,17 @@ internal sealed partial class LiveCenter
         var catalog = _svc.Strategies;
         if (catalog.Files.Count == 0) catalog.Refresh();
         var file = catalog.Files.FirstOrDefault(f => f.Id == info.StrategyId) ?? catalog.Files.FirstOrDefault(f => f.FileName == info.StrategyId.Split('.').Last());
-        if (file == null) return (null, $"No encuentro la estrategia «{info.Strategy}» en Backtesting.");
+        if (file == null) return (null, $"Strategy not found: «{info.Strategy}» in Backtesting.");
         if (file.Type == null) await Task.Run(() => catalog.Compile(file));
-        if (file.Type == null) return (null, $"«{info.Strategy}» tiene errores de compilación.");
+        if (file.Type == null) return (null, $"«{info.Strategy}» has compilation errors.");
         string profileId = info.ProfileId.Length > 0 ? info.ProfileId : _svc.Connections.Enabled.FirstOrDefault(p => p.MarketDataId == info.FeedId)?.Id ?? "";
-        if (profileId.Length == 0) return (null, $"No hay una conexión activa para {info.FeedId}.");
+        if (profileId.Length == 0) return (null, $"No active connection for {info.FeedId}.");
         // las guardadas por una versión anterior no tienen la cuenta: la simulada se reconoce por el nombre
-        string accountId = info.AccountId.Length > 0 ? info.AccountId : info.Account == "Cuenta simulada" ? "sim" : "";
-        if (accountId.Length == 0) return (null, "No sé en qué cuenta operaba (es de una versión anterior): lanzala de nuevo desde «Nueva estrategia en vivo».");
+        string accountId = info.AccountId.Length > 0 ? info.AccountId : info.Account is "Cuenta simulada" or "Simulated account" ? "sim" : "";
+        if (accountId.Length == 0) return (null, "Previous account is unknown (saved by an older version): launch again using New live strategy.");
         var instruments = await InstrumentPicker.InstrumentsAsync(_svc, profileId);
         var inst = instruments.FirstOrDefault(i => i.Symbol.Equals(info.Symbol, StringComparison.OrdinalIgnoreCase));
-        if (inst == null) return (null, $"{info.Symbol} no está en la conexión.");
+        if (inst == null) return (null, $"{info.Symbol} is not available on this connection.");
         if (!ChartPeriod.TryParse(info.Period, out var period)) period = ChartPeriod.M5;
         var parameters = info.Parameters.ToDictionary(kv => kv.Key, kv => kv.Value);
         string? timeZone = info.TimeZoneId;
@@ -506,7 +506,7 @@ internal sealed partial class LiveCenter
     /// </summary>
     public string? ApplyContextFilter(LiveEntry e, RegimeFilter filter, int minRank, int maxRank)
     {
-        if (e.Locked) return "Está bloqueada: su condición de mercado no se cambia desde acá.";
+        if (e.Locked) return "Locked: market conditions cannot be changed here.";
         if (e.Runner is { IsRunning: true } r) r.SetContextFilter(filter, minRank, maxRank);
         void Put(IDictionary<string, object?> p)
         {
@@ -526,7 +526,7 @@ internal sealed partial class LiveCenter
 
         _svc.SaveLiveState();
         string what = Robustness.DescribeFilter(filter, minRank, maxRank);
-        Notice?.Invoke($"«{e.Info.Strategy}» opera {(what.Length > 0 ? what : "en cualquier condición de mercado")}");
+        Notice?.Invoke($"«{e.Info.Strategy}» trades {(what.Length > 0 ? what : "in any market condition")}");
         return null;
     }
 
@@ -545,7 +545,7 @@ internal sealed partial class LiveCenter
     public async Task<(LiveStrategyRunner? Runner, string Message)> LaunchAsync(LiveLaunch spec)
     {
         if (spec.File.Type == null) await Task.Run(() => _svc.Strategies.Compile(spec.File));
-        if (spec.File.Type == null) return (null, $"«{spec.File.FileName}» tiene errores: arreglala en Backtesting.");
+        if (spec.File.Type == null) return (null, $"«{spec.File.FileName}» has errors: fix them in Backtesting.");
         var data = _svc.Open(spec.ProfileId, spec.Instrument);
         for (int i = 0; i < 240 && data.IsLoadingHistory; i++) await Task.Delay(500);
         var strategy = spec.File.Create();
@@ -567,14 +567,14 @@ internal sealed partial class LiveCenter
             PortfolioId = spec.PortfolioId,
             ProtectOnStart = true,
         };
-        if (Running(runner.Key) != null) return (null, $"«{runner.StrategyName}» ya está corriendo en {spec.Instrument.Symbol} con {account.Name}.");
+        if (Running(runner.Key) != null) return (null, $"«{runner.StrategyName}» is already running on {spec.Instrument.Symbol} with {TradingHub.Common.EnglishText.Of(account.Name)}.");
         try
         {
             runner.Start();
         }
         catch (Exception ex)
         {
-            return (null, "No se pudo iniciar: " + ex.Message);
+            return (null, "Could not start: " + ex.Message);
         }
 
         if (spec.Paused) runner.SetPaused(true);
@@ -586,12 +586,12 @@ internal sealed partial class LiveCenter
         {
             decimal units = runner.UnitsFor(QuantityOf(spec.Parameters));
             Notify(runner.CrossExecution
-                ? $"«{runner.StrategyName}» opera en micros: cada orden va con {units:0.####} {execInst.Symbol} (equivale a {units / ratio:0.####} {spec.Instrument.Symbol})"
-                : $"«{runner.StrategyName}» opera {units:0.####} {execInst.Symbol} por orden");
+                ? $"«{runner.StrategyName}» executes in micros: each order submits {units:0.####} {execInst.Symbol} (equivalent to {units / ratio:0.####} {spec.Instrument.Symbol})"
+                : $"«{runner.StrategyName}» trades {units:0.####} {execInst.Symbol} per order");
         }
 
-        string where = runner.CrossExecution ? $"{spec.Instrument.Symbol}, ejecuta en {execInst.Symbol}" : spec.Instrument.Symbol;
-        return (runner, $"{runner.StrategyName} corriendo en vivo en {account.Name} ({where})");
+        string where = runner.CrossExecution ? $"{spec.Instrument.Symbol}, executes on {execInst.Symbol}" : spec.Instrument.Symbol;
+        return (runner, $"{runner.StrategyName} running live on {TradingHub.Common.EnglishText.Of(account.Name)} ({where})");
     }
 
     // ===================================================================== contrato inteligente
@@ -704,7 +704,7 @@ internal sealed partial class LiveCenter
             if (_contractSwitchTried.TryGetValue(r.Key, out var last) && (DateTime.UtcNow - last).TotalMinutes < 5) continue;
             _contractSwitchTried[r.Key] = DateTime.UtcNow;
             if (Find(r.Key) is not { } e) continue;
-            Notify($"«{r.StrategyName}» con tamaño ×{r.SizeMultiplier:0.##}: ahora ejecuta en {symbol} (estaba plana, se reinició)");
+            Notify($"«{r.StrategyName}» with size ×{r.SizeMultiplier:0.##}: now executes on {symbol} (was flat; restarted)");
             _ = RestartWithParametersAsync(e, r.StrategyInstance.GetParameters());
         }
     }
@@ -712,7 +712,7 @@ internal sealed partial class LiveCenter
     /// <summary>Reinicia con otros parámetros (sigue la misma contabilidad y, si tenía posición, la sigue gestionando).</summary>
     public async Task<string?> RestartWithParametersAsync(LiveEntry e, Dictionary<string, object?> parameters)
     {
-        if (e.Locked) return "Está bloqueada: sus parámetros no se cambian desde acá.";
+        if (e.Locked) return "Locked: parameters cannot be changed here.";
         if (e.ChartStrategy is { } cs && e.Chart is { } chart && Trading?.Invoke() is { } tv)
         {
             cs.Parameters = new Dictionary<string, object?>(parameters);
@@ -726,7 +726,7 @@ internal sealed partial class LiveCenter
         var old = e.Runner;
         if (old is { IsRunning: true })
         {
-            old.StopReason = "Reiniciada con parámetros nuevos";
+            old.StopReason = "Restarted with new parameters";
             old.Stop(flatten: false);
         }
 
@@ -754,10 +754,10 @@ internal sealed partial class LiveCenter
     /// <summary>Borra el historial de operaciones de una estrategia y empieza de cero (solo sin posición abierta).</summary>
     public string? ResetHistory(LiveEntry e)
     {
-        if (e.Locked) return "Está bloqueada: su historial no se borra desde acá.";
+        if (e.Locked) return "Locked: history cannot be deleted here.";
         if (e.Runner is { } r && (r.IsRunning || r.IsClosing))
         {
-            if (!r.ResetLedger()) return "Tiene una posición abierta: cerrala primero.";
+            if (!r.ResetLedger()) return "An open position exists: close it first.";
         }
         else LiveStore.DeleteFills(e.Key); // detenida: se borra aunque su contabilidad diga que tenía posición (la cuenta manda)
 
@@ -776,10 +776,10 @@ internal sealed partial class LiveCenter
     /// <summary>Borra una estrategia de En vivo (la detiene si corría; con <paramref name="history"/>, también su historial).</summary>
     public async Task<string?> DeleteAsync(LiveEntry e, bool history)
     {
-        if (e.Locked) return "Está bloqueada: no se borra desde acá.";
+        if (e.Locked) return "Locked: cannot be removed here.";
         if (e.Runner is { IsRunning: true } r)
         {
-            r.StopReason = "Borrada";
+            r.StopReason = "Removed";
             r.Stop(flatten: false);
         }
 
@@ -810,7 +810,7 @@ internal sealed partial class LiveCenter
             stopped++;
         }
 
-        Notify($"⛔ Frenaste todo ({stopped} estrategia(s)): {reason}");
+        Notify($"⛔ Emergency stop ({stopped} strategy/strategies): {reason}");
         _svc.SaveLiveState();
         return stopped;
     }
@@ -895,7 +895,7 @@ internal sealed partial class LiveCenter
     /// <summary>Muestra una operación en un gráfico (abre uno del instrumento si no hay).</summary>
     public async Task<string?> ShowTradeAsync(LiveEntry e, ClosedTrade? t)
     {
-        if (Trading?.Invoke() is not { } tv) return "Abrí la sección Trading primero.";
+        if (Trading?.Invoke() is not { } tv) return "Open Trading first.";
         string profileId = e.Info.ProfileId.Length > 0 ? e.Info.ProfileId : _svc.Connections.Enabled.FirstOrDefault(p => p.MarketDataId == e.Info.FeedId)?.Id ?? e.Info.FeedId;
         if (!ChartPeriod.TryParse(e.Info.Period, out var period)) period = ChartPeriod.M5;
         return await tv.ShowTradeAsync(profileId, e.Info.Symbol, period, e.Chart, t, $"{e.Info.Strategy}");
@@ -914,7 +914,7 @@ internal sealed partial class LiveCenter
             bool first = _proposalsStamp == default;
             _proposalsStamp = stamp;
             if (!first && LiveStore.LoadProposals().Any(p => p.Source == "claude" && p.IsPending && p.CreatedUtc.ToUniversalTime() > now.AddMinutes(-10)))
-                Notify("Claude propuso cambios de tamaño: revisalos en En vivo → Propuestas");
+                Notify("Claude proposed sizing changes: review them in Live → Proposals");
         }
 
         if ((now - _lastTick).TotalSeconds < 20) return;

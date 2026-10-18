@@ -107,14 +107,14 @@ namespace TradingHub.Indicators
         [JsonIgnore]
         public string Name
         {
-            get => _name ??= DefaultName(GetType());
+            get => TradingHub.Common.EnglishText.Of(_name ??= DefaultName(GetType()));
             set => _name = value;
         }
 
         public static string DefaultName(Type t)
         {
             var dn = t.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName;
-            return string.IsNullOrWhiteSpace(dn) ? t.Name : dn;
+            return TradingHub.Common.EnglishText.Of(string.IsNullOrWhiteSpace(dn) ? t.Name : dn);
         }
 
         [Browsable(false)]
@@ -260,12 +260,12 @@ namespace TradingHub.Indicators
 
         /// <summary>Tipo de gráfico ("TimeFrame", "Tick", "Volume"…). En ATAS está marcado como obsoleto.</summary>
         [Browsable(false)]
-        [Obsolete("Usá ChartInfo.ChartType")]
+        [Obsolete("Use ChartInfo.ChartType")]
         public string? ChartType => ChartInfo?.ChartType;
 
         /// <summary>Período del gráfico ("M5", "H1", "Daily"…). En ATAS está marcado como obsoleto.</summary>
         [Browsable(false)]
-        [Obsolete("Usá ChartInfo.TimeFrame")]
+        [Obsolete("Use ChartInfo.TimeFrame")]
         public string? TimeFrame => ChartInfo?.TimeFrame;
 
         [Browsable(false)]
@@ -411,7 +411,7 @@ namespace TradingHub.Indicators
         public IndicatorCandle GetCandle(int bar)
         {
             var h = Host;
-            if (h == null || h.BarCount == 0) throw new InvalidOperationException("El indicador no está en un gráfico.");
+            if (h == null || h.BarCount == 0) throw new InvalidOperationException("Indicator is not attached to a chart.");
             bar = Math.Clamp(bar, 0, h.BarCount - 1);
             return h.GetCandle(bar);
         }
@@ -645,7 +645,7 @@ namespace TradingHub.Indicators
         public virtual void Dispose()
         {
             try { OnDispose(); }
-            catch (Exception ex) { this.LogError("Error al liberar el indicador", ex); }
+            catch (Exception ex) { this.LogError("Error disposing indicator", ex); }
         }
 
         // ================================================================ motor (lo llama el gráfico)

@@ -77,8 +77,8 @@ public sealed class MainWindow : Window
 
         _svc.Scripts = new UserScripts(_svc.Catalog);
         _svc.Scripts.Compiled += r => SetStatus(r.Success
-            ? $"Indicadores propios compilados en {r.Elapsed.TotalMilliseconds:0} ms"
-            : $"Error compilando indicadores propios: {r.Diagnostics.FirstOrDefault(d => d.Severity == "error")}");
+            ? $"Custom indicators compiled in {r.Elapsed.TotalMilliseconds:0} ms"
+            : $"Error compiling custom indicators: {r.Diagnostics.FirstOrDefault(d => d.Severity == "error")}");
         _svc.Scripts.CompileAll();
 
         Log.Entry += e =>
@@ -213,13 +213,13 @@ public sealed class MainWindow : Window
         };
 
         var conn = new Border { Child = Ui.H(8, _connDot, _connText), Classes = { "pill" }, Padding = new Thickness(11, 4), VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand) };
-        var reconnect = new MenuItem { Header = "Reconectar ahora" };
+        var reconnect = new MenuItem { Header = "Reconnect now" };
         reconnect.Click += (_, _) =>
         {
             _svc.Hub.ReconnectAll();
             SetStatus("Reconnecting… missing data from the interruption will be backfilled automatically.");
         };
-        var toConnections = new MenuItem { Header = "Conexiones…" };
+        var toConnections = new MenuItem { Header = "Connections…" };
         toConnections.Click += (_, _) => Navigate("connections");
         var connMenu = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight };
         connMenu.Items.Add(reconnect);
@@ -239,7 +239,7 @@ public sealed class MainWindow : Window
         void ThemeIcon()
         {
             themeButton.Content = Ui.Icon(AppTheme.IsLight ? MaterialIconKind.WeatherNight : MaterialIconKind.WhiteBalanceSunny, 16);
-            ToolTip.SetTip(themeButton, AppTheme.IsLight ? "Pasar a modo oscuro" : "Pasar a modo claro");
+            ToolTip.SetTip(themeButton, AppTheme.IsLight ? "Switch to dark mode" : "Switch to light mode");
         }
 
         ThemeIcon();
@@ -336,7 +336,7 @@ public sealed class MainWindow : Window
             _ = Trading.NewChartAsync();
         }, new KeyGesture(Key.T, KeyModifiers.Meta)));
         file.Menu.Add(Item("Close chart", Trading.CloseActiveTab, new KeyGesture(Key.W, KeyModifiers.Meta)));
-        file.Menu.Add(Item("Buscar instrumento…", () =>
+        file.Menu.Add(Item("Search instruments…", () =>
         {
             Navigate("trading");
             Trading.Picker.Open();
@@ -352,7 +352,7 @@ public sealed class MainWindow : Window
 
         var chart = new NativeMenuItem("Chart") { Menu = new NativeMenu() };
         chart.Menu.Add(Item("Indicators…", Trading.OpenIndicators, new KeyGesture(Key.I, KeyModifiers.Meta)));
-        chart.Menu.Add(Item("Editar footprint…", Trading.OpenFootprintEditor, new KeyGesture(Key.F, KeyModifiers.Meta | KeyModifiers.Shift)));
+        chart.Menu.Add(Item("Edit footprint…", Trading.OpenFootprintEditor, new KeyGesture(Key.F, KeyModifiers.Meta | KeyModifiers.Shift)));
         chart.Menu.Add(Item("Auto scale", () =>
         {
             if (Trading.ActiveTab?.Model is { } m)
@@ -384,11 +384,11 @@ public sealed class MainWindow : Window
             Trading.DetachActive();
         }, new KeyGesture(Key.D, KeyModifiers.Meta | KeyModifiers.Shift)));
         chart.Menu.Add(new NativeMenuItemSeparator());
-        var panels = new NativeMenuItem("Paneles") { Menu = new NativeMenu() };
-        foreach (var (key, label) in new[] { ("side", "Panel derecho"), ("ticket", "Ticket"), ("dom", "DOM"), ("tape", "Trade tape") })
-            panels.Menu.Add(Item($"Mostrar u ocultar: {label}", () => Trading.TogglePanel(key)));
+        var panels = new NativeMenuItem("Panels") { Menu = new NativeMenu() };
+        foreach (var (key, label) in new[] { ("side", "Right panel"), ("ticket", "Ticket"), ("dom", "DOM"), ("tape", "Trade tape") })
+            panels.Menu.Add(Item($"Show or hide: {label}", () => Trading.TogglePanel(key)));
         chart.Menu.Add(panels);
-        chart.Menu.Add(Item("Configurar DOM…", () =>
+        chart.Menu.Add(Item("DOM settings…", () =>
         {
             Navigate("trading");
             Trading.ShowDomSettings();
@@ -437,7 +437,7 @@ public sealed class MainWindow : Window
             if (_lastTickAt != default && (now - _lastTickAt).TotalSeconds > 20)
             {
                 _svc.Hub.ReconnectAll();
-                SetStatus($"Volvió después de {(now - _lastTickAt).TotalMinutes:0} min en pausa: reconectando y rellenando lo que faltó.");
+                SetStatus($"Resumed after {(now - _lastTickAt).TotalMinutes:0} minutes paused: reconnecting and backfilling missing data.");
             }
 
             _lastTickAt = now;
@@ -497,52 +497,52 @@ public sealed class MainWindow : Window
                 var tz = m.Settings.TimeZone;
                 var open = FuturesSessions.NextGlobexOpen(DateTime.UtcNow);
                 var openLocal = TimeZoneInfo.ConvertTimeFromUtc(open, tz);
-                state = open > DateTime.UtcNow ? $"mercado cerrado · abre {Day(openLocal, tz)} {openLocal:HH:mm}" : "mercado cerrado";
+                state = open > DateTime.UtcNow ? $"market closed · opens {Day(openLocal, tz)} {openLocal:HH:mm}" : "market closed";
                 tip = d.ClosedAt is { } last
-                    ? $"Última operación: {Day(TimeZoneInfo.ConvertTimeFromUtc(last, tz), tz)} {TimeZoneInfo.ConvertTimeFromUtc(last, tz):HH:mm}. La conexión sigue activa."
+                    ? $"Latest trade: {Day(TimeZoneInfo.ConvertTimeFromUtc(last, tz), tz)} {TimeZoneInfo.ConvertTimeFromUtc(last, tz):HH:mm}. Connection remains active."
                     : "Connection remains active; data will resume when the market opens.";
                 _connDot.Fill = Ui.Text2;
             }
             else if (d.Status == FeedStatus.Connected && d.Feed.IsLive && d.LastDataAt.Year > 2000 && quiet.TotalSeconds > 60)
             {
-                state = $"sin datos hace {(quiet.TotalMinutes < 60 ? $"{quiet.TotalMinutes:0} min" : $"{quiet.TotalHours:0} h")}";
+                state = $"no data for {(quiet.TotalMinutes < 60 ? $"{quiet.TotalMinutes:0} min" : $"{quiet.TotalHours:0} h")}";
                 _connDot.Fill = Ui.Warn;
             }
             else if (d.Status == FeedStatus.Reconnecting && d.StatusMessage is { } rm
-                     && System.Text.RegularExpressions.Regex.Match(rm, @"intento (\d+)") is { Success: true } attempt)
+                     && System.Text.RegularExpressions.Regex.Match(rm, @"attempt (\d+)") is { Success: true } attempt)
             {
-                state = $"reconectando… (intento {attempt.Groups[1].Value})";
+                state = $"reconnecting… (attempt {attempt.Groups[1].Value})";
             }
 
             _connText.Text = $"{feedName} · {state}";
             ToolTip.SetTip(_connText, tip ?? d.StatusMessage);
             _infoText.Text = d.IsLoadingHistory || d.IsExtending
-                ? $"Cargando historia {d.HistoryProgress * 100:0}%"
-                : $"{d.Trades.Count:N0} operaciones · {m.Series.Count:N0} velas · desde {TimeZoneInfo.ConvertTimeFromUtc(d.HistoryFrom, m.Settings.TimeZone):dd/MM HH:mm}";
+                ? $"Loading history {d.HistoryProgress * 100:0}%"
+                : $"{d.Trades.Count:N0} trades · {m.Series.Count:N0} bars · since {TimeZoneInfo.ConvertTimeFromUtc(d.HistoryFrom, m.Settings.TimeZone):dd/MM HH:mm}";
         }
 
         // resultado del día y saldo de la cuenta simulada (guardados: no vuelven a cero al cerrar Trading Hub)
         var (day, balance) = _svc.AccountCenter.SimSummary();
         _pnlText.Foreground = day >= 0 ? Ui.Up : Ui.Down;
-        _pnlText.Text = $"Simulada  {day:+0.00;-0.00;0.00}  ·  {balance:N2}";
+        _pnlText.Text = $"Simulated  {day:+0.00;-0.00;0.00}  ·  {balance:N2}";
         Trading.UpdatePosition();
     }
 
     private static string Day(DateTime local, TimeZoneInfo tz)
     {
         var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz).Date;
-        if (local.Date == today) return "hoy";
+        if (local.Date == today) return "today";
         if (local.Date == today.AddDays(1)) return "tomorrow";
-        return local.ToString("ddd", new System.Globalization.CultureInfo("es-AR")).TrimEnd('.');
+        return local.ToString("ddd", new System.Globalization.CultureInfo("en-US")).TrimEnd('.');
     }
 
     private static string StatusName(FeedStatus s) => s switch
     {
-        FeedStatus.Connected => "conectado",
-        FeedStatus.Connecting => "conectando…",
-        FeedStatus.Reconnecting => "reconectando…",
+        FeedStatus.Connected => "connected",
+        FeedStatus.Connecting => "connecting…",
+        FeedStatus.Reconnecting => "reconnecting…",
         FeedStatus.Error => "error",
-        _ => "desconectado",
+        _ => "disconnected",
     };
 }
 

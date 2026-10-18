@@ -97,8 +97,8 @@ public sealed class TradeAnalytics
     public double MaxDrawdownDays { get; private set; }
     public double LongestFlatDays { get; private set; }
 
-    public BucketStat Long { get; } = new() { Label = "Largos" };
-    public BucketStat Short { get; } = new() { Label = "Cortos" };
+    public BucketStat Long { get; } = new() { Label = "Long trades" };
+    public BucketStat Short { get; } = new() { Label = "Short trades" };
     public List<YearReturns> Monthly { get; } = new();
     public List<BucketStat> ByHour { get; } = new();
     public List<BucketStat> ByWeekday { get; } = new();
@@ -110,7 +110,7 @@ public sealed class TradeAnalytics
     /// <summary>Curva de capital al cierre de cada operación (para el drawdown "de cierre").</summary>
     public List<(DateTime Time, decimal Equity)> ClosedEquity { get; } = new();
 
-    private static readonly string[] WeekdayNames = { "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado" };
+    private static readonly string[] WeekdayNames = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
 
     public static TradeAnalytics Compute(IReadOnlyList<ClosedTrade> trades, IReadOnlyList<EquityPoint> equity, decimal capital, PerformanceMetrics m,
         TimeZoneInfo? tz = null, DateTime? from = null, DateTime? to = null)

@@ -109,7 +109,7 @@ public sealed class ClaudeAgent
     public async Task<ClaudeAgentResult> RunAsync(ClaudeAgentRequest req, CancellationToken ct)
     {
         var cli = ClaudeCodeBridge.FindCli();
-        if (cli == null) return new ClaudeAgentResult(false, "", null, 0, 0, "No encontré Claude Code en esta Mac (instalalo desde claude.com/claude-code).", false, 0);
+        if (cli == null) return new ClaudeAgentResult(false, "", null, 0, 0, "Claude Code was not found on this Mac (install from claude.com/claude-code).", false, 0);
 
         var supports = await SupportsAsync(cli);
         Directory.CreateDirectory(req.WorkDir);
@@ -185,7 +185,7 @@ public sealed class ClaudeAgent
         }
         catch (Exception ex)
         {
-            return new ClaudeAgentResult(false, allText.ToString(), null, cost, sw.Elapsed.TotalSeconds, "No se pudo ejecutar Claude Code: " + ex.Message, false, tools);
+            return new ClaudeAgentResult(false, allText.ToString(), null, cost, sw.Elapsed.TotalSeconds, "Could not run Claude Code: " + ex.Message, false, tools);
         }
         finally
         {
@@ -193,12 +193,12 @@ public sealed class ClaudeAgent
         }
 
         string text = finalText.Length > 0 ? finalText.ToString() : allText.ToString();
-        if (ct.IsCancellationRequested) return new ClaudeAgentResult(false, text, null, cost, sw.Elapsed.TotalSeconds, "Detenido.", false, tools);
+        if (ct.IsCancellationRequested) return new ClaudeAgentResult(false, text, null, cost, sw.Elapsed.TotalSeconds, "Stopped.", false, tools);
         if (timeout.IsCancellationRequested)
-            return new ClaudeAgentResult(false, text, null, cost, sw.Elapsed.TotalSeconds, $"Se pasó del tiempo máximo ({req.Timeout.TotalMinutes:0} min) y se cortó.", false, tools);
+            return new ClaudeAgentResult(false, text, null, cost, sw.Elapsed.TotalSeconds, $"Exceeded the maximum runtime ({req.Timeout.TotalMinutes:0} min) and was stopped.", false, tools);
 
         string? error = null;
-        if (!gotResult) error = stderr.Length > 0 ? stderr.ToString().Trim() : "Claude Code terminó sin respuesta.";
+        if (!gotResult) error = stderr.Length > 0 ? stderr.ToString().Trim() : "Claude Code exited without a response.";
         else if (isError) error = subtype is { Length: > 0 } s && s != "success" ? Explain(s, text) : text.Trim();
         string all = (error ?? "") + "\n" + text + "\n" + stderr;
         bool needsLogin = !gotResult || isError
@@ -209,14 +209,14 @@ public sealed class ClaudeAgent
         // aunque se haya cortado por el tope de gasto, si ya dejó el JSON se usa
         var json = ExtractJson(text) ?? ExtractJson(allText.ToString());
         bool ok = json != null && (error == null || subtype == "error_max_budget_usd" || subtype == "error_max_turns");
-        return new ClaudeAgentResult(ok, text, json, cost, sw.Elapsed.TotalSeconds, ok ? null : error ?? "El agente no devolvió el bloque JSON pedido.", needsLogin, tools);
+        return new ClaudeAgentResult(ok, text, json, cost, sw.Elapsed.TotalSeconds, ok ? null : error ?? "The agent did not return the requested JSON block.", needsLogin, tools);
     }
 
     private static string Explain(string subtype, string text) => subtype switch
     {
-        "error_max_budget_usd" => "Llegó al tope de gasto por tanda antes de terminar.",
-        "error_max_turns" => "Llegó al máximo de pasos antes de terminar.",
-        "error_during_execution" => "Claude Code falló mientras trabajaba" + (text.Length > 0 ? ": " + text.Trim() : "."),
+        "error_max_budget_usd" => "Reached the batch spending limit before finishing.",
+        "error_max_turns" => "Reached the step limit before finishing.",
+        "error_during_execution" => "Claude Code failed while working" + (text.Length > 0 ? ": " + text.Trim() : "."),
         _ => text.Length > 0 ? text.Trim() : subtype,
     };
 

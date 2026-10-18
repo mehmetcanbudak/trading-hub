@@ -29,7 +29,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
         {
             foreach (var list in _sinks.Values)
                 foreach (var (inst, sink, _) in list.ToList())
-                    sink.OnStatus(inst, up ? FeedStatus.Connected : FeedStatus.Reconnecting, up ? "cTrader conectado" : $"Reconectando ({why})");
+                    sink.OnStatus(inst, up ? FeedStatus.Connected : FeedStatus.Reconnecting, up ? "cTrader connected" : $"Reconnecting ({why})");
         };
     }
 
@@ -38,7 +38,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     public string DisplayName => "cTrader";
     public bool SupportsHistory => true;
     public bool IsLive => true;
-    public string HistoryNote => "ticks (bid) del broker por la Open API de cTrader";
+    public string HistoryNote => "broker bid ticks through cTrader Open API";
 
     public async Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(CancellationToken ct)
     {
@@ -70,7 +70,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     {
         await _session.EnsureConnectedAsync(ct).ConfigureAwait(false);
         var s = _session.Symbols.FirstOrDefault(x => x.Name.Equals(instrument.Symbol, StringComparison.OrdinalIgnoreCase))
-                ?? throw new InvalidOperationException($"{instrument.Symbol} no está en tu cuenta de cTrader.");
+                ?? throw new InvalidOperationException($"{instrument.Symbol} is not in your cTrader account.");
         return s.Id;
     }
 
@@ -228,7 +228,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
             {
                 try
                 {
-                    sink.OnStatus(instrument, FeedStatus.Connecting, "Conectando a cTrader…");
+                    sink.OnStatus(instrument, FeedStatus.Connecting, "Connecting to cTrader…");
                     long id = await SymbolIdAsync(instrument, CancellationToken.None).ConfigureAwait(false);
                     sub.SymbolId = id;
                     _sinks.AddOrUpdate(id, _ => new() { (instrument, sink, state) }, (_, l) =>
@@ -237,7 +237,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
                         return l;
                     });
                     await _session.SubscribeAsync(id, CancellationToken.None).ConfigureAwait(false);
-                    sink.OnStatus(instrument, FeedStatus.Connected, "cTrader conectado");
+                    sink.OnStatus(instrument, FeedStatus.Connected, "cTrader connected");
                     return;
                 }
                 catch (Exception ex)
@@ -303,7 +303,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     {
         await _session.EnsureConnectedAsync(ct).ConfigureAwait(false);
         int indices = _session.Symbols.Count(s => s.Name is "US100" or "NAS100" or "USTEC" or "US500" or "SPX500" or "US30" or "GER40" or "DE40");
-        return (true, $"Conectado a {_session.AccountTitle}: {_session.Symbols.Count} símbolos{(indices > 0 ? $" ({indices} índices)" : "")}.");
+        return (true, $"Connected to {_session.AccountTitle}: {_session.Symbols.Count} symbols{(indices > 0 ? $" ({indices} indices)" : "")}.");
     }
 
     public void Dispose() => _session.Dispose();
@@ -327,7 +327,7 @@ public static class CTraderAuth
         var root = doc.RootElement;
         string access = CTraderSession.Str(root, "accessToken"), refresh = CTraderSession.Str(root, "refreshToken");
         if (access.Length == 0)
-            throw new InvalidOperationException("cTrader no devolvió el token: " + (CTraderSession.Str(root, "description") is { Length: > 0 } d ? d : CTraderSession.Str(root, "errorCode")));
+            throw new InvalidOperationException("cTrader returned no token: " + (CTraderSession.Str(root, "description") is { Length: > 0 } d ? d : CTraderSession.Str(root, "errorCode")));
         return (access, refresh, CTraderSession.Long(root, "expiresIn"));
     }
 }

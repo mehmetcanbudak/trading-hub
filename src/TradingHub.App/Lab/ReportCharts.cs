@@ -19,7 +19,7 @@ internal static class ReportCharts
         new(37, 99, 235), new(234, 140, 0), new(22, 163, 107), new(168, 85, 247), new(220, 53, 69), new(14, 165, 233), new(132, 94, 54), new(236, 72, 153),
     };
 
-    private static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-AR");
+    private static readonly CultureInfo Es = CultureInfo.GetCultureInfo("en-US");
     private static SKTypeface Face(bool bold = false) => SKTypeface.FromFamilyName("Helvetica Neue", bold ? SKFontStyle.Bold : SKFontStyle.Normal) ?? SKTypeface.Default;
 
     private static string Compact(double v)
@@ -196,7 +196,7 @@ internal static class ReportCharts
                 ly += 24;
             }
 
-            Item("Portafolio", LineC);
+            Item("Portfolio", LineC);
             for (int k = 0; k < extra.Count; k++) Item(extra[k].Label, Palette[(k + 1) % Palette.Length]);
         }
 
@@ -210,8 +210,8 @@ internal static class ReportCharts
         using var surface = SKSurface.Create(new SKImageInfo(W, H));
         var c = surface.Canvas;
         c.Clear(Bg);
-        Title(c, "Rendimiento mensual", 40, 46);
-        string[] months = { "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic", "Año" };
+        Title(c, "Monthly performance", 40, 46);
+        string[] months = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Year" };
         float left = 110, top = 96, cellW = (W - left - 40) / 13f;
         using var font = new SKFont(Face(), 17);
         using var bold = new SKFont(Face(true), 17);
@@ -257,7 +257,7 @@ internal static class ReportCharts
         using var surface = SKSurface.Create(new SKImageInfo(W, H));
         var c = surface.Canvas;
         c.Clear(Bg);
-        Title(c, "Distribución de resultados por operación", 40, 46);
+        Title(c, "Distribution of per-trade PnL", 40, 46);
         if (buckets.Count == 0) return Encode(surface);
         float left = 90, right = W - 40, top = 90, bottom = H - 90;
         int max = Math.Max(1, buckets.Max(b => b.Count));
@@ -338,7 +338,7 @@ internal static class ReportCharts
 
         using (var cap = new SKPaint { Color = AxisC, StrokeWidth = 1.5f, PathEffect = SKPathEffect.CreateDash(new[] { 8f, 6f }, 0), IsAntialias = true })
             c.DrawLine(left, Y((double)capital), right, Y((double)capital), cap);
-        var lbl = "operaciones →";
+        var lbl = "trades →";
         c.DrawText(lbl, right - Tw(font, lbl), H - 22, font, tp);
         return Encode(surface);
     }
@@ -353,7 +353,7 @@ internal static class ReportCharts
         using var surface = SKSurface.Create(new SKImageInfo(W, H));
         var c = surface.Canvas;
         c.Clear(Bg);
-        Title(c, "Correlación de los resultados diarios", 40, 46);
+        Title(c, "Correlation of daily returns", 40, 46);
         float left = labelW, top = 110;
         using var font = new SKFont(Face(), 17);
         using var bold = new SKFont(Face(true), 19);

@@ -130,7 +130,7 @@ public sealed class BacktestEngine : IStrategyHost
             if (_s.CloseAtEnd && _pos != 0)
             {
                 foreach (var o in _orders.ToList()) Cancel(o);
-                var exit = new StrategyOrder { Id = _nextId++, Side = _pos > 0 ? OrderSide.Sell : OrderSide.Buy, Type = StrategyOrderType.Market, Quantity = Math.Abs(_pos), Name = "Fin del backtest", Time = Time };
+                var exit = new StrategyOrder { Id = _nextId++, Side = _pos > 0 ? OrderSide.Sell : OrderSide.Buy, Type = StrategyOrderType.Market, Quantity = Math.Abs(_pos), Name = "End of backtest", Time = Time };
                 ApplyFill(exit, _priceTicks, Time, notify: false);
             }
 
@@ -400,8 +400,8 @@ public sealed class BacktestEngine : IStrategyHost
 
     public StrategyOrder Submit(OrderSide side, StrategyOrderType type, decimal quantity, decimal price, string name)
     {
-        if (quantity <= 0) throw new ArgumentException("La cantidad tiene que ser mayor a cero.");
-        if (type != StrategyOrderType.Market && price <= 0) throw new ArgumentException("El precio de la orden tiene que ser mayor a cero.");
+        if (quantity <= 0) throw new ArgumentException("Quantity must be greater than zero.");
+        if (type != StrategyOrderType.Market && price <= 0) throw new ArgumentException("Order price must be greater than zero.");
         return NewOrder(side, type, quantity, price, name, null, protective: false);
     }
 

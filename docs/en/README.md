@@ -2,7 +2,7 @@
 
 [← Main README](../../README.md) · [Spanish documentation](../README.es.md)
 
-This is the English-language guide collection. Trading Hub currently builds for Apple Silicon macOS, and the existing app still contains Spanish interface text while localization is in progress.
+Full English guides for the `feat/english-localization` branch of this fork, targeting Apple Silicon macOS. Built-in UI, dialogs, prompts and new reports are English. Spanish folder names and API/storage identifiers are deliberately preserved; existing personal and third-party content is not rewritten.
 
 | Area | Guide |
 |---|---|
@@ -15,4 +15,4 @@ This is the English-language guide collection. Trading Hub currently builds for 
 
 ## Translation progress
 
-See the [localization validation dashboard](TRANSLATION_STATUS.md) for verified checks, remaining Spanish content, and release blockers.
+See the [localization validation dashboard](TRANSLATION_STATUS.md) for verified checks, compatibility exceptions and untested areas.

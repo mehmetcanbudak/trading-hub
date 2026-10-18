@@ -22,8 +22,8 @@ public sealed class FootprintEditorWindow : Window
     private readonly ListBox _columns = new();
     private readonly PropertyGrid _columnGrid = new();
     private readonly PropertyGrid _layoutGrid = new();
-    private readonly TextBox _name = new() { Watermark = "Mi footprint" };
-    private readonly ComboBox _presets = new() { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Elegí una plantilla…" };
+    private readonly TextBox _name = new() { Watermark = "My footprint" };
+    private readonly ComboBox _presets = new() { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Choose a template…" };
     private readonly TextBlock _columnTitle = new() { Classes = { "h2" } };
 
     internal FootprintEditorWindow(ChartModel model, TradingView main)
@@ -33,7 +33,7 @@ public sealed class FootprintEditorWindow : Window
         _layout = model.Settings.Layout.Clone();
         model.Settings.Layout = _layout;
         if (model.Settings.Style != ChartStyle.Footprint) model.Settings.Style = ChartStyle.Footprint;
-        Title = "Editor de footprint";
+        Title = "Footprint editor";
         Width = 980;
         Height = 720;
         MinWidth = 820;
@@ -55,8 +55,8 @@ public sealed class FootprintEditorWindow : Window
 
         // ---- columna izquierda: plantilla + columnas
         var left = new DockPanel();
-        foreach (var p in FootprintLayout.Presets) _presets.Items.Add(new ComboBoxItem { Content = p.Name, Tag = p });
-        foreach (var p in FootprintLayout.LoadUserTemplates()) _presets.Items.Add(new ComboBoxItem { Content = "★ " + p.Name, Tag = p });
+        foreach (var p in FootprintLayout.Presets) _presets.Items.Add(new ComboBoxItem { Content = p.DisplayName, Tag = p });
+        foreach (var p in FootprintLayout.LoadUserTemplates()) _presets.Items.Add(new ComboBoxItem { Content = "★ " + p.DisplayName, Tag = p });
         _presets.SelectionChanged += (_, _) =>
         {
             if (_presets.SelectedItem is not ComboBoxItem { Tag: FootprintLayout p }) return;
@@ -73,19 +73,19 @@ public sealed class FootprintEditorWindow : Window
             LoadIntoUi();
             Apply();
         };
-        var top = Ui.V(10, Ui.Field("Partir de una plantilla", _presets));
+        var top = Ui.V(10, Ui.Field("Start from a template", _presets));
         top.Margin = new Thickness(0, 0, 0, 14);
         DockPanel.SetDock(top, Dock.Top);
         left.Children.Add(top);
 
         var listHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
         var moveTools = Ui.H(2,
-            Ui.IconButton(MaterialIconKind.ArrowUp, "Mover a la izquierda", () => Move(-1), 16),
-            Ui.IconButton(MaterialIconKind.ArrowDown, "Mover a la derecha", () => Move(1), 16),
-            Ui.IconButton(MaterialIconKind.DeleteOutline, "Quitar columna", RemoveSelected, 16));
+            Ui.IconButton(MaterialIconKind.ArrowUp, "Move left", () => Move(-1), 16),
+            Ui.IconButton(MaterialIconKind.ArrowDown, "Move right", () => Move(1), 16),
+            Ui.IconButton(MaterialIconKind.DeleteOutline, "Remove column", RemoveSelected, 16));
         DockPanel.SetDock(moveTools, Dock.Right);
         listHeader.Children.Add(moveTools);
-        listHeader.Children.Add(Ui.V(2, Ui.H3("Columnas"), Ui.Faint("de izquierda a derecha dentro de cada vela")));
+        listHeader.Children.Add(Ui.V(2, Ui.H3("Columns"), Ui.Faint("left to right within each bar")));
         DockPanel.SetDock(listHeader, Dock.Top);
         left.Children.Add(listHeader);
 
@@ -103,23 +103,23 @@ public sealed class FootprintEditorWindow : Window
             addPanel.Children.Add(b);
         }
 
-        AddBtn("Escalera", MaterialIconKind.FormatListNumbered, () => new FootprintColumn { Kind = FootprintColumnKind.Ladder, Value = FootprintValue.Delta, Highlight = HighlightRule.StrongDelta });
-        AddBtn("Perfil", MaterialIconKind.ChartGantt, () => new FootprintColumn { Kind = FootprintColumnKind.Profile, Value = FootprintValue.Volume });
-        AddBtn("Celdas", MaterialIconKind.ViewGridOutline, () => new FootprintColumn { Kind = FootprintColumnKind.Cells, Value = FootprintValue.BidAsk });
-        AddBtn("Vela", MaterialIconKind.ChartBoxOutline, () => new FootprintColumn { Kind = FootprintColumnKind.Candle });
-        AddBtn("Espacio", MaterialIconKind.ArrowExpandHorizontal, () => new FootprintColumn { Kind = FootprintColumnKind.Spacer, Width = 0.2 });
+        AddBtn("Ladder", MaterialIconKind.FormatListNumbered, () => new FootprintColumn { Kind = FootprintColumnKind.Ladder, Value = FootprintValue.Delta, Highlight = HighlightRule.StrongDelta });
+        AddBtn("Profile", MaterialIconKind.ChartGantt, () => new FootprintColumn { Kind = FootprintColumnKind.Profile, Value = FootprintValue.Volume });
+        AddBtn("Cells", MaterialIconKind.ViewGridOutline, () => new FootprintColumn { Kind = FootprintColumnKind.Cells, Value = FootprintValue.BidAsk });
+        AddBtn("Bar", MaterialIconKind.ChartBoxOutline, () => new FootprintColumn { Kind = FootprintColumnKind.Candle });
+        AddBtn("Spacer", MaterialIconKind.ArrowExpandHorizontal, () => new FootprintColumn { Kind = FootprintColumnKind.Spacer, Width = 0.2 });
 
-        var save = Ui.Button("Guardar como plantilla", MaterialIconKind.StarOutline, () =>
+        var save = Ui.Button("Save as template", MaterialIconKind.StarOutline, () =>
         {
-            _layout.Name = string.IsNullOrWhiteSpace(_name.Text) ? "Mi footprint" : _name.Text!.Trim();
+            _layout.Name = string.IsNullOrWhiteSpace(_name.Text) ? "My footprint" : _name.Text!.Trim();
             _layout.SaveAsTemplate();
             _main.RefreshLayoutBoxes();
-            _main.SetStatus($"Plantilla \"{_layout.Name}\" guardada");
+            _main.SetStatus($"Template \"{_layout.Name}\" saved");
         }, "primary");
         save.HorizontalAlignment = HorizontalAlignment.Stretch;
         save.HorizontalContentAlignment = HorizontalAlignment.Center;
 
-        var bottom = Ui.V(10, addPanel, Ui.Divider(), Ui.Field("Nombre de la plantilla", _name), save);
+        var bottom = Ui.V(10, addPanel, Ui.Divider(), Ui.Field("Template name", _name), save);
         DockPanel.SetDock(bottom, Dock.Bottom);
         left.Children.Add(bottom);
 
@@ -128,7 +128,7 @@ public sealed class FootprintEditorWindow : Window
             int i = _columns.SelectedIndex;
             var col = i >= 0 && i < _layout.Columns.Count ? _layout.Columns[i] : null;
             _columnGrid.Target = col;
-            _columnTitle.Text = col == null ? "Ninguna columna seleccionada" : $"Columna {i + 1}: {PropertyGrid.EnumDisplay(col.Kind)}";
+            _columnTitle.Text = col == null ? "No column selected" : $"Column {i + 1}: {PropertyGrid.EnumDisplay(col.Kind)}";
         };
         left.Children.Add(Ui.Card(_columns, 4));
         root.Children.Add(left);
@@ -143,7 +143,7 @@ public sealed class FootprintEditorWindow : Window
         right.Children.Add(Ui.Card(colCard));
 
         var general = new DockPanel();
-        var gh = Ui.V(2, Ui.H2("Opciones generales"), Ui.Faint("Totales, POC, desbalances y escalas del footprint completo"));
+        var gh = Ui.V(2, Ui.H2("General options"), Ui.Faint("Totals, POC, imbalances and scaling for the entire footprint"));
         gh.Margin = new Thickness(0, 0, 0, 10);
         DockPanel.SetDock(gh, Dock.Top);
         general.Children.Add(gh);
@@ -158,7 +158,7 @@ public sealed class FootprintEditorWindow : Window
 
     private void LoadIntoUi()
     {
-        _name.Text = _layout.Name;
+        _name.Text = _layout.DisplayName;
         RefreshColumns(0);
         _layoutGrid.Target = _layout;
     }
@@ -174,11 +174,11 @@ public sealed class FootprintEditorWindow : Window
 
     private static (string Title, string Detail) Describe(FootprintColumn c) => c.Kind switch
     {
-        FootprintColumnKind.Candle => ("Vela finita", "cuerpo y mechas"),
-        FootprintColumnKind.Spacer => ("Espacio", $"ancho {c.Width:0.##}"),
-        FootprintColumnKind.Ladder => ("Escalera", PropertyGrid.EnumDisplay(c.Value) + (c.Highlight != HighlightRule.None ? " · resalta " + PropertyGrid.EnumDisplay(c.Highlight).ToLowerInvariant() : "")),
-        FootprintColumnKind.Profile => ("Perfil", $"{PropertyGrid.EnumDisplay(c.Value)} · {PropertyGrid.EnumDisplay(c.Direction).ToLowerInvariant()}"),
-        _ => ("Celdas", $"{PropertyGrid.EnumDisplay(c.Value)} · {PropertyGrid.EnumDisplay(c.ColorScheme).ToLowerInvariant()}"),
+        FootprintColumnKind.Candle => ("Thin candle", "body and wicks"),
+        FootprintColumnKind.Spacer => ("Spacer", $"width {c.Width:0.##}"),
+        FootprintColumnKind.Ladder => ("Ladder", PropertyGrid.EnumDisplay(c.Value) + (c.Highlight != HighlightRule.None ? " · highlights " + PropertyGrid.EnumDisplay(c.Highlight).ToLowerInvariant() : "")),
+        FootprintColumnKind.Profile => ("Profile", $"{PropertyGrid.EnumDisplay(c.Value)} · {PropertyGrid.EnumDisplay(c.Direction).ToLowerInvariant()}"),
+        _ => ("Cells", $"{PropertyGrid.EnumDisplay(c.Value)} · {PropertyGrid.EnumDisplay(c.ColorScheme).ToLowerInvariant()}"),
     };
 
     private static Control Row(FootprintColumn c, int index)

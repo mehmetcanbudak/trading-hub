@@ -83,11 +83,11 @@ public readonly record struct ChartPeriod(PeriodType Type, decimal Value)
                 PeriodType.Minutes => $"{v}m",
                 PeriodType.Hours => $"{v}h",
                 PeriodType.Days => Value == 1 ? "D" : $"{v}D",
-                PeriodType.Weeks => Value == 1 ? "S" : $"{v}S",
-                PeriodType.Months => Value == 1 ? "Mes" : $"{v} meses",
+                PeriodType.Weeks => Value == 1 ? "W" : $"{v}W",
+                PeriodType.Months => Value == 1 ? "Month" : $"{v}mo",
                 PeriodType.Tick => $"{v} ticks",
                 PeriodType.Volume => $"Vol {v}",
-                PeriodType.Range => $"Rango {v}",
+                PeriodType.Range => $"Range {v}",
                 PeriodType.Delta => $"Delta {v}",
                 PeriodType.Renko => $"Renko {v}",
                 _ => v,
@@ -100,7 +100,7 @@ public readonly record struct ChartPeriod(PeriodType Type, decimal Value)
     public static ChartPeriod Parse(string code)
     {
         if (TryParse(code, out var p)) return p;
-        throw new FormatException($"Período inválido: {code}");
+        throw new FormatException($"Invalid period: {code}");
     }
 
     /// <summary>

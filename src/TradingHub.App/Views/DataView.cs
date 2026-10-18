@@ -135,8 +135,10 @@ internal sealed class DataView : UserControl, IPage
         ToolTip.SetTip(replay, "Open selected day as replay in Trading (simulated account only)");
         var delete = Ui.Button("Delete", MaterialIconKind.DeleteOutline, () => _ = DeleteSelectedAsync(), "ghost");
         var actions = Ui.H(8, delete, replay);
+        actions.HorizontalAlignment = HorizontalAlignment.Right;
+        actions.Margin = new Thickness(0, 8, 0, 0);
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
-        DockPanel.SetDock(actions, Dock.Right);
+        DockPanel.SetDock(actions, Dock.Bottom);
         head.Children.Add(actions);
         head.Children.Add(Ui.V(3, _daysTitle, _daysInfo));
         var panel = new DockPanel();
@@ -364,11 +366,11 @@ internal sealed class DataView : UserControl, IPage
             _dbQuote = total;
             _dbQuoteKey = $"{DbRoot}|{days.First()}|{days.Last()}|{days.Count}";
             _dbDownload!.IsEnabled = true;
-            _dbStatus.Text = $"{DbRoot}: {days.Count} día(s) por bajar ({days.First():dd/MM/yyyy} → {days.Last():dd/MM/yyyy}) · costo ≈ US$ {total.ToString("0.00", CultureInfo.InvariantCulture)} de tus créditos de Databento.";
+            _dbStatus.Text = $"{DbRoot}: {days.Count} day(s) to download ({days.First():dd/MM/yyyy} → {days.Last():dd/MM/yyyy}) · estimated cost ≈ US$ {total.ToString("0.00", CultureInfo.InvariantCulture)} from your Databento credits.";
         }
         catch (Exception ex)
         {
-            _dbStatus.Text = "No se pudo calcular: " + ex.Message;
+            _dbStatus.Text = "Could not estimate: " + ex.Message;
         }
         finally
         {
@@ -389,13 +391,13 @@ internal sealed class DataView : UserControl, IPage
 
         string cost = quote.ToString("0.00", CultureInfo.InvariantCulture);
         if (!await ConfirmDialog.ShowAsync(_main, "Download Databento history",
-                $"Se bajan {days.Count} día(s) de {DbRoot} tick a tick. Databento cobra ≈ US$ {cost} de tus créditos (si no te alcanzan, a tu medio de pago en Databento).",
-                $"Bajar (≈ US$ {cost})")) return;
+                $"Downloads {days.Count} day(s) of {DbRoot} tick-by-tick. Databento charges ≈ US$ {cost} from your credits (any shortfall is charged to your Databento payment method).",
+                $"Download (≈ US$ {cost})")) return;
 
         var inst = CmeInstrument(DbRoot);
         _dbCts = new CancellationTokenSource();
         var ct = _dbCts.Token;
-        using var job = BackgroundWork.Begin($"bajando historia de {DbRoot} de Databento");
+        using var job = BackgroundWork.Begin($"downloading history for {DbRoot} from Databento");
         _dbDownload!.IsEnabled = false;
         _dbCost!.IsEnabled = false;
         _dbCancel!.IsVisible = true;
@@ -409,7 +411,7 @@ internal sealed class DataView : UserControl, IPage
             {
                 var day = days[i];
                 int index = i;
-                _dbStatus.Text = $"{DbRoot} {day:dd/MM/yyyy}: descargando… ({i + 1}/{days.Count})";
+                _dbStatus.Text = $"{DbRoot} {day:dd/MM/yyyy}: downloading… ({i + 1}/{days.Count})";
                 var progress = new Progress<double>(p => _dbProgress.Value = (index + p) / days.Count);
                 var list = await client.DownloadDayAsync(inst, day, progress, ct);
                 if (list == null)
@@ -418,18 +420,18 @@ internal sealed class DataView : UserControl, IPage
                     continue;
                 }
 
-                _dbStatus.Text = $"{DbRoot} {day:dd/MM/yyyy}: guardando {list.Count:N0} operaciones…";
+                _dbStatus.Text = $"{DbRoot} {day:dd/MM/yyyy}: saving {list.Count:N0} trades…";
                 await Task.Run(() => HistoricalData.WriteDay(AppPaths.Ticks, inst, day, list, replace: true), ct);
                 trades += list.Count;
                 done++;
             }
 
-            _dbStatus.Text = $"Listo: {done} día(s) de {DbRoot} ({trades:N0} operaciones con su lado agresor)" + (empty > 0 ? $", {empty} sin operaciones (feriados)" : "") + ".";
+            _dbStatus.Text = $"Done: {done} day(s) of {DbRoot} ({trades:N0} trades with aggressor side)" + (empty > 0 ? $", {empty} with no trades (holidays)" : "") + ".";
             _status(_dbStatus.Text);
         }
         catch (OperationCanceledException)
         {
-            _dbStatus.Text = $"Cancelado. Se guardaron {done} día(s).";
+            _dbStatus.Text = $"Canceled. Saved {done} day(s).";
         }
         catch (Exception ex)
         {
@@ -484,15 +486,15 @@ internal sealed class DataView : UserControl, IPage
                 var path = files[i].TryGetLocalPath();
                 if (path == null) continue;
                 string symbol = typed.Length > 0 ? typed : GuessSymbol(path);
-                _importStatus.Text = $"{Path.GetFileName(path)} → {symbol}: leyendo… ({i + 1}/{files.Count})";
+                _importStatus.Text = $"{Path.GetFileName(path)} → {symbol}: reading… ({i + 1}/{files.Count})";
                 int index = i;
                 var progress = new Progress<double>(p => _importProgress.Value = (index + p) / files.Count);
                 try
                 {
                     var r = await Task.Run(() => CsvImport.Import(path, symbol, AppPaths.Ticks, offset, null, progress, CancellationToken.None));
-                    lines.Add($"{symbol}: {r.Kind}, {r.Trades:N0} operaciones en {r.Days} día(s)" +
+                    lines.Add($"{symbol}: {r.Kind}, {r.Trades:N0} trades in {r.Days} day(s)" +
                               (r.From is { } f && r.To is { } t ? $" ({f:dd/MM/yyyy} → {t:dd/MM/yyyy})" : "") +
-                              (r.BadLines > 0 ? $", {r.BadLines:N0} filas que no se pudieron leer" : "") + $" · paso de precio {r.TickSize.ToString("0.########", CultureInfo.InvariantCulture)}");
+                              (r.BadLines > 0 ? $", {r.BadLines:N0} unreadable rows" : "") + $" · price increment {r.TickSize.ToString("0.########", CultureInfo.InvariantCulture)}");
                 }
                 catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
                 {
@@ -500,7 +502,7 @@ internal sealed class DataView : UserControl, IPage
                 }
             }
 
-            _importStatus.Text = "Listo. " + string.Join(" · ", lines) + ". Aparece en la lista de la izquierda (conexión «importado») y en los backtests.";
+            _importStatus.Text = "Done. " + string.Join(" · ", lines) + ". Available in the left-hand list (imported connection) and in backtests.";
             _status(_importStatus.Text);
         }
         finally
@@ -580,18 +582,18 @@ internal sealed class DataView : UserControl, IPage
             var contracts = days.Select(d => TradingHub.Feeds.Rithmic.RithmicFeed.ContractNameOn(_dlInstrument, d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc))).Distinct().ToList();
             var since = TradingHub.Feeds.Rithmic.RithmicFeed.CurrentContractSince(_dlInstrument);
             bool older = since is { } sd && days.Count > 0 && days[0].ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) < sd;
-            _dlStatus.Text = $"{_dlInstrument.Symbol} · {days.Count} días tick a tick desde Rithmic · contrato{(contracts.Count > 1 ? "s" : "")} {string.Join(", ", contracts)}" +
-                             (older ? $". Ojo: Rithmic no guarda la historia de los contratos vencidos; lo seguro es desde el {since:dd/MM} (contrato {contracts[^1]}). Lo anterior se intenta igual." : "") +
-                             (days.Count > 60 ? " Un índice como el ES tiene más de un millón de operaciones por día: un rango largo tarda (se puede cancelar y seguir después)." : "");
+            _dlStatus.Text = $"{_dlInstrument.Symbol} · {days.Count} days of Rithmic ticks · contract{(contracts.Count > 1 ? "s" : "")} {string.Join(", ", contracts)}" +
+                             (older ? $". Note: Rithmic does not retain expired-contract history; reliable availability starts on {since:dd/MM} (contract {contracts[^1]}). Earlier dates are still attempted." : "") +
+                             (days.Count > 60 ? " An index such as ES has over a million trades daily: long ranges take time (cancel and resume later if needed)." : "");
         }
         else if (Downloader is { } dl)
         {
-            _dlStatus.Text = $"{_dlInstrument.Symbol} · {days.Count} días · {dl.HistoryNote}" +
-                             (days.Count > 30 ? ". Un rango largo tarda: se puede cancelar y seguir después (lo bajado queda)." : "");
+            _dlStatus.Text = $"{_dlInstrument.Symbol} · {days.Count} days · {dl.HistoryNote}" +
+                             (days.Count > 30 ? ". A long range takes time: cancel and resume later; downloaded data is retained." : "");
         }
         else
         {
-            _dlStatus.Text = $"{_dlInstrument.Symbol} · {days.Count} días · archivos diarios de {_dlInstrument.Exchange}";
+            _dlStatus.Text = $"{_dlInstrument.Symbol} · {days.Count} days · daily archives from {_dlInstrument.Exchange}";
         }
     }
 
@@ -604,7 +606,7 @@ internal sealed class DataView : UserControl, IPage
         _ => $"{Math.Max(1, bytes / 1024)} KB",
     };
 
-    private string FeedName(string feedId) => _svc.Connections.Find(feedId)?.Name ?? (feedId == HistorySources.Databento ? "Databento" : feedId);
+    private string FeedName(string feedId) => _svc.Connections.Find(feedId)?.Name ?? (feedId == HistorySources.Databento ? "Databento" : TradingHub.Common.EnglishText.Of(feedId));
 
     /// <summary>Lo que ya se bajó de Databento (para que se vea en su tarjeta).</summary>
     private void RefreshDatabentoSummary()
@@ -612,13 +614,13 @@ internal sealed class DataView : UserControl, IPage
         var have = _index.Where(s => s.FeedId == HistorySources.Databento).OrderBy(s => s.Symbol).ToList();
         _dbHave.Text = have.Count == 0
             ? "No Databento history downloaded yet."
-            : "Databento history already available: " + string.Join(" · ", have.Select(s => $"{s.Symbol} {s.Days.Count} día{(s.Days.Count == 1 ? "" : "s")} ({s.First:dd/MM/yyyy} → {s.Last:dd/MM/yyyy})"));
+            : "Databento history already available: " + string.Join(" · ", have.Select(s => $"{s.Symbol} {s.Days.Count} day{(s.Days.Count == 1 ? "" : "s")} ({s.First:dd/MM/yyyy} → {s.Last:dd/MM/yyyy})"));
     }
 
     private void Refresh()
     {
         _index = HistoricalData.Scan(AppPaths.Ticks);
-        _totals.Text = $"{_index.Count} instrumentos · {Size(_index.Sum(s => s.Bytes))}";
+        _totals.Text = $"{_index.Count} instruments · {Size(_index.Sum(s => s.Bytes))}";
         RefreshDatabentoSummary();
         var keep = _selected;
         _symbols.Items.Clear();
@@ -626,7 +628,7 @@ internal sealed class DataView : UserControl, IPage
         {
             var text = Ui.V(2,
                 new TextBlock { Text = s.Symbol, FontWeight = FontWeight.SemiBold },
-                new TextBlock { Text = $"{FeedName(s.FeedId)} · {s.Days.Count} día{(s.Days.Count == 1 ? "" : "s")}", Classes = { "muted", "small" } });
+                new TextBlock { Text = $"{FeedName(s.FeedId)} · {s.Days.Count} day{(s.Days.Count == 1 ? "" : "s")}", Classes = { "muted", "small" } });
             var size = new TextBlock { Text = Size(s.Bytes), Classes = { "faint", "small" }, VerticalAlignment = VerticalAlignment.Center };
             var row = new DockPanel { Margin = new Thickness(2, 4) };
             DockPanel.SetDock(size, Dock.Right);
@@ -659,7 +661,7 @@ internal sealed class DataView : UserControl, IPage
         long max = _selected.Days.Max(d => d.Bytes);
         foreach (var d in _selected.Days.OrderByDescending(d => d.Day))
         {
-            var date = new TextBlock { Text = d.Day.ToDateTime(TimeOnly.MinValue).ToString("ddd dd/MM/yyyy", CultureInfo.GetCultureInfo("es-AR")), Width = 130, VerticalAlignment = VerticalAlignment.Center };
+            var date = new TextBlock { Text = d.Day.ToDateTime(TimeOnly.MinValue).ToString("ddd dd/MM/yyyy", CultureInfo.GetCultureInfo("en-US")), Width = 130, VerticalAlignment = VerticalAlignment.Center };
             var bar = new Border { Height = 6, CornerRadius = new CornerRadius(3), Background = Ui.Accent, Opacity = 0.75, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Width = Math.Max(4, 220.0 * d.Bytes / Math.Max(1, max)) };
             ToolTip.SetTip(bar, "Relative size (approximate trade count)");
             var size = new TextBlock { Text = Size(d.Bytes), Classes = { "muted", "small" }, Width = 70, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
@@ -684,9 +686,9 @@ internal sealed class DataView : UserControl, IPage
             return;
         }
 
-        if (!await ConfirmDialog.ShowAsync(_main, "Delete data", $"Se borran {days.Count} día(s) de {_selected.Symbol} ({Size(days.Sum(d => d.Bytes))}). No se puede deshacer.", "Delete", danger: true)) return;
+        if (!await ConfirmDialog.ShowAsync(_main, "Delete data", $"Deletes {days.Count} day(s) of {_selected.Symbol} ({Size(days.Sum(d => d.Bytes))}). This cannot be undone.", "Delete", danger: true)) return;
         HistoricalData.DeleteDays(AppPaths.Ticks, _selected.FeedId, _selected.Symbol, days.Select(d => d.Day));
-        _status($"Borrados {days.Count} día(s) de {_selected.Symbol}");
+        _status($"Deleted {days.Count} day(s) of {_selected.Symbol}");
         Refresh();
     }
 
@@ -720,7 +722,7 @@ internal sealed class DataView : UserControl, IPage
 
         if (inst == null)
         {
-            _status($"No pude obtener la ficha de {_selected.Symbol} (¿la conexión está activa?).");
+            _status($"Could not retrieve instrument details for {_selected.Symbol} (is the connection enabled?).");
             return;
         }
 
@@ -771,7 +773,7 @@ internal sealed class DataView : UserControl, IPage
         int done = 0, skipped = 0, missing = 0;
         long trades = 0;
         var inst = _dlInstrument;
-        using var job = BackgroundWork.Begin($"bajando historia de {inst.Symbol}");
+        using var job = BackgroundWork.Begin($"downloading history for {inst.Symbol}");
         try
         {
             for (int i = 0; i < days.Count; i++)
@@ -791,11 +793,11 @@ internal sealed class DataView : UserControl, IPage
                 if (fetched > 0)
                 {
                     var left = TimeSpan.FromTicks((DateTime.UtcNow - started).Ticks / fetched * (days.Count - i));
-                    eta = left.TotalMinutes < 1 ? " · falta menos de un minuto" : left.TotalHours < 1 ? $" · faltan ~{left.TotalMinutes:0} min" : $" · faltan ~{left.TotalHours:0.#} h";
+                    eta = left.TotalMinutes < 1 ? " · less than a minute remaining" : left.TotalHours < 1 ? $" · about {left.TotalMinutes:0} min" : $" · about {left.TotalHours:0.#} h";
                 }
 
                 string contract = rithmic != null ? $" ({TradingHub.Feeds.Rithmic.RithmicFeed.ContractNameOn(inst, day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc))})" : "";
-                _dlStatus.Text = $"{inst.Symbol} {day:dd/MM/yyyy}{contract}: descargando… ({i + 1}/{days.Count}){eta}";
+                _dlStatus.Text = $"{inst.Symbol} {day:dd/MM/yyyy}{contract}: downloading… ({i + 1}/{days.Count}){eta}";
                 var progress = new Progress<double>(p => _progress.Value = (index + p) / days.Count);
                 var list = downloader != null
                     ? await downloader.DownloadDayAsync(inst, day, progress, ct)
@@ -804,11 +806,11 @@ internal sealed class DataView : UserControl, IPage
                 if (list == null)
                 {
                     missing++;
-                    if (rithmic?.LastHistoryError is { } err) lastProblem = $"{day:dd/MM}{contract}: Rithmic respondió {err}";
+                    if (rithmic?.LastHistoryError is { } err) lastProblem = $"{day:dd/MM}{contract}: Rithmic returned {err}";
                     continue;
                 }
 
-                _dlStatus.Text = $"{inst.Symbol} {day:dd/MM/yyyy}{contract}: guardando {list.Count:N0} operaciones…";
+                _dlStatus.Text = $"{inst.Symbol} {day:dd/MM/yyyy}{contract}: saving {list.Count:N0} trades…";
                 bool replace = downloader != null; // el día bajado por la API viene completo: reemplaza lo grabado en vivo
                 await Task.Run(() => HistoricalData.WriteDay(AppPaths.Ticks, inst, day, list, replace), ct);
                 trades += list.Count;
@@ -816,17 +818,17 @@ internal sealed class DataView : UserControl, IPage
                 _progress.Value = (i + 1.0) / days.Count;
             }
 
-            _dlStatus.Text = $"Listo: {done} día(s) descargados ({trades:N0} operaciones)" +
-                             (skipped > 0 ? $", {skipped} ya estaban" : "") +
-                             (missing > 0 ? rithmic != null ? $", {missing} sin operaciones en Rithmic (feriados o fuera de lo que guarda)" : downloader != null ? $", {missing} sin datos (feriados o fin de semana)" : $", {missing} todavía no publicados" : "") + "." +
+            _dlStatus.Text = $"Done: {done} downloaded day(s) ({trades:N0} trades)" +
+                             (skipped > 0 ? $", {skipped} already available" : "") +
+                             (missing > 0 ? rithmic != null ? $", {missing} with no Rithmic trades (holidays or outside retained history)" : downloader != null ? $", {missing} with no data (holidays or weekends)" : $", {missing} not published yet" : "") + "." +
                              (lastProblem != null ? " " + lastProblem : "");
             if (rithmic?.MissingContracts is { Count: > 0 } gone)
-                _dlStatus.Text += $" Rithmic no devolvió nada de {string.Join(", ", gone)}: no guarda la historia de los contratos vencidos, así que con Rithmic se puede bajar desde el último vencimiento. Lo que bajes o grabes queda guardado en tu Mac, así que la historia se va juntando.";
+                _dlStatus.Text += $" Rithmic returned no data for {string.Join(", ", gone)}: expired-contract history is not retained, so downloads are available from the last expiry. Downloaded or recorded data stays on your Mac and accumulates over time.";
             _status(_dlStatus.Text);
         }
         catch (OperationCanceledException)
         {
-            _dlStatus.Text = $"Cancelado. Se guardaron {done} día(s).";
+            _dlStatus.Text = $"Canceled. Saved {done} day(s).";
         }
         catch (Exception ex)
         {

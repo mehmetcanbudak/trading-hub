@@ -228,10 +228,10 @@ public sealed class BracketManager : IDisposable
         bool above = price > reference;
         return role switch
         {
-            BracketRole.StopLoss when side > 0 && !below => "El stop de un largo va debajo del precio actual.",
-            BracketRole.StopLoss when side < 0 && !above => "El stop de un corto va encima del precio actual.",
-            BracketRole.Target when side > 0 && !above => "El objetivo de un largo va encima del precio actual.",
-            BracketRole.Target when side < 0 && !below => "El objetivo de un corto va debajo del precio actual.",
+            BracketRole.StopLoss when side > 0 && !below => "A long-position stop must be below the current price.",
+            BracketRole.StopLoss when side < 0 && !above => "A short-position stop must be above the current price.",
+            BracketRole.Target when side > 0 && !above => "A long-position target must be above the current price.",
+            BracketRole.Target when side < 0 && !below => "A short-position target must be below the current price.",
             _ => null,
         };
     }
@@ -240,11 +240,11 @@ public sealed class BracketManager : IDisposable
     public string DropFromPosition(decimal price, BracketRole role = BracketRole.None)
     {
         decimal v = Volume;
-        if (v == 0) return "No hay posición abierta.";
+        if (v == 0) return "No open position.";
         if (role == BracketRole.None)
         {
             decimal last = Account.LastPrice > 0 ? Account.LastPrice : EntryPrice;
-            if (price == last) return "Soltalo arriba o abajo del precio actual.";
+            if (price == last) return "Drop above or below the current price.";
             role = (price > last) == (v > 0) ? BracketRole.Target : BracketRole.StopLoss;
         }
 
@@ -254,7 +254,7 @@ public sealed class BracketManager : IDisposable
     public string SetStopLoss(decimal price) => Run(() =>
     {
         decimal v = Volume;
-        if (v == 0) return "No hay posición abierta.";
+        if (v == 0) return "No open position.";
         price = Inst.RoundPrice(price);
         if (Validate(BracketRole.StopLoss, price, Math.Sign(v), Account.LastPrice) is { } err) return err;
         var live = LiveOf(_stops).FirstOrDefault();
@@ -269,7 +269,7 @@ public sealed class BracketManager : IDisposable
             _stops.Add(Account.Exit(OrderTypes.Stop, ExitDirection, Math.Abs(v), price, "SL"));
         }
 
-        return $"Stop loss en {Inst.FormatPrice(price)} ({FormatMoney(PnLAt(price))})";
+        return $"Stop loss at {Inst.FormatPrice(price)} ({FormatMoney(PnLAt(price))})";
     });
 
     /// <summary>
@@ -279,7 +279,7 @@ public sealed class BracketManager : IDisposable
     public string AddTarget(decimal price, decimal? quantity = null) => Run(() =>
     {
         decimal v = Volume;
-        if (v == 0) return "No hay posición abierta.";
+        if (v == 0) return "No open position.";
         price = Inst.RoundPrice(price);
         if (Validate(BracketRole.Target, price, Math.Sign(v), Account.LastPrice) is { } err) return err;
         decimal abs = Math.Abs(v);
@@ -299,15 +299,15 @@ public sealed class BracketManager : IDisposable
         {
             var biggest = live.OrderByDescending(t => t.Live.Unfilled).First();
             decimal half = RoundQty(biggest.Live.Unfilled / 2);
-            if (half <= 0) return "La cantidad no se puede dividir más: mové el objetivo que ya existe.";
+            if (half <= 0) return "Quantity cannot be split further: move the existing target.";
             var n = Account.Replace(biggest.Live, PriceOf(biggest.Live), biggest.Live.Unfilled - half);
             Swap(_targets, biggest.Tracked, n);
             qty = half;
         }
 
-        if (qty <= 0) return "La cantidad del objetivo quedó en cero.";
+        if (qty <= 0) return "Target quantity became zero.";
         _targets.Add(Account.Exit(OrderTypes.Limit, ExitDirection, qty, price, "TP"));
-        return $"Objetivo de {Fmt(qty)} en {Inst.FormatPrice(price)} ({FormatMoney(PnLAt(price, qty))})";
+        return $"Target for {Fmt(qty)} on {Inst.FormatPrice(price)} ({FormatMoney(PnLAt(price, qty))})";
     });
 
     /// <summary>Mueve una orden: stop, objetivo, entrada con brackets o cualquier otra.</summary>
@@ -322,18 +322,18 @@ public sealed class BracketManager : IDisposable
             var tracked = list.First(s => Same(s, order));
             var live = Live(tracked) ?? order;
             Swap(list, tracked, Account.Replace(live, price, live.Unfilled));
-            return $"{(role == BracketRole.StopLoss ? "Stop" : "Objetivo")} movido a {Inst.FormatPrice(price)}";
+            return $"{(role == BracketRole.StopLoss ? "Stop" : "Target")} moved to {Inst.FormatPrice(price)}";
         }
 
         var pb = _pending.FirstOrDefault(p => Same(p.Entry, order));
         if (pb != null)
         {
             pb.Entry = Account.Replace(order, price, order.Unfilled);
-            return $"Orden movida a {Inst.FormatPrice(price)} (el stop y los objetivos la siguen)";
+            return $"Order moved to {Inst.FormatPrice(price)} (stop and targets follow)";
         }
 
         Account.Modify(order, price);
-        return $"Orden movida a {Inst.FormatPrice(price)}";
+        return $"Order moved to {Inst.FormatPrice(price)}";
     });
 
     /// <summary>Cambia la cantidad de un objetivo a una fracción de la posición (los demás se achican si hace falta).</summary>
@@ -341,13 +341,13 @@ public sealed class BracketManager : IDisposable
     {
         decimal abs = Math.Abs(Volume);
         var tracked = _targets.FirstOrDefault(t => Same(t, target));
-        if (abs == 0 || tracked == null || Live(tracked) is not { } live) return "No es un objetivo activo.";
+        if (abs == 0 || tracked == null || Live(tracked) is not { } live) return "Not an active target.";
         decimal qty = RoundQty(abs * fraction);
-        if (qty <= 0) return "Esa fracción da cero con la cantidad de la posición.";
+        if (qty <= 0) return "This fraction rounds to zero for the position quantity.";
         var n = Account.Replace(live, PriceOf(live), qty);
         Swap(_targets, tracked, n);
         ReduceTargets(abs, n);
-        return $"Objetivo ahora cierra {Fmt(qty)}";
+        return $"Target now closes {Fmt(qty)}";
     });
 
     public string CancelBracket(Order order) => Run(() =>
@@ -363,12 +363,12 @@ public sealed class BracketManager : IDisposable
             }
 
             list.Remove(tracked);
-            return "Orden cancelada";
+            return "Order canceled";
         }
 
         Account.Cancel(order);
         _pending.RemoveAll(p => Same(p.Entry, order));
-        return "Orden cancelada";
+        return "Order canceled";
     });
 
     /// <summary>Lleva el stop al precio de entrada (más el margen de la plantilla).</summary>
@@ -377,25 +377,25 @@ public sealed class BracketManager : IDisposable
     private string MoveStopToBreakevenCore()
     {
         decimal v = Volume;
-        if (v == 0) return "No hay posición abierta.";
+        if (v == 0) return "No open position.";
         decimal be = Inst.RoundPrice(EntryPrice + Math.Sign(v) * Template.BreakevenOffsetTicks * Inst.TickSize);
         if (Validate(BracketRole.StopLoss, be, Math.Sign(v), Account.LastPrice) != null)
-            return "Todavía no hay ganancia suficiente para poner el stop en breakeven.";
+            return "Not enough profit yet to move the stop to breakeven.";
         var live = LiveOf(_stops).FirstOrDefault();
         if (live.Live != null) Swap(_stops, live.Tracked, Account.Replace(live.Live, be, Math.Abs(v)));
         else _stops.Add(Account.Exit(OrderTypes.Stop, ExitDirection, Math.Abs(v), be, "SL"));
-        return $"Stop en breakeven ({Inst.FormatPrice(be)})";
+        return $"Stop at breakeven ({Inst.FormatPrice(be)})";
     }
 
     /// <summary>Cierra a mercado una parte de la posición (0.5 = la mitad).</summary>
     public string ClosePartial(decimal fraction) => Run(() =>
     {
         decimal abs = Math.Abs(Volume);
-        if (abs == 0) return "No hay posición abierta.";
+        if (abs == 0) return "No open position.";
         decimal qty = fraction >= 1 ? abs : RoundQty(abs * fraction);
         if (qty <= 0) qty = Math.Min(abs, Inst.VolumeStep > 0 ? Inst.VolumeStep : 1);
-        Account.Market(ExitDirection, qty, "Parcial");
-        return $"Cerrados {Fmt(qty)} de {Fmt(abs)} a mercado";
+        Account.Market(ExitDirection, qty, "Partial");
+        return $"Closed {Fmt(qty)} of {Fmt(abs)} at market";
     });
 
     /// <summary>Pone el stop y los objetivos de la plantilla a la posición abierta.</summary>
@@ -404,7 +404,7 @@ public sealed class BracketManager : IDisposable
     private string ApplyTemplateCore()
     {
         decimal v = Volume;
-        if (v == 0) return "No hay posición abierta.";
+        if (v == 0) return "No open position.";
         CancelManaged();
         return PlaceBrackets(Math.Sign(v), EntryPrice, Template.StopTicks, Template.Targets);
     }
@@ -442,7 +442,7 @@ public sealed class BracketManager : IDisposable
             decimal tp = Inst.RoundPrice(entry + side * t.Ticks * Inst.TickSize);
             if (Validate(BracketRole.Target, tp, side, last) != null)
             {
-                skipped.Add($"objetivo {i + 1}");
+                skipped.Add($"target {i + 1}");
                 continue;
             }
 
@@ -451,8 +451,8 @@ public sealed class BracketManager : IDisposable
             placed++;
         }
 
-        string msg = placed > 0 ? $"Stop y objetivos puestos ({placed} órdenes)" : "No se puso ningún stop ni objetivo";
-        if (skipped.Count > 0) msg += $" · el precio ya pasó: {string.Join(", ", skipped)}";
+        string msg = placed > 0 ? $"Stop and targets placed ({placed} orders)" : "No stop or target placed";
+        if (skipped.Count > 0) msg += $" · price already passed: {string.Join(", ", skipped)}";
         return msg;
     }
 
@@ -489,16 +489,16 @@ public sealed class BracketManager : IDisposable
         }
 
         int ticks = (int)Math.Round((price - pb.EntryPrice) / Inst.TickSize) * pb.Side;
-        if (ticks == 0) return "Soltalo arriba o abajo de la orden.";
+        if (ticks == 0) return "Drop above or below the order.";
         if (role == BracketRole.None) role = ticks > 0 ? BracketRole.Target : BracketRole.StopLoss;
         if (role == BracketRole.StopLoss)
         {
-            if (ticks >= 0) return "El stop va del lado de la pérdida de la orden.";
+            if (ticks >= 0) return "Stop must be on the order's loss side.";
             pb.StopTicks = -ticks;
-            return $"Stop adjunto a {-ticks} ticks (se envía cuando se llene la orden)";
+            return $"Stop attached at {-ticks} ticks (submitted when the entry fills)";
         }
 
-        if (ticks <= 0) return "El objetivo va del lado de la ganancia de la orden.";
+        if (ticks <= 0) return "Target must be on the order's profit side.";
         if (pb.Targets.Count == 0) pb.Targets.Add(new BracketTarget { Ticks = ticks, Percent = 100 });
         else
         {
@@ -508,7 +508,7 @@ public sealed class BracketManager : IDisposable
             pb.Targets.Add(new BracketTarget { Ticks = ticks, Percent = half });
         }
 
-        return $"Objetivo adjunto a {ticks} ticks (se envía cuando se llene la orden)";
+        return $"Target attached at {ticks} ticks (submitted when the entry fills)";
     });
 
     /// <summary>Mueve el stop (index −1) o un objetivo adjunto a una entrada pendiente.</summary>
@@ -517,15 +517,15 @@ public sealed class BracketManager : IDisposable
         int ticks = (int)Math.Round((Inst.RoundPrice(price) - pb.EntryPrice) / Inst.TickSize) * pb.Side;
         if (index < 0)
         {
-            if (ticks >= 0) return "El stop va del lado de la pérdida de la orden.";
+            if (ticks >= 0) return "Stop must be on the order's loss side.";
             pb.StopTicks = -ticks;
-            return $"Stop adjunto a {-ticks} ticks";
+            return $"Stop attached at {-ticks} ticks";
         }
 
         if (index >= pb.Targets.Count) return "";
-        if (ticks <= 0) return "El objetivo va del lado de la ganancia de la orden.";
+        if (ticks <= 0) return "Target must be on the order's profit side.";
         pb.Targets[index].Ticks = ticks;
-        return $"Objetivo adjunto a {ticks} ticks";
+        return $"Target attached at {ticks} ticks";
     });
 
     public void RemovePending(PendingBracket pb, int index) => Run(() =>
@@ -567,7 +567,7 @@ public sealed class BracketManager : IDisposable
             }
             catch (Exception ex)
             {
-                Message?.Invoke("Error con el stop/objetivos: " + ex.Message);
+                Message?.Invoke("Stop/target error: " + ex.Message);
                 changed = false;
             }
             finally
@@ -598,7 +598,7 @@ public sealed class BracketManager : IDisposable
         if (before != 0 && v == 0)
         {
             // OCO: se cerró la posición (stop, objetivo o a mano): se cancela lo que quedó
-            if (CancelManaged() > 0) Message?.Invoke("Posición cerrada: se cancelaron el stop y los objetivos que quedaban.");
+            if (CancelManaged() > 0) Message?.Invoke("Position closed: remaining stop and targets canceled.");
             _targetHits = 0;
         }
         else if (v != 0 && (before == 0 || Math.Sign(v) != Math.Sign(before)))
@@ -624,9 +624,9 @@ public sealed class BracketManager : IDisposable
                 if (_targetHits >= 1 && Template.BreakevenAfterFirstTarget && LiveOf(_stops).Count > 0 && _targetHits == hits)
                 {
                     var msg = MoveStopToBreakevenCore();
-                    Message?.Invoke($"Objetivo lleno · {msg}");
+                    Message?.Invoke($"Target filled · {msg}");
                 }
-                else Message?.Invoke("Objetivo lleno: el stop se ajustó a lo que queda abierto.");
+                else Message?.Invoke("Target filled: stop adjusted to the remaining position.");
             }
         }
         else if (v != 0 && Math.Abs(v) > Math.Abs(before))

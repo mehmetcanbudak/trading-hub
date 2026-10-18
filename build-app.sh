@@ -1,7 +1,7 @@
 #!/bin/zsh
-# Compila Trading Hub y arma «Trading Hub.app» (Mac con Apple Silicon). Uso: ./build-app.sh [--install]
-# El paquete se arma y se firma fuera del Escritorio: iCloud le agrega atributos que rompen la firma.
-# Opcional: un archivo build.local.env (no se sube a GitHub) con BUNDLE_ID y SIGN_IDENTITY propios.
+# Build Trading Hub.app for Apple Silicon. Usage: ./build-app.sh [--install]
+# Stage/sign outside Desktop: iCloud extended attributes can break code signing.
+# Optional git-ignored build.local.env can supply BUNDLE_ID and SIGN_IDENTITY.
 set -e
 cd "$(dirname "$0")"
 export PATH="$HOME/.dotnet:$PATH" DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
@@ -11,7 +11,7 @@ BUNDLE_ID="app.tradinghub.desktop"
 SIGN_IDENTITY=""
 [ -f build.local.env ] && source ./build.local.env
 
-# TH_OUT / TH_STAGE: otra carpeta de salida y de armado (por defecto dist y una temporal)
+# TH_OUT / TH_STAGE override the output/staging directories (defaults: dist and a temporary directory).
 OUT="${TH_OUT:-dist}"
 STAGE="${TH_STAGE:-${TMPDIR:-/tmp}tradinghub-app}"
 APP="$STAGE/$NAME.app"
@@ -42,20 +42,20 @@ PLIST
 cp src/TradingHub.App/Assets/tradinghub.icns "$APP/Contents/Resources/"
 xattr -cr "$APP"
 
-# con un certificado fijo macOS recuerda los permisos entre actualizaciones; si no hay, se firma ad hoc (funciona igual)
+# A fixed certificate helps macOS retain permissions across updates; otherwise use ad-hoc signing.
 if [ -n "$SIGN_IDENTITY" ] && security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$SIGN_IDENTITY\""; then
   codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
-  codesign --verify --deep --strict "$APP" && echo "Firmada con: $SIGN_IDENTITY"
+  codesign --verify --deep --strict "$APP" && echo "Signed with: $SIGN_IDENTITY"
 else
   codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
-  echo "Firmada ad hoc"
+  echo "Signed ad hoc"
 fi
 
 rm -rf "$OUT/$NAME.app"
 ditto "$APP" "$OUT/$NAME.app" 2>/dev/null || true
-echo "Listo: $APP"
+echo "Built: $APP"
 if [ "$1" = "--install" ]; then
   rm -rf "/Applications/$NAME.app"
   ditto --noextattr --norsrc "$APP" "/Applications/$NAME.app"
-  codesign --verify --deep --strict "/Applications/$NAME.app" && echo "Instalado en /Applications/$NAME.app"
+  codesign --verify --deep --strict "/Applications/$NAME.app" && echo "Installed in /Applications/$NAME.app"
 fi

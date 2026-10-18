@@ -179,15 +179,15 @@ namespace TradingHub.Indicators
     /// <summary>Categorías de indicadores (para el listado de la UI).</summary>
     public static class IndicatorCategories
     {
-        public const string VolumeOrderFlow = "Volumen / Order flow";
-        public const string OrderBook = "Libro de órdenes";
+        public const string VolumeOrderFlow = "Volume / Order flow";
+        public const string OrderBook = "Order book";
         public const string Trading = "Trading";
-        public const string Samples = "Ejemplos";
-        public const string Trend = "Tendencia";
-        public const string Oscillators = "Osciladores";
-        public const string Levels = "Niveles";
-        public const string Other = "Otros";
-        public const string Custom = "Personalizados";
+        public const string Samples = "Examples";
+        public const string Trend = "Trend";
+        public const string Oscillators = "Oscillators";
+        public const string Levels = "Levels";
+        public const string Other = "Other";
+        public const string Custom = "Custom";
     }
 
     /// <summary>Colores por defecto (paleta estándar).</summary>

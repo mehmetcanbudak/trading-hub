@@ -2,13 +2,15 @@
 
 **Free, source-available desktop trading platform that runs locally on your Mac.**
 
-Footprint charts, Depth of Market (DOM) trading, professional backtesting designed to reduce overfitting, and AI-assisted strategies. Your data and broker credentials remain on your computer.
+Footprint charts, Depth of Market (DOM) trading, professional backtesting designed to reduce overfitting, and AI-assisted strategies. Data and credentials are stored locally; configured providers and optional Claude requests communicate over the network.
 
-Created by [@ralphtradesz](https://x.com/ralphtradesz).
+Created by [@ralphtradesz](https://x.com/ralphtradesz). English work in this fork reuses [indigiti/TradeDock's community translation](https://github.com/indigiti/tradedock/tree/translation/english-documentation-ui), with additional completion, compatibility fixes and validation.
+
+**English branch:** `feat/english-localization`. Built-in UI, safety dialogs, reports, assistant instructions and full guides are English. Stored identifiers, personal history and third-party content are not destructively rewritten. See the [validation dashboard](docs/en/TRANSLATION_STATUS.md).
 
 **Using Windows?** See [Porting Trading Hub to Windows](docs/en/portar-a-windows.md).
 
-![Trading Hub](docs/img/trading.png)
+![Trading Hub](docs/en/img/trading.png)
 
 ## What is Trading Hub?
 
@@ -75,11 +77,11 @@ A strategy assistant helps develop and fix C# strategies. A built-in MCP laborat
 
 | | |
 |---|---|
-| ![Footprint](docs/img/footprint.png) | ![Trading](docs/img/operar.png) |
+| ![Footprint](docs/en/img/footprint.png) | ![Trading](docs/en/img/operar.png) |
 | Footprint charts with delta, POC, and large trades | Chart Trader, DOM, and trade tape |
-| ![Claude](docs/img/claude.png) | ![Backtesting](docs/img/backtest.png) |
+| ![Claude](docs/en/img/claude.png) | ![Backtesting](docs/en/img/backtest.png) |
 | C# strategies with Claude assistance | Backtesting across market conditions |
-| ![Data](docs/img/datos.png) | ![Light theme](docs/img/claro.png) |
+| ![Data](docs/en/img/datos.png) | ![Light theme](docs/en/img/claro.png) |
 | Tick-level history and Databento | Light and dark themes |
 
 ## Installation
@@ -92,7 +94,7 @@ On an Apple Silicon Mac, open a terminal in the repository folder, start `claude
 Install Trading Hub on my Mac by following CLAUDE.md.
 ```
 
-The installation assistant checks prerequisites, installs any missing .NET components without an administrator password, builds the application, and installs it into Applications. The detailed installation instructions are in [INSTALAR_CON_CLAUDE_CODE.md](docs/en/instalar-con-claude-code.md). **Note:** the English instructions are maintained separately from the original Spanish source.
+The installation assistant checks prerequisites, installs any missing .NET components without an administrator password, builds the application, and installs it into Applications. The detailed installation instructions are in [INSTALAR_CON_CLAUDE_CODE.md](docs/en/instalar-con-claude-code.md). The full English guides are maintained alongside the retained Spanish originals.
 
 ### Option 2: Install manually
 
@@ -101,8 +103,8 @@ Requirements: Apple Silicon Mac, macOS 12 or later, and .NET 10.
 ```bash
 curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
 bash /tmp/dotnet-install.sh --channel 10.0
-git clone https://github.com/indigiti/tradedock.git
-cd tradedock
+git clone --branch feat/english-localization https://github.com/mehmetcanbudak/trading-hub.git
+cd trading-hub
 ./build-app.sh --install
 ```
 
@@ -138,7 +140,7 @@ This script adapts compatible namespaces and handles some compilation difference
 
 ## Documentation
 
-English guides are available by topic below. The original, more detailed Spanish sources remain available under `docs/`:
+Full English guides are available below. Original Spanish sources remain under `docs/` for reference; installation does not rewrite your existing scripts, reports or data.
 
 | Topic | Guide |
 |---|---|

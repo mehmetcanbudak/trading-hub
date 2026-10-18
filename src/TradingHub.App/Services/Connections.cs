@@ -72,7 +72,7 @@ public static class Keychain
 
 public enum ConnectionKind
 {
-    [Display(Name = "Simulador")] Simulator,
+    [Display(Name = "Simulator")] Simulator,
     [Display(Name = "Binance Futures")] BinanceFutures,
     [Display(Name = "Binance Spot")] BinanceSpot,
     [Display(Name = "Bybit")] Bybit,
@@ -200,7 +200,7 @@ public sealed class ConnectionManager
         if (Profiles.Count == 0)
         {
             // ids iguales a los datos de mercado para que los espacios de trabajo viejos sigan andando
-            Profiles.Add(new ConnectionProfile { Id = SimulatedFeed.FeedId, Kind = ConnectionKind.Simulator, Name = "Simulador", HistoryHours = 6 });
+            Profiles.Add(new ConnectionProfile { Id = SimulatedFeed.FeedId, Kind = ConnectionKind.Simulator, Name = "Simulator", HistoryHours = 6 });
             Profiles.Add(new ConnectionProfile { Id = BinanceFeed.FuturesId, Kind = ConnectionKind.BinanceFutures, Name = "Binance Futures" });
             Profiles.Add(new ConnectionProfile { Id = BinanceFeed.SpotId, Kind = ConnectionKind.BinanceSpot, Name = "Binance Spot" });
             Profiles.Add(new ConnectionProfile { Id = BybitFeed.LinearId, Kind = ConnectionKind.Bybit, Name = "Bybit" });
@@ -225,10 +225,12 @@ public sealed class ConnectionManager
         {
             if (File.Exists(FilePath))
                 Profiles.AddRange(JsonSerializer.Deserialize<List<ConnectionProfile>>(File.ReadAllText(FilePath), Json) ?? new());
+            foreach (var profile in Profiles.Where(p => p.Kind == ConnectionKind.Simulator && p.Name == "Simulador"))
+                profile.Name = "Simulator";
         }
         catch (Exception ex)
         {
-            this.LogWarn("No se pudieron leer las conexiones: " + ex.Message);
+            this.LogWarn("Could not read connections: " + ex.Message);
         }
     }
 
@@ -280,7 +282,7 @@ public sealed class ConnectionManager
 
     public IMarketDataFeed GetFeed(string profileId)
     {
-        var p = Find(profileId) ?? throw new KeyNotFoundException($"No existe la conexión {profileId}");
+        var p = Find(profileId) ?? throw new KeyNotFoundException($"Connection not found: {profileId}");
         if (_feeds.TryGetValue(p.Id, out var f)) return f;
         f = p.Kind switch
         {
@@ -293,8 +295,8 @@ public sealed class ConnectionManager
             ConnectionKind.CTrader => CTraderFeedOf(p),
             ConnectionKind.Oanda => new TradingHub.Feeds.Oanda.OandaFeed(OandaSettingsOf(p)),
             ConnectionKind.Alpaca => new TradingHub.Feeds.Alpaca.AlpacaFeed(AlpacaSettingsOf(p)),
-            ConnectionKind.Databento => throw new NotSupportedException("Databento no da datos en vivo: se usa desde Datos para bajar historia de futuros."),
-            _ => throw new NotSupportedException("Interactive Brokers todavía no da datos en Trading Hub (solo prueba de conexión)."),
+            ConnectionKind.Databento => throw new NotSupportedException("Databento does not provide live data here: use Data to download futures history."),
+            _ => throw new NotSupportedException("Interactive Brokers currently only tests connectivity; no market data integration."),
         };
         _feeds[p.Id] = f;
         return f;
@@ -400,7 +402,7 @@ public sealed class ConnectionManager
             switch (p.Kind)
             {
                 case ConnectionKind.Simulator:
-                    return (true, "El simulador no necesita conexión.");
+                    return (true, "The simulator does not require a connection.");
                 case ConnectionKind.BinanceFutures:
                 case ConnectionKind.BinanceSpot:
                 {
@@ -408,22 +410,22 @@ public sealed class ConnectionManager
                     var inst = await feed.GetInstrumentsAsync(ct);
                     using var acc = new BinanceAccountClient(BinanceSettingsOf(p));
                     var (ok, msg) = await acc.TestAsync(ct);
-                    return (ok, $"{inst.Count} instrumentos disponibles. {msg}");
+                    return (ok, $"{inst.Count} instruments available. {msg}");
                 }
                 case ConnectionKind.Bybit:
                 {
                     var inst = await new BybitFeed().GetInstrumentsAsync(ct);
-                    return (true, $"{inst.Count} perpetuos disponibles (datos públicos).");
+                    return (true, $"{inst.Count} perpetuals available (public data).");
                 }
                 case ConnectionKind.Rithmic:
                 case ConnectionKind.AmpFutures:
                 {
                     var systems = await RithmicClient.ListSystemsAsync(p.RithmicUri, ct);
                     if (string.IsNullOrWhiteSpace(p.RithmicUser))
-                        return (true, $"Servidor OK: {systems.Count} sistemas disponibles. Completá usuario y contraseña para iniciar sesión.");
+                        return (true, $"Server OK: {systems.Count} systems available. Enter username and password to sign in.");
                     // con la misma sesión de los gráficos: un login aparte cortaría la que está andando
                     var (ok, message) = await ((RithmicFeed)GetFeed(p.Id)).TestAsync(ct);
-                    return (ok, ok ? $"Conectado a {p.RithmicSystem}. {message}" : message);
+                    return (ok, ok ? $"Connected to {p.RithmicSystem}. {message}" : message);
                 }
                 case ConnectionKind.InteractiveBrokers:
                     return await IbProbe.TestAsync(p.IbHost, p.IbPort, ct);
@@ -437,14 +439,14 @@ public sealed class ConnectionManager
                     return await ((TradingHub.Feeds.Alpaca.AlpacaFeed)GetFeed(p.Id)).TestAsync(ct);
                 case ConnectionKind.Databento:
                 {
-                    if (string.IsNullOrWhiteSpace(GetSecret(p))) return (false, "Falta la API key de Databento.");
+                    if (string.IsNullOrWhiteSpace(GetSecret(p))) return (false, "Databento API key is missing.");
                     using var db = DatabentoOf(p);
                     var (start, end) = await db.RangeAsync(ct);
                     // costo de un día de NQ, para que se vea cuánto rinden los créditos (no baja nada)
                     var day = DateOnly.FromDateTime(end.AddDays(-3));
                     while (day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) day = day.AddDays(-1);
                     decimal cost = await db.CostAsync("NQ", day, day, ct);
-                    return (true, $"API key OK. Globex desde {start:dd/MM/yyyy} hasta {end:dd/MM/yyyy}. Un día de NQ tick a tick cuesta ≈ US$ {cost:0.00} de tus créditos.");
+                    return (true, $"API key OK. Globex from {start:dd/MM/yyyy} to {end:dd/MM/yyyy}. One day of NQ tick data costs approximately US$ {cost:0.00} from your credits.");
                 }
             }
         }
@@ -453,7 +455,7 @@ public sealed class ConnectionManager
             return (false, ex.Message);
         }
 
-        return (false, "Tipo de conexión desconocido");
+        return (false, "Unknown connection type");
     }
 
     public void DisposeAll()

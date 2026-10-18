@@ -2,7 +2,7 @@
 
 [← Back to the main README](../README.md)
 
-This directory contains the full platform documentation organized by feature. **English-language guides are linked below.** The original Spanish versions remain available in this directory, and some English guides are condensed relative to the originals.
+This directory contains the full platform documentation organized by feature. **English-language guides are linked below.** Full English guides cover the original feature sections, examples and safety warnings. The original Spanish versions remain in this directory for reference.
 
 ## Getting started
 
@@ -36,4 +36,4 @@ This directory contains the full platform documentation organized by feature. **
 
 ---
 
-Trading Hub was originally created by [@ralphtradesz](https://x.com/ralphtradesz). It is free to use, with source available under the [MIT + Commons Clause license](../LICENSE); commercial use is restricted. See the [main README](../README.md) for details.
+Trading Hub was originally created by [@ralphtradesz](https://x.com/ralphtradesz). It is free to use, with source available under the [MIT + Commons Clause license](../LICENSE); commercial sale and services primarily based on it are restricted. See the [main README](../README.md) for details.

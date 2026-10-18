@@ -39,7 +39,7 @@ public sealed class UserScripts : IDisposable
         }
         catch (Exception ex)
         {
-            this.LogWarn("No se pudo vigilar la carpeta de indicadores: " + ex.Message);
+            this.LogWarn("Could not watch indicator directory: " + ex.Message);
         }
     }
 
@@ -75,7 +75,7 @@ public sealed class UserScripts : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // un archivo a medio guardar o que se movió: se reintenta con el próximo cambio de la carpeta
-            this.LogWarn("No se pudieron leer los indicadores propios: " + ex.Message);
+            this.LogWarn("Could not read custom indicators: " + ex.Message);
             Restart();
             return LastResult;
         }
@@ -85,7 +85,7 @@ public sealed class UserScripts : IDisposable
         {
             _catalog.RemoveSource(Source);
             _catalog.Scan(res.Assembly, Source);
-            this.LogInfo($"Indicadores propios compilados ({files.Count} archivos, {res.Elapsed.TotalMilliseconds:0} ms)");
+            this.LogInfo($"Custom indicators compiled ({files.Count} files, {res.Elapsed.TotalMilliseconds:0} ms)");
         }
         else
         {
@@ -103,15 +103,15 @@ public sealed class UserScripts : IDisposable
     }
 
     public const string ExampleSource = """
-        // Ejemplo de indicador propio. Guardá cambios y Trading Hub lo recompila solo.
-        // La API es la misma que la de ATAS: podés pegar indicadores escritos para ATAS.
+        // Custom indicator example. Saving recompiles it automatically.
+        // The compatible API accepts indicators written for ATAS.
         using System.ComponentModel;
         using System.ComponentModel.DataAnnotations;
         using System.Drawing;
         using TradingHub.Indicators;
 
-        [DisplayName("Ejemplo: delta % por vela")]
-        [Category("Mis indicadores")]
+        [DisplayName("Example: delta % per bar")]
+        [Category("My indicators")]
         public class EjemploDeltaPorcentual : Indicator
         {
             private readonly ValueDataSeries _serie = new("DeltaPct", "Delta %")
@@ -119,7 +119,7 @@ public sealed class UserScripts : IDisposable
                 VisualType = VisualMode.Histogram,
             };
 
-            [Display(Name = "Umbral para resaltar (%)", GroupName = "Configuración")]
+            [Display(Name = "Highlight threshold (%)", GroupName = "Settings")]
             public decimal Umbral { get; set; } = 30;
 
             public EjemploDeltaPorcentual()

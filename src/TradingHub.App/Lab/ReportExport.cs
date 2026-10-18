@@ -131,7 +131,7 @@ internal static class ReportExport
         CloseList();
         return $$"""
             <!doctype html>
-            <html lang="es"><head><meta charset="utf-8"><title>{{WebUtility.HtmlEncode(title)}}</title>
+            <html lang="en"><head><meta charset="utf-8"><title>{{WebUtility.HtmlEncode(title)}}</title>
             <style>
             @page { size: A4; margin: 16mm 14mm; }
             body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; color: #22262e; max-width: 980px; margin: 32px auto; padding: 0 28px; line-height: 1.5; font-size: 14px; }

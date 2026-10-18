@@ -58,9 +58,9 @@ public sealed class DatabentoClient : IDisposable
 
         return status switch
         {
-            System.Net.HttpStatusCode.Unauthorized => "Databento rechazó la API key.",
-            System.Net.HttpStatusCode.PaymentRequired => "Databento: no te alcanzan los créditos para este pedido.",
-            _ => $"Databento respondió {(int)status}: {detail}",
+            System.Net.HttpStatusCode.Unauthorized => "Databento rejected the API key.",
+            System.Net.HttpStatusCode.PaymentRequired => "Databento: insufficient credits for this request.",
+            _ => $"Databento returned {(int)status}: {detail}",
         };
     }
 
@@ -103,7 +103,7 @@ public sealed class DatabentoClient : IDisposable
         if (header == null) return null;
         var cols = header.Split(',');
         int iTs = Array.IndexOf(cols, "ts_event"), iPx = Array.IndexOf(cols, "price"), iSz = Array.IndexOf(cols, "size"), iSide = Array.IndexOf(cols, "side");
-        if (iTs < 0 || iPx < 0 || iSz < 0) throw new InvalidDataException("Databento devolvió un formato inesperado: " + header);
+        if (iTs < 0 || iPx < 0 || iSz < 0) throw new InvalidDataException("Databento returned an unexpected format: " + header);
         var list = new List<Trade>();
         long lastId = 0, read = 0;
         decimal last = 0;

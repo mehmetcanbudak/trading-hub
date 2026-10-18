@@ -68,8 +68,8 @@ public sealed class TradovateConnection : IDisposable
     private string UserSocketUrl => Settings.UserSocketUrl ?? (Settings.Live ? "wss://live.tradovateapi.com/v1/websocket" : "wss://demo.tradovateapi.com/v1/websocket");
     private string MdSocketUrl => Settings.MdSocketUrl ?? "wss://md.tradovateapi.com/v1/websocket";
 
-    public TradovateSocket Md => _mdSocket ??= new TradovateSocket(MdSocketUrl, ct => MdTokenAsync(ct), "datos de Tradovate");
-    public TradovateSocket User => _userSocket ??= new TradovateSocket(UserSocketUrl, ct => AccessTokenAsync(ct), "cuenta de Tradovate");
+    public TradovateSocket Md => _mdSocket ??= new TradovateSocket(MdSocketUrl, ct => MdTokenAsync(ct), "Tradovate data connection");
+    public TradovateSocket User => _userSocket ??= new TradovateSocket(UserSocketUrl, ct => AccessTokenAsync(ct), "Tradovate account connection");
 
     // ===================================================================== token
 
@@ -120,7 +120,7 @@ public sealed class TradovateConnection : IDisposable
     {
         var s = Settings;
         if (string.IsNullOrWhiteSpace(s.User) || string.IsNullOrEmpty(s.Password))
-            throw new TradovateException("Faltan el usuario y la contraseña de Tradovate.");
+            throw new TradovateException("Tradovate username and password are missing.");
         var body = new JsonObject
         {
             ["name"] = s.User.Trim(),
@@ -134,15 +134,15 @@ public sealed class TradovateConnection : IDisposable
         using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
         using var resp = await _http.PostAsync(RestBase + "/auth/accesstokenrequest", content, ct).ConfigureAwait(false);
         var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        if (!resp.IsSuccessStatusCode) throw new TradovateException($"Tradovate respondió {(int)resp.StatusCode} al iniciar sesión: {Short(text)}", (int)resp.StatusCode);
+        if (!resp.IsSuccessStatusCode) throw new TradovateException($"Tradovate returned {(int)resp.StatusCode} during sign-in: {Short(text)}", (int)resp.StatusCode);
         if (!ReadToken(text, renew: false))
         {
             using var doc = JsonDocument.Parse(text);
             var root = doc.RootElement;
             if (root.TryGetProperty("p-ticket", out _))
-                throw new TradovateException("Tradovate pide esperar o resolver un captcha por demasiados intentos: entrá una vez desde la web de Tradovate y volvé a probar en unos minutos.");
+                throw new TradovateException("Tradovate requires a wait or captcha after too many attempts. Sign in on the Tradovate website once, then retry in a few minutes.");
             string err = root.TryGetProperty("errorText", out var e) ? e.GetString() ?? "" : "";
-            throw new TradovateException(err.Length > 0 ? "Tradovate: " + err : "Tradovate no devolvió el token (revisá usuario, contraseña, CID y secret).");
+            throw new TradovateException(err.Length > 0 ? "Tradovate: " + err : "Tradovate returned no token (check username, password, CID and secret).");
         }
     }
 
@@ -193,7 +193,7 @@ public sealed class TradovateConnection : IDisposable
                 continue;
             }
 
-            if (!resp.IsSuccessStatusCode) throw new TradovateException($"Tradovate respondió {(int)resp.StatusCode}: {Short(text)}", (int)resp.StatusCode);
+            if (!resp.IsSuccessStatusCode) throw new TradovateException($"Tradovate returned {(int)resp.StatusCode}: {Short(text)}", (int)resp.StatusCode);
             using var doc = JsonDocument.Parse(text.Length == 0 ? "null" : text);
             return doc.RootElement.Clone();
         }
@@ -214,7 +214,7 @@ public sealed class TradovateConnection : IDisposable
             var first = list.ValueKind == JsonValueKind.Array
                 ? list.EnumerateArray().FirstOrDefault(c => c.TryGetProperty("name", out var n) && (n.GetString() ?? "").StartsWith(root, StringComparison.OrdinalIgnoreCase) && (n.GetString()!.Length <= root.Length + 2))
                 : default;
-            if (first.ValueKind != JsonValueKind.Object) throw new TradovateException($"Tradovate no tiene contratos de {root}.");
+            if (first.ValueKind != JsonValueKind.Object) throw new TradovateException($"Tradovate has no contracts for {root}.");
             var r = (first.GetProperty("id").GetInt64(), first.GetProperty("name").GetString()!);
             _contracts["front|" + root] = r;
             _contractNames[r.Item1] = r.Item2;
@@ -228,7 +228,7 @@ public sealed class TradovateConnection : IDisposable
     {
         if (_contracts.TryGetValue(name, out var c)) return c;
         var e = await GetAsync($"/contract/find?name={Uri.EscapeDataString(name)}", ct).ConfigureAwait(false);
-        if (e.ValueKind != JsonValueKind.Object || !e.TryGetProperty("id", out var id)) throw new TradovateException($"Tradovate no encontró el contrato {name}.");
+        if (e.ValueKind != JsonValueKind.Object || !e.TryGetProperty("id", out var id)) throw new TradovateException($"Tradovate could not find contract {name}.");
         var r = (id.GetInt64(), e.GetProperty("name").GetString() ?? name);
         _contracts[name] = r;
         _contractNames[r.Item1] = r.Item2;
@@ -302,7 +302,7 @@ public sealed class TradovateSocket : IDisposable
         try
         {
             if (IsConnected) return;
-            Drop("reconectando", notify: false);
+            Drop("reconnecting", notify: false);
             var token = await _token(ct).ConfigureAwait(false);
             var ws = new ClientWebSocket();
             using (var c = CancellationTokenSource.CreateLinkedTokenSource(ct))
@@ -318,7 +318,7 @@ public sealed class TradovateSocket : IDisposable
             _ = Task.Run(() => ReceiveAsync(ws, token, loop));
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
             wait.CancelAfter(TimeSpan.FromSeconds(15));
-            await using (wait.Token.Register(() => _authorized.TrySetException(new TimeoutException($"La {_name} no respondió a tiempo."))))
+            await using (wait.Token.Register(() => _authorized.TrySetException(new TimeoutException($"The {_name} timed out."))))
                 await _authorized.Task.ConfigureAwait(false);
             _ = Task.Run(() => HeartbeatAsync(ws, loop));
             StateChanged?.Invoke(true, null);
@@ -362,7 +362,7 @@ public sealed class TradovateSocket : IDisposable
     {
         var buf = new byte[1 << 16];
         var ms = new MemoryStream();
-        string why = "se cortó la conexión";
+        string why = "connection lost";
         bool opened = false;
         try
         {
@@ -379,7 +379,7 @@ public sealed class TradovateSocket : IDisposable
 
                 if (r.MessageType == WebSocketMessageType.Close)
                 {
-                    why = "Tradovate cerró la conexión";
+                    why = "Tradovate closed the connection";
                     break;
                 }
 
@@ -398,7 +398,7 @@ public sealed class TradovateSocket : IDisposable
                     case 'h':
                         break;
                     case 'c':
-                        why = "Tradovate cerró la sesión" + (text.Length > 1 ? ": " + text[1..] : "");
+                        why = "Tradovate ended the session" + (text.Length > 1 ? ": " + text[1..] : "");
                         goto done;
                     case 'a':
                         HandleArray(text[1..]);
@@ -444,9 +444,9 @@ public sealed class TradovateSocket : IDisposable
                     string reason = d.ValueKind == JsonValueKind.Object && d.TryGetProperty("reasonCode", out var rc) ? rc.GetString() ?? "" : "";
                     Drop(reason switch
                     {
-                        "ConnectionQuotaReached" => "Tradovate cortó por límite de conexiones (¿tenés Tradovate abierto en otro lado con el mismo usuario?)",
-                        "Maintenance" => "Tradovate está en mantenimiento",
-                        _ => "Tradovate cortó la sesión " + reason,
+                        "ConnectionQuotaReached" => "Tradovate disconnected due to its connection limit (is another session using the same username?).",
+                        "Maintenance" => "Tradovate is under maintenance",
+                        _ => "Tradovate ended session " + reason,
                     }, notify: true);
                     return;
                 }
@@ -461,14 +461,14 @@ public sealed class TradovateSocket : IDisposable
             if (i == 0 && _authorized is { } auth && !auth.Task.IsCompleted)
             {
                 if (status == 200) auth.TrySetResult(true);
-                else auth.TrySetException(new TradovateException($"Tradovate rechazó la autorización de la {_name}: {Text(data)}", status));
+                else auth.TrySetException(new TradovateException($"Tradovate rejected authorization for {_name}: {Text(data)}", status));
                 continue;
             }
 
             if (_pending.TryRemove(i, out var tcs))
             {
                 if (status == 200) tcs.TrySetResult(data);
-                else tcs.TrySetException(new TradovateException($"Tradovate respondió {status}: {Text(data)}", status));
+                else tcs.TrySetException(new TradovateException($"Tradovate returned {status}: {Text(data)}", status));
             }
         }
     }
@@ -478,7 +478,7 @@ public sealed class TradovateSocket : IDisposable
         // a veces el texto viene entre comillas («"Access is denied"»)
         JsonValueKind.String => (d.GetString() ?? "").Trim('"'),
         JsonValueKind.Object when d.TryGetProperty("errorText", out var e) => e.GetString() ?? "",
-        JsonValueKind.Undefined => "sin detalle",
+        JsonValueKind.Undefined => "no details",
         _ => d.ToString(),
     };
 
@@ -486,7 +486,7 @@ public sealed class TradovateSocket : IDisposable
     public async Task<JsonElement> RequestAsync(string endpoint, JsonNode? body, CancellationToken ct, string query = "")
     {
         await EnsureAsync(ct).ConfigureAwait(false);
-        var ws = _ws ?? throw new IOException($"Sin conexión con la {_name}");
+        var ws = _ws ?? throw new IOException($"No connection to {_name}");
         int id = Interlocked.Increment(ref _id);
         var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[id] = tcs;
@@ -500,7 +500,7 @@ public sealed class TradovateSocket : IDisposable
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new TimeoutException($"La {_name} no respondió a tiempo ({endpoint}).");
+            throw new TimeoutException($"The {_name} timed out ({endpoint}).");
         }
         finally
         {
@@ -533,13 +533,13 @@ public sealed class TradovateSocket : IDisposable
         _authorized?.TrySetException(new IOException(why));
         foreach (var p in _pending)
             if (_pending.TryRemove(p.Key, out var tcs))
-                tcs.TrySetException(new IOException($"Se cortó la {_name} ({why})"));
+                tcs.TrySetException(new IOException($"Disconnected: {_name} ({why})"));
         if (was && notify) StateChanged?.Invoke(false, why);
     }
 
     public void Dispose()
     {
         _life.Cancel();
-        Drop("cerrada", notify: false);
+        Drop("closed", notify: false);
     }
 }

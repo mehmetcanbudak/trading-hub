@@ -103,7 +103,7 @@ public sealed class IndicatorCatalog
         foreach (var dll in Directory.EnumerateFiles(folder, "*.dll"))
         {
             try { Scan(Assembly.LoadFrom(dll), source); }
-            catch (Exception ex) { this.LogWarn($"No se pudo cargar {Path.GetFileName(dll)}: {ex.Message}"); }
+            catch (Exception ex) { this.LogWarn($"Could not load {Path.GetFileName(dll)}: {ex.Message}"); }
         }
     }
 
@@ -366,7 +366,7 @@ public sealed class AppServices
         }
         catch (Exception ex)
         {
-            this.LogInfo($"Sin indicadores técnicos extra: {ex.Message}");
+            this.LogInfo($"No additional technical indicators: {ex.Message}");
         }
         Catalog.ScanFolder(Path.Combine(AppContext.BaseDirectory, "Indicators"), "Extra");
         Catalog.ScanFolder(Path.Combine(AppPaths.Root, "Indicators"), "Extra");
@@ -412,9 +412,9 @@ public sealed class AppServices
         bool waiting = false;
         if (live == 0 && !agents && !waiting) return null;
         var parts = new List<string>();
-        if (live > 0) parts.Add($"{live} estrategia(s) en vivo");
-        if (agents) parts.Add("agentes trabajando");
-        return string.Join(" y ", parts);
+        if (live > 0) parts.Add($"{live} live strategy/strategies");
+        if (agents) parts.Add("agents working");
+        return string.Join(" and ", parts);
     }
 
     private LiveCenter? _live;
@@ -495,7 +495,7 @@ public sealed class AppServices
     /// <summary>Cuentas con las que se puede operar este instrumento.</summary>
     public IEnumerable<AccountOption> AccountsFor(InstrumentData data)
     {
-        yield return new AccountOption("sim", "Cuenta simulada", false);
+        yield return new AccountOption("sim", "Simulated account", false);
         foreach (var p in Connections.Enabled.Where(p => p.SupportsTrading && p.MarketDataId == data.Instrument.FeedId && !string.IsNullOrWhiteSpace(p.ApiKey)))
         {
             if (p.Testnet) yield return new AccountOption(p.Id, $"{p.Name} (testnet)", false);
@@ -520,7 +520,7 @@ public sealed class AppServices
             var session = RithmicSessionFor(p);
             foreach (var a in session.Accounts)
             {
-                if (session.IsPractice) yield return new AccountOption(RithmicAccountId(p, a.AccountId), $"{a.AccountId} · Rithmic (práctica)", false);
+                if (session.IsPractice) yield return new AccountOption(RithmicAccountId(p, a.AccountId), $"{a.AccountId} · Rithmic (practice)", false);
                 else if (p.AllowRealOrders) yield return new AccountOption(RithmicAccountId(p, a.AccountId), $"{a.AccountId} · Rithmic — REAL", true);
             }
         }
@@ -549,7 +549,7 @@ public sealed class AppServices
             var rp = Connections.Find(parts[1]) ?? throw new KeyNotFoundException(accountId);
             var session = RithmicSessionFor(rp);
             var feed = (TradingHub.Feeds.Rithmic.RithmicFeed)Connections.GetFeed(rp.Id);
-            var rb = new TradingHub.Feeds.Rithmic.RithmicBroker(data, session, parts[2], $"{parts[2]} · Rithmic{(session.IsPractice ? " (práctica)" : " — REAL")}",
+            var rb = new TradingHub.Feeds.Rithmic.RithmicBroker(data, session, parts[2], $"{parts[2]} · Rithmic{(session.IsPractice ? " (practice)" : " — REAL")}",
                 ct => feed.ContractAsync(data.Instrument, ct));
             _realBrokers[key] = rb;
             return rb;
@@ -578,7 +578,7 @@ public sealed class AppServices
         }
         catch (Exception ex)
         {
-            this.LogError("Error al cerrar", ex);
+            this.LogError("Error closing", ex);
         }
     }
 }

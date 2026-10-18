@@ -110,8 +110,8 @@ public sealed class PropertyGrid : UserControl
     private static string GroupOf(PropertyInfo p)
     {
         var d = p.GetCustomAttribute<DisplayAttribute>();
-        try { return d?.GetGroupName() ?? p.GetCustomAttribute<CategoryAttribute>()?.Category ?? ""; }
-        catch { return d?.GroupName ?? ""; }
+        try { return TradingHub.Common.EnglishText.Of(d?.GetGroupName() ?? p.GetCustomAttribute<CategoryAttribute>()?.Category ?? ""); }
+        catch { return TradingHub.Common.EnglishText.Of(d?.GroupName ?? ""); }
     }
 
     private static int OrderOf(PropertyInfo p)
@@ -126,15 +126,15 @@ public sealed class PropertyGrid : UserControl
         try
         {
             var n = d?.GetName();
-            if (!string.IsNullOrWhiteSpace(n)) return n;
+            if (!string.IsNullOrWhiteSpace(n)) return TradingHub.Common.EnglishText.Of(n);
         }
         catch
         {
-            if (!string.IsNullOrWhiteSpace(d?.Name)) return d!.Name!;
+            if (!string.IsNullOrWhiteSpace(d?.Name)) return TradingHub.Common.EnglishText.Of(d!.Name!);
         }
 
         var dn = p.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName;
-        return string.IsNullOrWhiteSpace(dn) ? Humanize(p.Name) : dn;
+        return string.IsNullOrWhiteSpace(dn) ? Humanize(p.Name) : TradingHub.Common.EnglishText.Of(dn);
     }
 
     private static string? DescriptionOf(PropertyInfo p)
@@ -207,7 +207,7 @@ public sealed class PropertyGrid : UserControl
         }
         catch (Exception ex)
         {
-            TradingHub.Common.Logging.LoggingExtensions.LogWarn(this, $"No se pudo cambiar {p.Name}: {ex.InnerException?.Message ?? ex.Message}");
+            TradingHub.Common.Logging.LoggingExtensions.LogWarn(this, $"Could not change {p.Name}: {ex.InnerException?.Message ?? ex.Message}");
         }
     }
 
@@ -333,7 +333,7 @@ public sealed class PropertyGrid : UserControl
 
         if (t == typeof(DateTime) || nt == typeof(DateTime))
         {
-            var tb = new TextBox { Text = value is DateTime dt ? dt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) : "", Watermark = "aaaa-mm-dd hh:mm" };
+            var tb = new TextBox { Text = value is DateTime dt ? dt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) : "", Watermark = "yyyy-mm-dd hh:mm" };
             tb.LostFocus += (_, _) =>
             {
                 if (DateTime.TryParse(tb.Text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var v)) Set(owner, p, v);
@@ -431,7 +431,7 @@ public sealed class PropertyGrid : UserControl
         var flyoutContent = new StackPanel { Spacing = 8, Margin = new Thickness(12), Children = { view } };
         if (allowAuto)
         {
-            var auto = new Button { Content = "Automático (color del tema)" };
+            var auto = new Button { Content = "Automatic (theme color)" };
             auto.Click += (_, _) =>
             {
                 swatch.Background = Brushes.Transparent;
@@ -451,7 +451,7 @@ public sealed class PropertyGrid : UserControl
     {
         var visibleSeries = ind.DataSeries.Where(s => !s.IsHidden).ToList();
         if (visibleSeries.Count == 0 && ind.LineSeries.Count == 0) return;
-        _root.Children.Add(new TextBlock { Text = "Series (colores y estilo)", FontWeight = FontWeight.SemiBold, Foreground = Ui.Text1, Margin = new Thickness(0, 12, 0, 2) });
+        _root.Children.Add(new TextBlock { Text = "Series (colors and style)", FontWeight = FontWeight.SemiBold, Foreground = Ui.Text1, Margin = new Thickness(0, 12, 0, 2) });
         foreach (var s in visibleSeries)
         {
             var inner = new StackPanel { Spacing = 2, Margin = new Thickness(8, 2, 0, 4) };
@@ -464,7 +464,7 @@ public sealed class PropertyGrid : UserControl
         {
             var inner = new StackPanel { Spacing = 2, Margin = new Thickness(8, 2, 0, 4) };
             foreach (var p in EditableProperties(ls.GetType())) AddRow(inner, ls, p, 1);
-            _root.Children.Add(new Expander { Header = "Nivel: " + ls.Name, Content = inner, HorizontalAlignment = HorizontalAlignment.Stretch });
+            _root.Children.Add(new Expander { Header = "Level: " + ls.Name, Content = inner, HorizontalAlignment = HorizontalAlignment.Stretch });
         }
     }
 }

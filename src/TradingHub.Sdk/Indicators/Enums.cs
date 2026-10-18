@@ -11,30 +11,30 @@ namespace TradingHub.Indicators
     /// <summary>Cómo se dibuja una serie de valores.</summary>
     public enum VisualMode
     {
-        [Display(Name = "Línea")] Line,
-        [Display(Name = "Histograma")] Histogram,
+        [Display(Name = "Line")] Line,
+        [Display(Name = "Histogram")] Histogram,
         [Display(Name = "Hash")] Hash,
-        [Display(Name = "Cruz")] Cross,
-        [Display(Name = "Puntos")] Dots,
-        [Display(Name = "Bloque")] Block,
-        [Display(Name = "Cuadrado")] Square,
-        [Display(Name = "Flecha arriba")] UpArrow,
-        [Display(Name = "Flecha abajo")] DownArrow,
-        [Display(Name = "Solo valor en eje")] OnlyValueOnAxis,
-        [Display(Name = "Oculto")] Hide,
-        [Display(Name = "Bandas")] Bands,
-        [Display(Name = "Puntos (línea)")] Points,
-        [Display(Name = "Niveles")] Levels,
-        [Display(Name = "Escalones")] Steps,
+        [Display(Name = "Cross")] Cross,
+        [Display(Name = "Points")] Dots,
+        [Display(Name = "Block")] Block,
+        [Display(Name = "Square")] Square,
+        [Display(Name = "Up arrow")] UpArrow,
+        [Display(Name = "Down arrow")] DownArrow,
+        [Display(Name = "Axis value only")] OnlyValueOnAxis,
+        [Display(Name = "Hidden")] Hide,
+        [Display(Name = "Bands")] Bands,
+        [Display(Name = "Dots (line)")] Points,
+        [Display(Name = "Levels")] Levels,
+        [Display(Name = "Step line")] Steps,
     }
 
     public enum LineDashStyle
     {
-        [Display(Name = "Sólida")] Solid,
-        [Display(Name = "Guiones")] Dash,
-        [Display(Name = "Puntos")] Dot,
-        [Display(Name = "Guión-punto")] DashDot,
-        [Display(Name = "Guión-punto-punto")] DashDotDot,
+        [Display(Name = "Solid")] Solid,
+        [Display(Name = "Dashed")] Dash,
+        [Display(Name = "Points")] Dot,
+        [Display(Name = "Dash-dot")] DashDot,
+        [Display(Name = "Dash-dot-dot")] DashDotDot,
     }
 
     /// <summary>Valor de la vela que recibe OnCalculate como "value".</summary>

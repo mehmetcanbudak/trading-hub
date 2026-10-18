@@ -127,7 +127,7 @@ public class StrategyTests
         var r2 = new BacktestEngine(new LimitBuyer(), through, Settings()).Run();
         var t = Assert.Single(r2.Trades); // se cierra al final del backtest
         Assert.Equal(98m, t.EntryPrice);
-        Assert.Equal("Fin del backtest", t.ExitName);
+        Assert.Equal("End of backtest", t.ExitName);
     }
 
     /// <summary>Da vuelta la posición de largo a corto.</summary>
@@ -259,12 +259,12 @@ public class StrategyTests
         var w = StrategyWarmup.Measure(typeof(CanalConAtr));
         Assert.Null(w.Error);
         Assert.True(w.Complete);
-        Assert.Equal(new[] { "Máximo(20)", "Mínimo(20)", "ATR(14)" }, w.Indicators);
+        Assert.Equal(new[] { "Highest(20)", "Lowest(20)", "ATR(14)" }, w.Indicators);
         Assert.Equal(20, w.Bars);
         // con el canal en el máximo de [Optimize] (los parámetros llegan como double, como desde el laboratorio)
         var max = StrategyWarmup.Measure(typeof(CanalConAtr), new Dictionary<string, object?> { ["Canal"] = 40.0 });
         Assert.Equal(40, max.Bars);
-        Assert.Contains("Máximo(40)", max.Indicators);
+        Assert.Contains("Highest(40)", max.Indicators);
         // con el canal más corto que el ATR, manda el ATR
         Assert.Equal(14, StrategyWarmup.Measure(typeof(CanalConAtr), new Dictionary<string, object?> { ["Canal"] = 10.0 }).Bars);
 

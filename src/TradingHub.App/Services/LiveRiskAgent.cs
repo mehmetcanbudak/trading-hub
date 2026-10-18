@@ -69,18 +69,18 @@ internal sealed class LiveRiskAgent
     /// <summary>Corre el agente sobre un portafolio. Devuelve null si salió bien, o el motivo.</summary>
     public async Task<string?> RunAsync(string portfolioId, bool manual)
     {
-        if (IsRunning(portfolioId)) return "Ya está revisando ese portafolio.";
+        if (IsRunning(portfolioId)) return "This portfolio is already being reviewed.";
         var p = _center.Portfolios().FirstOrDefault(x => x.Def.Id == portfolioId);
-        if (p == null) return "No encuentro el portafolio.";
+        if (p == null) return "Portfolio not found.";
         var a = p.Def.Agent;
         var adjustable = p.Members.Where(m => !m.Locked && (m.Running || m.WaitingResume)).ToList();
-        if (adjustable.Count == 0) return "No hay estrategias para ajustar.";
-        if (!manual && RunsToday(a) >= a.MaxRunsPerDay) return "Llegó al tope de revisiones de hoy.";
-        if (ClaudeCodeBridge.FindCli() == null) return "No encontré Claude Code en esta Mac.";
+        if (adjustable.Count == 0) return "No strategies to adjust.";
+        if (!manual && RunsToday(a) >= a.MaxRunsPerDay) return "Today's review limit has been reached.";
+        if (ClaudeCodeBridge.FindCli() == null) return "Claude Code was not found on this Mac.";
 
         var cts = new CancellationTokenSource();
         _running[portfolioId] = cts;
-        _activity[portfolioId] = "Revisando el riesgo del portafolio…";
+        _activity[portfolioId] = "Reviewing portfolio risk…";
         Touch();
         try
         {
@@ -110,11 +110,11 @@ internal sealed class LiveRiskAgent
             a.CostTotal += res.CostUsd;
             if (!res.Ok || res.Json is not { } json)
             {
-                a.LastError = res.Error ?? "El agente no devolvió el bloque JSON pedido.";
+                a.LastError = res.Error ?? "The agent did not return the requested JSON block.";
                 if ((res.Error ?? "").Contains("or newer is required", StringComparison.OrdinalIgnoreCase))
-                    a.LastError = "Tu Claude Code es viejo para Opus 5.5: abrí la app de Claude (se actualiza sola) o corré «claude update».";
+                    a.LastError = "Your Claude Code version is too old for Opus 5.5. Open the Claude app to update or run claude update.";
                 Save(p.Def);
-                _center.Notify($"⚠ Agente de riesgo de «{p.Def.Name}»: {a.LastError}");
+                _center.Notify($"⚠ Risk agent for «{p.Def.Name}»: {a.LastError}");
                 return a.LastError;
             }
 
@@ -124,7 +124,7 @@ internal sealed class LiveRiskAgent
             Save(p.Def);
             if (proposal.Items.Count == 0)
             {
-                if (manual) _center.Notify($"Agente de riesgo de «{p.Def.Name}»: sin cambios. {Short(proposal.Summary, 160)}");
+                if (manual) _center.Notify($"Risk agent for «{p.Def.Name}»: no changes. {Short(proposal.Summary, 160)}");
                 return null;
             }
 
@@ -141,12 +141,12 @@ internal sealed class LiveRiskAgent
 
                 proposal.Source = "agente (automático)";
                 LiveStore.AddProposal(proposal);
-                _center.Notify($"El agente de riesgo ajustó {proposal.Items.Count} estrategia(s) de «{p.Def.Name}» (modo automático, cuentas simuladas).");
+                _center.Notify($"Risk agent adjusted {proposal.Items.Count} strategy/strategies in «{p.Def.Name}» (automatic mode, simulated accounts).");
             }
             else
             {
                 LiveStore.AddProposal(proposal);
-                _center.Notify($"El agente de riesgo propone {proposal.Items.Count} cambio(s) en «{p.Def.Name}»: revisalos en En vivo → Portafolios.");
+                _center.Notify($"Risk agent proposes {proposal.Items.Count} change(s) in «{p.Def.Name}»: review in Live → Portfolios.");
             }
 
             return null;
@@ -183,42 +183,40 @@ internal sealed class LiveRiskAgent
     // ===================================================================== pedido
 
     internal const string SystemPrompt = """
-        Sos el gestor de riesgo de un portafolio de estrategias algorítmicas que corren en vivo en Trading Hub (la
-        plataforma de trading de un trader particular). No hay un humano en la conversación: decidí con criterio profesional y explicá.
+        You manage risk for a portfolio of algorithmic strategies running live in Trading Hub for an individual trader.
+        There is no human conversation: make professional, evidence-based decisions and explain them.
 
-        TU TRABAJO: repartir el riesgo entre las estrategias del portafolio de forma dinámica e inteligente, para que el
-        portafolio gane lo más posible por unidad de riesgo sin pasarse del presupuesto. Herramientas que tenés: el
-        TAMAÑO de cada estrategia (multiplicador de sus órdenes: 1 = como la programaron, 0 = no abre operaciones nuevas)
-        y sus LÍMITES (pérdida máxima del día y drawdown máximo, en dinero; al tocarlos la estrategia frena o se detiene).
+        Allocate risk dynamically to maximize return per unit of risk without exceeding the budget. Available controls are
+        strategy SIZE (order multiplier: 1 = programmed quantity, 0 = no new entries) and monetary LIMITS (maximum daily loss
+        and maximum drawdown; reaching a limit blocks entries or stops the strategy).
 
-        Cómo pensás (como un risk manager de un fondo cuantitativo):
-        - Muestra: con pocas operaciones (menos de ~20) los números son ruido. Cerca de 1× y cambios chicos. No persigas
-          rachas cortas, ni para arriba ni para abajo.
-        - Riesgo parejo: estrategias con resultado diario más volátil van con menos tamaño (pesos tipo inversa de la
-          volatilidad), salvo que la evidencia de ventaja sea fuerte.
-        - Correlación: si dos estrategias se mueven juntas (correlación del resultado diario > 0,6) son casi la misma
-          apuesta: el tamaño conjunto tiene que bajar.
-        - Degradación: drawdown actual cerca o por encima de su peor drawdown histórico, con profit factor reciente malo y
-          muestra suficiente, es señal de que la ventaja se fue: bajá fuerte o poné 0 (pausar abrir) explicando por qué.
-        - Presupuesto: la suma de las pérdidas máximas del día no debería pasar el riesgo diario del portafolio, y el
-          drawdown del portafolio no debería acercarse al máximo permitido. Si se acerca, bajá el riesgo de todo.
-        - Cambios graduales: no más de ±50 % del tamaño actual por revisión, salvo para frenar una que se degradó.
-        - Contratos enteros: las órdenes van en contratos enteros. El tamaño multiplica la cantidad que programó la
-          estrategia y te paso en qué contratos queda cada tamaño. En un futuro con micro (NQ→MNQ, ES→MES: 1 mini = 10
-          micros) y «contrato inteligente» activo, una fracción del mini se ejecuta en micros con la misma exposición
-          (×0,5 de 1 NQ = 5 MNQ), así que podés afinar de a décimas. Sin micro, todo lo que no llega a 1 contrato manda
-          igual 1 (el mínimo): bajar de ahí no baja el riesgo; para reducir más, poné 0 y explicalo.
-        - Respetá siempre los topes de tamaño que te pasan y las indicaciones del trader.
-        - Nunca inventes números: usá solo los datos que te paso. Si no hace falta cambiar nada, no cambies nada.
+        Reason like a quantitative fund risk manager:
+        - Sample size: fewer than about 20 trades is noisy. Stay near ×1 and make small changes; do not chase short winning
+          or losing streaks.
+        - Equal risk: reduce size for strategies with more volatile daily PnL, using inverse-volatility principles unless
+          there is strong evidence of an edge.
+        - Correlation: strategies with daily-PnL correlation above 0.6 represent similar exposure; reduce their combined size.
+        - Degradation: current drawdown near or above its historical worst, poor recent profit factor and sufficient sample
+          suggest a fading edge. Reduce substantially or use size 0 to pause entries, explaining the evidence.
+        - Budget: combined maximum daily losses should not exceed the portfolio's daily risk budget. If portfolio drawdown
+          approaches its permitted maximum, reduce overall risk.
+        - Gradual changes: no more than ±50% of current size per review, except to halt a degraded strategy.
+        - Whole contracts: size multiplies the strategy's programmed quantity. The context identifies each size's execution
+          contract. With a corresponding micro contract and smart selection enabled (NQ→MNQ, ES→MES; 1 mini = 10 micros),
+          fractional mini exposure executes equivalently in micros (×0.5 of 1 NQ = 5 MNQ), allowing tenths. Without a micro,
+          quantities below one contract still submit one: reducing size below that does not reduce exposure. Use 0 to pause
+          when further reduction is required, and explain why.
+        - Always respect the supplied size bounds and trader instructions.
+        - Never invent numbers. Use only supplied data. Make no changes when none are justified.
 
-        Respondé en español rioplatense, claro y concreto: 3 a 8 líneas de análisis y al final UN único bloque ```json:
+        Respond in clear English: 3–8 analysis lines followed by exactly one valid JSON block:
         ```json
-        {"summary":"resumen de 1 a 3 frases de cómo está el portafolio y qué hacés",
-         "allocations":[{"key":"clave exacta de la estrategia","size":1.25,"max_daily_loss":250,"max_drawdown":1500,
-                         "reason":"por qué, con los números que lo justifican"}]}
+        {"summary":"1–3 sentences describing portfolio state and actions",
+         "allocations":[{"key":"exact strategy key","size":1.25,"max_daily_loss":250,"max_drawdown":1500,
+                         "reason":"numerical evidence supporting the change"}]}
         ```
-        Incluí en allocations solo las estrategias que cambian (tamaño o límites). max_daily_loss y max_drawdown son
-        opcionales: ponelos solo si los cambiás (0 = sin límite). JSON válido, sin comentarios.
+        Include only changed strategies in allocations. max_daily_loss and max_drawdown are optional; include only when changing
+        those limits (0 = no limit). Return valid JSON without comments. Keep the following internal routing marker unchanged:
         [[ROL:live-risk]]
         """;
 
@@ -228,17 +226,17 @@ internal sealed class LiveRiskAgent
         decimal capital = p.Def.Capital > 0 ? p.Def.Capital : 25_000m;
         var analysis = LiveCenter.Analyze(p);
         var sb = new StringBuilder();
-        sb.AppendLine($"Portafolio «{p.Def.Name}» · capital de referencia {N(capital)} · fecha {DateTime.Now:yyyy-MM-dd HH:mm} (hora local).");
-        sb.AppendLine($"Presupuesto: riesgo diario total {N(a.DailyRiskPercent)} % del capital ({N(capital * a.DailyRiskPercent / 100)}), drawdown máximo del portafolio {N(a.MaxDrawdownPercent)} % ({N(capital * a.MaxDrawdownPercent / 100)}).");
-        sb.AppendLine($"Topes de tamaño por estrategia: entre {N(a.MinSize)} y {N(a.MaxSize)} (o 0 para que no abra operaciones nuevas).");
-        if (!string.IsNullOrWhiteSpace(a.Instructions)) sb.AppendLine($"Indicaciones del trader: {a.Instructions.Trim()}");
-        if (a.LastSummary.Length > 0 && a.LastRunUtc is { } last) sb.AppendLine($"Tu revisión anterior ({last.ToLocalTime():dd/MM HH:mm}): {a.LastSummary}");
+        sb.AppendLine($"Portfolio «{p.Def.Name}» · reference capital {N(capital)} · date {DateTime.Now:yyyy-MM-dd HH:mm} (local time).");
+        sb.AppendLine($"Budget: total daily risk {N(a.DailyRiskPercent)} % of capital ({N(capital * a.DailyRiskPercent / 100)}), maximum portfolio drawdown {N(a.MaxDrawdownPercent)} % ({N(capital * a.MaxDrawdownPercent / 100)}).");
+        sb.AppendLine($"Size limits per strategy: between {N(a.MinSize)} and {N(a.MaxSize)} (or 0 to block new entries).");
+        if (!string.IsNullOrWhiteSpace(a.Instructions)) sb.AppendLine($"Trader instructions: {a.Instructions.Trim()}");
+        if (a.LastSummary.Length > 0 && a.LastRunUtc is { } last) sb.AppendLine($"Your previous review ({last.ToLocalTime():dd/MM HH:mm}): {a.LastSummary}");
         sb.AppendLine();
         var m = analysis.Metrics;
-        sb.AppendLine($"PORTAFOLIO (operaciones cerradas): neto {N(m.NetProfit)} · {m.TotalTrades} operaciones · PF {N(Math.Min(m.ProfitFactor, 99))} · drawdown máx {N(m.MaxDrawdown)} · " +
-                      $"Sharpe {m.SharpeRatio.ToString("0.00", Inv)} · abierto ahora {N(p.Members.Sum(x => x.OpenPnL))}");
+        sb.AppendLine($"PORTFOLIO (closed trades): net {N(m.NetProfit)} · {m.TotalTrades} trades · PF {N(Math.Min(m.ProfitFactor, 99))} · max drawdown {N(m.MaxDrawdown)} · " +
+                      $"Sharpe {m.SharpeRatio.ToString("0.00", Inv)} · currently open {N(p.Members.Sum(x => x.OpenPnL))}");
         sb.AppendLine();
-        sb.AppendLine("ESTRATEGIAS:");
+        sb.AppendLine("STRATEGIES:");
         for (int i = 0; i < p.Members.Count; i++)
         {
             var e = p.Members[i];
@@ -250,34 +248,34 @@ internal sealed class LiveRiskAgent
             decimal dl = r?.MaxDailyLoss ?? e.Info.MaxDailyLoss, dd = r?.MaxDrawdown ?? e.Info.MaxDrawdown;
             double days = e.Ledger.Fills.Count > 0 ? (DateTime.UtcNow - e.Ledger.Fills[0].Time).TotalDays : 0;
             sb.AppendLine($"- key: {e.Key}");
-            sb.AppendLine($"  {e.Info.Strategy} · {e.Info.Symbol} {e.Info.Period} · cuenta {e.Info.Account}{(e.Info.IsReal ? " (REAL)" : " (simulada)")} · {e.StateLabel}" +
-                          $"{(canChange ? "" : $" · NO la podés cambiar ({(e.Locked ? "está bloqueada" : "está detenida")})")}");
-            sb.AppendLine($"  tamaño ×{N(size)} · pérdida máx. del día {(dl > 0 ? N(dl) : "sin límite")} · drawdown máx. {(dd > 0 ? N(dd) : "sin límite")} · posición {N(e.Ledger.Position)} · abierto {N(e.OpenPnL)}");
+            sb.AppendLine($"  {e.Info.Strategy} · {e.Info.Symbol} {e.Info.Period} · account {TradingHub.Common.EnglishText.Of(e.Info.Account)}{(e.Info.IsReal ? " (REAL)" : " (simulated)")} · {e.StateLabel}" +
+                          $"{(canChange ? "" : $" · DO NOT change it ({(e.Locked ? "locked" : "stopped")})")}");
+            sb.AppendLine($"  size ×{N(size)} · max daily loss {(dl > 0 ? N(dl) : "no limit")} · max drawdown {(dd > 0 ? N(dd) : "no limit")} · position {N(e.Ledger.Position)} · open {N(e.OpenPnL)}");
             sb.AppendLine("  " + ContractLine(e, size));
-            sb.AppendLine($"  {sm.TotalTrades} operaciones en {days:0.#} días · neto {N(stats.Net)} · PF {N(Math.Min(sm.ProfitFactor, 99))} · aciertos {sm.WinRate:0} % · " +
-                          $"media/op {N(sm.TotalTrades > 0 ? e.Ledger.Trades.Average(t => t.NetPnl) : 0)} · ganancia media {N(sm.AverageWin)} · pérdida media {N(sm.AverageLoss)}");
-            sb.AppendLine($"  drawdown actual {N(stats.CurrentDrawdown)} · peor drawdown {N(sm.MaxDrawdown)} · últimas {stats.RecentTrades}: PF {N(Math.Min(stats.RecentProfitFactor, 99))}, media {N(stats.RecentExpectancy)}" +
-                          $"{(r != null ? $" · resultado de hoy {N(r.TodayPnL)}" : "")}");
+            sb.AppendLine($"  {sm.TotalTrades} trades in {days:0.#} days · net {N(stats.Net)} · PF {N(Math.Min(sm.ProfitFactor, 99))} · win rate {sm.WinRate:0} % · " +
+                          $"average/trade {N(sm.TotalTrades > 0 ? e.Ledger.Trades.Average(t => t.NetPnl) : 0)} · average profit {N(sm.AverageWin)} · average loss {N(sm.AverageLoss)}");
+            sb.AppendLine($"  current drawdown {N(stats.CurrentDrawdown)} · worst drawdown {N(sm.MaxDrawdown)} · last {stats.RecentTrades}: PF {N(Math.Min(stats.RecentProfitFactor, 99))}, average {N(stats.RecentExpectancy)}" +
+                          $"{(r != null ? $" · today's PnL {N(r.TodayPnL)}" : "")}");
             if (i < analysis.DailyPnl.Count)
             {
                 var daily = analysis.DailyPnl[i];
                 var vals = daily.Where(v => v != 0).ToList();
                 double vol = vals.Count > 1 ? Math.Sqrt(vals.Sum(v => Math.Pow((double)v - vals.Average(x => (double)x), 2)) / (vals.Count - 1)) : 0;
-                sb.AppendLine($"  resultado diario (últimos {Math.Min(20, daily.Length)} días): {string.Join(" ", daily.TakeLast(20).Select(N))} · volatilidad diaria {vol.ToString("0.##", Inv)}");
+                sb.AppendLine($"  daily PnL (last {Math.Min(20, daily.Length)} days): {string.Join(" ", daily.TakeLast(20).Select(N))} · daily volatility {vol.ToString("0.##", Inv)}");
             }
         }
 
         if (p.Members.Count > 1 && analysis.Correlation.GetLength(0) == p.Members.Count)
         {
             sb.AppendLine();
-            sb.AppendLine("CORRELACIÓN del resultado diario (Pearson):");
+            sb.AppendLine("Daily-PnL CORRELATION (Pearson):");
             for (int i = 0; i < p.Members.Count; i++)
                 for (int j = i + 1; j < p.Members.Count; j++)
                     sb.AppendLine($"  {p.Members[i].Info.Strategy}·{p.Members[i].Info.Symbol} ↔ {p.Members[j].Info.Strategy}·{p.Members[j].Info.Symbol}: {analysis.Correlation[i, j].ToString("0.00", Inv)}");
         }
 
         sb.AppendLine();
-        sb.AppendLine("Decidí el reparto de riesgo y devolvé el bloque JSON (solo con las que cambian).");
+        sb.AppendLine("Allocate risk and return the JSON block with changed strategies only.");
         return sb.ToString();
     }
 
@@ -287,17 +285,17 @@ internal sealed class LiveRiskAgent
         decimal qty = LiveCenter.QuantityOf(e.Info.Parameters);
         string Of(decimal s)
         {
-            if (s <= 0) return "0 (no abre)";
+            if (s <= 0) return "0 (no entries)";
             var (symbol, ratio) = _center.PreferredContract(e.Info.FeedId, e.Info.Symbol, qty, s);
             decimal units = Math.Floor(qty * s * ratio + 0.0000001m);
-            return $"×{N(s)} = {N(Math.Max(1, units))} {symbol}{(units < 1 ? " (mínimo)" : "")}";
+            return $"×{N(s)} = {N(Math.Max(1, units))} {symbol}{(units < 1 ? " (minimum)" : "")}";
         }
 
         string micro = MarketInfo.IsFutures(e.Info.FeedId) && MarketInfo.MicroOf(e.Info.Symbol) is { } m
-            ? _svc.Settings.SmartContracts ? $"tiene micro ({m}): las fracciones del mini van en micros" : $"tiene micro ({m}) pero el contrato inteligente está apagado"
-            : "sin micro: menos de 1 contrato manda 1";
+            ? _svc.Settings.SmartContracts ? $"has a micro ({m}): fractional mini exposure executes using micros" : $"has a micro ({m}) but smart contract selection is disabled"
+            : "no micro: quantities below 1 contract submit 1";
         var steps = new[] { size * 0.5m, size, size * 1.5m }.Select(v => Math.Round(v, 2)).Distinct();
-        return $"contratos: la estrategia pide {N(qty)} {e.Info.Symbol} por orden · {micro} · {string.Join(" · ", steps.Select(Of))}";
+        return $"contracts: strategy requests {N(qty)} {e.Info.Symbol} per order · {micro} · {string.Join(" · ", steps.Select(Of))}";
     }
 
     /// <summary>Lee lo que devolvió el agente y lo deja como propuesta (dentro de los topes; solo las que puede tocar).</summary>

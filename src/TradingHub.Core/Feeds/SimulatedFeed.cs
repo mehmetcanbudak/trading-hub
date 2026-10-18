@@ -15,16 +15,16 @@ public sealed class SimulatedFeed : IMarketDataFeed, ITickerStatsProvider, IKlin
     private readonly object _lock = new();
 
     public string Id => FeedId;
-    public string DisplayName => "Simulador (sin conexión)";
+    public string DisplayName => "Simulator (offline)";
     public bool SupportsHistory => true;
     public bool IsLive => false;
 
     private static readonly (Instrument Instrument, double StartPrice, double TradesPerSec, double BaseVolume, double VolTicksPerSqrtSec)[] Specs =
     {
-        (new Instrument { Symbol = "SIM-BTC", FeedId = FeedId, Exchange = "Simulador", TickSize = 0.1m, VolumeStep = 0.001m, BaseAsset = "BTC", QuoteAsset = "USDT", Description = "Bitcoin simulado" }, 86800, 9, 0.06, 6.0),
-        (new Instrument { Symbol = "SIM-ES", FeedId = FeedId, Exchange = "Simulador", TickSize = 0.25m, VolumeStep = 1m, PointValue = 50m, Description = "E-mini S&P 500 simulado" }, 6650, 14, 2.2, 0.55),
-        (new Instrument { Symbol = "SIM-NQ", FeedId = FeedId, Exchange = "Simulador", TickSize = 0.25m, VolumeStep = 1m, PointValue = 20m, Description = "E-mini Nasdaq simulado" }, 24300, 11, 1.6, 2.4),
-        (new Instrument { Symbol = "SIM-ETH", FeedId = FeedId, Exchange = "Simulador", TickSize = 0.01m, VolumeStep = 0.001m, BaseAsset = "ETH", QuoteAsset = "USDT", Description = "Ethereum simulado" }, 3210, 8, 0.9, 12.0),
+        (new Instrument { Symbol = "SIM-BTC", FeedId = FeedId, Exchange = "Simulator", TickSize = 0.1m, VolumeStep = 0.001m, BaseAsset = "BTC", QuoteAsset = "USDT", Description = "Simulated Bitcoin" }, 86800, 9, 0.06, 6.0),
+        (new Instrument { Symbol = "SIM-ES", FeedId = FeedId, Exchange = "Simulator", TickSize = 0.25m, VolumeStep = 1m, PointValue = 50m, Description = "Simulated E-mini S&P 500" }, 6650, 14, 2.2, 0.55),
+        (new Instrument { Symbol = "SIM-NQ", FeedId = FeedId, Exchange = "Simulator", TickSize = 0.25m, VolumeStep = 1m, PointValue = 20m, Description = "Simulated E-mini Nasdaq" }, 24300, 11, 1.6, 2.4),
+        (new Instrument { Symbol = "SIM-ETH", FeedId = FeedId, Exchange = "Simulator", TickSize = 0.01m, VolumeStep = 0.001m, BaseAsset = "ETH", QuoteAsset = "USDT", Description = "Simulated Ethereum" }, 3210, 8, 0.9, 12.0),
     };
 
     public Task<IReadOnlyDictionary<string, TickerStats>> GetTickerStatsAsync(CancellationToken ct)
@@ -183,7 +183,7 @@ public sealed class SimulatedFeed : IMarketDataFeed, ITickerStatsProvider, IKlin
         var waitStart = DateTime.UtcNow;
         while (!ct.IsCancellationRequested && !model.HistoryDone && (model.HistoryActive || (DateTime.UtcNow - waitStart).TotalMilliseconds < 1500))
             Thread.Sleep(50);
-        sink.OnStatus(model.Instrument, FeedStatus.Connected, "Simulador activo");
+        sink.OnStatus(model.Instrument, FeedStatus.Connected, "Simulator active");
         var lastDepth = DateTime.MinValue;
         bool first = true;
         while (!ct.IsCancellationRequested)

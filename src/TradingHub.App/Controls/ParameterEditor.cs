@@ -25,7 +25,7 @@ internal sealed class ParameterEditor : StackPanel
         _type = type;
         if (type == null)
         {
-            Children.Add(new TextBlock { Text = "La estrategia no está compilada: abrila en Backtesting.", Classes = { "faint", "small" }, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+            Children.Add(new TextBlock { Text = "Strategy is not compiled: open it in Backtesting.", Classes = { "faint", "small" }, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
             return;
         }
 
@@ -88,7 +88,7 @@ internal sealed class ParameterEditor : StackPanel
             _editors.Add((p, read, editor));
         }
 
-        if (_editors.Count == 0) Children.Add(new TextBlock { Text = "Esta estrategia no tiene parámetros.", Classes = { "faint", "small" } });
+        if (_editors.Count == 0) Children.Add(new TextBlock { Text = "This strategy has no parameters.", Classes = { "faint", "small" } });
     }
 
     /// <summary>Los valores elegidos (los inválidos quedan como estaban).</summary>

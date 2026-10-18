@@ -89,7 +89,7 @@ internal sealed class RithmicTickerPlant : IDisposable
         }
         catch (TimeoutException)
         {
-            return (false, StatusMessage ?? "Rithmic no respondió a tiempo");
+            return (false, StatusMessage ?? "Rithmic timed out");
         }
     }
 
@@ -114,7 +114,7 @@ internal sealed class RithmicTickerPlant : IDisposable
         if (Status == FeedStatus.Connected)
             sink.OnStatus(instrument, FeedStatus.Connected, sub.Subscribed ? $"Rithmic: {sub.Symbol} ({_settings().System})" : StatusMessage);
         else
-            sink.OnStatus(instrument, Status == FeedStatus.Disconnected ? FeedStatus.Connecting : Status, StatusMessage ?? "Conectando a Rithmic…");
+            sink.OnStatus(instrument, Status == FeedStatus.Disconnected ? FeedStatus.Connecting : Status, StatusMessage ?? "Connecting to Rithmic…");
         _ = KickAsync(sub);
     }
 
@@ -156,7 +156,7 @@ internal sealed class RithmicTickerPlant : IDisposable
         }
         catch (TimeoutException)
         {
-            throw new TimeoutException("Rithmic no respondió el contrato del mes: " + (StatusMessage ?? "sin conexión"));
+            throw new TimeoutException("Rithmic returned no active contract: " + (StatusMessage ?? "disconnected"));
         }
         finally
         {
@@ -283,7 +283,7 @@ internal sealed class RithmicTickerPlant : IDisposable
             var s = _settings();
             if (string.IsNullOrWhiteSpace(s.User))
             {
-                Broadcast(FeedStatus.Error, "Configurá tu usuario de Rithmic en Conexiones");
+                Broadcast(FeedStatus.Error, "Configure your Rithmic username in Connections");
                 SetConnected(false, StatusMessage!);
                 await WaitWake(TimeSpan.FromMinutes(5), stop).ConfigureAwait(false);
                 ResetConnected();
@@ -296,7 +296,7 @@ internal sealed class RithmicTickerPlant : IDisposable
             var client = new RithmicClient();
             try
             {
-                Broadcast(FeedStatus.Connecting, $"Conectando a Rithmic ({s.System})…");
+                Broadcast(FeedStatus.Connecting, $"Connecting to Rithmic ({s.System})…");
                 var aggregated = await RithmicClient.AggregatedQuotesFor(s.Uri, s.System, s.AggregatedQuotes, ct).ConfigureAwait(false);
                 await client.ConnectAsync(s.Uri, ct, s.TimeoutMs).ConfigureAwait(false);
                 var login = await client.LoginAsync(s.User, s.Password, s.System, s.AppName, s.AppVersion, 1, ct, aggregated).ConfigureAwait(false);
@@ -327,7 +327,7 @@ internal sealed class RithmicTickerPlant : IDisposable
                     }
                 }
 
-                Broadcast(FeedStatus.Connected, $"Rithmic conectado ({s.System})");
+                Broadcast(FeedStatus.Connected, $"Rithmic connected ({s.System})");
                 SetConnected(true, login.Message);
                 foreach (var sub in AllSubs()) await AskFrontMonth(client, sub, ct).ConfigureAwait(false);
 
@@ -358,7 +358,7 @@ internal sealed class RithmicTickerPlant : IDisposable
             catch (Exception ex)
             {
                 failures++;
-                Broadcast(FeedStatus.Reconnecting, $"Reconectando a Rithmic · intento {failures} ({ex.Message})");
+                Broadcast(FeedStatus.Reconnecting, $"Reconnecting to Rithmic · attempt {failures} ({ex.Message})");
             }
             finally
             {
@@ -374,7 +374,7 @@ internal sealed class RithmicTickerPlant : IDisposable
             }
 
             if (stop.IsCancellationRequested) break;
-            if (Status != FeedStatus.Error) Broadcast(FeedStatus.Reconnecting, failures > 0 ? $"Reconectando a Rithmic · intento {failures}" : "Reconectando a Rithmic…");
+            if (Status != FeedStatus.Error) Broadcast(FeedStatus.Reconnecting, failures > 0 ? $"Reconnecting to Rithmic · attempt {failures}" : "Reconnecting to Rithmic…");
             await Task.WhenAny(Task.Delay(LiveSubscription.Backoff(failures), stop), WakeTask()).ContinueWith(_ => { }).ConfigureAwait(false);
         }
 
@@ -429,7 +429,7 @@ internal sealed class RithmicTickerPlant : IDisposable
                 var parts = tag.Split('|');
                 foreach (var sub in ByContract(parts.ElementAtOrDefault(1), parts.ElementAtOrDefault(2)))
                 {
-                    foreach (var sink in Sinks(sub)) sink.OnStatus(sub.Instrument, FeedStatus.Error, $"Rithmic rechazó la suscripción a {sub.Symbol}: {string.Join(" ", codes)}");
+                    foreach (var sink in Sinks(sub)) sink.OnStatus(sub.Instrument, FeedStatus.Error, $"Rithmic rejected subscription to {sub.Symbol}: {string.Join(" ", codes)}");
                     MarkReady(sub);
                 }
 
@@ -491,7 +491,7 @@ internal sealed class RithmicTickerPlant : IDisposable
                 break;
             }
             case 77: // ForcedLogout: otro programa entró con el mismo usuario
-                Broadcast(FeedStatus.Reconnecting, "Rithmic cortó la sesión: otro programa entró con tu usuario (¿ATAS o R|Trader conectados al mismo tiempo?). Reintentando…");
+                Broadcast(FeedStatus.Reconnecting, "Rithmic ended the session because another program signed in with your username (ATAS or R|Trader?). Retrying…");
                 return false;
         }
 
@@ -534,14 +534,14 @@ internal sealed class RithmicHistoryPlant : IDisposable
             {
                 await DropAsync().ConfigureAwait(false);
                 var s = _settings();
-                if (string.IsNullOrWhiteSpace(s.User)) throw new InvalidOperationException("Configurá tu usuario de Rithmic en Conexiones");
+                if (string.IsNullOrWhiteSpace(s.User)) throw new InvalidOperationException("Configure your Rithmic username in Connections");
                 var c = new RithmicClient();
                 try
                 {
                     await c.ConnectAsync(s.Uri, ct, s.TimeoutMs).ConfigureAwait(false);
                     var login = await c.LoginAsync(s.User, s.Password, s.System, s.AppName, s.AppVersion, 3, ct).ConfigureAwait(false);
                     Logins++;
-                    if (!login.Ok) throw new InvalidOperationException("Historia de Rithmic: " + login.Message);
+                    if (!login.Ok) throw new InvalidOperationException("Rithmic history: " + login.Message);
                     _client = c;
                 }
                 catch

@@ -79,7 +79,7 @@ public sealed class LiveSubscription : IDisposable, IReconnectable
             _channels[channel] = (status, message);
             var worst = _channels.Values.MaxBy(v => Rank(v.Status));
             overall = worst.Status;
-            msg = overall == FeedStatus.Connected ? _name + " conectado" : worst.Message;
+            msg = overall == FeedStatus.Connected ? _name + " connected" : worst.Message;
             if (overall == _lastStatus && msg == _lastMessage) return;
             _lastStatus = overall;
             _lastMessage = msg;

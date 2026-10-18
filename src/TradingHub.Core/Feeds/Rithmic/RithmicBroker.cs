@@ -60,7 +60,7 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
         }
         catch (Exception ex)
         {
-            LastError = "No se pudo saber el contrato del mes: " + ex.Message;
+            LastError = "Could not determine active contract: " + ex.Message;
             Changed?.Invoke();
             throw;
         }
@@ -113,7 +113,7 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
                 }
 
                 Apply(s, o);
-                if (s.Rejected && s.Reason.Length > 0) LastError = "Rithmic rechazó la orden: " + s.Reason;
+                if (s.Rejected && s.Reason.Length > 0) LastError = "Rithmic rejected order: " + s.Reason;
                 if (o.State == OrderStates.Active && seen.Add(o)) active.Add(o);
             }
 
@@ -142,7 +142,7 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
         {
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
-            LastError = "En futuros la cantidad tiene que ser un número entero de contratos (1, 2, 3…)";
+            LastError = "Futures quantity must be a whole number of contracts (1, 2, 3…).";
             Changed?.Invoke();
             return order;
         }
@@ -239,7 +239,7 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
             try
             {
                 for (int i = 0; i < 20 && order.ExchangeOrderId.Length == 0 && order.State == OrderStates.Active; i++) await Task.Delay(100).ConfigureAwait(false);
-                var s = StateOf(order) ?? throw new InvalidOperationException("La orden todavía no figura en Rithmic");
+                var s = StateOf(order) ?? throw new InvalidOperationException("The order is not available in Rithmic yet");
                 await _session.ModifyAsync(_account, s, total, px, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -256,15 +256,15 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
     {
         CancelAll();
         var q = Position.Volume;
-        if (q > 0) Send(OrderDirections.Sell, OrderTypes.Market, q, 0, "Cerrar");
-        else if (q < 0) Send(OrderDirections.Buy, OrderTypes.Market, -q, 0, "Cerrar");
+        if (q > 0) Send(OrderDirections.Sell, OrderTypes.Market, q, 0, "Close");
+        else if (q < 0) Send(OrderDirections.Buy, OrderTypes.Market, -q, 0, "Close");
     }
 
     public void Reverse()
     {
         var q = Position.Volume;
-        if (q > 0) Market(OrderDirections.Sell, q * 2, "Revertir");
-        else if (q < 0) Market(OrderDirections.Buy, -q * 2, "Revertir");
+        if (q > 0) Market(OrderDirections.Sell, q * 2, "Reverse");
+        else if (q < 0) Market(OrderDirections.Buy, -q * 2, "Reverse");
     }
 
     public void Dispose() => _session.Changed -= Sync;

@@ -24,7 +24,7 @@ internal static class BacktestMarketScene
     private const string Code = """
         using TradingHub.Strategies;
 
-        [Strategy("Prueba según el mercado")]
+        [Strategy("Market-condition test")]
         public class BtMercado : Strategy
         {
             private int _entry = -100;
@@ -144,14 +144,14 @@ internal static class BacktestMarketScene
         pump(1);
         window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "backtest_mercado.png"));
         var texts = view.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text ?? "").ToList();
-        Check(texts.Contains("Rango") && texts.Contains("Mixto") && texts.Contains("Tendencia alcista") && texts.Contains("Tendencia bajista") &&
-              texts.Any(x => x.StartsWith("Volatilidad ", StringComparison.Ordinal)) && texts.Contains("CÓMO LE FUE SEGÚN EL MERCADO"),
+        Check(texts.Contains("Range") && texts.Contains("Mixed") && texts.Contains("Uptrend") && texts.Contains("Downtrend") &&
+              texts.Any(x => x.StartsWith("Low volatility", StringComparison.Ordinal)) && texts.Contains("PERFORMANCE BY MARKET CONDITION"),
             "la pestaña «Según el mercado» muestra cómo le fue en cada condición y volatilidad");
 
         // solo en rango: un backtest nuevo con el filtro (no un recorte del anterior)
         var picker = (MarketConditionPicker)t.GetField("_btConditions", Any)!.GetValue(view)!;
         picker.Load(RegimeFilter.RangeOnly, 0, 100);
-        var rerun = view.GetVisualDescendants().OfType<Button>().First(b => b.GetVisualDescendants().OfType<TextBlock>().Any(x => x.Text == "Volver a correr solo en estas condiciones"));
+        var rerun = view.GetVisualDescendants().OfType<Button>().First(b => b.GetVisualDescendants().OfType<TextBlock>().Any(x => x.Text == "Rerun only in selected conditions"));
         RunAndWait(() =>
         {
             rerun.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -173,11 +173,11 @@ internal static class BacktestMarketScene
         pump(0.5);
         window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "backtest_mercado_filtrado.png"));
         texts = view.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text ?? "").ToList();
-        Check(texts.Contains("En todas las condiciones") && texts.Any(x => x.StartsWith("Con el filtro (solo en rango)", StringComparison.Ordinal)),
+        Check(texts.Contains("In all conditions") && texts.Any(x => x.StartsWith("With filter (only in range)", StringComparison.Ordinal)),
             "compara todas las condiciones contra solo las elegidas");
 
         // y se vuelve a todas
-        var reset = view.GetVisualDescendants().OfType<Button>().First(b => b.GetVisualDescendants().OfType<TextBlock>().Any(x => x.Text == "Correr en todas las condiciones"));
+        var reset = view.GetVisualDescendants().OfType<Button>().First(b => b.GetVisualDescendants().OfType<TextBlock>().Any(x => x.Text == "Run in all conditions"));
         RunAndWait(() =>
         {
             reset.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -189,7 +189,7 @@ internal static class BacktestMarketScene
         // el optimizador también prueba períodos de las velas, como un parámetro más
         t.GetMethod("ShowTab", Any)!.Invoke(view, new object[] { "optimize" });
         pump(0.8);
-        var periodCheck = view.GetVisualDescendants().OfType<CheckBox>().FirstOrDefault(c => c.Content as string == "Período de las velas" && c.IsEffectivelyVisible);
+        var periodCheck = view.GetVisualDescendants().OfType<CheckBox>().FirstOrDefault(c => c.Content as string == "Bar period" && c.IsEffectivelyVisible);
         var comboText = (TextBlock)t.GetField("_comboCount", Any)!.GetValue(view)!;
         string before = comboText.Text ?? "";
         Check(periodCheck != null, "el optimizador tiene «Período de las velas» con los períodos para tildar");

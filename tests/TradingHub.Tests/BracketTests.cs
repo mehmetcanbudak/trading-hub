@@ -50,7 +50,7 @@ public class BracketTests
 
         // hacia la pérdida = stop, hacia la ganancia = objetivo
         Assert.StartsWith("Stop loss", r.Brackets.DropFromPosition(90));
-        Assert.StartsWith("Objetivo", r.Brackets.DropFromPosition(110));
+        Assert.StartsWith("Target", r.Brackets.DropFromPosition(110));
         Assert.Equal(BracketRole.StopLoss, r.Brackets.RoleOf(r.Brackets.StopLoss!));
         Assert.Single(r.Brackets.Targets);
         Assert.Equal(2m, r.Brackets.Targets[0].Unfilled);
@@ -59,7 +59,7 @@ public class BracketTests
         r.Trade(111);
         Assert.Equal(0m, r.Position);
         Assert.Empty(r.Broker.ActiveOrders);
-        Assert.Contains(r.Messages, m => m.Contains("cancelaron"));
+        Assert.Contains(r.Messages, m => m.Contains("canceled"));
     }
 
     [Fact]
@@ -67,8 +67,8 @@ public class BracketTests
     {
         var r = new Rig();
         r.Broker.Market(OrderDirections.Sell, 1);
-        Assert.Contains("encima", r.Brackets.SetStopLoss(95));
-        Assert.Contains("debajo", r.Brackets.AddTarget(105));
+        Assert.Contains("above", r.Brackets.SetStopLoss(95));
+        Assert.Contains("below", r.Brackets.AddTarget(105));
         Assert.Empty(r.Broker.ActiveOrders);
     }
 
@@ -146,8 +146,8 @@ public class BracketTests
     {
         var r = new Rig();
         var entry = r.Broker.Limit(OrderDirections.Buy, 2, 95);
-        Assert.Contains("Stop adjunto", r.Brackets.AttachToEntry(entry, 90));
-        Assert.Contains("Objetivo adjunto", r.Brackets.AttachToEntry(entry, 105));
+        Assert.Contains("Stop attached", r.Brackets.AttachToEntry(entry, 90));
+        Assert.Contains("Target attached", r.Brackets.AttachToEntry(entry, 105));
         var pb = r.Brackets.PendingFor(entry)!;
         Assert.Equal(5, pb.StopTicks);
         Assert.Equal(10, pb.Targets[0].Ticks);

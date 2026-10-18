@@ -39,11 +39,11 @@ public static class IbProbe
             var body = new byte[n];
             await stream.ReadExactlyAsync(body, rt.Token).ConfigureAwait(false);
             var fields = Encoding.ASCII.GetString(body).Split('\0');
-            return (true, $"TWS respondió: versión del servidor {fields.ElementAtOrDefault(0)}, hora {fields.ElementAtOrDefault(1)}");
+            return (true, $"TWS responded: server version {fields.ElementAtOrDefault(0)}, time {fields.ElementAtOrDefault(1)}");
         }
         catch (Exception ex)
         {
-            return (false, $"No se pudo conectar a {host}:{port} ({ex.Message}). ¿Está abierta la TWS o el IB Gateway con la API habilitada?");
+            return (false, $"Could not connect to {host}:{port} ({ex.Message}). Is TWS or IB Gateway running with API access enabled?");
         }
     }
 }

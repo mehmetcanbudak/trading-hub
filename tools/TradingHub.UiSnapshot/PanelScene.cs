@@ -67,7 +67,7 @@ internal static class PanelScene
         else Check(false, "la cinta tiene datos");
 
         // botones del DOM
-        var domButtons = tv.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible && b.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text is "C. Bid" or "V. Ask" or "Cerrar")).ToList();
+        var domButtons = tv.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible && b.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text is "B. Bid" or "S. Ask" or "Close")).ToList();
         Check(domButtons.Count >= 3, $"el DOM tiene botones de ejecución ({domButtons.Count})");
 
         // el gráfico pegado al panel: sin hueco entre el borde del gráfico y el del panel
@@ -111,7 +111,7 @@ internal static class PanelScene
         toolbar.Sync();
         pump(0.5);
         var barTexts = toolbar.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
-        Check(barTexts.Count(t => t is "Velas" or "Barras" or "Línea" or "Heikin Ashi" or "Footprint") == 1 && !barTexts.Contains("30m") && barTexts.Contains("15m"),
+        Check(barTexts.Count(t => t is "Candles" or "Bars" or "Line" or "Heikin Ashi" or "Footprint") == 1 && !barTexts.Contains("30m") && barTexts.Contains("15m"),
             $"la barra muestra solo los períodos favoritos y el tipo de gráfico va en un selector ({string.Join(" | ", barTexts)})");
         var menuBtn = (Button)typeof(TradingHub.App.Views.ChartToolbar).GetField("_periodMenu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(toolbar)!;
         var fly = (Flyout)typeof(TradingHub.App.Views.ChartToolbar).GetField("_periodFlyout", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(toolbar)!;
@@ -140,14 +140,14 @@ internal static class PanelScene
         // el cartel de confirmación (Cuenta → Reiniciar la cuenta simulada): con aire, Cancelar y la acción
         window.Navigate("accounts");
         pump(1);
-        var restart = window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content as string == "Reiniciar la cuenta simulada");
+        var restart = window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content as string == "Reset simulated account");
         if (restart?.Flyout is Flyout confirm)
         {
             confirm.ShowAt(restart);
             pump(0.8);
             var content = confirm.Content as Control;
             var labels = content?.GetVisualDescendants().OfType<Button>().Select(b => b.Content as string).ToList() ?? new();
-            Check(labels.Contains("Cancelar") && labels.Contains("Reiniciar") && content is StackPanel { Margin.Left: >= 12 }, $"el cartel tiene margen, «Cancelar» y la acción ({string.Join(", ", labels)})");
+            Check(labels.Contains("Cancel") && labels.Contains("Reset") && content is StackPanel { Margin.Left: >= 12 }, $"el cartel tiene margen, «Cancelar» y la acción ({string.Join(", ", labels)})");
             TopLevel.GetTopLevel(content)?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "cartel_confirmar.png"));
             confirm.Hide();
         }

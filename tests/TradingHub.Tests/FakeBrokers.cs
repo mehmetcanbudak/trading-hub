@@ -275,7 +275,7 @@ internal sealed class FakeTradovate : IDisposable
 {
     public readonly FakeHttpServer Server = new();
     public readonly List<JsonObject> Orders = new();
-    public readonly List<string> MdRequests = new();
+    public readonly System.Collections.Concurrent.ConcurrentQueue<string> MdRequests = new();
     public string? MdToken, UserToken;
     public int Logins, ChartRequests;
     public long BaseMs = new DateTimeOffset(FakeBrokers.Day.ToDateTime(new TimeOnly(14, 30), DateTimeKind.Utc)).ToUnixTimeMilliseconds();
@@ -353,7 +353,7 @@ internal sealed class FakeTradovate : IDisposable
                     continue;
                 }
 
-                if (md) lock (MdRequests) MdRequests.Add(endpoint);
+                if (md) MdRequests.Enqueue(endpoint);
                 switch (endpoint)
                 {
                     case "user/syncrequest":

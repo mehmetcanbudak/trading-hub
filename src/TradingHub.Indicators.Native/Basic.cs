@@ -8,16 +8,16 @@ namespace TradingHub.Indicators.Native;
 public enum MaType
 {
     [Display(Name = "Simple (SMA)")] Sma,
-    [Display(Name = "Exponencial (EMA)")] Ema,
-    [Display(Name = "Ponderada (WMA)")] Wma,
+    [Display(Name = "Exponential (EMA)")] Ema,
+    [Display(Name = "Weighted (WMA)")] Wma,
 }
 
 /// <summary>Media móvil simple, exponencial o ponderada.</summary>
-[DisplayName("Media móvil")]
+[DisplayName("Moving average")]
 [Category(IndicatorCategories.Trend)]
 public class MovingAverage : Indicator
 {
-    private readonly ValueDataSeries _ma = new("MA", "Media") { Color = Color.FromArgb(255, 255, 196, 0), Width = 2 };
+    private readonly ValueDataSeries _ma = new("MA", "Average") { Color = Color.FromArgb(255, 255, 196, 0), Width = 2 };
     private int _period = 20;
     private MaType _type = MaType.Ema;
 
@@ -26,14 +26,14 @@ public class MovingAverage : Indicator
         DataSeries[0] = _ma;
     }
 
-    [Display(Name = "Período", GroupName = "Cálculo", Order = 10)]
+    [Display(Name = "Period", GroupName = "Calculation", Order = 10)]
     [Range(1, 10000)]
     public int Period { get => _period; set { _period = Math.Max(1, value); RecalculateValues(); } }
 
-    [Display(Name = "Tipo", GroupName = "Cálculo", Order = 20)]
+    [Display(Name = "Type", GroupName = "Calculation", Order = 20)]
     public MaType Type { get => _type; set { _type = value; RecalculateValues(); } }
 
-    [Display(Name = "Fuente", GroupName = "Cálculo", Order = 30)]
+    [Display(Name = "Source", GroupName = "Calculation", Order = 30)]
     public DataSeriesType Source { get => SourceType; set { SourceType = value; RecalculateValues(); } }
 
     protected override void OnCalculate(int bar, decimal value)
@@ -70,14 +70,14 @@ public class MovingAverage : Indicator
 /// <summary>Período en el que se reinicia el VWAP.</summary>
 public enum VwapAnchor
 {
-    [Display(Name = "Sesión (día)")] Session,
-    [Display(Name = "Semana")] Week,
-    [Display(Name = "Mes")] Month,
+    [Display(Name = "Session (day)")] Session,
+    [Display(Name = "Week")] Week,
+    [Display(Name = "Month")] Month,
 }
 
-[DisplayName("VWAP con desvíos")]
+[DisplayName("VWAP with bands")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
-[Description("VWAP anclado a la sesión, la semana o el mes con hasta tres bandas de desvío estándar ponderado por volumen.")]
+[Description("VWAP anchored to the session, week or month with up to three volume-weighted standard-deviation bands.")]
 public class SessionVwap : Indicator
 {
     private readonly ValueDataSeries _vwap = new("VWAP", "VWAP") { Color = Color.FromArgb(255, 255, 255, 255), Width = 2 };
@@ -103,18 +103,18 @@ public class SessionVwap : Indicator
         DataSeries.Add(_dn3);
     }
 
-    [Display(Name = "Reiniciar cada", GroupName = "Cálculo", Order = 1)]
+    [Display(Name = "Reset every", GroupName = "Calculation", Order = 1)]
     public VwapAnchor Anchor { get => _anchor; set { _anchor = value; RecalculateValues(); } }
 
-    [Display(Name = "Banda 1 (σ)", GroupName = "Bandas", Order = 10)]
+    [Display(Name = "Band 1 (σ)", GroupName = "Bands", Order = 10)]
     [Range(0, 10)]
     public decimal Band1 { get => _k1; set { _k1 = value; RecalculateValues(); } }
 
-    [Display(Name = "Banda 2 (σ)", GroupName = "Bandas", Order = 20)]
+    [Display(Name = "Band 2 (σ)", GroupName = "Bands", Order = 20)]
     [Range(0, 10)]
     public decimal Band2 { get => _k2; set { _k2 = value; RecalculateValues(); } }
 
-    [Display(Name = "Banda 3 (σ, 0 = oculta)", GroupName = "Bandas", Order = 30)]
+    [Display(Name = "Band 3 (σ, 0 = hidden)", GroupName = "Bands", Order = 30)]
     [Range(0, 10)]
     public decimal Band3 { get => _k3; set { _k3 = value; RecalculateValues(); } }
 
@@ -190,11 +190,11 @@ public class SessionVwap : Indicator
 }
 
 /// <summary>Volumen por vela, coloreado según el delta.</summary>
-[DisplayName("Volumen")]
+[DisplayName("Volume")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 public class VolumeBars : Indicator
 {
-    private readonly ValueDataSeries _vol = new("Volume", "Volumen") { VisualType = VisualMode.Histogram, Color = Color.FromArgb(255, 110, 120, 140) };
+    private readonly ValueDataSeries _vol = new("Volume", "Volume") { VisualType = VisualMode.Histogram, Color = Color.FromArgb(255, 110, 120, 140) };
 
     public VolumeBars() : base(true)
     {
@@ -202,13 +202,13 @@ public class VolumeBars : Indicator
         DataSeries[0] = _vol;
     }
 
-    [Display(Name = "Color alcista", GroupName = "Colores", Order = 10)]
+    [Display(Name = "Bullish color", GroupName = "Colors", Order = 10)]
     public Color UpColor { get; set; } = Color.FromArgb(255, 60, 170, 90);
 
-    [Display(Name = "Color bajista", GroupName = "Colores", Order = 20)]
+    [Display(Name = "Bearish color", GroupName = "Colors", Order = 20)]
     public Color DownColor { get; set; } = Color.FromArgb(255, 200, 60, 60);
 
-    [Display(Name = "Colorear por delta (si no, por vela)", GroupName = "Colores", Order = 30)]
+    [Display(Name = "Color by delta (otherwise by bar)", GroupName = "Colors", Order = 30)]
     public bool ByDelta { get; set; } = true;
 
     protected override void OnCalculate(int bar, decimal value)
@@ -227,12 +227,12 @@ public class DeltaBars : Indicator
 {
     public enum DeltaView
     {
-        [Display(Name = "Histograma")] Histogram,
-        [Display(Name = "Velas (con máx/mín del delta)")] Candles,
+        [Display(Name = "Histogram")] Histogram,
+        [Display(Name = "Candles (with delta high/low)")] Candles,
     }
 
     private readonly ValueDataSeries _delta = new("Delta", "Delta") { VisualType = VisualMode.Histogram };
-    private readonly CandleDataSeries _candles = new("DeltaCandles", "Velas de delta") { DrawCandleBorder = false };
+    private readonly CandleDataSeries _candles = new("DeltaCandles", "Delta candles") { DrawCandleBorder = false };
     private DeltaView _view = DeltaView.Histogram;
 
     public DeltaBars() : base(true)
@@ -240,16 +240,16 @@ public class DeltaBars : Indicator
         Panel = IndicatorDataProvider.NewPanel;
         DataSeries[0] = _delta;
         DataSeries.Add(_candles);
-        LineSeries.Add(new LineSeries("Zero", "Cero") { Value = 0, Color = Color.FromArgb(120, 140, 140, 150), LineDashStyle = LineDashStyle.Solid });
+        LineSeries.Add(new LineSeries("Zero", "Zero") { Value = 0, Color = Color.FromArgb(120, 140, 140, 150), LineDashStyle = LineDashStyle.Solid });
     }
 
-    [Display(Name = "Vista", GroupName = "Visualización", Order = 10)]
+    [Display(Name = "View", GroupName = "Visualization", Order = 10)]
     public DeltaView View { get => _view; set { _view = value; RecalculateValues(); } }
 
-    [Display(Name = "Color positivo", GroupName = "Visualización", Order = 20)]
+    [Display(Name = "Positive color", GroupName = "Visualization", Order = 20)]
     public Color PositiveColor { get; set; } = Color.FromArgb(255, 73, 209, 73);
 
-    [Display(Name = "Color negativo", GroupName = "Visualización", Order = 30)]
+    [Display(Name = "Negative color", GroupName = "Visualization", Order = 30)]
     public Color NegativeColor { get; set; } = Color.FromArgb(255, 232, 69, 72);
 
     protected override void OnCalculate(int bar, decimal value)
@@ -275,12 +275,12 @@ public class DeltaBars : Indicator
 }
 
 /// <summary>Delta acumulado (CVD) en velas.</summary>
-[DisplayName("Delta acumulado (CVD)")]
+[DisplayName("Cumulative delta (CVD)")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 public class CumulativeDeltaCandles : Indicator
 {
-    private readonly CandleDataSeries _cvd = new("CVD", "Delta acumulado") { DrawCandleBorder = false };
-    private readonly ValueDataSeries _value = new("Value", "Valor") { VisualType = VisualMode.OnlyValueOnAxis, Color = Color.FromArgb(255, 200, 200, 210) };
+    private readonly CandleDataSeries _cvd = new("CVD", "Cumulative delta") { DrawCandleBorder = false };
+    private readonly ValueDataSeries _value = new("Value", "Value") { VisualType = VisualMode.OnlyValueOnAxis, Color = Color.FromArgb(255, 200, 200, 210) };
     private bool _resetDaily;
     private decimal _base;
 
@@ -291,7 +291,7 @@ public class CumulativeDeltaCandles : Indicator
         DataSeries.Add(_cvd);
     }
 
-    [Display(Name = "Reiniciar en cada sesión", GroupName = "Cálculo", Order = 10)]
+    [Display(Name = "Reset each session", GroupName = "Calculation", Order = 10)]
     public bool ResetDaily { get => _resetDaily; set { _resetDaily = value; RecalculateValues(); } }
 
     protected override void OnRecalculate() => _base = 0;
@@ -319,11 +319,11 @@ public class Rsi : Indicator
     {
         Panel = IndicatorDataProvider.NewPanel;
         DataSeries[0] = _rsi;
-        LineSeries.Add(new LineSeries("70", "Sobrecompra") { Value = 70, Color = Color.FromArgb(150, 232, 69, 72) });
-        LineSeries.Add(new LineSeries("30", "Sobreventa") { Value = 30, Color = Color.FromArgb(150, 73, 209, 73) });
+        LineSeries.Add(new LineSeries("70", "Overbought") { Value = 70, Color = Color.FromArgb(150, 232, 69, 72) });
+        LineSeries.Add(new LineSeries("30", "Oversold") { Value = 30, Color = Color.FromArgb(150, 73, 209, 73) });
     }
 
-    [Display(Name = "Período", GroupName = "Cálculo", Order = 10)]
+    [Display(Name = "Period", GroupName = "Calculation", Order = 10)]
     [Range(2, 1000)]
     public int Period { get => _period; set { _period = Math.Max(2, value); RecalculateValues(); } }
 
@@ -355,8 +355,8 @@ public class Rsi : Indicator
 public class Macd : Indicator
 {
     private readonly ValueDataSeries _macd = new("MACD", "MACD") { Color = Color.FromArgb(255, 30, 144, 255), Width = 2 };
-    private readonly ValueDataSeries _signal = new("Signal", "Señal") { Color = Color.FromArgb(255, 255, 140, 0) };
-    private readonly ValueDataSeries _hist = new("Hist", "Histograma") { VisualType = VisualMode.Histogram, ShowCurrentValue = false };
+    private readonly ValueDataSeries _signal = new("Signal", "Signal") { Color = Color.FromArgb(255, 255, 140, 0) };
+    private readonly ValueDataSeries _hist = new("Hist", "Histogram") { VisualType = VisualMode.Histogram, ShowCurrentValue = false };
     private readonly ValueDataSeries _fast = new("f"), _slow = new("s");
     private int _fastP = 12, _slowP = 26, _sigP = 9;
 
@@ -368,9 +368,9 @@ public class Macd : Indicator
         DataSeries.Add(_signal);
     }
 
-    [Display(Name = "Rápida", GroupName = "Cálculo", Order = 10)] public int Fast { get => _fastP; set { _fastP = Math.Max(1, value); RecalculateValues(); } }
-    [Display(Name = "Lenta", GroupName = "Cálculo", Order = 20)] public int Slow { get => _slowP; set { _slowP = Math.Max(1, value); RecalculateValues(); } }
-    [Display(Name = "Señal", GroupName = "Cálculo", Order = 30)] public int SignalPeriod { get => _sigP; set { _sigP = Math.Max(1, value); RecalculateValues(); } }
+    [Display(Name = "Fast", GroupName = "Calculation", Order = 10)] public int Fast { get => _fastP; set { _fastP = Math.Max(1, value); RecalculateValues(); } }
+    [Display(Name = "Slow", GroupName = "Calculation", Order = 20)] public int Slow { get => _slowP; set { _slowP = Math.Max(1, value); RecalculateValues(); } }
+    [Display(Name = "Signal", GroupName = "Calculation", Order = 30)] public int SignalPeriod { get => _sigP; set { _sigP = Math.Max(1, value); RecalculateValues(); } }
 
     protected override void OnRecalculate()
     {
@@ -392,14 +392,14 @@ public class Macd : Indicator
 }
 
 /// <summary>Bandas de Bollinger.</summary>
-[DisplayName("Bandas de Bollinger")]
+[DisplayName("Bollinger Bands")]
 [Category(IndicatorCategories.Trend)]
 public class Bollinger : Indicator
 {
-    private readonly ValueDataSeries _mid = new("Mid", "Media") { Color = Color.FromArgb(220, 200, 200, 210) };
-    private readonly ValueDataSeries _up = new("Up", "Superior") { Color = Color.FromArgb(220, 30, 144, 255) };
-    private readonly ValueDataSeries _dn = new("Dn", "Inferior") { Color = Color.FromArgb(220, 30, 144, 255) };
-    private readonly RangeDataSeries _band = new("Band", "Relleno") { RangeColor = Color.FromArgb(22, 30, 144, 255) };
+    private readonly ValueDataSeries _mid = new("Mid", "Average") { Color = Color.FromArgb(220, 200, 200, 210) };
+    private readonly ValueDataSeries _up = new("Up", "Upper") { Color = Color.FromArgb(220, 30, 144, 255) };
+    private readonly ValueDataSeries _dn = new("Dn", "Lower") { Color = Color.FromArgb(220, 30, 144, 255) };
+    private readonly RangeDataSeries _band = new("Band", "Fill") { RangeColor = Color.FromArgb(22, 30, 144, 255) };
     private int _period = 20;
     private decimal _width = 2;
 
@@ -411,8 +411,8 @@ public class Bollinger : Indicator
         DataSeries.Add(_band);
     }
 
-    [Display(Name = "Período", GroupName = "Cálculo", Order = 10)] public int Period { get => _period; set { _period = Math.Max(2, value); RecalculateValues(); } }
-    [Display(Name = "Desvíos", GroupName = "Cálculo", Order = 20)] public decimal Width { get => _width; set { _width = value; RecalculateValues(); } }
+    [Display(Name = "Period", GroupName = "Calculation", Order = 10)] public int Period { get => _period; set { _period = Math.Max(2, value); RecalculateValues(); } }
+    [Display(Name = "Standard deviations", GroupName = "Calculation", Order = 20)] public decimal Width { get => _width; set { _width = value; RecalculateValues(); } }
 
     protected override void OnCalculate(int bar, decimal value)
     {

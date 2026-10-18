@@ -52,7 +52,7 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
     public string DisplayName => "Tradovate";
     public bool SupportsHistory => true;
     public bool IsLive => true;
-    public string HistoryNote => "ticks de Tradovate (hace falta tener habilitados los datos de CME por API)";
+    public string HistoryNote => "Tradovate ticks (requires CME API data entitlement)";
 
     /// <summary>Primero los contratos que elegiste en la conexión y después todos los de CME Group (al mes activo).</summary>
     public Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(CancellationToken ct)
@@ -71,7 +71,7 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
                 TickSize = product?.Tick ?? 0.25m,
                 VolumeStep = 1,
                 PointValue = product?.PointValue ?? 1,
-                Description = $"{product?.Name ?? root} · Tradovate (mes activo)",
+                Description = $"{product?.Name ?? root} · Tradovate (active contract)",
             });
         }
 
@@ -116,7 +116,7 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new TimeoutException("Tradovate no terminó de mandar la historia a tiempo.");
+            throw new TimeoutException("Tradovate history request timed out.");
         }
         finally
         {
@@ -297,7 +297,7 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
         {
             try
             {
-                t.Sink.OnStatus(t.Instrument, FeedStatus.Connecting, "Conectando a Tradovate…");
+                t.Sink.OnStatus(t.Instrument, FeedStatus.Connecting, "Connecting to Tradovate…");
                 var (id, name) = await _conn.ContractAsync(t.Instrument.Symbol, DateTime.UtcNow, CancellationToken.None).ConfigureAwait(false);
                 t.Contract = name;
                 t.ContractId = id;
@@ -324,14 +324,14 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
                 var dom = await _conn.Md.RequestAsync("md/subscribeDOM", new JsonObject { ["symbol"] = name }, CancellationToken.None).ConfigureAwait(false);
                 if (dom.ValueKind == JsonValueKind.String) throw new TradovateException(dom.GetString() ?? "");
                 t.Attempts = 0;
-                t.Sink.OnStatus(t.Instrument, FeedStatus.Connected, $"Tradovate conectado ({name})");
+                t.Sink.OnStatus(t.Instrument, FeedStatus.Connected, $"Tradovate connected ({name})");
                 return;
             }
             catch (Exception ex)
             {
                 t.Attempts++;
                 string msg = ex.Message.Contains("inaccessible", StringComparison.OrdinalIgnoreCase)
-                    ? "Tradovate no da datos de este contrato por API (hacen falta los datos de CME para API). Podés operar tus cuentas de Tradovate desde un gráfico de Rithmic."
+                    ? "Tradovate has no API data for this contract (CME API entitlement required). Trade Tradovate accounts using a Rithmic chart instead."
                     : ex.Message;
                 t.Sink.OnStatus(t.Instrument, t.Attempts > 3 && msg.Contains("API") ? FeedStatus.Error : FeedStatus.Reconnecting, msg);
                 await Task.Delay(LiveSubscription.Backoff(t.Attempts)).ConfigureAwait(false);
@@ -477,16 +477,16 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
             var (_, name) = await _conn.ContractAsync("ES", DateTime.UtcNow, ct).ConfigureAwait(false);
             var res = await _conn.Md.RequestAsync("md/subscribeQuote", new JsonObject { ["symbol"] = name }, ct).ConfigureAwait(false);
             data = res.ValueKind == JsonValueKind.String && (res.GetString() ?? "").Contains("inaccessible", StringComparison.OrdinalIgnoreCase)
-                ? "Sin datos de mercado por API (hacen falta los datos de CME para API): podés operar desde gráficos de Rithmic."
-                : "Datos de mercado por API disponibles.";
+                ? "No API market data (CME API entitlement required): trading is available from compatible Rithmic charts."
+                : "API market data available.";
             _ = _conn.Md.RequestAsync("md/unsubscribeQuote", new JsonObject { ["symbol"] = name }, CancellationToken.None);
         }
         catch (Exception ex)
         {
-            data = "Datos de mercado: " + ex.Message;
+            data = "Market data: " + ex.Message;
         }
 
-        return (true, $"Sesión iniciada como {_conn.UserName} ({(_conn.IsDemo ? "demo" : "real")}): {n} cuenta(s). {data}");
+        return (true, $"Signed in as {_conn.UserName} ({(_conn.IsDemo ? "demo" : "real")}): {n} account(s). {data}");
     }
 
     public void Dispose() => _conn.Dispose();

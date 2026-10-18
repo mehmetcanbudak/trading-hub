@@ -136,7 +136,7 @@ public class Position
     public decimal Commission { get; set; }
     public bool IsFlat => Volume == 0;
 
-    public override string ToString() => IsFlat ? "Sin posición" : $"{(Volume > 0 ? "LARGO" : "CORTO")} {Math.Abs(Volume)} @ {AveragePrice}";
+    public override string ToString() => IsFlat ? "No position" : $"{(Volume > 0 ? "LONG" : "SHORT")} {Math.Abs(Volume)} @ {AveragePrice}";
 }
 
 /// <summary>

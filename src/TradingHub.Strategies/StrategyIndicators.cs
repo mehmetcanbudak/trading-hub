@@ -216,7 +216,7 @@ public sealed class Highest : Series
     {
         _period = Math.Max(1, period);
         _source = source;
-        Name = $"Máximo({_period})";
+        Name = $"Highest({_period})";
     }
 
     public override bool IsReady => Values.Count >= _period;
@@ -239,7 +239,7 @@ public sealed class Lowest : Series
     {
         _period = Math.Max(1, period);
         _source = source;
-        Name = $"Mínimo({_period})";
+        Name = $"Lowest({_period})";
     }
 
     public override bool IsReady => Values.Count >= _period;
@@ -263,7 +263,7 @@ public sealed class StdDev : Series
     {
         _period = Math.Max(2, period);
         _source = source;
-        Name = $"Desvío({_period})";
+        Name = $"StdDev({_period})";
     }
 
     public override bool IsReady => _window.Count >= _period;
@@ -380,7 +380,7 @@ public sealed class CumulativeDelta : Series
     internal CumulativeDelta(Func<DateTime, DateOnly>? session)
     {
         _session = session;
-        Name = "Delta acumulado";
+        Name = "Cumulative delta";
     }
 
     internal override void Update(BarSeries bars)

@@ -75,7 +75,7 @@ public sealed class BinanceAccountClient : IDisposable
 
     private async Task<JsonDocument> SignedAsync(HttpMethod method, string path, string query, CancellationToken ct)
     {
-        if (!_s.HasKeys) throw new InvalidOperationException("Faltan la API key y el secret de Binance (Conexiones).");
+        if (!_s.HasKeys) throw new InvalidOperationException("Binance API key and secret are missing (Connections).");
         long ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + _timeOffsetMs;
         string q = (string.IsNullOrEmpty(query) ? "" : query + "&") + $"recvWindow=5000&timestamp={ts}";
         string url = $"{_s.RestBase}{path}?{q}&signature={Sign(q, _s.ApiSecret)}";
@@ -95,7 +95,7 @@ public sealed class BinanceAccountClient : IDisposable
                 // cuerpo no JSON
             }
 
-            throw new InvalidOperationException($"Binance rechazó la operación ({(int)resp.StatusCode}): {msg}");
+            throw new InvalidOperationException($"Binance rejected operation ({(int)resp.StatusCode}): {msg}");
         }
 
         return JsonDocument.Parse(body);
@@ -170,7 +170,7 @@ public sealed class BinanceAccountClient : IDisposable
                 sb.Append(_s.Futures ? $"&type=STOP_MARKET&stopPrice={Fmt(price)}" : $"&type=STOP_LOSS&stopPrice={Fmt(price)}");
                 break;
             default:
-                throw new NotSupportedException("Tipo de orden no soportado");
+                throw new NotSupportedException("Unsupported order type");
         }
 
         if (reduceOnly && _s.Futures) sb.Append("&reduceOnly=true");
@@ -194,12 +194,12 @@ public sealed class BinanceAccountClient : IDisposable
         try
         {
             await SyncTimeAsync(ct).ConfigureAwait(false);
-            if (!_s.HasKeys) return (true, $"Datos públicos OK ({_s.RestBase}). Sin claves: solo cotizaciones.");
+            if (!_s.HasKeys) return (true, $"Public data OK ({_s.RestBase}). No credentials: market data only.");
             var balances = await GetBalancesAsync(ct).ConfigureAwait(false);
             var main = balances.OrderByDescending(b => b.Asset is "USDT" or "USDC" ? 1 : 0).ThenByDescending(b => b.Wallet).FirstOrDefault();
             return (true, main == null
-                ? $"Cuenta conectada ({(_s.Testnet ? "testnet" : "REAL")}) sin saldo"
-                : $"Cuenta conectada ({(_s.Testnet ? "testnet" : "REAL")}): {main.Wallet:0.##} {main.Asset} (disponible {main.Available:0.##})");
+                ? $"Account connected ({(_s.Testnet ? "testnet" : "REAL")}) with no balance"
+                : $"Account connected ({(_s.Testnet ? "testnet" : "REAL")}): {main.Wallet:0.##} {main.Asset} (available {main.Available:0.##})");
         }
         catch (Exception ex)
         {
@@ -366,15 +366,15 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     {
         CancelAll();
         var q = Position.Volume;
-        if (q > 0) Send(OrderDirections.Sell, OrderTypes.Market, q, 0, "Cerrar", reduceOnly: true);
-        else if (q < 0) Send(OrderDirections.Buy, OrderTypes.Market, -q, 0, "Cerrar", reduceOnly: true);
+        if (q > 0) Send(OrderDirections.Sell, OrderTypes.Market, q, 0, "Close", reduceOnly: true);
+        else if (q < 0) Send(OrderDirections.Buy, OrderTypes.Market, -q, 0, "Close", reduceOnly: true);
     }
 
     public void Reverse()
     {
         var q = Position.Volume;
-        if (q > 0) Market(OrderDirections.Sell, q * 2, "Revertir");
-        else if (q < 0) Market(OrderDirections.Buy, -q * 2, "Revertir");
+        if (q > 0) Market(OrderDirections.Sell, q * 2, "Reverse");
+        else if (q < 0) Market(OrderDirections.Buy, -q * 2, "Reverse");
     }
 
     public void Dispose()

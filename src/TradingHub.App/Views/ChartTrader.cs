@@ -38,7 +38,7 @@ internal sealed class ChartTraderPanel : UserControl
     private readonly NumericUpDown _sl = new() { Minimum = 0, Maximum = 100000, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly StackPanel _targets = new() { Spacing = 6 };
     private readonly StackPanel _bracketBox = new() { Spacing = 8 };
-    private readonly CheckBox _be = new() { Content = "Breakeven al TP1", FontSize = 11.5 };
+    private readonly CheckBox _be = new() { Content = "Breakeven at TP1", FontSize = 11.5 };
     private readonly TextBlock _chartLabel = new() { Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly bool _docked;
     private string _templateSig = "";
@@ -121,16 +121,16 @@ internal sealed class ChartTraderPanel : UserControl
 
         decimal Q() => _chart.Quantity > 0 ? _chart.Quantity : 0;
         var grid = Pairs(
-            (Trade("Buy MKT", null, "buy", "Compra a mercado", () => _ = _host.TradeAsync(_chart, OrderTypes.Market, OrderDirections.Buy, 0, Q())),
-             Trade("Sell MKT", null, "sell", "Venta a mercado", () => _ = _host.TradeAsync(_chart, OrderTypes.Market, OrderDirections.Sell, 0, Q()))),
+            (Trade("Buy MKT", null, "buy", "Market buy", () => _ = _host.TradeAsync(_chart, OrderTypes.Market, OrderDirections.Buy, 0, Q())),
+             Trade("Sell MKT", null, "sell", "Market sell", () => _ = _host.TradeAsync(_chart, OrderTypes.Market, OrderDirections.Sell, 0, Q()))),
             (Trade("Buy Ask", _buyAsk, "buy-soft", "Limit buy at ask (subject to liquidity)", () => AtBook(OrderDirections.Buy, ask: true)),
              Trade("Sell Ask", _sellAsk, "sell-soft", "Limit sell at ask (joins ask queue)", () => AtBook(OrderDirections.Sell, ask: true))),
             (Trade("Buy Bid", _buyBid, "buy-soft", "Limit buy at bid (joins bid queue)", () => AtBook(OrderDirections.Buy, ask: false)),
              Trade("Sell Bid", _sellBid, "sell-soft", "Limit sell at bid (subject to liquidity)", () => AtBook(OrderDirections.Sell, ask: false))),
-            (Trade("Canc. compras", null, "", "Cancel buy orders", () => CancelSide(OrderDirections.Buy)),
-             Trade("Canc. ventas", null, "", "Cancel sell orders", () => CancelSide(OrderDirections.Sell))),
+            (Trade("Cancel buys", null, "", "Cancel buy orders", () => CancelSide(OrderDirections.Buy)),
+             Trade("Cancel sells", null, "", "Cancel sell orders", () => CancelSide(OrderDirections.Sell))),
             (Trade("Cancel all", null, "", "Cancel all orders", () => _ = _host.AccountActionAsync(_chart, a => a.CancelAll(), "Orders canceled")),
-             Trade("Revertir", null, "", "Reverse position", () => _ = _host.AccountActionAsync(_chart, a => a.Reverse(), "Position reversed"))));
+             Trade("Reverse", null, "", "Reverse position", () => _ = _host.AccountActionAsync(_chart, a => a.Reverse(), "Position reversed"))));
         var be = Trade("Breakeven", null, "", "Moves stop to entry price", () => _ = _host.BracketActionAsync(_chart, b => b.MoveStopToBreakeven(), "Move stop to breakeven"));
         // parciales: cierran una parte a mercado; el stop y los objetivos se ajustan solos
         var partials = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,4,*,4,*") };
@@ -139,7 +139,7 @@ internal sealed class ChartTraderPanel : UserControl
         foreach (var pct in new[] { 25, 50, 75 })
         {
             decimal f = pct / 100m;
-            var b = Trade($"{pct}%", null, "", $"Cierra el {pct}% de la posición a mercado (el stop y los objetivos se ajustan)", () => _ = _host.BracketActionAsync(_chart, br => br.ClosePartial(f), $"Cerrar el {pct}% de la posición"));
+            var b = Trade($"{pct}%", null, "", $"Closes {pct}% of the position at market (stop and targets adjust)", () => _ = _host.BracketActionAsync(_chart, br => br.ClosePartial(f), $"Close {pct}% of position"));
             b.MinHeight = 26;
             Grid.SetColumn(b, col);
             partials.Children.Add(b);
@@ -169,7 +169,7 @@ internal sealed class ChartTraderPanel : UserControl
         }
 
         var slRow = TicksRow("SL", Ui.Down, _sl);
-        var addTarget = new Button { Content = "+ objetivo", Padding = new Thickness(6, 2), MinHeight = 24, FontSize = 11 };
+        var addTarget = new Button { Content = "+ target", Padding = new Thickness(6, 2), MinHeight = 24, FontSize = 11 };
         ToolTip.SetTip(addTarget, "Up to 3 partial targets; each closes a percentage of position");
         addTarget.Click += (_, _) => EditTemplate(t =>
         {
@@ -321,7 +321,7 @@ internal sealed class ChartTraderPanel : UserControl
                 Grid.SetColumn(pct, 3);
                 g.Children.Add(pct);
                 var remove = new Button { Content = "×", Padding = new Thickness(0), MinHeight = 0, Width = 20, Height = 24, FontSize = 13, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
-                ToolTip.SetTip(remove, "Quitar este objetivo");
+                ToolTip.SetTip(remove, "Remove this target");
                 remove.Click += (_, _) => EditTemplate(tt =>
                 {
                     if (index < tt.Targets.Count) tt.Targets.RemoveAt(index);
@@ -349,9 +349,9 @@ internal sealed class ChartTraderPanel : UserControl
     private async void ShowCrossPicker()
     {
         var list = new ListBox { MaxHeight = 320, Width = 260 };
-        var search = new TextBox { Watermark = "Buscar instrumento (MES, MNQ, BTCUSDC…)" };
+        var search = new TextBox { Watermark = "Search instruments (MES, MNQ, BTCUSDC…)" };
         var flyout = new Flyout { Placement = PlacementMode.LeftEdgeAlignedTop };
-        var none = new ListBoxItem { Content = $"Ninguno · ejecutar en {_chart.Symbol}", Tag = "" };
+        var none = new ListBoxItem { Content = $"None · execute on {_chart.Symbol}", Tag = "" };
         IReadOnlyList<Instrument> instruments = Array.Empty<Instrument>();
         try
         {
@@ -359,7 +359,7 @@ internal sealed class ChartTraderPanel : UserControl
         }
         catch (Exception ex)
         {
-            _host.SetStatus("No pude traer los instrumentos: " + ex.Message);
+            _host.SetStatus("Could not retrieve instruments: " + ex.Message);
         }
 
         void Fill()
@@ -391,7 +391,7 @@ internal sealed class ChartTraderPanel : UserControl
             await _host.SetCrossTradingAsync(_chart, symbol.Length == 0 ? null : symbol);
         };
         Fill();
-        flyout.Content = Ui.V(8, Ui.H3("Ejecutar en"), search, list, Ui.Faint("Orders, stops and targets route to the selected instrument using their original numerical prices (for example mini/micro contracts).")).Also(v =>
+        flyout.Content = Ui.V(8, Ui.H3("Execute on"), search, list, Ui.Faint("Orders, stops and targets route to the selected instrument using their original numerical prices (for example mini/micro contracts).")).Also(v =>
         {
             v.Margin = new Thickness(12);
             v.Width = 280;
@@ -471,7 +471,7 @@ internal sealed class ChartTraderPanel : UserControl
             LoadTemplate(_host.Services.Settings.BracketTemplateFor(inst.Key));
         }
 
-        if (_docked) _chartLabel.Text = $"Opera en el gráfico activo: {_chart.Symbol} · {model.Period.DisplayName}";
+        if (_docked) _chartLabel.Text = $"Trades on active chart: {_chart.Symbol} · {model.Period.DisplayName}";
 
         // cuentas de Rithmic: si todavía no aparecen, se dice por qué (conectando, rechazo…). En los gráficos de Rithmic el
         // renglón queda reservado aunque esté vacío: que el aviso aparezca o se vaya nunca corre los botones de abajo
@@ -482,12 +482,12 @@ internal sealed class ChartTraderPanel : UserControl
 
         _cross.Content = _chart.CrossSymbol is { } cs
             ? Ui.H(6, Ui.Icon(MaterialIconKind.SwapHorizontal, 14, Ui.Accent), new TextBlock { Text = cs, FontWeight = FontWeight.SemiBold })
-            : Ui.H(6, Ui.Icon(MaterialIconKind.SwapHorizontal, 14, Ui.Text2), new TextBlock { Text = "Ninguno", Classes = { "muted" } });
+            : Ui.H(6, Ui.Icon(MaterialIconKind.SwapHorizontal, 14, Ui.Text2), new TextBlock { Text = "None", Classes = { "muted" } });
         if (_chart.CrossSymbol != null)
         {
             decimal a = data.LastPrice, b = tradeData.LastPrice;
             bool far = a > 0 && b > 0 && Math.Abs(a - b) / a > 0.001m;
-            _target.Text = $"Mirás {_chart.Symbol}, ejecuta en {_chart.CrossSymbol}" + (far ? $" · ojo: precios distintos ({inst.FormatPrice(b)})" : "");
+            _target.Text = $"Viewing {_chart.Symbol}, executes on {_chart.CrossSymbol}" + (far ? $" · warning: prices differ ({inst.FormatPrice(b)})" : "");
             ToolTip.SetTip(_target, _target.Text);
             _target.Foreground = far ? Ui.Warn : Ui.Accent;
             _target.IsVisible = true;
@@ -512,7 +512,7 @@ internal sealed class ChartTraderPanel : UserControl
             _pnl.Foreground = realized > 0 ? Ui.Up : realized < 0 ? Ui.Down : Ui.Text1;
             _pnl.FontSize = realized != 0 ? 18 : 13;
             int orders = acc?.ActiveOrders.Count() ?? 0;
-            _position.Text = (realized != 0 ? "Flat · today's PnL" : "Plana") + (orders > 0 ? $" · {orders} orden(es)" : "");
+            _position.Text = (realized != 0 ? "Flat · today's PnL" : "Flat") + (orders > 0 ? $" · {orders} order(s)" : "");
         }
         else
         {
@@ -520,7 +520,7 @@ internal sealed class ChartTraderPanel : UserControl
             _pnl.Foreground = pos.UnrealizedPnL >= 0 ? Ui.Up : Ui.Down;
             _pnl.FontSize = 18;
             int orders = acc!.ActiveOrders.Count();
-            _position.Text = $"{(pos.Volume > 0 ? "LARGO" : "CORTO")} {Math.Abs(pos.Volume).ToString("0.########", CultureInfo.InvariantCulture)} @ {inst.FormatPrice(pos.AveragePrice)}" + (orders > 0 ? $" · {orders} orden(es)" : "");
+            _position.Text = $"{(pos.Volume > 0 ? "LONG" : "SHORT")} {Math.Abs(pos.Volume).ToString("0.########", CultureInfo.InvariantCulture)} @ {inst.FormatPrice(pos.AveragePrice)}" + (orders > 0 ? $" · {orders} order(s)" : "");
         }
     }
 }

@@ -50,7 +50,7 @@ public class CsvImportTests : IDisposable
             01.09.2025 16:31:00.000 GMT+0200,6451.0,6451.9,6450.2,6450.4,98.1
             """);
         var r = CsvImport.Import(path, "US500", Path.Combine(_dir, "ticks"), TimeSpan.Zero, null, null, CancellationToken.None);
-        Assert.Equal("velas de 1 min", r.Kind);
+        Assert.Equal("1-minute bars", r.Kind);
         Assert.Equal(new DateTime(2025, 9, 1, 14, 30, 0, DateTimeKind.Utc), r.From);
         var trades = Day("US500", new DateOnly(2025, 9, 1));
         Assert.Equal(8, trades.Count); // 4 por vela
@@ -68,7 +68,7 @@ public class CsvImportTests : IDisposable
 
         var bars = File("DAT_ASCII_NSXUSD_M1_2025.csv", "20250901 093000;23450.25;23460.00;23440.50;23455.75;0\n20250901 093100;23455.75;23458.00;23452.00;23453.25;0\n");
         var b = CsvImport.Import(bars, "NSX1", Path.Combine(_dir, "ticks"), TimeSpan.FromHours(-5), null, null, CancellationToken.None);
-        Assert.Equal("velas de 1 min", b.Kind);
+        Assert.Equal("1-minute bars", b.Kind);
         Assert.Equal(8, b.Trades); // sin volumen igual se arman
     }
 
@@ -88,7 +88,7 @@ public class CsvImportTests : IDisposable
         long t0 = new DateTimeOffset(2025, 9, 1, 13, 30, 0, TimeSpan.Zero).ToUnixTimeSeconds();
         var path = File("NAS100.csv", $"time,open,high,low,close,Volume\n{t0},23450,23460,23440,23455,1500\n{t0 + 300},23455,23458,23452,23453,900\n");
         var r = CsvImport.Import(path, "NAS100", Path.Combine(_dir, "ticks"), TimeSpan.Zero, null, null, CancellationToken.None);
-        Assert.Equal("velas de 5 min", r.Kind);
+        Assert.Equal("5-minute bars", r.Kind);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(t0).UtcDateTime, r.From);
         Assert.Equal(2400m, Day("NAS100", new DateOnly(2025, 9, 1)).Sum(t => t.Volume));
     }
@@ -98,6 +98,6 @@ public class CsvImportTests : IDisposable
     {
         var path = File("notas.txt", "hola\nesto no es un csv de precios\n");
         var ex = Assert.Throws<InvalidDataException>(() => CsvImport.Import(path, "X", Path.Combine(_dir, "ticks"), TimeSpan.Zero, null, null, CancellationToken.None));
-        Assert.Contains("formato", ex.Message);
+        Assert.Contains("format", ex.Message);
     }
 }

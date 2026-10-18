@@ -65,9 +65,9 @@ public sealed class TapeRenderer
         var head = RenderContext.GetFont(t.FontFamily, 10, false, false);
         float c1 = 6, c2 = width * 0.36f, c3 = width - 6;
         _text.Color = t.TextDim;
-        canvas.DrawText("Hora", c1, 14, head, _text);
-        canvas.DrawText("Precio", c2, 14, head, _text);
-        canvas.DrawText("Volumen", c3 - RenderContext.MeasureWidth(head, "Volumen"), 14, head, _text);
+        canvas.DrawText("Time", c1, 14, head, _text);
+        canvas.DrawText("Price", c2, 14, head, _text);
+        canvas.DrawText("Volume", c3 - RenderContext.MeasureWidth(head, "Volume"), 14, head, _text);
 
         int maxRows = (int)((height - HeaderH) / RowH) + 1;
         if (tape.Anchor is { } anchor && anchor >= tape.Data.Trades.Count - 1) tape.Anchor = null;
@@ -99,7 +99,7 @@ public sealed class TapeRenderer
         {
             _fill.Color = t.AxisBackground;
             canvas.DrawRect(0, 0, width, HeaderH, _fill);
-            string msg = tape.NewSinceAnchor > 0 ? $"▲ {tape.NewSinceAnchor:N0} nuevas · clic para volver" : "▲ clic para volver a lo último";
+            string msg = tape.NewSinceAnchor > 0 ? $"▲ {tape.NewSinceAnchor:N0} new · click to return" : "▲ click to return to latest";
             _text.Color = t.LastPriceUp;
             canvas.DrawText(msg, width / 2 - RenderContext.MeasureWidth(head, msg) / 2, 14, head, _text);
         }

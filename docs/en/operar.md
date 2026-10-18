@@ -1,71 +1,127 @@
-[← English documentation](README.md)
+[← Documentation index](README.md)
 
-# Manual trading
+# Trading
 
-Trade through **Trading**, using Chart Trader, DOM (Depth of Market), chart context menus, or configured hotkeys. Each chart remembers its **own selected account**. The initial selection is the simulated account.
+Place orders in **Trading** using Chart Trader, DOM, the chart context menu or hotkeys. Each chart has its own selected account, initially **Simulated account**.
 
-## Account selection
+## Choose an account
 
-The simulated account works with any supported chart. Broker accounts depend on connection and instrument compatibility: Binance charts may offer the corresponding Binance testnet/real account; Rithmic charts may offer Rithmic paper/real; CME futures charts from Rithmic or Tradovate may offer Tradovate demo/real. Real account selection is clearly highlighted.
+Choose **Account** in Chart Trader. The selection is remembered per chart.
+
+| Chart | Available accounts |
+|---|---|
+| Any | Simulated account. |
+| Binance Futures / Spot | That profile's Binance account, marked testnet or **REAL**. |
+| Rithmic futures | Connected Rithmic practice or **REAL** accounts. |
+| Rithmic / Tradovate CME futures | Connected Tradovate demo or **REAL** accounts. |
+
+Rithmic accounts appear after the order session connects; until then, the ticket explains the wait. Selecting a real account displays an orange **REAL ACCOUNT** warning.
 
 ## Chart Trader
 
-Chart Trader appears beside an individual chart and in the panel above the DOM for the active chart. It offers:
+![Chart Trader, DOM execution buttons and tape](img/operar.png)
+
+It appears on each chart's right edge (collapse with the arrow or ⌥T), and above DOM in the right panel. The right-panel copy follows the active chart; closing a detached copy returns it to the panel.
 
 | Control | Action |
 |---|---|
-| Account | Choose execution destination |
-| Quantity and quick sizes | Select order size |
-| Buy MKT / Sell MKT | Submit a market order |
-| Buy Ask / Sell Ask | Submit a limit order at the current ask |
-| Buy Bid / Sell Bid | Submit a limit order at the current bid |
-| Cancel buys / Cancel sells / Cancel all | Cancel outstanding orders |
-| Reverse | Reverse an existing position |
-| Breakeven | Move a protective stop to entry price |
-| Close 25% / 50% / 75% | Partial close at market |
-| Close position | Close position and cancel related orders |
-| Auto SL / TP | Apply stop-loss and take-profit template |
+| Account | Select the destination account. |
+| Cross trading | Execute in another instrument; see [below](#cross-trading). |
+| Quantity | Quick values 1, 2, 5, 10 for whole-unit instruments; fractions for crypto. |
+| Buy MKT / Sell MKT | Market order. |
+| Buy Ask / Sell Ask | Limit at the displayed ask. Buying crosses immediately with a limit cap; selling waits at the offer. |
+| Buy Bid / Sell Bid | Limit at the bid. Buying waits at the bid; selling crosses with a limit cap. |
+| Cancel buys / sells | Cancel that side's orders. |
+| Cancel all / Reverse | Cancel all orders / reverse position. |
+| Breakeven | Move the stop to entry. |
+| Close 25% / 50% / 75% | Market partial exit; remaining brackets adjust. |
+| Close position | Close at market and cancel orders. |
+| PnL / position | Open PnL and long/short quantity/average price, or flat/day PnL. |
+| Automatic SL / TP | Stop and target template. |
 
-The right-side DOM execution controls use the active chart's account and quantity.
+PnL and position are below the buttons so updates do not shift click targets.
 
-## Order types and simulation
+## Order types
 
-- **Market:** fill at the available best bid/ask in the simulated book, falling back to last price if necessary.
-- **Limit:** fill at or through a specified price, with a simulated queue model.
-- **Stop:** trigger when the specified price trades, then execute as a market order.
-- **Bracket/OCO:** protective stop and targets must reduce, never enlarge or reverse, an existing position.
+| Type | Submission | Simulated fill |
+|---|---|---|
+| Market | MKT, Close, Reverse, partial exits. | Best bid/ask, or last trade when no book exists. |
+| Limit | Bid/Ask, DOM, chart context menu. | Price trades through the limit, or subsequent volume at the price exceeds the queue ahead at submission. |
+| Stop | DOM beyond current price or chart context menu. | A trade triggers the stop, which then fills at market. |
 
-These simulation rules are not a guarantee of actual broker execution.
+Protective stops and targets are reduce-only: they must not reverse a position.
 
-## Trading through the DOM
+## Trade with DOM
 
-Click the bid column to enter a buy order; click the ask column for a sell. A price at/through the opposite side may become a stop according to the DOM action. Right-click or Option-click a price to cancel your orders there. Drag an order to amend its price. Recenter or scroll the ladder as needed.
+| Gesture | Result |
+|---|---|
+| Click Bid / buy-order column | Buy limit; at/above ask, buy stop. |
+| Click Ask / sell-order column | Sell limit; at/below bid, sell stop. |
+| Right-click / ⌥-click | Cancel your orders at that price. |
+| Drag your order | Move its price. |
+| Wheel / center button | Scroll / recenter the ladder. |
 
-When the **Double-click to trade** setting is enabled in DOM preferences, ordinary single clicks do not submit orders; cancellation remains accessible.
+DOM uses the active chart's quantity. **Double-click to trade** disables single-click submission, but cancellation still takes one click. The question-mark control summarizes gestures.
 
-## Trading from the chart
+The optional execution strip has quantity shortcuts, Buy/Sell MKT, Buy/Sell Bid/Ask, Cancel, Reverse and Close, all operating on the active chart.
 
-Right-click a price for context-sensitive buy/sell limit or stop orders, drag order lines to amend price, or right-click an existing order to cancel it. When in a position, use the chart menu for a partial/full close, breakeven, or protective orders. Review account and price before interacting with lines.
+## Trade from the chart
 
-## Stops and profit targets
+- Right-click below last price for buy-limit/sell-stop; above for sell-limit/buy-stop, using Chart Trader quantity. The menu also cancels all orders.
+- Drag an order line to change price.
+- Right-click an order to cancel. Targets offer 25/50/75/100% quantity; stops offer breakeven; pending entries can attach the bracket template.
+- With a position open, the menu offers half/full market close, breakeven and applying template stops/targets.
 
-In **Auto SL / TP**, enable a stop distance in ticks and one or more target distances. Up to three partial targets can distribute the position's total size. Optional **Breakeven at TP1** moves the stop to entry when the first target fills. Applying the template to an open position replaces its current stop and targets; increasing or reducing position size adjusts protection.
+## Stops and targets
+
+**Automatic SL / TP** stores a per-instrument template shared by chart and right-panel tickets.
+
+1. Enable it.
+2. Set stop distance in ticks from entry.
+3. Set target distance. **+ target** adds up to three partial targets with percentages automatically apportioned to 100%; × removes one.
+4. **Breakeven at TP1**, enabled by default, moves the stop to entry after the first target fills.
+
+With the template enabled, a new position gets OCO protective orders: closing the position cancels remaining protective orders. Pending limit/stop entries carry attachments until filled. Increasing a position extends protection; partial exits resize it.
+
+**Apply to position** replaces the current position's stop/targets with the template. You can also drag SL/TP handles from a position or pending entry, or drag from the position line toward profit for a target and toward loss for a stop.
+
+Do not assume all strategy/OCO management is broker-native. App-managed protection requires the application and connection to remain operational; verify provider behavior before real trading.
 
 ## Cross trading
 
-Display one contract and route orders to another compatible contract, such as ES for analysis and MES for execution. The order, stop, and targets are sent with the **specified numerical prices**; the platform warns when the symbols' prices differ. Be certain that tick sizes and quoted prices are suitable for the routed instrument.
+View one instrument and execute in another—for example ES → MES. **Cross trading** searches instruments, prioritizing the same underlying; **None** restores execution in the displayed instrument. Orders, stops and targets use the selected instrument **at the same numerical prices**, not a conversion. A warning appears when the instruments' prices differ.
 
-## Hotkeys and account history
+## Trading shortcuts
 
-Configure manual trading shortcuts under **Settings → Keyboard shortcuts → Trading**. They are unassigned by default. **Account** (**Command-5**) shows balance, daily PnL, open PnL, orders, fills, closed trades, and period-based performance statistics. The simulated account can be reset only with no live simulated positions or orders; previous history is retained separately.
+Under **Settings → Keyboard shortcuts → Trading**, assign buy/sell market, buy bid, sell ask, close, reverse, cancel all, 25%/50% exits, breakeven, bracket application and next/previous quick quantity. They are unassigned by default.
 
-## Real-money safeguards
+Bindings target the active chart. Plain keys do not fire while typing in a text field; modified ⌘/⌥/⌃ or function-key bindings can still fire. Choose them carefully.
 
-- Live orders are disabled for each connection until explicitly authorized.
-- Simulated, paper, demo, and testnet accounts do not prompt before each order.
-- Real accounts may require confirmations for submissions, modifications, closures, reversal, and cancellations; settings vary by provider.
-- A configured maximum order quantity blocks oversize live orders.
-- Automated strategies have daily loss/drawdown controls and a **Stop all** facility to cancel orders and close related positions.
-- The Chart Trader and Account screen prominently identify real accounts.
+## Accounts section
 
-**Always inspect the actual order confirmation, provider entitlement, and position state.** Never interpret backtest or simulator fills as proof of real execution behavior.
+**Accounts** (⌘5) displays one account at a time, selected from groups for simulation, Rithmic and Tradovate.
+
+Cards show Balance, Today's PnL, Open PnL, Realized today, Total PnL for simulation or Available to trade for broker accounts, and Active orders. Broker balances come from Rithmic/Tradovate rather than an app-generated balance estimate.
+
+| Tab | Contents |
+|---|---|
+| Positions | Contract, side, quantity, average price, open/realized PnL and Close. |
+| Orders | Today's active/completed orders, status and Cancel. |
+| Fills | Time, contract, side, quantity, price and commission. |
+| Trades | Closed round trips with entry, exit, duration and PnL. |
+| Statistics | Today, seven days, 30 days or all: equity, net PnL, win rate, profit factor, maximum drawdown, expectancy, streaks, long/short and daily results. |
+
+Position/order rows remain in place; new rows append, reducing accidental clicks on adjacent rows. Local history survives app closure.
+
+For simulation, change **Initial balance** or **Reset simulated account**. Reset starts fresh history at the initial balance and archives the old records. Positions and active orders must first be cleared.
+
+## Safety
+
+- **No real trading by default.** Each profile's real-order permission starts disabled. Without it, the real account is unavailable for submission; see [Connections](conexiones.md#real-and-test-accounts).
+- **No confirmation on test accounts.** Simulation, demo, practice and testnet clicks submit immediately.
+- **Real-order confirmation.** By default a **Confirm REAL order** dialog identifies action and account. This also covers changes, closes, reversals, cancellations, partial exits and breakeven through manual controls. To disable it where supported, both the profile's per-real-order confirmation and **Settings → Trading → Confirm real orders** must be off. Tradovate has no profile switch for bypassing this, so its real orders still require confirmation. Accounts Close/Cancel also confirm for real accounts.
+- **Maximum order size.** Real orders larger than the configured connection limit are blocked with an **Order blocked** message.
+- **Strategy limits.** Automatic strategies have daily-loss and drawdown limits; **0 means no limit**. **Live → Stop all** stops strategies, cancels their orders and requests closure of their positions. Confirm resulting broker positions; network failures can prevent closure.
+- **Visible real-account warnings.** Real destinations are marked orange with **REAL** / **REAL ACCOUNT**.
+
+A launch confirmation authorizes an automatic strategy to trade without an individual dialog for every generated order. Start with simulation; a translated interface is not a guarantee of trading safety.

@@ -28,7 +28,7 @@ public sealed class InstrumentPicker : Button
     private readonly TextBlock _change = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, MinWidth = 54 };
 
     // menú
-    private readonly TextBox _search = new() { Watermark = "Buscar (BTC, ETH, NQ…)", MinWidth = 360 };
+    private readonly TextBox _search = new() { Watermark = "Search (BTC, ETH, NQ…)", MinWidth = 360 };
     private readonly StackPanel _connTabs = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
     private readonly StackPanel _chips = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
     private readonly ListBox _list = new() { Height = 430 };
@@ -53,7 +53,7 @@ public sealed class InstrumentPicker : Button
         var chevron = Ui.Icon(MaterialIconKind.ChevronDown, 16, Ui.Text2);
         Content = Ui.H(10, Ui.Icon(MaterialIconKind.ChartBoxOutline, 18, Ui.Accent), Ui.V(0, _symbol, _exchange), _price, _change, chevron);
         _exchange.Foreground = Ui.Text2;
-        ToolTip.SetTip(this, "Elegir instrumento (⌘K)");
+        ToolTip.SetTip(this, "Choose instrument (⌘K)");
 
         // al reciclar filas el contenido puede llegar vacío: se dibuja una fila vacía
         _list.ItemTemplate = new FuncDataTemplate<Row>((row, _) => row == null ? new Panel() : BuildRow(row), supportsRecycling: false);
@@ -92,11 +92,11 @@ public sealed class InstrumentPicker : Button
             header.Children.Add(t);
         }
 
-        H("SÍMBOLO", 1);
-        H("DESCRIPCIÓN", 2);
-        H("PRECIO", 3, HorizontalAlignment.Right);
+        H("SYMBOL", 1);
+        H("DESCRIPTION", 2);
+        H("PRICE", 3, HorizontalAlignment.Right);
         H("24 H", 4, HorizontalAlignment.Right);
-        H("VOLUMEN", 5, HorizontalAlignment.Right);
+        H("VOLUME", 5, HorizontalAlignment.Right);
 
         var panel = new StackPanel
         {
@@ -115,7 +115,7 @@ public sealed class InstrumentPicker : Button
             },
         };
         _flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft, ShowMode = FlyoutShowMode.Standard };
-        _symbol.Text = "Elegir instrumento…";
+        _symbol.Text = "Choose instrument…";
         _flyout.Opened += (_, _) =>
         {
             _search.Text = "";
@@ -132,7 +132,7 @@ public sealed class InstrumentPicker : Button
     public void SetCurrent(string profileId, Instrument? instrument)
     {
         _profileId = profileId;
-        _symbol.Text = instrument?.Symbol ?? "Elegir…";
+        _symbol.Text = instrument?.Symbol ?? "Choose…";
         // el ancho mínimo se fija al cambiar de instrumento (no en cada tick)
         _price.MinWidth = Math.Max(60, 9 * Math.Max(6, (instrument?.FormatPrice(instrument.TickSize * 10_000_000) ?? "").Length));
         _exchange.Text = _svc.Connections.Find(profileId)?.Name ?? instrument?.Exchange ?? "";
@@ -164,14 +164,14 @@ public sealed class InstrumentPicker : Button
         catch (Exception ex)
         {
             CrashLog.Write(ex);
-            _hint.Text = "No se pudo cargar la lista: " + ex.Message;
+            _hint.Text = "Could not load the list: " + ex.Message;
         }
     }
 
     private void BuildConnectionTabs()
     {
         _connTabs.Children.Clear();
-        var fav = new ToggleButton { Content = Ui.H(5, Ui.Icon(MaterialIconKind.Star, 14), new TextBlock { Text = "Favoritos" }), IsChecked = _favoritesOnly }.Classes("seg");
+        var fav = new ToggleButton { Content = Ui.H(5, Ui.Icon(MaterialIconKind.Star, 14), new TextBlock { Text = "Favorites" }), IsChecked = _favoritesOnly }.Classes("seg");
         fav.Click += async (_, _) =>
         {
             _favoritesOnly = fav.IsChecked == true;
@@ -196,7 +196,7 @@ public sealed class InstrumentPicker : Button
         if (!_favoritesOnly) _profileId = profileId;
         foreach (var b in _connTabs.Children.OfType<ToggleButton>())
             b.IsChecked = b.Tag == null ? _favoritesOnly : (!_favoritesOnly && Equals(b.Tag, _profileId));
-        _hint.Text = "Cargando instrumentos…";
+        _hint.Text = "Loading instruments…";
         var rows = new List<Row>();
         var profiles = _favoritesOnly
             ? _svc.Connections.Enabled.Where(p => p.HasMarketData && _svc.Settings.Favorites.Any(f => f.StartsWith(p.Id + ":", StringComparison.Ordinal)))
@@ -242,7 +242,7 @@ public sealed class InstrumentPicker : Button
             }
             catch (Exception ex)
             {
-                _hint.Text = $"No se pudieron cargar los instrumentos de {p.Name}: {ex.Message}";
+                _hint.Text = $"Could not load instruments from {p.Name}: {ex.Message}";
             }
         }
 
@@ -259,7 +259,7 @@ public sealed class InstrumentPicker : Button
         if (quotes.Count < 2) return;
         foreach (var q in new[] { "" }.Concat(quotes))
         {
-            var b = new ToggleButton { Content = q == "" ? "Todas" : q, IsChecked = q == _filterQuote }.Classes("seg");
+            var b = new ToggleButton { Content = q == "" ? "All" : q, IsChecked = q == _filterQuote }.Classes("seg");
             b.Click += (_, _) =>
             {
                 _filterQuote = q;
@@ -282,7 +282,7 @@ public sealed class InstrumentPicker : Button
             filtered = filtered.OrderByDescending(r => r.Instrument.Symbol.StartsWith(q, StringComparison.OrdinalIgnoreCase)).ThenByDescending(r => r.Stats?.QuoteVolume ?? 0).ToList();
         _list.ItemsSource = filtered;
         _list.SelectedIndex = filtered.Count > 0 ? 0 : -1;
-        _hint.Text = $"{filtered.Count} instrumentos · Enter abre aquí · ⌘Enter en una pestaña nueva · ★ marca favoritos";
+        _hint.Text = $"{filtered.Count} instruments · Enter opens here · ⌘Enter opens a new tab · ★ marks favorites";
     }
 
     private Control BuildRow(Row r)

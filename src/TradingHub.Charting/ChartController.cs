@@ -756,7 +756,7 @@ public sealed class ChartController
             }
             catch (Exception ex)
             {
-                this.LogError($"Error en el mouse de {ind.Name}", ex);
+                this.LogError($"Mouse error in {ind.Name}", ex);
             }
         }
 
@@ -797,7 +797,7 @@ public sealed class ChartController
             }
             catch (Exception ex)
             {
-                this.LogError($"Error de teclado en {s.Indicator.Name}", ex);
+                this.LogError($"Keyboard error in {s.Indicator.Name}", ex);
             }
         }
 

@@ -61,7 +61,7 @@ internal static partial class Workspace
     /// <summary>Guarda cómo se ve el gráfico (sin el instrumento ni el período) como plantilla.</summary>
     public static void SaveChartTemplate(ChartTab tab, string name)
     {
-        var m = tab.Model ?? throw new InvalidOperationException("El gráfico todavía no cargó");
+        var m = tab.Model ?? throw new InvalidOperationException("Chart is not loaded yet");
         var dto = new ChartTemplateDto { Name = name.Trim(), Settings = JObject.FromObject(m.Settings, Serializer), BarWidth = m.Viewport.BarWidth };
         dto.Settings.Remove(nameof(ChartSettings.TimeZoneId));
         foreach (var slot in m.Indicators) dto.Indicators.Add(ToIndicatorDto(slot));

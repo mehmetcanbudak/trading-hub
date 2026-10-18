@@ -1,41 +1,148 @@
-[← English documentation](README.md)
+[← Documentation index](README.md)
 
-# Getting started
+# First steps
+
+A tour of the main window. Start with [Installation](instalacion.md) if the app is not installed yet.
 
 ## First launch
 
-Trading Hub starts with a **simulated account**, so using it for the first time does not send live orders to a broker. You can open simulated instruments without adding credentials. Real trading requires an explicit connection and permission to send real orders.
+Trading opens with a five-minute `SIM-BTC` footprint chart, Big Trades and Delta indicators. This comes from **Simulator**, an offline practice market.
 
-## Main navigation
+Orders initially use the **simulated account**. No real money is involved until you explicitly enable it for an appropriate profile in [Connections](conexiones.md).
 
-- **Trading**: chart workspace, order book, tape, drawings, and manual trading.
-- **Account**: balances, open positions, orders, executions, trades, and statistics.
-- **Backtesting**: write or select a C# strategy, test it, optimize it, and create reports.
-- **Live**: supervise running strategies, portfolios, market conditions, and risk proposals.
-- **Data**: inspect local historical data, download supported history, and import CSV files.
-- **Connections**: configure the simulated feed, exchanges, brokers, and historical providers.
-- **Settings**: appearance, time zone, order confirmation, hotkeys, recordings, and sleep behavior.
+| Built-in connection | Initially | Provides |
+|---|---|---|
+| Simulator | Enabled | Simulated SIM-BTC, SIM-ETH, SIM-ES and SIM-NQ. |
+| Binance Futures | Enabled | Public crypto data without an account. |
+| Binance Spot | Enabled | Public crypto data without an account. |
+| Bybit | Enabled | Public USDT linear-perpetual data. |
+| Rithmic | Disabled | CME futures; provider credentials required. |
 
-On macOS, shortcuts use the Command key. For example, **Command-1** opens Trading, **Command-2** Backtesting, **Command-3** Data, **Command-4** Connections, and **Command-5** Account. See Settings for other shortcuts.
+## Main window
+
+### Sections in the title bar
+
+Navigation is integrated into the macOS title bar next to the window controls.
+
+| Section | Shortcut | Purpose |
+|---|---|---|
+| Trading | ⌘1 | Charts, DOM, tape and Chart Trader. |
+| Accounts | ⌘5 | Balance, positions, orders, fills, trades and statistics. |
+| Backtesting | ⌘2 | C# strategies, backtests, optimization and Claude chat. |
+| Live | ⌘7 | Running strategies, portfolios and **Stop all**. |
+| Data | ⌘3 | Stored history, downloads, imports, Databento and replay. |
+| Connections | ⌘4 | Markets, brokers and accounts. |
+| Settings | ⌘, | Appearance, time zone, hotkeys, sleep prevention and folders. |
+
+Below 1360 pixels wide, navigation shows icons with names in tooltips. Drag the title bar to move the window; double-click to maximize.
+
+### Right side of the title bar
+
+- The simulated account's daily PnL and balance; click to open Accounts.
+- A sun/moon control for light and dark appearance.
+- The active chart's connection-status pill. Click for **Reconnect now** and **Connections…**.
+
+| Status | Meaning |
+|---|---|
+| Connected | Data is arriving. |
+| Connecting / reconnecting, attempt N | Establishing the connection; missing data is backfilled after interruptions where the provider supports it. |
+| No data for N minutes | Connected but no recent events have arrived. |
+| Market closed; opening day/time | Futures are outside trading hours, not necessarily disconnected. |
+| Error / disconnected | Check the profile in Connections. |
+
+After system sleep, the app reconnects and attempts to fill the missing history.
+
+### Status bar
+
+The bottom-left area shows the latest order, history, alert or error notice. Hover to read the full message. On the right is the active chart summary—trade/bar counts and starting time—or history-loading progress.
+
+## Trading section
+
+![Trading with charts, Chart Trader, DOM and tape](img/trading.png)
+
+1. **Chart toolbar:** instrument, history, period, style, indicators, footprint, colors, strategies, templates, layout, panels, detach and new tab. See [Charts](graficos.md).
+2. **Tabs:** visible when more than one exists; each holds one to six charts.
+3. **Chart:** drawing tools on the left and its own collapsible Chart Trader on the right.
+4. **Right panel:** Chart Trader, DOM and tape. Drag the edge for width and dividers for height. Each section can be hidden or detached.
+5. **Replay controls:** appear below when the active chart is a replay. See [Data](datos.md#replay).
+
+For orders, see [Trading](operar.md).
+
+## Simulated account
+
+- Starts at 10,000. Change this in **Accounts → Initial balance**.
+- Works with Simulator or real market data from supported connections.
+- Market orders fill at the best available bid/ask. Limits fill when price trades through, or when subsequent volume at the limit exceeds the queue ahead at submission. Stops trigger on a trade at the trigger price and then fill at market.
+- Recorded balance/history survives app restarts. Use **Reset simulated account** in Accounts to start over; close positions and cancel orders first.
 
 ## Open a chart
 
-1. Select the Trading section.
-2. Open the instrument picker and choose the simulated feed or a configured exchange.
-3. Choose a symbol, timeframe, and chart style.
-4. Switch among candles, footprint, and other chart representations as needed.
-5. Open Chart Trader or DOM only after confirming the selected account.
+1. Click the instrument selector, the first chart-toolbar button, or press ⌘K.
+2. Choose a connection, or **Favorites**.
+3. Search for BTC, ETH, NQ, etc.; move through results with arrow keys.
+4. Enter or double-click opens in the active chart; ⌘Enter opens a new tab.
+5. Use a row's star to mark it as a favorite.
 
-A newly opened chart can load locally recorded ticks first, then request additional history from its connection. Opening more tabs or selecting a multi-chart layout does not automatically enable real orders.
+Opening a chart loads the connection's configured recent history. Use the history menu for more. **⌘T** or **+** creates a tab copied from the active chart unless a default new-tab template is configured. **⌘W** closes the active chart; at least one tab remains.
 
-## Practice before trading
+Add account-backed markets in [Connections](conexiones.md).
 
-In Chart Trader, ensure the selected account is **Simulated**. Try a market or limit order, inspect order history and the position, add a stop and a target, and close the simulated position. Check the Account page and learn how order cancellation and reversal work.
+## macOS application menus
 
-## macOS menu bar behavior
+| Menu | Actions |
+|---|---|
+| File | New chart (⌘T), Close chart (⌘W), Find instrument (⌘K), Save workspace (⌘S), Open data folder. |
+| Chart | Indicators (⌘I), Edit footprint (⇧⌘F), Auto scale (⌥⌘A), Latest price (⌘End), Layout, Detach chart (⇧⌘D), Panels, DOM settings. |
+| Go | All seven sections and their shortcuts. |
+| Code | Indicator editor (⇧⌘E), Open indicators folder, Recompile indicators, Strategy backtesting, Live strategies, Open strategies folder. |
 
-By default, closing the application window can keep Trading Hub running in the menu bar, including live strategy activity. To stop the program completely, use **Command-Q** or the menu-bar Quit action.
+The workspace—tabs, charts, layouts and panels—is also saved automatically when closing and restored at startup.
+
+## Menu-bar icon
+
+The macOS menu-bar icon offers:
+
+- active-chart connection status;
+- live strategies with size, position and PnL;
+- open positions;
+- **Live panel**, **Open Trading Hub**, and **Quit Trading Hub**.
+
+The live panel updates strategies and positions in real time and offers the same open/quit actions.
+
+**Closing is not quitting.** By default the red window button hides the window while strategies keep running. This is controlled by **Settings → Live strategies → Keep running in menu bar when window closes**. Disabling it removes the icon and makes window closure quit the application. Use **⌘Q** or **Quit Trading Hub** to exit completely. Clicking the Dock icon reopens a hidden window.
+
+## Keyboard shortcuts
+
+**Settings → Keyboard shortcuts** contains configurable shortcuts for Trading and detached charts. Click a binding and press the desired keys; Esc cancels, Delete clears, and **Restore defaults** restores the original bindings.
+
+| Default | Action |
+|---|---|
+| ⌥1–⌥6 | 1-minute, 5-minute, 15-minute, 1-hour, 4-hour and daily periods. |
+| ⌥H | Draw a horizontal line. |
+| ⌥T | Toggle the chart's Chart Trader. |
+| ⌃Tab / ⌃⇧Tab | Next / previous tab. |
+
+Order actions—buy, sell, close, reverse, cancel, partial exits, breakeven and others—are intentionally **unassigned**. See [Trading shortcuts](operar.md#trading-shortcuts).
+
+| Chart key | Action |
+|---|---|
+| Esc | Return to cursor, cancel an order drag or clear a highlighted trade. |
+| Delete / Backspace | Delete selected drawings. |
+| Home / End | Return to the latest data with automatic scaling. |
+| ← / → | Pan the chart. |
+| + / − | Increase / decrease bar width. |
+
+## Settings worth reviewing
+
+- **General:** theme, chart time zone and alert sounds.
+- **Trading:** confirm real orders; see [Safety](operar.md#safety).
+- **Live strategies:** menu-bar behavior, startup resumption and automatic mini/micro contract selection.
+- **Keep awake:** prevent sleep while strategies run; optional closed-lid behavior.
+- **Data:** record incoming live data and open local folders.
 
 ## Next steps
 
-Review [Connections](conexiones.md), [Charts](graficos.md), and [Trading](operar.md). For automated experiments, read [Strategies](estrategias.md) and [Backtesting](backtesting.md). For real account operations, read the [risk safeguards](operar.md#real-money-safeguards).
+- [Connections](conexiones.md): markets and brokers.
+- [Charts](graficos.md): periods, footprint, drawings, indicators and templates.
+- [Trading](operar.md): orders, brackets and account history.
+- [Data](datos.md): stored history, downloads, imports, Databento and replay.

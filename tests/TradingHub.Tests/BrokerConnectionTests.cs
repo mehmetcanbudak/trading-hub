@@ -126,7 +126,7 @@ public class BrokerConnectionTests
         var (ok, msg) = await feed.TestAsync(CancellationToken.None);
         Assert.True(ok);
         Assert.Contains("demo", msg);
-        Assert.Contains("1 cuenta", msg);
+        Assert.Contains("1 account", msg);
         Assert.Equal(1, fake.Logins); // un login: REST y los sockets usan el mismo token
         Assert.Equal("MD1", fake.MdToken); // el socket de datos usa el token de datos
 

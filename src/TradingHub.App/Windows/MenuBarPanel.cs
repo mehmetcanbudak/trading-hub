@@ -16,7 +16,7 @@ namespace TradingHub.App.Windows;
 /// </summary>
 internal sealed class MenuBarPanel : Window
 {
-    private static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-AR");
+    private static readonly CultureInfo Es = CultureInfo.GetCultureInfo("en-US");
     private readonly AppServices _svc;
     private readonly MainWindow _main;
     private readonly TextBlock _status = new() { Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -41,7 +41,7 @@ internal sealed class MenuBarPanel : Window
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
 
         var logo = new Border { Width = 30, Height = 30, CornerRadius = new CornerRadius(8), ClipToBounds = true, Child = new Image { Source = AppIcon.Bitmap, Width = 30, Height = 30 } };
-        var open = Ui.Button("Abrir Trading Hub", MaterialIconKind.OpenInNew, openMain, "primary");
+        var open = Ui.Button("Open Trading Hub", MaterialIconKind.OpenInNew, openMain, "primary");
         var head = new DockPanel();
         DockPanel.SetDock(open, Dock.Right);
         open.Margin = new Thickness(10, 0, 0, 0);
@@ -53,16 +53,16 @@ internal sealed class MenuBarPanel : Window
         head.Children.Add(logo);
         head.Children.Add(Ui.V(1, new TextBlock { Text = TradingHub.Common.Product.Name, FontWeight = FontWeight.SemiBold, FontSize = 14 }, _status));
 
-        var quit = Ui.Button("Salir de Trading Hub", MaterialIconKind.Power, MenuBar.Quit, "ghost");
-        ToolTip.SetTip(quit, "Cierra Trading Hub del todo: detiene las estrategias en vivo y los agentes (las que corrían se reanudan al abrir, si así está en Ajustes)");
+        var quit = Ui.Button("Quit Trading Hub", MaterialIconKind.Power, MenuBar.Quit, "ghost");
+        ToolTip.SetTip(quit, "Completely quits Trading Hub, stopping live strategies and agents (previously running strategies resume on startup if enabled in Settings)");
         var foot = new DockPanel();
         DockPanel.SetDock(quit, Dock.Right);
         foot.Children.Add(quit);
-        foot.Children.Add(new TextBlock { Text = "Cerrar la ventana deja a Trading Hub corriendo acá arriba.", Classes = { "faint", "small" }, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
+        foot.Children.Add(new TextBlock { Text = "Closing the window keeps Trading Hub running in the menu bar.", Classes = { "faint", "small" }, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
 
         var body = new StackPanel { Spacing = 14 };
         body.Children.Add(Section(_strategiesTitle, _strategies));
-        body.Children.Add(Section(Ui.H3("Posiciones abiertas"), _positions));
+        body.Children.Add(Section(Ui.H3("Open positions"), _positions));
 
         var root = new DockPanel { Margin = new Thickness(16, 14, 16, 12) };
         DockPanel.SetDock(head, Dock.Top);
@@ -112,7 +112,7 @@ internal sealed class MenuBarPanel : Window
     private static IBrush MoneyBrush(decimal v) => v > 0 ? Ui.Up : v < 0 ? Ui.Down : Ui.Text1;
 
     private static string Side(decimal position, string avg, string symbol) =>
-        position == 0 ? "plana" : $"{(position > 0 ? "largo" : "corto")} {Math.Abs(position).ToString("0.####", Es)} {symbol} @ {avg}";
+        position == 0 ? "flat" : $"{(position > 0 ? "long" : "short")} {Math.Abs(position).ToString("0.####", Es)} {symbol} @ {avg}";
 
     /// <summary>Vuelve a leer todo (una vez por segundo mientras el panel está abierto).</summary>
     public void Refresh()
@@ -122,7 +122,7 @@ internal sealed class MenuBarPanel : Window
             RefreshStrategies();
             RefreshPositions();
             var (day, balance) = _svc.AccountCenter.SimSummary();
-            _status.Text = $"{_main.ConnectionSummary} · simulada {Money(day)} hoy · {balance.ToString("N2", Es)}";
+            _status.Text = $"{_main.ConnectionSummary} · simulated {Money(day)} today · {balance.ToString("N2", Es)}";
         }
         catch (Exception ex)
         {
@@ -133,11 +133,11 @@ internal sealed class MenuBarPanel : Window
     private void RefreshStrategies()
     {
         var running = _svc.Live.Entries(includeStopped: false).Where(e => e.Running).ToList();
-        _strategiesTitle.Text = $"ESTRATEGIAS EN VIVO ({running.Count})";
+        _strategiesTitle.Text = $"LIVE STRATEGIES ({running.Count})";
         _strategies.Children.Clear();
         if (running.Count == 0)
         {
-            _strategies.Children.Add(Empty("No hay estrategias en vivo corriendo."));
+            _strategies.Children.Add(Empty("No live strategies running."));
             return;
         }
 
@@ -152,18 +152,18 @@ internal sealed class MenuBarPanel : Window
             top.Children.Add(state);
             top.Children.Add(name);
             var plan = _svc.Live.PlanOf(e);
-            var where = new TextBlock { Text = $"{inst.Symbol} · {e.Info.Account} · {e.SourceLabel}{(e.Info.IsReal ? " · REAL" : "")}", Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis };
+            var where = new TextBlock { Text = $"{inst.Symbol} · {TradingHub.Common.EnglishText.Of(e.Info.Account)} · {e.SourceLabel}{(e.Info.IsReal ? " · REAL" : "")}", Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis };
             // cuántos contratos y de cuál manda cada orden (el micro, resaltado)
             var contract = new TextBlock
             {
-                Text = plan.Units <= 0 ? "Tamaño en cero: no abre operaciones" : $"Cada orden: {plan.Text}{(plan.Detail.Length > 0 ? $" ({plan.Detail})" : "")}",
+                Text = plan.Units <= 0 ? "Size is zero: no new entries" : $"Each order: {plan.Text}{(plan.Detail.Length > 0 ? $" ({plan.Detail})" : "")}",
                 FontSize = 11.5,
                 Foreground = plan.Micro ? Ui.Accent : Ui.Text1,
                 FontWeight = plan.Micro ? FontWeight.SemiBold : FontWeight.Normal,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             };
             var pos = new TextBlock { Text = Side(e.Ledger.Position, inst.FormatPrice(e.Ledger.AveragePrice), e.Ledger.OpenSymbol ?? plan.Symbol), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-            var pnl = new TextBlock { Text = $"abierta {Money(e.OpenPnL)} · hoy {Money(r.TodayPnL)}", FontSize = 12, Foreground = MoneyBrush(e.OpenPnL + r.TodayPnL), VerticalAlignment = VerticalAlignment.Center };
+            var pnl = new TextBlock { Text = $"open {Money(e.OpenPnL)} · today {Money(r.TodayPnL)}", FontSize = 12, Foreground = MoneyBrush(e.OpenPnL + r.TodayPnL), VerticalAlignment = VerticalAlignment.Center };
             var bottom = new DockPanel();
             DockPanel.SetDock(pnl, Dock.Right);
             bottom.Children.Add(pnl);
@@ -213,7 +213,7 @@ internal sealed class MenuBarPanel : Window
             }
         }
 
-        if (count == 0) _positions.Children.Add(Empty("Sin posiciones abiertas."));
+        if (count == 0) _positions.Children.Add(Empty("No open positions."));
     }
 
 }

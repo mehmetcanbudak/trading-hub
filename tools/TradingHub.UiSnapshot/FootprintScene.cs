@@ -31,7 +31,7 @@ internal static class FootprintScene
         model.Settings.Style = ChartStyle.Footprint;
         model.Settings.Layout = new FootprintLayout
         {
-            Name = "Colores de texto",
+            Name = "Text colors",
             Columns =
             {
                 new() { Kind = FootprintColumnKind.Candle },
@@ -80,13 +80,13 @@ internal static class FootprintScene
         list.SelectedIndex = 3;
         pump(1);
         var labels = editor.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
-        Check(labels.Contains("Texto del delta positivo") && labels.Contains("Texto del delta negativo") && labels.Contains("Color del texto"), "la escalera de delta tiene color del texto, delta positivo y negativo");
-        Check(!labels.Contains("Texto del bid") && !labels.Contains("Dirección de las barras"), "no muestra opciones que no le tocan");
+        Check(labels.Contains("Positive delta text") && labels.Contains("Negative delta text") && labels.Contains("Text color"), "la escalera de delta tiene color del texto, delta positivo y negativo");
+        Check(!labels.Contains("Bid text") && !labels.Contains("Bar direction"), "no muestra opciones que no le tocan");
         editor.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "footprint_editor_delta.png"));
         list.SelectedIndex = 1;
         pump(1);
         labels = editor.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
-        Check(labels.Contains("Texto del bid") && !labels.Contains("Texto del ask"), "la escalera de bid tiene su color de texto");
+        Check(labels.Contains("Bid text") && !labels.Contains("Ask text"), "la escalera de bid tiene su color de texto");
         editor.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "footprint_editor_bid.png"));
         editor.Close();
 

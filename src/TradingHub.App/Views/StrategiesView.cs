@@ -53,10 +53,10 @@ internal sealed partial class StrategiesView : UserControl, IPage
             ("code", "Code", (string?)"Edit strategy in C#"),
             ("backtest", "Backtest", (string?)"Test against recorded tick-level history"),
             ("optimize", "Optimization", (string?)"Test combinations of parameters"),
-            ("wfo", "Walk-forward", (string?)"Optimizar y validar fuera de muestra, ventana por ventana"),
+            ("wfo", "Walk-forward", (string?)"Optimize and validate out of sample, window by window"),
             ("history", "History", (string?)"Saved runs for this strategy"),
             ("portfolio", "Portfolio", (string?)"Test portfolio: combine strategy backtests and measure correlation"),
-            ("reports", "Reportes", (string?)"Informes profesionales de las estrategias y portafolios"),
+            ("reports", "Reports", (string?)"Detailed strategy and portfolio reports"),
         });
         _tabs.SelectionChanged += ShowTab;
 
@@ -137,7 +137,7 @@ internal sealed partial class StrategiesView : UserControl, IPage
         var favs = _svc.Settings.FavoriteStrategies;
         if (favs.RemoveAll(x => x.Equals(f.FileName, StringComparison.OrdinalIgnoreCase)) == 0) favs.Add(f.FileName);
         _svc.Settings.Save();
-        _status(IsFavorite(f) ? $"{f.DisplayName} quedó en favoritos" : $"{f.DisplayName} salió de favoritos");
+        _status(IsFavorite(f) ? $"{f.DisplayName} added to favorites" : $"{f.DisplayName} removed from favorites");
     }
 
     private Control StrategyList()
@@ -160,11 +160,11 @@ internal sealed partial class StrategiesView : UserControl, IPage
                 return h;
             }
 
-            list.Children.Add(Section("Favoritos"));
+            list.Children.Add(Section("Favorites"));
             if (favorites.Count == 0)
                 list.Children.Add(new TextBlock
                 {
-                    Text = q.Length > 0 ? "Ninguna favorita con ese nombre." : "Star a strategy to pin it here.",
+                    Text = q.Length > 0 ? "No favorite matches this name." : "Star a strategy to pin it here.",
                     Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 2, 4, 8),
                 });
             foreach (var f in favorites) list.Children.Add(StrategyRow(f, Fill));
@@ -213,7 +213,7 @@ internal sealed partial class StrategiesView : UserControl, IPage
             Content = Ui.Icon(fav ? MaterialIconKind.Star : MaterialIconKind.StarOutline, 18, fav ? Ui.Accent : Ui.Text2),
             Classes = { "ghost" }, Padding = new Thickness(6), VerticalAlignment = VerticalAlignment.Center,
         };
-        ToolTip.SetTip(star, fav ? "Sacar de favoritos" : "Agregar a favoritos");
+        ToolTip.SetTip(star, fav ? "Remove from favorites" : "Add to favorites");
         star.Click += (_, _) =>
         {
             ToggleFavorite(f);
@@ -251,7 +251,7 @@ internal sealed partial class StrategiesView : UserControl, IPage
         var full = Path.GetFullPath(path);
         var file = _catalog.Files.FirstOrDefault(f => string.Equals(Path.GetFullPath(f.Path), full, StringComparison.OrdinalIgnoreCase));
         if (file != null) await SelectAsync(file);
-        else _status($"No encontré {Path.GetFileName(path)} entre las estrategias");
+        else _status($"Could not find {Path.GetFileName(path)} in strategies");
     }
 
     private async Task SelectAsync(StrategyFile file)
@@ -272,20 +272,20 @@ internal sealed partial class StrategiesView : UserControl, IPage
         File.WriteAllText(_current.Path, _editor.Text);
         _editor.IsDirty = false;
         UpdateFileInfo();
-        _status($"Guardado {Path.GetFileName(_current.Path)}");
+        _status($"Saved {Path.GetFileName(_current.Path)}");
     }
 
     private void UpdateFileInfo()
     {
         if (_current == null) return;
-        _fileInfo.Text = $"{Path.GetFileName(_current.Path)}{(_editor.IsDirty ? " · sin guardar" : "")}";
+        _fileInfo.Text = $"{Path.GetFileName(_current.Path)}{(_editor.IsDirty ? " · unsaved" : "")}";
     }
 
     private async Task<bool> CompileAsync(bool silent = false)
     {
         if (_current == null) return false;
         if (_editor.IsDirty) Save();
-        SetCompileState(null, "Compilando…");
+        SetCompileState(null, "Compiling…");
         var file = _current;
         var res = await Task.Run(() => _catalog.Compile(file, force: !silent));
         if (!ReferenceEquals(file, _current)) return false;
@@ -293,18 +293,18 @@ internal sealed partial class StrategiesView : UserControl, IPage
         if (res.Success && file.Type != null)
         {
             _compiledSource = File.ReadAllText(file.Path);
-            SetCompileState(true, $"Compilada · {res.Elapsed.TotalMilliseconds:0} ms");
+            SetCompileState(true, $"Compiled · {res.Elapsed.TotalMilliseconds:0} ms");
             _strategyName.Text = file.DisplayName;
             LoadState();
             BuildParameterForm();
             RefreshRanges();
-            if (!silent) _status($"{file.DisplayName} compilada sin errores");
+            if (!silent) _status($"{file.DisplayName} compiled without errors");
             return true;
         }
 
         int errors = res.Diagnostics.Count(d => d.Severity == "error");
-        SetCompileState(false, $"{errors} error{(errors == 1 ? "" : "es")}");
-        if (!silent) _status($"La estrategia tiene {errors} error(es): revisalos en Código");
+        SetCompileState(false, $"{errors} error{(errors == 1 ? "" : "s")}");
+        if (!silent) _status($"Strategy has {errors} error(s): review them in Code");
         return false;
     }
 
@@ -345,7 +345,7 @@ internal sealed partial class StrategiesView : UserControl, IPage
         var delete = Ui.IconButton(MaterialIconKind.DeleteOutline, "Delete this strategy", async () =>
         {
             if (_current == null || TopLevel.GetTopLevel(this) is not Window w) return;
-            if (!await ConfirmDialog.ShowAsync(w, "Delete strategy", $"Se borra el archivo {Path.GetFileName(_current.Path)}. El historial de backtests se conserva.", "Delete", danger: true)) return;
+            if (!await ConfirmDialog.ShowAsync(w, "Delete strategy", $"Deletes file {Path.GetFileName(_current.Path)}. Backtest history is retained.", "Delete", danger: true)) return;
             _catalog.Delete(_current);
             _current = null;
             var next = _catalog.Files.FirstOrDefault();
@@ -387,15 +387,15 @@ internal sealed partial class StrategiesView : UserControl, IPage
             Width = 520,
             Content = Ui.V(12,
                 Ui.H2("Quick reference"),
-                Section("Ciclo", "OnInit()  → crear indicadores\nOnBar(Bar bar)  → al cerrar cada vela\nOnTick(Trade t)  → cada operación (más lento)\nOnOrderFilled(orden) · OnSessionStart(día) · OnStop()"),
-                Section("Data", "Bars[0] (última cerrada), Bars[1]… · Bar.Open/High/Low/Close/Volume\nBar.BuyVolume / SellVolume / Delta / MaxDelta / MinDelta / Trades / PocPrice\nBar.Levels (con UseFootprint = true) · Price · Time · LocalTime · TickSize"),
-                Section("Orders", "EnterLong() · EnterShort() · Buy(cant) · Sell(cant)\nBuyLimit(precio) · SellLimit(precio) · BuyStop(precio) · SellStop(precio)\nClosePosition() · CancelAll() · Modify(orden, precio)\nStopLossTicks · TakeProfitTicks · TrailingStopTicks (automáticos, OCO)"),
-                Section("Position", "Position (>0 largo, <0 corto) · IsFlat · IsLong · IsShort\nAveragePrice · OpenPnL · NetProfit · ActiveOrders"),
-                Section("Indicators", "Sma(n) · Ema(n) · Rsi(n) · Atr(n) · Vwap() · Bollinger(n, k)\nMacd(12,26,9) · Highest(n) · Lowest(n) · StdDev(n) · CumulativeDelta()\nCustom(\"nombre\", bars => …)   ·   serie[0] actual, serie[1] anterior, .IsReady"),
-                Section("Ayudas", "CrossAbove(a, b) · CrossBelow(a, b) · Ticks(n) · Round(precio)\nTimeBetween(desde, hasta) · Log(\"texto\")"),
-                Section("Chart drawings", "DrawBox(id, desde, precio1, hasta, precio2, color, fillOpacity, texto)\nDrawLine(id, t1, p1, t2, p2, color) · DrawHorizontalLine(id, precio, desde, color, texto)\nDrawArrowUp / DrawArrowDown(id, tiempo, precio, color, texto) · DrawMarker · DrawText\nPlot(\"nombre\", valor, color) → línea vela a vela · RemoveDrawing(id) · ClearDrawings()\nMismo id = reemplaza (estirar el rango del día). Color: \"#RRGGBB\" o \"verde\", \"rojo\"…"),
-                Section("Market context", "MarketTrend (0 rango … 1 tendencia, 24 h) · Regime (Range / Mixed / Trend)\nMarketVolatility (% por hora, 24 h) · VolatilityRank (percentil del último mes)\nFiltro sin código: RegimeFilter · MinVolatilityRank · MaxVolatilityRank (parámetros)"),
-                Section("Parameters", "[Parameter(\"Nombre\")] en una propiedad pública para editarla\n[Optimize(mín, máx, paso)] para incluirla en la optimización")),
+                Section("Lifecycle", "OnInit() → create indicators\nOnBar(Bar bar) → on bar close\nOnTick(Trade trade) → every trade (slower)\nOnOrderFilled(order) · OnSessionStart(session) · OnStop()"),
+                Section("Data", "Bars[0] = latest closed bar, Bars[1] = previous\nBar.Open/High/Low/Close/Volume · BuyVolume/SellVolume/Delta\nBar.MaxDelta/MinDelta/Trades/PocPrice\nBar.Levels requires UseFootprint = true\nPrice · Time · LocalTime · TickSize"),
+                Section("Orders", "EnterLong() · EnterShort() · Buy(quantity) · Sell(quantity)\nBuyLimit(price) · SellLimit(price) · BuyStop(price) · SellStop(price)\nClosePosition() · CancelAll() · Modify(order, price)\nStopLossTicks · TakeProfitTicks · TrailingStopTicks (automatic OCO)"),
+                Section("Position", "Position (>0 long, <0 short) · IsFlat · IsLong · IsShort\nAveragePrice · OpenPnL · NetProfit · ActiveOrders"),
+                Section("Indicators", "Sma(n) · Ema(n) · Rsi(n) · Atr(n) · Vwap() · Bollinger(n, k)\nMacd(12,26,9) · Highest(n) · Lowest(n) · StdDev(n) · CumulativeDelta()\nCustom(\"Name\", bars => value)\nseries[0] = current, series[1] = previous · .IsReady"),
+                Section("Helpers", "CrossAbove(a, b) · CrossBelow(a, b) · Ticks(n) · Round(price)\nTimeBetween(from, to) · Log(\"text\")"),
+                Section("Chart drawings", "DrawBox(id, from, price1, to, price2, color, fillOpacity, text)\nDrawLine(id, t1, p1, t2, p2, color)\nDrawHorizontalLine(id, price, from, color, text)\nDrawArrowUp/DrawArrowDown(id, time, price, color, text)\nDrawMarker · DrawText · Plot(\"Name\", value, color)\nRemoveDrawing(id) · ClearDrawings()\nReusing an ID replaces the drawing. Colors: \"#RRGGBB\", \"green\", \"red\"…"),
+                Section("Market context", "MarketTrend (0 range … 1 trend, 24 h) · Regime (Range/Mixed/Trend)\nMarketVolatility (% per hour, 24 h)\nVolatilityRank (percentile over the last month)\nBuilt-in filters: RegimeFilter · MinVolatilityRank · MaxVolatilityRank"),
+                Section("Parameters", "[Parameter(\"Name\")] on a public editable property\n[Optimize(min, max, step)] includes it in optimization")),
         };
     }
 
@@ -510,7 +510,7 @@ internal sealed class NewStrategyDialog : Window
             Children =
             {
                 new TextBlock { Text = "New strategy", Classes = { "h2" } },
-                Ui.Field("Nombre", name),
+                Ui.Field("Name", name),
                 Ui.Field("Start from", list),
                 Ui.H(8, cancel, ok).Also(p => p.HorizontalAlignment = HorizontalAlignment.Right),
             },

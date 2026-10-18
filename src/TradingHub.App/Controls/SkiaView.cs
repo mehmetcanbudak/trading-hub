@@ -44,7 +44,7 @@ public abstract class SkiaView : Control
         catch (Exception ex)
         {
             using var p = new SKPaint { Color = SKColors.OrangeRed, IsAntialias = true };
-            canvas.DrawText("Error al dibujar: " + ex.Message, 10, 20, p);
+            canvas.DrawText("Rendering error: " + ex.Message, 10, 20, p);
             CrashLog.Write(ex);
         }
 

@@ -124,14 +124,14 @@ public sealed partial class TradingView : UserControl
 
     internal static readonly (PaneLayout Layout, string Label, string Short)[] Layouts =
     {
-        (PaneLayout.One, "Un gráfico", "1"),
-        (PaneLayout.TwoColumns, "Dos, uno al lado del otro", "2 ‖"),
-        (PaneLayout.TwoRows, "Dos, uno arriba del otro", "2 ═"),
-        (PaneLayout.ThreeColumns, "Tres en columnas", "3 ‖"),
-        (PaneLayout.OneLeftTwoRight, "Uno grande y dos a la derecha", "1+2"),
-        (PaneLayout.OneTopTwoBottom, "Uno grande arriba y dos abajo", "1+2 ═"),
-        (PaneLayout.Four, "Cuatro (2 × 2)", "4"),
-        (PaneLayout.Six, "Seis (3 × 2)", "6"),
+        (PaneLayout.One, "One chart", "1"),
+        (PaneLayout.TwoColumns, "Two side by side", "2 ‖"),
+        (PaneLayout.TwoRows, "Two stacked", "2 ═"),
+        (PaneLayout.ThreeColumns, "Three columns", "3 ‖"),
+        (PaneLayout.OneLeftTwoRight, "One large and two on the right", "1+2"),
+        (PaneLayout.OneTopTwoBottom, "One large above, two below", "1+2 ═"),
+        (PaneLayout.Four, "Four (2 × 2)", "4"),
+        (PaneLayout.Six, "Six (3 × 2)", "6"),
     };
 
     public TradingView(AppServices svc, Action<string> status)
@@ -139,10 +139,10 @@ public sealed partial class TradingView : UserControl
         _svc = svc;
         _status = status;
         _layoutChoice = new ChoiceButton<PaneLayout>(MaterialIconKind.ViewGridOutline, Layouts.Select(l => (l.Layout, l.Label)),
-            "Diseño: cuántos gráficos ver a la vez en esta pestaña", l => Layouts.First(x => x.Layout == l).Short);
+            "Layout: charts visible simultaneously in this tab", l => Layouts.First(x => x.Layout == l).Short);
         _layoutChoice.Changed += l => _ = SetLayoutAsync(l);
-        var popOut = Ui.IconButton(MaterialIconKind.OpenInNew, "Sacar el gráfico a una ventana aparte (⇧⌘D)", () => DetachActive());
-        var newTab = Ui.IconButton(MaterialIconKind.Plus, "Nueva pestaña (⌘T)", () => _ = NewChartAsync());
+        var popOut = Ui.IconButton(MaterialIconKind.OpenInNew, "Detach chart into a window (⇧⌘D)", () => DetachActive());
+        var newTab = Ui.IconButton(MaterialIconKind.Plus, "New tab (⌘T)", () => _ = NewChartAsync());
         _toolbar = new ChartToolbar(this, false, Ui.Divider(true), _layoutChoice, BuildPanelsButton(), popOut, newTab);
         _svc.BracketsCreated += HookBrackets;
         Content = BuildLayout();
@@ -346,7 +346,7 @@ public sealed partial class TradingView : UserControl
         if (chart.MaximizeButton is not { } b) return;
         bool big = chart.Page?.Maximized != null && ReferenceEquals(chart.Page.Maximized, chart);
         b.Content = Ui.Icon(big ? MaterialIconKind.ArrowCollapse : MaterialIconKind.ArrowExpand, 14);
-        ToolTip.SetTip(b, big ? "Show all charts again" : "Agrandar este gráfico (ocupa toda la pestaña)");
+        ToolTip.SetTip(b, big ? "Show all charts again" : "Maximize this chart (fills the tab)");
     }
 
     /// <summary>Diseño justo para la cantidad de gráficos que quedan (al cerrar o sacar uno no quedan lugares vacíos).</summary>
@@ -369,7 +369,7 @@ public sealed partial class TradingView : UserControl
 
     private Control EmptyPane(ChartPage page)
     {
-        var add = Ui.Button("Agregar gráfico", MaterialIconKind.Plus, () => _ = AddClonedChartAsync(page));
+        var add = Ui.Button("Add chart", MaterialIconKind.Plus, () => _ = AddClonedChartAsync(page));
         var box = Ui.V(10, Ui.Icon(MaterialIconKind.ChartBoxOutline, 34, Ui.Text2), add);
         box.HorizontalAlignment = HorizontalAlignment.Center;
         box.VerticalAlignment = VerticalAlignment.Center;
@@ -407,7 +407,7 @@ public sealed partial class TradingView : UserControl
     {
         var main = page.Active ?? page.Charts.FirstOrDefault();
         int n = page.VisibleCount;
-        page.HeaderText.Text = main == null ? "Vacía" : n > 1 ? $"{main.Caption}  +{n - 1}" : main.Caption;
+        page.HeaderText.Text = main == null ? "Empty" : n > 1 ? $"{main.Caption}  +{n - 1}" : main.Caption;
     }
 
     /// <summary>Actualiza los títulos donde aparece un gráfico (marco, pestaña y ventana).</summary>
@@ -438,7 +438,7 @@ public sealed partial class TradingView : UserControl
             if (await AddClonedChartAsync(page, arrange: false) == null) break;
         Arrange(page);
         if (page.Active == null || page.Charts.IndexOf(page.Active) >= need) Activate(page.Charts.FirstOrDefault());
-        _status(need == 1 ? "Un gráfico por pestaña" : $"{need} gráficos en la pestaña: hacé clic en uno para elegirlo y cambiarle el instrumento o el período");
+        _status(need == 1 ? "One chart per tab" : $"{need} charts in this tab: select a chart to change its instrument or period");
     }
 
     /// <summary>Agrega a la pestaña una copia del gráfico activo con otro período.</summary>
@@ -523,10 +523,10 @@ public sealed partial class TradingView : UserControl
             return b;
         }
 
-        chart.MaximizeButton = Small(MaterialIconKind.ArrowExpand, "Agrandar este gráfico (ocupa toda la pestaña)", () => ToggleMaximize(chart));
+        chart.MaximizeButton = Small(MaterialIconKind.ArrowExpand, "Maximize this chart (fills the tab)", () => ToggleMaximize(chart));
         headerRight.Children.Add(chart.MaximizeButton);
-        headerRight.Children.Add(Small(MaterialIconKind.OpenInNew, "Sacar a una ventana aparte", () => Detach(chart)));
-        headerRight.Children.Add(Small(MaterialIconKind.Close, "Cerrar este gráfico", () => CloseChart(chart)));
+        headerRight.Children.Add(Small(MaterialIconKind.OpenInNew, "Detach into a window", () => Detach(chart)));
+        headerRight.Children.Add(Small(MaterialIconKind.Close, "Close this chart", () => CloseChart(chart)));
 
         // clic en cualquier parte del gráfico: pasa a ser el activo
         frame.AddHandler(PointerPressedEvent, (_, _) => Activate(chart), RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -554,7 +554,7 @@ public sealed partial class TradingView : UserControl
     {
         var headerText = new TextBlock { Text = "…", VerticalAlignment = VerticalAlignment.Center };
         var close = new Button { Content = Ui.Icon(MaterialIconKind.Close, 13), Width = 20, Height = 20, MinHeight = 0, Padding = new Thickness(0) }.Classes("icon");
-        ToolTip.SetTip(close, "Cerrar la pestaña");
+        ToolTip.SetTip(close, "Close tab");
         var item = new TabItem { Header = Ui.H(8, headerText, close) };
         var page = new ChartPage { Item = item, HeaderText = headerText };
         item.Content = page.Host;
@@ -605,7 +605,7 @@ public sealed partial class TradingView : UserControl
             var profile = _svc.Connections.Find(feedId);
             if (profile == null)
             {
-                _status($"La conexión {feedId} no existe; revisá Conexiones.");
+                _status($"Connection {feedId} does not exist; check Connections.");
                 return;
             }
 
@@ -613,7 +613,7 @@ public sealed partial class TradingView : UserControl
             var inst = instruments.FirstOrDefault(i => i.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
             if (inst == null)
             {
-                _status($"No encontré {symbol} en {profile.Name}");
+                _status($"Could not find {symbol} on {profile.Name}");
                 return;
             }
 
@@ -662,22 +662,22 @@ public sealed partial class TradingView : UserControl
             if (ReferenceEquals(tab, _active)) _toolbar.Chart = tab;
             tab.Window?.Toolbar.Sync();
             if (!_linkSync) _ = PropagateSymbolAsync(tab);
-            _status($"Abriendo {inst.Symbol} en {profile.Name}…");
+            _status($"Opening {inst.Symbol} on {profile.Name}…");
             void Ready()
             {
                 data.HistoryLoaded -= Ready;
                 if (tab.Model?.Data != data) return;
                 var from = TimeZoneInfo.ConvertTimeFromUtc(data.Trades.Count > 0 ? data.Trades.FirstTime : DateTime.UtcNow, model.Settings.TimeZone);
                 _status(data.HistoryError != null
-                    ? $"{inst.Symbol}: no se pudo traer toda la historia ({data.HistoryError})"
-                    : $"{inst.Symbol} listo · {data.Trades.Count:N0} operaciones desde {from:dd/MM HH:mm}");
+                    ? $"{inst.Symbol}: could not retrieve all history ({data.HistoryError})"
+                    : $"{inst.Symbol} ready · {data.Trades.Count:N0} trades since {from:dd/MM HH:mm}");
             }
 
             if (data.IsLoadingHistory) data.HistoryLoaded += Ready;
         }
         catch (Exception ex)
         {
-            _status("Error al abrir: " + ex.Message);
+            _status("Error opening: " + ex.Message);
             CrashLog.Write(ex);
         }
     }
@@ -763,7 +763,7 @@ public sealed partial class TradingView : UserControl
     {
         if (_pages.Count <= 1)
         {
-            _status("Tiene que quedar al menos una pestaña abierta.");
+            _status("At least one tab must remain open.");
             return;
         }
 
@@ -860,7 +860,7 @@ public sealed partial class TradingView : UserControl
             }
         }
 
-        _status($"{chart.Caption} en una ventana aparte: movela a otro monitor si querés. Para volver, usá «Volver a la ventana principal».");
+        _status($"{chart.Caption} in a separate window: move it to another monitor if desired. Use Return to main window to dock it again.");
         return w;
     }
 
@@ -959,7 +959,7 @@ public sealed partial class TradingView : UserControl
         _replayPlay.Content = Ui.Icon(r.Paused || r.IsFinished ? MaterialIconKind.Play : MaterialIconKind.Pause, 18);
         _replaySpeed?.Select(r.Speed);
         var local = TimeZoneInfo.ConvertTimeFromUtc(r.Clock, _active.Model.Settings.TimeZone);
-        _replayClock.Text = r.IsFinished ? "Terminado" : local.ToString("ddd dd/MM HH:mm:ss", CultureInfo.GetCultureInfo("es-AR"));
+        _replayClock.Text = r.IsFinished ? "Finished" : local.ToString("ddd dd/MM HH:mm:ss", CultureInfo.GetCultureInfo("en-US"));
         _replayProgress.Value = r.Progress;
     }
 
@@ -995,7 +995,7 @@ public sealed partial class TradingView : UserControl
         _tabControl.Items.Add(page.Item);
         _tabControl.SelectedItem = page.Item;
         UpdateTitles(chart);
-        _status($"Replay de {source.Symbol} desde {TimeZoneInfo.ConvertTimeFromUtc(startUtc, model.Settings.TimeZone):dd/MM HH:mm}: operá con la cuenta simulada como si fuera en vivo.");
+        _status($"Replay of {source.Symbol} from {TimeZoneInfo.ConvertTimeFromUtc(startUtc, model.Settings.TimeZone):dd/MM HH:mm}: trade with the simulated account as if live.");
         await Task.CompletedTask;
     }
 
@@ -1016,14 +1016,14 @@ public sealed partial class TradingView : UserControl
         {
             if (hours == ChartToolbar.AllHistory)
             {
-                if (!quiet) _status($"Buscando dónde empieza el historial de {chart.Symbol}…");
+                if (!quiet) _status($"Finding the start of available history for {chart.Symbol}…");
                 from = data.Feed is IKlineHistory k ? await k.FirstAvailableAsync(data.Instrument, CancellationToken.None) ?? data.Feed.Now.AddYears(-5) : data.Feed.Now.AddYears(-5);
             }
             else from = data.Feed.Now.AddHours(-hours);
         }
         catch (Exception ex)
         {
-            _status($"No se pudo consultar el historial de {chart.Symbol}: {ex.Message}");
+            _status($"Could not query history for {chart.Symbol}: {ex.Message}");
             return;
         }
 
@@ -1032,21 +1032,21 @@ public sealed partial class TradingView : UserControl
         if (!ReferenceEquals(chart.Model?.Data, data)) return;
         if (!data.ExtendHistory(from))
         {
-            if (!quiet) _status($"{chart.Symbol}: la historia pedida ({what}) ya está cargada.");
+            if (!quiet) _status($"{chart.Symbol}: requested history ({what}) is already loaded.");
             return;
         }
 
-        if (!quiet || hours > 24) _status($"Cargando {what} de {chart.Symbol}: lo que no está guardado se trae del exchange…");
+        if (!quiet || hours > 24) _status($"Loading {what} of {chart.Symbol}: retrieving missing history from the exchange…");
         for (int i = 0; i < 24000 && data.IsExtending; i++) await Task.Delay(250);
         if (!ReferenceEquals(chart.Model?.Data, data)) return;
         var tz = chart.Model!.Settings.TimeZone;
         string fromText = TimeZoneInfo.ConvertTimeFromUtc(data.Trades.Count > 0 ? data.Trades.FirstTime : from, tz).ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
         string ticks = data.RealTicksFrom < DateTime.MaxValue
-            ? $" · footprint (ticks) desde {TimeZoneInfo.ConvertTimeFromUtc(data.RealTicksFrom, tz):dd/MM HH:mm}; antes, velas de 1 minuto del exchange (para más footprint, bajá días en Datos)"
+            ? $" · footprint ticks from {TimeZoneInfo.ConvertTimeFromUtc(data.RealTicksFrom, tz):dd/MM HH:mm}; earlier history uses exchange 1-minute bars (download days in Data for more footprint history)"
             : "";
         _status(data.HistoryError != null
-            ? $"{chart.Symbol}: no se pudo traer toda la historia ({data.HistoryError})"
-            : $"{chart.Symbol}: historia desde {fromText} · {data.Trades.Count:N0} operaciones{ticks}");
+            ? $"{chart.Symbol}: could not retrieve all history ({data.HistoryError})"
+            : $"{chart.Symbol}: history from {fromText} · {data.Trades.Count:N0} trades{ticks}");
     }
 
     // ===================================================================== herramientas y ventanas auxiliares
@@ -1132,17 +1132,17 @@ public sealed partial class TradingView : UserControl
     {
         if (tab.Model == null || TopLevel.GetTopLevel(tab.Window ?? (Control)this) is not Window owner) return;
         string suggested = $"{tab.Symbol} {(tab.Model.Settings.Style == ChartStyle.Footprint ? "footprint" : tab.Model.Settings.Style.ToString().ToLowerInvariant())}";
-        var name = await PromptDialog.ShowAsync(owner, "Guardar plantilla de gráfico",
-            "Nombre de la plantilla. Guarda el estilo, el footprint, los colores, lo que se muestra y los indicadores (no el instrumento ni el período).", suggested, "Save");
+        var name = await PromptDialog.ShowAsync(owner, "Save chart template",
+            "Template name. Saves style, footprint, colors, visibility and indicators, but not instrument or period.", suggested, "Save");
         if (string.IsNullOrWhiteSpace(name)) return;
         try
         {
             Workspace.SaveChartTemplate(tab, name);
-            _status($"Plantilla de gráfico «{name.Trim()}» guardada · aplicala a cualquier gráfico desde Plantillas");
+            _status($"Chart template «{name.Trim()}» saved · apply to any chart from Templates");
         }
         catch (Exception ex)
         {
-            _status("No se pudo guardar la plantilla: " + ex.Message);
+            _status("Could not save template: " + ex.Message);
         }
     }
 
@@ -1150,13 +1150,13 @@ public sealed partial class TradingView : UserControl
     internal List<Control> ChartTemplateItems(ChartTab tab)
     {
         var items = new List<Control>();
-        var save = new MenuItem { Header = "Guardar este gráfico como plantilla…", Icon = Ui.Icon(MaterialIconKind.ContentSaveOutline, 16) };
+        var save = new MenuItem { Header = "Save this chart as template…", Icon = Ui.Icon(MaterialIconKind.ContentSaveOutline, 16) };
         save.Click += (_, _) => _ = SaveChartTemplateAsync(tab);
         items.Add(save);
         var names = Workspace.ChartTemplateNames();
         if (names.Count == 0)
         {
-            items.Add(new MenuItem { Header = "Todavía no hay plantillas guardadas", IsEnabled = false });
+            items.Add(new MenuItem { Header = "No saved templates yet", IsEnabled = false });
             return items;
         }
 
@@ -1164,19 +1164,19 @@ public sealed partial class TradingView : UserControl
         string? def = _svc.Settings.DefaultChartTemplate;
         foreach (var n in names)
         {
-            var apply = new MenuItem { Header = n == def ? $"{n}  · pestañas nuevas" : n, Icon = Ui.Icon(MaterialIconKind.BookmarkOutline, 16) };
-            ToolTip.SetTip(apply, $"Aplicar «{n}» a este gráfico (reemplaza su estilo, colores e indicadores)");
+            var apply = new MenuItem { Header = n == def ? $"{n}  · new tabs" : n, Icon = Ui.Icon(MaterialIconKind.BookmarkOutline, 16) };
+            ToolTip.SetTip(apply, $"Apply «{n}» to this chart (replaces style, colors and indicators)");
             apply.Click += (_, _) =>
             {
                 if (!Workspace.ApplyChartTemplate(this, tab, n)) return;
                 AfterTemplate(tab);
-                _status($"Plantilla «{n}» aplicada a {tab.Symbol}");
+                _status($"Template «{n}» applied to {tab.Symbol}");
             };
             items.Add(apply);
         }
 
         items.Add(new Separator());
-        var forNew = new MenuItem { Header = "Para las pestañas nuevas", Icon = Ui.Icon(MaterialIconKind.StarOutline, 16) };
+        var forNew = new MenuItem { Header = "For new tabs", Icon = Ui.Icon(MaterialIconKind.StarOutline, 16) };
         MenuItem Choice(string header, string? value)
         {
             var mi = new MenuItem { Header = header, Icon = value == def ? Ui.Icon(MaterialIconKind.Check, 15, Ui.Accent) : null };
@@ -1184,12 +1184,12 @@ public sealed partial class TradingView : UserControl
             {
                 _svc.Settings.DefaultChartTemplate = value;
                 _svc.Settings.Save();
-                _status(value == null ? "Las pestañas nuevas copian el gráfico activo" : $"Las pestañas nuevas arrancan con «{value}»");
+                _status(value == null ? "New tabs copy the active chart" : $"New tabs start with «{value}»");
             };
             return mi;
         }
 
-        forNew.Items.Add(Choice("Copiar el gráfico activo (sin plantilla)", null));
+        forNew.Items.Add(Choice("Copy active chart (no template)", null));
         foreach (var n in names) forNew.Items.Add(Choice(n, n));
         items.Add(forNew);
 
@@ -1206,7 +1206,7 @@ public sealed partial class TradingView : UserControl
                     _svc.Settings.Save();
                 }
 
-                _status($"Plantilla «{n}» borrada");
+                _status($"Template «{n}» deleted");
             };
             delete.Items.Add(mi);
         }
@@ -1422,7 +1422,7 @@ public sealed partial class TradingView : UserControl
                 d.Dashed = false;
                 d.LineStyle = LineStyleKind.Solid;
                 DrawingsTouched(t);
-                _status($"🔔 {t.Symbol} tocó {m.Instrument.FormatPrice(level)}");
+                _status($"🔔 {t.Symbol} touched {m.Instrument.FormatPrice(level)}");
                 Sound.Play();
                 m.Invalidate();
             }

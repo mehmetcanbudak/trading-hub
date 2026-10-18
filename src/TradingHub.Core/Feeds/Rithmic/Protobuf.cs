@@ -90,7 +90,7 @@ public sealed class ProtoMessage
                     pos += 4;
                     break;
                 default:
-                    throw new FormatException($"Tipo de campo protobuf no soportado: {wire}");
+                    throw new FormatException($"Unsupported protobuf field type: {wire}");
             }
 
             if (!m._fields.TryGetValue(field, out var list)) m._fields[field] = list = new List<object>();

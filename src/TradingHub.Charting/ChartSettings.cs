@@ -4,9 +4,9 @@ namespace TradingHub.Charting;
 
 public enum ChartStyle
 {
-    [Display(Name = "Velas")] Candles,
-    [Display(Name = "Barras OHLC")] Bars,
-    [Display(Name = "Línea")] Line,
+    [Display(Name = "Candles")] Candles,
+    [Display(Name = "OHLC bars")] Bars,
+    [Display(Name = "Line")] Line,
     [Display(Name = "Footprint (clusters)")] Footprint,
     [Display(Name = "Heikin Ashi")] HeikinAshi,
 }
@@ -14,12 +14,12 @@ public enum ChartStyle
 /// <summary>Cómo se colorean las celdas.</summary>
 public enum ClusterColorScheme
 {
-    [Display(Name = "Proporcional al volumen")] VolumeProportion,
-    [Display(Name = "Por delta")] Delta,
+    [Display(Name = "Proportional to volume")] VolumeProportion,
+    [Display(Name = "By delta")] Delta,
     [Display(Name = "Bid / Ask")] BidAsk,
-    [Display(Name = "Mapa de calor")] Heatmap,
-    [Display(Name = "Sólido")] Solid,
-    [Display(Name = "Sin fondo")] None,
+    [Display(Name = "Heatmap")] Heatmap,
+    [Display(Name = "Solid")] Solid,
+    [Display(Name = "No background")] None,
 }
 
 /// <summary>Configuración visual de un gráfico.</summary>
@@ -27,8 +27,8 @@ public enum ClusterColorScheme
 public enum TradeLineStyle
 {
     [Display(Name = "Rayas")] Dashed,
-    [Display(Name = "Continua")] Solid,
-    [Display(Name = "Puntos")] Dotted,
+    [Display(Name = "Continuous")] Solid,
+    [Display(Name = "Points")] Dotted,
 }
 
 public sealed class ChartSettings

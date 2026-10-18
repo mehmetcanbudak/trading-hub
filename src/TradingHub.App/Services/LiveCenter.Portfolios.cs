@@ -20,7 +20,7 @@ internal sealed partial class LiveCenter
         {
             if (auto == null)
             {
-                auto = new LivePortfolioDef { Id = LivePortfolioDef.AutoId, Auto = true, Name = "Automático · todas en vivo" };
+                auto = new LivePortfolioDef { Id = LivePortfolioDef.AutoId, Auto = true, Name = "Automatic · all live strategies" };
                 defs.Insert(0, auto);
                 LiveStore.SavePortfolios(defs);
             }

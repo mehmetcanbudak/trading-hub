@@ -15,14 +15,14 @@ internal sealed partial class StrategiesView
     private readonly ListBox _historyList = new() { Background = Brushes.Transparent };
     private readonly Ui.Segmented<string> _historyFilter = new(new[]
     {
-        ("all", "Todas", (string?)null),
+        ("all", "All", (string?)null),
         ("bt", "Backtests", null),
-        ("opt", "Optimizaciones", null),
+        ("opt", "Optimizations", null),
         ("wfo", "Walk-forward", null),
-        ("star", "★", (string?)"Favoritas"),
+        ("star", "★", (string?)"Favorites"),
     });
     private readonly StackPanel _historyDetail = new() { Spacing = 14 };
-    private readonly EquityChart _historyChart = new() { Height = 240, EmptyText = "Sin curva de capital" };
+    private readonly EquityChart _historyChart = new() { Height = 240, EmptyText = "No equity curve" };
     private string _historyKind = "all";
 
     private Control BuildHistoryPage()
@@ -42,7 +42,7 @@ internal sealed partial class StrategiesView
                 RunKind.WalkForward => MaterialIconKind.ChartTimelineVariantShimmer,
                 _ => MaterialIconKind.ChartLine,
             };
-            var kind = s.Kind switch { RunKind.Optimization => $"Optimización · {s.Combinations:N0} comb.", RunKind.WalkForward => $"Walk-forward · efic. {s.Efficiency * 100:0}%", _ => "Backtest" };
+            var kind = s.Kind switch { RunKind.Optimization => $"Optimization · {s.Combinations:N0} comb.", RunKind.WalkForward => $"Walk-forward · efficiency {s.Efficiency * 100:0}%", _ => "Backtest" };
             var title = Ui.H(6, new TextBlock { Text = $"{s.Symbol} · {s.Period}", FontWeight = FontWeight.SemiBold }, new TextBlock { Text = s.Starred ? "★" : "", Foreground = Ui.Accent });
             var text = Ui.V(2,
                 title,
@@ -65,7 +65,7 @@ internal sealed partial class StrategiesView
         _historyList.SelectionChanged += (_, _) => ShowHistoryDetail(_historyList.SelectedItem as StrategyRunSummary);
 
         var left = new DockPanel { Width = 430 };
-        var head = Ui.V(10, Ui.H2("Corridas guardadas"), _historyFilter);
+        var head = Ui.V(10, Ui.H2("Saved runs"), _historyFilter);
         head.Margin = new Thickness(0, 0, 0, 12);
         DockPanel.SetDock(head, Dock.Top);
         left.Children.Add(head);
@@ -125,11 +125,11 @@ internal sealed partial class StrategiesView
             var saved = Lab.ReportStore.Save(input.Title, markdown, _current.FileName, "", images);
             RefreshReports();
             OpenReport(saved.Path);
-            _status($"Informe listo: {System.IO.Path.GetFileName(saved.Path)}");
+            _status($"Report ready: {System.IO.Path.GetFileName(saved.Path)}");
         }
         catch (Exception ex)
         {
-            _status("No se pudo armar el informe: " + ex.Message);
+            _status("Could not generate report: " + ex.Message);
             CrashLog.Write(ex);
         }
     }
@@ -141,8 +141,8 @@ internal sealed partial class StrategiesView
         {
             var empty = Ui.V(10,
                 Ui.Icon(MaterialIconKind.History, 40, Ui.Text2),
-                new TextBlock { Text = "Cada backtest, optimización y walk-forward queda guardado acá", Classes = { "muted" }, HorizontalAlignment = HorizontalAlignment.Center },
-                new TextBlock { Text = "con sus parámetros, sus métricas y el código exacto que se usó.", Classes = { "faint", "small" }, HorizontalAlignment = HorizontalAlignment.Center });
+                new TextBlock { Text = "Every backtest, optimization and walk-forward is saved here", Classes = { "muted" }, HorizontalAlignment = HorizontalAlignment.Center },
+                new TextBlock { Text = "with its parameters, metrics and exact source code.", Classes = { "faint", "small" }, HorizontalAlignment = HorizontalAlignment.Center });
             ((StackPanel)empty).Children[0].HorizontalAlignment = HorizontalAlignment.Center;
             empty.Margin = new Thickness(0, 80, 0, 0);
             _historyDetail.Children.Add(empty);
@@ -152,38 +152,38 @@ internal sealed partial class StrategiesView
         var run = StrategyStore.Load(_current.Id, summary.Id);
         if (run == null)
         {
-            _historyDetail.Children.Add(new TextBlock { Text = "No se pudo leer la corrida (¿se borró el archivo?).", Classes = { "muted" } });
+            _historyDetail.Children.Add(new TextBlock { Text = "Could not read run (was the file deleted?).", Classes = { "muted" } });
             return;
         }
 
         // encabezado + acciones
-        var star = Ui.IconButton(run.Starred ? MaterialIconKind.Star : MaterialIconKind.StarOutline, "Marcar como favorita", () =>
+        var star = Ui.IconButton(run.Starred ? MaterialIconKind.Star : MaterialIconKind.StarOutline, "Mark as favorite", () =>
         {
             StrategyStore.Annotate(_current.Id, run.Id, null, !run.Starred);
             RefreshHistory();
         });
-        var use = Ui.Button("Usar parámetros", MaterialIconKind.ArrowRightBoldBoxOutline, () => ApplyParameters(run.Parameters));
-        var code = Ui.Button("Ver código", MaterialIconKind.CodeBraces, () =>
+        var use = Ui.Button("Use parameters", MaterialIconKind.ArrowRightBoldBoxOutline, () => ApplyParameters(run.Parameters));
+        var code = Ui.Button("View code", MaterialIconKind.CodeBraces, () =>
         {
             var src = StrategyStore.LoadCode(_current.Id, run.CodeHash);
             if (src == null || TopLevel.GetTopLevel(this) is not Window w) return;
-            new CodeViewerWindow($"{run.StrategyName} · versión {run.CodeHash}", src).Show(w);
+            new CodeViewerWindow($"{run.StrategyName} · version {run.CodeHash}", src).Show(w);
         });
         code.IsEnabled = !string.IsNullOrEmpty(run.CodeHash);
-        var delete = Ui.IconButton(MaterialIconKind.DeleteOutline, "Borrar corrida", async () =>
+        var delete = Ui.IconButton(MaterialIconKind.DeleteOutline, "Delete run", async () =>
         {
             if (TopLevel.GetTopLevel(this) is not Window w) return;
-            if (!await ConfirmDialog.ShowAsync(w, "Borrar corrida", "Se borra esta corrida del historial.", "Borrar", danger: true)) return;
+            if (!await ConfirmDialog.ShowAsync(w, "Delete run", "This run will be deleted from history.", "Delete", danger: true)) return;
             StrategyStore.Delete(_current.Id, run.Id);
             RefreshHistory();
         });
-        string kind = run.Kind switch { RunKind.Optimization => "Optimización", RunKind.WalkForward => "Walk-forward", _ => "Backtest" };
+        string kind = run.Kind switch { RunKind.Optimization => "Optimization", RunKind.WalkForward => "Walk-forward", _ => "Backtest" };
         var title = Ui.V(3,
             new TextBlock { Text = $"{kind} · {run.Settings.Symbol} · {run.Settings.Period}", Classes = { "h2" } },
             new TextBlock { Text = $"{run.Settings.FromUtc:dd/MM/yyyy} → {run.Settings.ToUtc.AddDays(-1):dd/MM/yyyy} · {run.Ticks:N0} ticks · {run.Seconds:0.#} s · {run.CreatedUtc.ToLocalTime():dd/MM/yyyy HH:mm}", Classes = { "muted", "small" } });
         var header = new DockPanel();
-        var report = Ui.Button("Informe", MaterialIconKind.FileChartOutline, () => MakeReport(run));
-        ToolTip.SetTip(report, "Informe profesional de esta corrida con todas las métricas, tablas y gráficos (se abre en Reportes)");
+        var report = Ui.Button("Report", MaterialIconKind.FileChartOutline, () => MakeReport(run));
+        ToolTip.SetTip(report, "Detailed report for this run with all metrics, tables and charts (opens in Reports)");
         var actions = Ui.H(6, star, delete, code, report, use);
         DockPanel.SetDock(actions, Dock.Right);
         header.Children.Add(actions);
@@ -191,7 +191,7 @@ internal sealed partial class StrategiesView
         _historyDetail.Children.Add(header);
 
         // notas
-        var notes = new TextBox { Text = run.Notes, Watermark = "Notas (qué cambiaste, conclusiones…)", AcceptsReturn = false };
+        var notes = new TextBox { Text = run.Notes, Watermark = "Notes (changes, conclusions…)", AcceptsReturn = false };
         notes.LostFocus += (_, _) =>
         {
             if (notes.Text == run.Notes) return;
@@ -203,11 +203,11 @@ internal sealed partial class StrategiesView
         if (run.Metrics is { } m)
         {
             var kpis = new WrapPanel { ItemSpacing = 10, LineSpacing = 10 };
-            kpis.Children.Add(Kpi(run.Kind == RunKind.WalkForward ? "Fuera de muestra" : "Resultado neto", Money(m.NetProfit), $"{m.ReturnPercent:0.##}% del capital", m.NetProfit >= 0 ? Ui.Up : Ui.Down));
-            kpis.Children.Add(Kpi("Profit factor", m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es), $"{m.TotalTrades} operaciones", null));
-            kpis.Children.Add(Kpi("Drawdown máx.", Money(-m.MaxDrawdown), $"{m.MaxDrawdownPercent:0.##}%", Ui.Down));
-            kpis.Children.Add(Kpi("Sharpe", m.SharpeRatio.ToString("0.00", Es), $"{m.WinRate:0.#}% ganadoras", null));
-            if (run.WalkForward is { } wf) kpis.Children.Add(Kpi("Eficiencia WF", $"{wf.WalkForwardEfficiency * 100:0}%", $"{wf.ProfitableWindowsPercent:0}% ventanas ganadoras", wf.WalkForwardEfficiency >= 0.5 ? Ui.Up : Ui.Warn));
+            kpis.Children.Add(Kpi(run.Kind == RunKind.WalkForward ? "Out of sample" : "Net PnL", Money(m.NetProfit), $"{m.ReturnPercent:0.##}% of capital", m.NetProfit >= 0 ? Ui.Up : Ui.Down));
+            kpis.Children.Add(Kpi("Profit factor", m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es), $"{m.TotalTrades} trades", null));
+            kpis.Children.Add(Kpi("Max drawdown", Money(-m.MaxDrawdown), $"{m.MaxDrawdownPercent:0.##}%", Ui.Down));
+            kpis.Children.Add(Kpi("Sharpe", m.SharpeRatio.ToString("0.00", Es), $"{m.WinRate:0.#}% winners", null));
+            if (run.WalkForward is { } wf) kpis.Children.Add(Kpi("WF efficiency", $"{wf.WalkForwardEfficiency * 100:0}%", $"{wf.ProfitableWindowsPercent:0}% profitable windows", wf.WalkForwardEfficiency >= 0.5 ? Ui.Up : Ui.Warn));
             _historyDetail.Children.Add(kpis);
         }
 
@@ -221,18 +221,18 @@ internal sealed partial class StrategiesView
         var pars = new WrapPanel { ItemSpacing = 8, LineSpacing = 8 };
         foreach (var (k, v) in run.Parameters)
             pars.Children.Add(new Border { Child = new TextBlock { Text = $"{ParamName(k)} = {FormatValue(v)}", FontSize = 12 }, Classes = { "pill" }, Padding = new Thickness(10, 4) });
-        _historyDetail.Children.Add(Ui.Card(Ui.V(10, Ui.H3(run.Kind == RunKind.Optimization ? "Mejores parámetros" : "Parámetros"), pars)));
+        _historyDetail.Children.Add(Ui.Card(Ui.V(10, Ui.H3(run.Kind == RunKind.Optimization ? "Best parameters" : "Parameters"), pars)));
 
         if (run.Optimization is { } opt)
         {
             var top = opt.Rows.Take(15).Select((r, i) => $"{i + 1,2}. {Money(r.Metrics.NetProfit),12}  PF {r.Metrics.ProfitFactor,5:0.00}  DD {Money(-r.Metrics.MaxDrawdown),11}  {string.Join(", ", r.Parameters.Select(kv => $"{ParamName(kv.Key)}={FormatValue(kv.Value)}"))}");
-            _historyDetail.Children.Add(Ui.Card(Ui.V(8, Ui.H3($"Top 15 de {opt.Combinations:N0} combinaciones"), new TextBlock { Text = string.Join('\n', top), Classes = { "mono", "small" } })));
+            _historyDetail.Children.Add(Ui.Card(Ui.V(8, Ui.H3($"Top 15 of {opt.Combinations:N0} combinations"), new TextBlock { Text = string.Join('\n', top), Classes = { "mono", "small" } })));
         }
 
         var s = run.Settings;
         _historyDetail.Children.Add(new TextBlock
         {
-            Text = $"Capital {s.InitialCapital:N0} · comisión {s.CommissionPercent:0.###}% + {s.CommissionPerUnit:0.##}/u · deslizamiento {s.SlippageTicks} tick(s) · límites: {(s.LimitFill == LimitFillMode.Touch ? "al tocar" : "al atravesar")} · código {run.CodeHash}",
+            Text = $"Capital {s.InitialCapital:N0} · commission {s.CommissionPercent:0.###}% + {s.CommissionPerUnit:0.##}/unit · slippage {s.SlippageTicks} tick(s) · limit fills: {(s.LimitFill == LimitFillMode.Touch ? "on touch" : "on trade-through")} · code {run.CodeHash}",
             Classes = { "faint", "small" },
             TextWrapping = TextWrapping.Wrap,
         });
@@ -264,16 +264,16 @@ internal sealed class CodeViewerWindow : Window
         var done = new TextBlock { Classes = { "faint", "small" }, VerticalAlignment = VerticalAlignment.Center };
         var actions = new WrapPanel { ItemSpacing = 8, LineSpacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
         actions.Children.Add(done);
-        actions.Children.Add(Ui.Button("Copiar", MaterialIconKind.ContentCopy, () =>
+        actions.Children.Add(Ui.Button("Copy", MaterialIconKind.ContentCopy, () =>
         {
             if (GetTopLevel(this)?.Clipboard is { } cb) _ = cb.SetTextAsync(code);
-            done.Text = "Copiado";
+            done.Text = "Copied";
         }, "ghost"));
-        if (path != null) actions.Children.Add(Ui.Button("Mostrar en el Finder", MaterialIconKind.FolderSearchOutline, () => Shell.Reveal(path), "ghost"));
-        if (openInBacktesting != null) actions.Children.Add(Ui.Button("Abrir en Backtesting", MaterialIconKind.FlaskOutline, openInBacktesting));
+        if (path != null) actions.Children.Add(Ui.Button("Show in Finder", MaterialIconKind.FolderSearchOutline, () => Shell.Reveal(path), "ghost"));
+        if (openInBacktesting != null) actions.Children.Add(Ui.Button("Open in Backtesting", MaterialIconKind.FlaskOutline, openInBacktesting));
         var name = new TextBlock
         {
-            Text = path != null ? $"{Path.GetFileName(path)} · {code.Split('\n').Length} líneas · solo lectura" : "solo lectura",
+            Text = path != null ? $"{Path.GetFileName(path)} · {code.Split('\n').Length} lines · read-only" : "read-only",
             Classes = { "muted" },
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,

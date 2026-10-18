@@ -102,7 +102,7 @@ public sealed class ReplayFeed : IMarketDataFeed
 
     private void Run(IMarketDataSink sink)
     {
-        sink.OnStatus(Instrument, FeedStatus.Connected, $"Replay desde {Start:dd/MM HH:mm} UTC");
+        sink.OnStatus(Instrument, FeedStatus.Connected, $"Replay from {Start:dd/MM HH:mm} UTC");
         using var e = HistoricalData.Read(_root, _source.FeedId, _source.Symbol, Start, End).GetEnumerator();
         bool has = e.MoveNext();
         var sw = Stopwatch.StartNew();
@@ -134,7 +134,7 @@ public sealed class ReplayFeed : IMarketDataFeed
         {
             IsFinished = true;
             Interlocked.Exchange(ref _clockTicks, End.Ticks);
-            sink.OnStatus(Instrument, FeedStatus.Disconnected, "Replay terminado");
+            sink.OnStatus(Instrument, FeedStatus.Disconnected, "Replay finished");
         }
     }
 

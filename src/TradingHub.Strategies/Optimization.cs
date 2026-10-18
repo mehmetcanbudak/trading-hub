@@ -33,7 +33,7 @@ public sealed class ParameterRange
     /// <summary>El período de las velas como un parámetro más: se prueba cada uno de <paramref name="periods"/>.</summary>
     public static ParameterRange Periods(IEnumerable<string> periods, bool enabled = true)
     {
-        var r = new ParameterRange { Name = PeriodName, Label = "Período", Enabled = enabled, IsInteger = true };
+        var r = new ParameterRange { Name = PeriodName, Label = "Period", Enabled = enabled, IsInteger = true };
         r.SetChoices(periods);
         return r;
     }
@@ -309,7 +309,7 @@ public static class Optimizer
             Search = grid ? "grilla" : "bayesiana", SpaceSize = space.Size, Compression = raw > 0 ? Math.Round((double)data.Count / raw, 4) : 1,
         };
         var windows = Windows(settings, inSampleDays, outSampleDays, anchored);
-        if (windows.Count == 0) throw new InvalidOperationException("El rango es muy corto para esas ventanas: alargá el período o achicá las ventanas.");
+        if (windows.Count == 0) throw new InvalidOperationException("The date range is too short for these windows: extend the range or shorten the windows.");
 
         var cache = new ConfigCache(factory, baseParameters, data, settings.Clone(), contextHistory, space, ct);
         long expected = grid ? space.Size : Math.Min(space.Size, (long)budget * windows.Count / 2 + budget);

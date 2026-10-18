@@ -65,7 +65,7 @@ internal sealed class MarketConditions
         public decimal?[] Closes { get; set; } = new decimal?[24];
     }
 
-    private static string CacheDir => Path.Combine(AppPaths.Root, "Contexto");
+    private static string CacheDir => Path.Combine(AppPaths.Root, "Context");
 
     private static string CachePath(string feed, string symbol)
     {
@@ -154,7 +154,7 @@ internal sealed class MarketConditions
         }
         catch (Exception ex)
         {
-            this.LogWarn($"No se pudo armar el contexto del mercado de {runner.StrategyName}: {ex.Message}");
+            this.LogWarn($"Could not build market context for {runner.StrategyName}: {ex.Message}");
         }
     }
 
@@ -276,7 +276,7 @@ internal sealed class MarketConditions
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    this.LogInfo($"Sin velas del exchange para el contexto de {symbol}: {ex.Message}");
+                    this.LogInfo($"No exchange bars for market context of {symbol}: {ex.Message}");
                 }
             }
         }
@@ -313,7 +313,7 @@ internal sealed class MarketConditions
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            this.LogInfo($"Sin velas públicas para el contexto de {symbol}: {ex.Message}");
+            this.LogInfo($"No public bars for market context of {symbol}: {ex.Message}");
             return null;
         }
     }

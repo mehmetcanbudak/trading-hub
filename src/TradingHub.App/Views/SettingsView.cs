@@ -64,7 +64,7 @@ internal sealed class SettingsView : UserControl, IPage
                 }
             }
 
-            _status("Zona horaria actualizada");
+            _status("Time zone updated");
         };
 
         var confirm = Switch(s.ConfirmRealOrders, v => s.ConfirmRealOrders = v);
@@ -185,8 +185,8 @@ internal sealed class SettingsView : UserControl, IPage
     {
         var g = _svc.Sleep;
         string reason = _svc.AwakeReason() ?? "nothing running";
-        _sleepState.Text = (g.Awake ? $"Ahora: despierta ({g.Reason})." : $"Ahora: puede dormir ({reason}).") +
-                           (g.LidHelperRunning ? " Tapa cerrada: activo." : _svc.Settings.KeepAwakeLidClosed ? " Tapa cerrada: se activa cuando haya algo corriendo." : "") +
+        _sleepState.Text = (g.Awake ? $"Now: awake ({g.Reason})." : $"Now: may sleep ({reason}).") +
+                           (g.LidHelperRunning ? " Closed lid: active." : _svc.Settings.KeepAwakeLidClosed ? " Closed lid: activates while work is running." : "") +
                            (g.LidError != null ? " " + g.LidError : "");
     }
 
@@ -247,7 +247,7 @@ internal sealed class SettingsView : UserControl, IPage
                         {
                             s.Hotkeys[other.Id] = "";
                             RefreshHotkey(other.Id);
-                            _status($"{Hotkeys.Pretty(gesture)} estaba en «{other.Name}»: se pasó a «{def.Name}»");
+                            _status($"{Hotkeys.Pretty(gesture)} was assigned to «{other.Name}»: reassigned to «{def.Name}»");
                         }
 
                         s.Hotkeys[def.Id] = gesture;
@@ -273,7 +273,7 @@ internal sealed class SettingsView : UserControl, IPage
             s.Hotkeys.Clear();
             s.Save();
             foreach (var h in Hotkeys.All) RefreshHotkey(h.Id);
-            _status("Atajos restablecidos");
+            _status("Shortcuts reset");
         });
         reset.HorizontalAlignment = HorizontalAlignment.Left;
         var note = new TextBlock

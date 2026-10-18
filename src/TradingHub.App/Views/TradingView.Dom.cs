@@ -24,7 +24,7 @@ public sealed partial class TradingView
     private static string PanelName(string key) => key switch
     {
         "dom" => "DOM",
-        "tape" => "Cinta de operaciones",
+        "tape" => "Trade tape",
         _ => "Chart Trader",
     };
 
@@ -37,7 +37,7 @@ public sealed partial class TradingView
 
     private Button BuildDetachButton(string key)
     {
-        var b = Ui.IconButton(MaterialIconKind.OpenInNew, $"Sacar {Article(key)} a una ventana aparte", () =>
+        var b = Ui.IconButton(MaterialIconKind.OpenInNew, $"Detach {Article(key)} into a separate window", () =>
         {
             if (_panelWindows.ContainsKey(key)) DockSection(key);
             else DetachSection(key);
@@ -46,14 +46,14 @@ public sealed partial class TradingView
         return b;
     }
 
-    private static string Article(string key) => key == "tape" ? "la cinta" : key == "dom" ? "el DOM" : "el Chart Trader";
+    private static string Article(string key) => key == "tape" ? "trade tape" : key == "dom" ? "DOM" : "Chart Trader";
 
     private void UpdateDetachButton(string key)
     {
         if (!_detachButtons.TryGetValue(key, out var b)) return;
         bool floating = _panelWindows.ContainsKey(key);
         b.Content = Ui.Icon(floating ? MaterialIconKind.DockRight : MaterialIconKind.OpenInNew, 15);
-        ToolTip.SetTip(b, floating ? $"Volver a poner {Article(key)} en el panel derecho" : $"Sacar {Article(key)} a una ventana aparte");
+        ToolTip.SetTip(b, floating ? $"Return {Article(key)} in the right panel" : $"Detach {Article(key)} into a separate window");
     }
 
     /// <summary>Dónde y de qué tamaño estaba la ventana de una sección (el DOM trae lo de la versión anterior).</summary>
@@ -121,7 +121,7 @@ public sealed partial class TradingView
         UpdateDetachButton(key);
         ApplyPanelVisibility();
         w.Show(owner);
-        _status($"{PanelName(key)} en una ventana aparte: sigue al gráfico activo y, al cerrar la ventana, vuelve al panel derecho.");
+        _status($"{PanelName(key)} in a separate window: follows the active chart and returns to the right panel when closed.");
     }
 
     private void SaveWindowBounds(string key, Window w)

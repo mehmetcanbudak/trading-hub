@@ -62,7 +62,7 @@ internal static class Program
                 return; // ante la duda arranca como siempre
             }
 
-            if (i == 0) CrashLog.Write(new InvalidOperationException("No hay pantalla activa (apagada o bloqueada): Trading Hub abre cuando vuelva"));
+            if (i == 0) CrashLog.Write(new InvalidOperationException("No active display (off or locked): Trading Hub opens when a display becomes available"));
             Thread.Sleep(2000);
         }
     }

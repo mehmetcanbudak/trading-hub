@@ -99,7 +99,7 @@ public class HistorySourcesTests : IDisposable
         Assert.Equal(new[] { Day2, Day3 }, nq[1].Days.Select(d => d.Day));
         Assert.Equal(new[] { Day1, Day2 }, nq[2].Days.Select(d => d.Day));
         Assert.Equal("Rithmic + Databento", HistorySources.Describe(nq[0]));
-        Assert.Equal("solo Rithmic", HistorySources.Describe(nq[1]));
+        Assert.Equal("only Rithmic", HistorySources.Describe(nq[1]));
         Assert.Equal("Databento", HistorySources.Describe(nq[2]));
 
         // con una sola fuente, una sola entrada (sin «solo»)

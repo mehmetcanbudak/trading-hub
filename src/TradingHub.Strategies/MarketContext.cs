@@ -5,10 +5,10 @@ namespace TradingHub.Strategies;
 /// <summary>Condición del mercado según la eficiencia de la tendencia de las últimas 24 horas.</summary>
 public enum MarketRegime
 {
-    [Description("Sin datos")] Unknown,
-    [Description("Rango")] Range,
-    [Description("Mixto")] Mixed,
-    [Description("Tendencia")] Trend,
+    [Description("No data")] Unknown,
+    [Description("Range")] Range,
+    [Description("Mixed")] Mixed,
+    [Description("Trend")] Trend,
 }
 
 /// <summary>
@@ -17,21 +17,21 @@ public enum MarketRegime
 /// </summary>
 public enum RegimeFilter
 {
-    [Description("Todas")] All,
-    [Description("Solo en rango")] RangeOnly,
-    [Description("Sin tendencia (rango o mixto)")] NoTrend,
-    [Description("Solo en tendencia")] TrendOnly,
-    [Description("Sin rango (mixto o tendencia)")] NoRange,
-    [Description("Solo en tendencia alcista")] UpTrendOnly,
-    [Description("Solo en tendencia bajista")] DownTrendOnly,
-    [Description("Solo en mixto")] MixedOnly,
-    [Description("Rango o tendencia alcista")] RangeOrUpTrend,
-    [Description("Rango o tendencia bajista")] RangeOrDownTrend,
-    [Description("Mixto o tendencia alcista")] MixedOrUpTrend,
-    [Description("Mixto o tendencia bajista")] MixedOrDownTrend,
-    [Description("Todo menos tendencia bajista")] NoDownTrend,
-    [Description("Todo menos tendencia alcista")] NoUpTrend,
-    [Description("Rango o tendencia (sin mixto)")] NoMixed,
+    [Description("All")] All,
+    [Description("Range only")] RangeOnly,
+    [Description("No trend (range or mixed)")] NoTrend,
+    [Description("Trend only")] TrendOnly,
+    [Description("No range (mixed or trend)")] NoRange,
+    [Description("Uptrend only")] UpTrendOnly,
+    [Description("Downtrend only")] DownTrendOnly,
+    [Description("Mixed only")] MixedOnly,
+    [Description("Range or uptrend")] RangeOrUpTrend,
+    [Description("Range or downtrend")] RangeOrDownTrend,
+    [Description("Mixed or uptrend")] MixedOrUpTrend,
+    [Description("Mixed or downtrend")] MixedOrDownTrend,
+    [Description("All except downtrend")] NoDownTrend,
+    [Description("All except uptrend")] NoUpTrend,
+    [Description("Range or trend (not mixed)")] NoMixed,
 }
 
 /// <summary>Las cuatro condiciones de mercado, combinables.</summary>
@@ -94,14 +94,14 @@ public sealed class MarketContextTracker
 
     public static string Label(MarketRegime regime, int? direction) => regime switch
     {
-        MarketRegime.Range => "Rango",
-        MarketRegime.Mixed => "Mixto",
-        MarketRegime.Trend => direction > 0 ? "Tendencia alcista" : direction < 0 ? "Tendencia bajista" : "Tendencia",
-        _ => "Sin datos",
+        MarketRegime.Range => "Range",
+        MarketRegime.Mixed => "Mixed",
+        MarketRegime.Trend => direction > 0 ? "Uptrend" : direction < 0 ? "Downtrend" : "Trend",
+        _ => "No data",
     };
 
     /// <summary>Volatilidad baja (hasta el percentil 33 del último mes), normal o alta (desde el 67).</summary>
-    public static string VolatilityLabel(double? rank) => rank is not { } r ? "sin datos" : r <= LowVolatility ? "baja" : r >= HighVolatility ? "alta" : "normal";
+    public static string VolatilityLabel(double? rank) => rank is not { } r ? "no data" : r <= LowVolatility ? "low" : r >= HighVolatility ? "high" : "normal";
 
     /// <summary>
     /// Suma historia previa por hora (para arrancar en vivo con las 24 horas y el mes de volatilidad completos, como en un
@@ -294,7 +294,7 @@ public sealed class MarketContextTracker
 
     /// <summary>Texto corto del contexto: «tendencia alcista (0.42) · volatilidad percentil 28».</summary>
     public string Describe() =>
-        Trend is not { } t ? "sin datos de contexto todavía"
+        Trend is not { } t ? "no market context yet"
         : $"{RegimeLabel.ToLowerInvariant()} ({t.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)})" +
-          (VolatilityRank is { } r ? $" · volatilidad percentil {r:0}" : "");
+          (VolatilityRank is { } r ? $" · volatility percentile {r:0}" : "");
 }

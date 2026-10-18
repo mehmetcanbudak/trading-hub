@@ -153,7 +153,7 @@ public static class HistorySources
     public static string Describe(SymbolData s)
     {
         if (s.FeedId == Databento) return "Databento";
-        if (s.FeedId.EndsWith(OnlySuffix, StringComparison.Ordinal)) return "solo " + Pretty(Folder(s.FeedId));
+        if (s.FeedId.EndsWith(OnlySuffix, StringComparison.Ordinal)) return "only " + Pretty(Folder(s.FeedId));
         return s.Combined ? $"{Pretty(s.FeedId)} + Databento" : Pretty(s.FeedId);
     }
 
@@ -161,6 +161,6 @@ public static class HistorySources
     {
         "rithmic" => "Rithmic",
         "tradovate" => "Tradovate",
-        _ => feedId,
+        _ => TradingHub.Common.EnglishText.Of(feedId),
     };
 }

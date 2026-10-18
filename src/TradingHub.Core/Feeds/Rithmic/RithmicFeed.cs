@@ -245,7 +245,7 @@ public sealed class RithmicClient : IAsyncDisposable
         for (int i = 0; i < 20; i++)
         {
             var m = await ReceiveAsync(ct).ConfigureAwait(false);
-            if (m == null) return new RithmicResult(false, "El servidor cerró la conexión", Array.Empty<string>());
+            if (m == null) return new RithmicResult(false, "Server closed the connection", Array.Empty<string>());
             if (m.Int(Rp.TemplateId) != Rp.ResponseLogin) continue;
             var codes = m.Strings(Rp.RpCode).ToList();
             bool ok = codes.Count > 0 && codes[0] == "0";
@@ -253,21 +253,21 @@ public sealed class RithmicClient : IAsyncDisposable
             {
                 double hb = m.Int(Rp.HeartbeatInterval, 60);
                 StartHeartbeat(TimeSpan.FromSeconds(Math.Max(5, hb - 5)));
-                return new RithmicResult(true, $"Sesión iniciada (FCM {m.String(Rp.FcmId)}, IB {m.String(Rp.IbId)})", codes);
+                return new RithmicResult(true, $"Signed in (FCM {m.String(Rp.FcmId)}, IB {m.String(Rp.IbId)})", codes);
             }
 
             LastError = string.Join(" ", codes);
             string reason = string.Join(" — ", codes.Skip(1).DefaultIfEmpty(string.Join(" ", codes)));
             string help = codes.FirstOrDefault() switch
             {
-                "13" => $"Rithmic rechazó el usuario en «{system}» (permission denied). Revisá que el servidor diga el mismo sistema que te dio tu broker (en ATAS: «Rithmic paper trading» es «Rithmic Paper Trading») y la contraseña. Si todo coincide, puede que tu usuario no tenga habilitado el acceso por API (R|Protocol): eso lo habilita Rithmic o tu broker.",
-                "11" => $"Rithmic no aceptó el pedido de login ({reason}).",
-                _ => "Rithmic rechazó el login: " + reason,
+                "13" => $"Rithmic rejected the user on «{system}» (permission denied). Check the system supplied by your broker and the password (Rithmic Paper Trading is case-sensitive). If correct, API access (R|Protocol) may need enabling by Rithmic or your broker.",
+                "11" => $"Rithmic did not accept the login request ({reason}).",
+                _ => "Rithmic rejected login: " + reason,
             };
             return new RithmicResult(false, help, codes);
         }
 
-        return new RithmicResult(false, "Sin respuesta de login", Array.Empty<string>());
+        return new RithmicResult(false, "No login response", Array.Empty<string>());
     }
 
     private void StartHeartbeat(TimeSpan every)
@@ -406,7 +406,7 @@ public sealed partial class RithmicFeed : IMarketDataFeed
                 TickSize = product?.Tick ?? 0.25m,
                 VolumeStep = 1,
                 PointValue = product?.PointValue ?? 1m,
-                Description = $"{product?.Name ?? root} · {exch} (mes activo)",
+                Description = $"{product?.Name ?? root} · {exch} (active contract)",
             });
         }
 

@@ -98,7 +98,7 @@ public sealed class FeedRegistry
     public IMarketDataFeed Get(string id)
     {
         if (_instances.TryGetValue(id, out var f)) return f;
-        if (!_factories.TryGetValue(id, out var factory)) throw new KeyNotFoundException($"Feed desconocido: {id}");
+        if (!_factories.TryGetValue(id, out var factory)) throw new KeyNotFoundException($"Unknown feed: {id}");
         f = factory();
         _instances[id] = f;
         return f;

@@ -234,7 +234,7 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
                 VolumeStep = step / 1.0000000000000000000000000000m,
                 BaseAsset = s.GetProperty("baseAsset").GetString() ?? "",
                 QuoteAsset = s.GetProperty("quoteAsset").GetString() ?? "",
-                Description = $"{s.GetProperty("baseAsset").GetString()}/{s.GetProperty("quoteAsset").GetString()}{(_futures ? " perpetuo" : "")}",
+                Description = $"{s.GetProperty("baseAsset").GetString()}/{s.GetProperty("quoteAsset").GetString()}{(_futures ? " perpetual" : "")}",
             });
         }
 
@@ -344,14 +344,14 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
             // Binance Futures separó los canales: el tape va por /market y el libro por la ruta principal.
             // El libro llega cada 100 ms: si se corta 10 s, la conexión está muerta. La cinta puede tener
             // pausas largas en instrumentos poco líquidos; ahí avisan los pings.
-            _ = Task.Run(() => RunAsync(instrument, sink, sub, "cinta", $"{lower}@aggTrade",
+            _ = Task.Run(() => RunAsync(instrument, sink, sub, "tape", $"{lower}@aggTrade",
                 new[] { "wss://fstream.binance.com/market", "wss://fstream.binance.com" }, TimeSpan.FromMinutes(5)));
-            _ = Task.Run(() => RunAsync(instrument, sink, sub, "libro", $"{lower}@depth@100ms",
+            _ = Task.Run(() => RunAsync(instrument, sink, sub, "order book", $"{lower}@depth@100ms",
                 new[] { "wss://fstream.binance.com", "wss://fstream.binance.com/public" }, TimeSpan.FromSeconds(10)));
         }
         else
         {
-            _ = Task.Run(() => RunAsync(instrument, sink, sub, "datos", $"{lower}@aggTrade/{lower}@depth@100ms", WsBases.ToArray(), TimeSpan.FromSeconds(10)));
+            _ = Task.Run(() => RunAsync(instrument, sink, sub, "data", $"{lower}@aggTrade/{lower}@depth@100ms", WsBases.ToArray(), TimeSpan.FromSeconds(10)));
         }
 
         return sub;
@@ -383,11 +383,11 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
             var docs = new List<JsonDocument>();
             DateTime lastPublish = DateTime.MinValue;
             bool receivedAny = false;
-            string reason = "se cortó la conexión";
+            string reason = "connection lost";
 
             try
             {
-                if (!everConnected) sub.SetChannel(channel, FeedStatus.Connecting, "Conectando a " + DisplayName + "…");
+                if (!everConnected) sub.SetChannel(channel, FeedStatus.Connecting, "Connecting to " + DisplayName + "…");
                 using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(conn.Token))
                 {
                     connectCts.CancelAfter(TimeSpan.FromSeconds(15));
@@ -397,7 +397,7 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
                 // rellena el hueco si nos desconectamos (antes de leer el vivo, así no se desordena)
                 if (lastTradeId >= 0)
                 {
-                    sub.SetChannel(channel, FeedStatus.Reconnecting, "Recuperando las operaciones del corte…");
+                    sub.SetChannel(channel, FeedStatus.Reconnecting, "Backfilling trades missed during the interruption…");
                     lastTradeId = await BackfillAsync(instrument, lastTradeId + 1, sink, conn.Token).ConfigureAwait(false);
                 }
 
@@ -421,7 +421,7 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
 
                     if (r.MessageType == WebSocketMessageType.Close)
                     {
-                        reason = "el servidor cerró la conexión";
+                        reason = "server closed the connection";
                         break;
                     }
 
@@ -535,7 +535,7 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
             catch (OperationCanceledException)
             {
                 // el vigía (no llegó nada) o una reconexión pedida: se vuelve a conectar al toque
-                reason = sub.WasRequested(ref requested) ? "reconexión pedida" : receivedAny ? "no llegaban datos" : "no respondió a tiempo";
+                reason = sub.WasRequested(ref requested) ? "reconnection requested" : receivedAny ? "no data arriving" : "response timed out";
                 if (!receivedAny) failures++;
             }
             catch (Exception ex)
@@ -553,8 +553,8 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
             if (ct.IsCancellationRequested) break;
             var wait = LiveSubscription.Backoff(failures);
             sub.SetChannel(channel, FeedStatus.Reconnecting, failures == 0
-                ? $"Reconectando ({reason})…"
-                : $"Reconectando en {wait.TotalSeconds:0} s · intento {failures} ({reason})");
+                ? $"Reconnecting ({reason})…"
+                : $"Reconnecting in {wait.TotalSeconds:0} s · attempt {failures} ({reason})");
             await Task.Delay(wait, ct).ContinueWith(_ => { }).ConfigureAwait(false);
         }
 

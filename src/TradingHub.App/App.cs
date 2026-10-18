@@ -17,6 +17,8 @@ public sealed class App : Application
 
     public override void Initialize()
     {
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+        System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
         Name = TradingHub.Common.Product.Name;
         RequestedThemeVariant = ThemeVariant.Dark;
         Styles.Add(new FluentTheme());

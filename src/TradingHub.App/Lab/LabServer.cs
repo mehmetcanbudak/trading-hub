@@ -68,7 +68,7 @@ internal static class LabServer
                         result = await CallAsync(msg!["params"]);
                         break;
                     default:
-                        error = (-32601, $"Método desconocido: {method}");
+                        error = (-32601, $"Unknown method: {method}");
                         break;
                 }
             }
@@ -91,7 +91,7 @@ internal static class LabServer
         ["protocolVersion"] = p?["protocolVersion"]?.GetValue<string>() ?? "2025-06-18",
         ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
         ["serverInfo"] = new JsonObject { ["name"] = "tradinghub-lab", ["version"] = "1.0" },
-        ["instructions"] = "Laboratorio de Trading Hub: estrategias en C#, datos tick a tick guardados, backtest, optimización, walk-forward, Monte Carlo y reportes.",
+        ["instructions"] = "Trading Hub laboratory: C# strategies, saved trade-level data, backtesting, optimization, walk-forward, Monte Carlo and reports.",
     };
 
     // ===================================================================== herramientas
@@ -111,19 +111,19 @@ internal static class LabServer
 
     private static readonly (string Name, string Type, string Description, bool Required)[] RangeProps =
     {
-        ("file", "string", "Archivo de la estrategia sin .cs (ej. CruceDeMedias)", true),
-        ("feed", "string", "Conexión de los datos (ej. binance-futures), ver list_data", true),
-        ("symbol", "string", "Símbolo (ej. BTCUSDT)", true),
-        ("from", "string", "Desde (AAAA-MM-DD, UTC)", true),
-        ("to", "string", "Hasta (AAAA-MM-DD, UTC, inclusive)", true),
-        ("period", "string", "Velas: M1, M5, M15, H1, Tick500, Volume100, Range20… (por defecto M5)", false),
-        ("parameters", "object", "Parámetros fijos {Nombre: valor}; los que falten usan el valor por defecto", false),
-        ("capital", "number", "Capital inicial (10000)", false),
-        ("commission_percent", "number", "Comisión % del nominal por lado (0.04). Para futuros usá 0 y commission_per_unit", false),
-        ("commission_per_unit", "number", "Comisión fija por contrato o unidad y por lado (ej. 2.5 en futuros de CME); se suma a la porcentual", false),
-        ("slippage_ticks", "integer", "Deslizamiento en ticks de las órdenes a mercado y stops (1)", false),
-        ("timezone", "string", "Zona horaria de la sesión (ej. America/New_York); por defecto UTC", false),
-        ("session_start_hour", "number", "Hora local de inicio de sesión (0)", false),
+        ("file", "string", "Strategy filename without .cs (e.g. CruceDeMedias)", true),
+        ("feed", "string", "Data connection (e.g. binance-futures); see list_data", true),
+        ("symbol", "string", "Symbol (e.g. BTCUSDT)", true),
+        ("from", "string", "From (YYYY-MM-DD, UTC)", true),
+        ("to", "string", "To (YYYY-MM-DD, UTC, inclusive)", true),
+        ("period", "string", "Bars: M1, M5, M15, H1, Tick500, Volume100, Range20… (default M5)", false),
+        ("parameters", "object", "Fixed parameters {Name: value}; omitted parameters use defaults", false),
+        ("capital", "number", "Initial capital (10000)", false),
+        ("commission_percent", "number", "Commission as % of notional per side (0.04). For futures use 0 and commission_per_unit", false),
+        ("commission_per_unit", "number", "Fixed commission per contract or unit per side (e.g. 2.5 for CME futures); added to percentage commission", false),
+        ("slippage_ticks", "integer", "Slippage in ticks for market and stop orders (1)", false),
+        ("timezone", "string", "Session time zone (e.g. America/New_York); defaults to UTC", false),
+        ("session_start_hour", "number", "Local session start hour (0)", false),
     };
 
     private static JsonArray Tools()
@@ -137,84 +137,84 @@ internal static class LabServer
 
         var optimizeProps = RangeProps.Concat(new[]
         {
-            ("ranges", "object", "Rangos {Parametro: {min, max, step}}; sin esto usa los [Optimize] de la estrategia", false),
-            ("metric", "string", "Métrica a maximizar: NetProfit, ProfitFactor, Sharpe, Sortino, RecoveryFactor, NetProfitOverDrawdown, WinRate, Expectancy (por defecto NetProfitOverDrawdown)", false),
-            ("min_trades", "integer", "Mínimo de operaciones para que una combinación cuente (10)", false),
+            ("ranges", "object", "Ranges {Parameter: {min, max, step}}; defaults to the strategy's [Optimize] attributes", false),
+            ("metric", "string", "Metric to maximize: NetProfit, ProfitFactor, Sharpe, Sortino, RecoveryFactor, NetProfitOverDrawdown, WinRate, Expectancy (default NetProfitOverDrawdown)", false),
+            ("min_trades", "integer", "Minimum trades for a combination to qualify (10)", false),
         }).ToArray();
 
         return new JsonArray
         {
-            Tool("list_strategies", "Lista las estrategias (archivos .cs) con su estado de compilación, sus parámetros (con los rangos de [Optimize]) y su calentamiento: " +
-                                    "los indicadores que crea en OnInit con su período (por ejemplo ATR(14), constantes del código incluidas) y las velas que tardan en estar listos " +
-                                    "(con los parámetros por defecto y, si cambia, con los máximos de [Optimize]). Cada ventana del walk-forward arranca sin historia y gasta esas primeras velas en calentar.", Schema()),
-            Tool("compile_strategy", "Compila una estrategia y devuelve los errores (línea y mensaje), sus parámetros y su calentamiento (indicadores con su período y velas que necesita).", Schema(("file", "string", "Archivo sin .cs", true))),
-            Tool("chart_snapshot", "Mira el gráfico: corre la estrategia en un rango y guarda una imagen con las velas, sus entradas y salidas, sus dibujos y sus líneas. Devuelve la ruta de la imagen (miralo con Read) y, con hora local, las velas del rango (con los valores de las líneas de la estrategia), las operaciones, los dibujos y su registro. Sirve para entender por qué entró o salió a tal hora.",
-                Schema(("file", "string", "Estrategia (archivo sin .cs)", true), ("feed", "string", "Conexión (como en list_data)", true), ("symbol", "string", "Símbolo", true),
-                    ("period", "string", "Período: M1, M5, M15, H1…", true), ("from", "string", "Desde, hora local: AAAA-MM-DD HH:mm (o solo la fecha)", true),
-                    ("to", "string", "Hasta, hora local: AAAA-MM-DD HH:mm (o solo la fecha = todo ese día)", true),
-                    ("parameters", "object", "Parámetros fijos {Nombre: valor}; los que falten usan el valor por defecto", false),
-                    ("warmup_days", "number", "Días previos para calentar indicadores (por defecto 3)", false),
-                    ("timezone", "string", "Huso horario (por defecto el de Trading Hub)", false))),
-            Tool("list_indicators", "Indicadores propios del usuario (su carpeta de indicadores): archivos, clases y nombres visibles.", Schema()),
-            Tool("compile_indicator", "Compila los indicadores propios y devuelve los errores del archivo pedido (línea y mensaje). Si compila, aparece en el gráfico en Indicadores → «Mis indicadores».",
-                Schema(("file", "string", "Archivo sin .cs (en la carpeta de indicadores)", true))),
-            Tool("list_data", "Datos tick a tick guardados por instrumento (días disponibles). Los backtests solo usan estos datos.", Schema()),
-            Tool("download_data", "Baja días completos de ticks de los archivos públicos (Binance Futures/Spot y Bybit; ~5 s por día). Máximo 62 días por llamada.",
-                Schema(("feed", "string", "binance-futures, binance-spot o bybit-linear", true), ("symbol", "string", "Símbolo", true),
-                    ("from", "string", "Primer día AAAA-MM-DD", true), ("to", "string", "Último día AAAA-MM-DD (inclusive)", true))),
-            Tool("run_backtest", "Backtest tick a tick con comisiones y deslizamiento. Devuelve métricas completas y el id de la corrida (queda en el historial).",
+            Tool("list_strategies", "Lists strategy .cs files, compilation status, parameters (with [Optimize] ranges) and warmup: " +
+                                    "indicators created in OnInit with their periods (e.g. ATR(14), including code constants) and the bars required to become ready " +
+                                    "(with default parameters and, when different, [Optimize] maxima). Each walk-forward window starts without history and consumes these initial bars for warmup.", Schema()),
+            Tool("compile_strategy", "Compiles a strategy and returns diagnostics (line and message), parameters and warmup requirements (indicator periods and required bars).", Schema(("file", "string", "Filename without .cs", true))),
+            Tool("chart_snapshot", "Runs a strategy over a range and saves a chart image with bars, entries/exits, drawings and lines. Returns the PNG path for Read plus local-time bars, strategy line values, trades, drawings and logs. Use it to explain entry or exit timing.",
+                Schema(("file", "string", "Strategy (filename without .cs)", true), ("feed", "string", "Connection (as listed by list_data)", true), ("symbol", "string", "Symbol", true),
+                    ("period", "string", "Period: M1, M5, M15, H1…", true), ("from", "string", "From, local time: YYYY-MM-DD HH:mm (or date only)", true),
+                    ("to", "string", "To, local time: YYYY-MM-DD HH:mm (date only includes the entire day)", true),
+                    ("parameters", "object", "Fixed parameters {Name: value}; omitted parameters use defaults", false),
+                    ("warmup_days", "number", "Prior days used for indicator warmup (default 3)", false),
+                    ("timezone", "string", "Time zone (defaults to Trading Hub's setting)", false))),
+            Tool("list_indicators", "User-defined indicators: files, classes and display names from the indicator directory.", Schema()),
+            Tool("compile_indicator", "Compiles custom indicators and returns diagnostics for the requested file (line and message). Compiled indicators appear under Indicators → My indicators.",
+                Schema(("file", "string", "Filename without .cs (in the indicator directory)", true))),
+            Tool("list_data", "Saved trade-level data by instrument (available days). Backtests only use these data.", Schema()),
+            Tool("download_data", "Downloads complete daily public tick archives (Binance Futures/Spot and Bybit; about 5 seconds per day). Maximum 62 days per call.",
+                Schema(("feed", "string", "binance-futures, binance-spot or bybit-linear", true), ("symbol", "string", "Symbol", true),
+                    ("from", "string", "First day YYYY-MM-DD", true), ("to", "string", "Last day YYYY-MM-DD (inclusive)", true))),
+            Tool("run_backtest", "Trade-level backtest with commissions and slippage. Returns full metrics and the saved run ID.",
                 Schema(RangeProps.Concat(new[]
                 {
-                    ("monte_carlo_runs", "integer", "Si es > 0, agrega Monte Carlo (reordenar operaciones) con esa cantidad de corridas", false),
-                    ("include_trades", "boolean", "Incluir las primeras y últimas operaciones", false),
+                    ("monte_carlo_runs", "integer", "If greater than 0, adds Monte Carlo trade reordering with this number of simulations", false),
+                    ("include_trades", "boolean", "Include the first and last trades", false),
                 }).ToArray())),
-            Tool("run_optimization", "Optimización en grilla (en paralelo) de los parámetros. Devuelve las mejores combinaciones. Ojo con el sobreajuste: validá con walk-forward.",
+            Tool("run_optimization", "Parallel grid optimization. Returns the best parameter combinations. Beware of overfitting: validate with walk-forward.",
                 Schema(optimizeProps.Concat(new[]
                 {
-                    ("top", "integer", "Cuántas combinaciones devolver (10)", false),
-                    ("max_combinations", "integer", "Tope de combinaciones (5000)", false),
+                    ("top", "integer", "Number of combinations to return (10)", false),
+                    ("max_combinations", "integer", "Maximum combinations (5000)", false),
                 }).ToArray())),
-            Tool("run_walk_forward", "Walk-forward: en cada ventana elige parámetros mirando solo esa ventana y los prueba fuera de muestra en la siguiente. Corre cada combinación una sola vez " +
-                                     "sobre toda la historia (ticks repetidos juntados, indicadores calientes como en vivo) y recorta por ventana, busca con la grilla entera si hay ≤ 300 combinaciones " +
-                                     "o con optimización bayesiana (TPE) si hay más, elige la mejor meseta (no el mejor pico) y mide el sobreajuste: PBO y caminos de la validación cruzada " +
-                                     "combinatoria purgada (CPCV). Devuelve el resultado encadenado fuera de muestra. Si lo pedís igual mientras ya corre, espera al que corre (no lo relances).",
+            Tool("run_walk_forward", "Walk-forward: each window selects parameters using only that window, then tests them out of sample in the next. Runs each combination once " +
+                                     "over the entire history (repeated ticks combined, indicators warmed as in live execution) and slices by window. Searches the full grid for ≤ 300 combinations " +
+                                     "or uses Bayesian optimization (TPE) otherwise; selects the best plateau, not the highest peak, and measures overfitting with PBO and purged " +
+                                     "combinatorial cross-validation (CPCV) paths. Returns stitched out-of-sample results. Repeating an identical request waits for the existing run; do not relaunch it.",
                 Schema(optimizeProps.Concat(new[]
                 {
-                    ("in_sample_days", "integer", "Días de cada ventana de optimización", true),
-                    ("out_sample_days", "integer", "Días de cada ventana fuera de muestra", true),
-                    ("anchored", "boolean", "Ventanas ancladas al inicio (false = móviles)", false),
-                    ("search", "string", "Búsqueda: auto (grilla hasta 300 combinaciones, si no bayesiana), grid o bayesian", false),
-                    ("budget", "integer", "Combinaciones que mide la bayesiana en cada ventana (80)", false),
-                    ("estimate_only", "boolean", "Solo estimar cuánto va a tardar (corre una combinación para medir; no guarda nada)", false),
+                    ("in_sample_days", "integer", "Days per optimization window", true),
+                    ("out_sample_days", "integer", "Days per out-of-sample window", true),
+                    ("anchored", "boolean", "Windows anchored to the start (false = rolling)", false),
+                    ("search", "string", "Search: auto (grid up to 300 combinations, otherwise Bayesian), grid or bayesian", false),
+                    ("budget", "integer", "Combinations evaluated by Bayesian search per window (80)", false),
+                    ("estimate_only", "boolean", "Only estimate runtime (times one combination; saves nothing)", false),
                 }).ToArray())),
-            Tool("list_runs", "Corridas guardadas de una estrategia (backtests, optimizaciones, walk-forward) con sus métricas.",
-                Schema(("file", "string", "Archivo sin .cs", true), ("limit", "integer", "Cuántas (20)", false))),
-            Tool("analyze_portfolio", "Combina varias estrategias (corridas guardadas) en un portafolio: métricas conjuntas, matriz de correlación de los resultados diarios y beneficio de diversificar.",
-                Schema(("components", "array", "Lista de {file, run_id (opcional: si falta, el último backtest), weight (opcional, 1)}", true),
-                    ("capital", "number", "Capital del portafolio (10000)", false))),
-            Tool("suggest_portfolio", "Busca entre los últimos backtests de todas las estrategias la combinación poco correlacionada que más mejora el Sharpe del conjunto.",
-                Schema(("max_components", "integer", "Máximo de estrategias (5)", false), ("max_correlation", "number", "Correlación máxima entre dos estrategias (0.5)", false),
-                    ("capital", "number", "Capital del portafolio (10000)", false))),
-            Tool("live_portfolio", "Cartera en vivo (solo lectura): cada estrategia que opera (o operó) con algoritmos en Trading Hub, con sus parámetros en vivo, tamaño actual, posición, resultado, operaciones, acierto, profit factor (total y de las últimas 20), drawdown actual y máximo, y sus últimas operaciones (con precios y cantidad). " +
-                                   "Dice en qué contrato ejecuta cada una (por ejemplo MNQ para una estrategia del NQ): cantidades y resultado salen en ese contrato.",
-                Schema(("recent_trades", "integer", "Cuántas operaciones recientes por estrategia (10)", false))),
-            Tool("propose_sizing", "Propone cambios de tamaño para estrategias de la cartera en vivo. NO aplica nada: quedan pendientes y el usuario aprueba o rechaza cada uno en Trading Hub (En vivo → Propuestas).",
-                Schema(("summary", "string", "Resumen del análisis en 1 a 3 líneas", true),
-                    ("items", "array", "Lista de {key (de live_portfolio), proposed_size (multiplicador: 1 = normal, 0 = pausa, máximo 3), reason}", true))),
-            Tool("save_report", "Arma y guarda el INFORME PROFESIONAL (lo genera Trading Hub con todas las métricas, tablas y gráficos a partir de las corridas: resumen, datos y supuestos, rentabilidad, operaciones, riesgo, largos/cortos, mensual, por hora y día, drawdowns, optimización con sensibilidad, walk-forward, Monte Carlo y portafolio). Vos aportás el veredicto y los textos de análisis. Se ve en Backtesting → Reportes.",
-                Schema(("title", "string", "Título corto del informe", true),
-                    ("verdict", "string", "ganadora, prometedora, perdedora o descartada", true),
-                    ("file", "string", "Estrategia evaluada (sin .cs); si faltan los run_id se usan sus últimas corridas", false),
-                    ("backtest_run_id", "string", "Corrida de backtest principal (idealmente con Monte Carlo)", false),
-                    ("optimization_run_id", "string", "Corrida de optimización", false),
-                    ("walk_forward_run_id", "string", "Corrida de walk-forward", false),
-                    ("portfolio", "array", "Opcional: componentes del portafolio [{file, run_id, weight}] para incluir la sección de portafolio", false),
-                    ("capital", "number", "Capital del portafolio (10000)", false),
-                    ("summary", "string", "Resumen ejecutivo de 2 a 5 líneas con la conclusión", true),
-                    ("analysis", "string", "Análisis en Markdown: qué funciona, qué no, robustez, sobreajuste, comparación entre versiones", true),
-                    ("risks", "string", "Riesgos en Markdown (lista)", false),
-                    ("next_steps", "string", "Próximos pasos en Markdown (lista)", false),
-                    ("extra_markdown", "string", "Secciones extra opcionales (por ejemplo, cambios al código)", false))),
+            Tool("list_runs", "Saved strategy runs (backtests, optimizations and walk-forwards) with metrics.",
+                Schema(("file", "string", "Filename without .cs", true), ("limit", "integer", "Number of runs (20)", false))),
+            Tool("analyze_portfolio", "Combines saved strategy runs into a portfolio: aggregate metrics, daily-return correlation matrix and diversification benefit.",
+                Schema(("components", "array", "List of {file, run_id (optional: latest backtest if omitted), weight (optional, 1)}", true),
+                    ("capital", "number", "Portfolio capital (10000)", false))),
+            Tool("suggest_portfolio", "Searches the latest strategy backtests for a low-correlation combination that most improves aggregate Sharpe.",
+                Schema(("max_components", "integer", "Maximum strategies (5)", false), ("max_correlation", "number", "Maximum correlation between two strategies (0.5)", false),
+                    ("capital", "number", "Portfolio capital (10000)", false))),
+            Tool("live_portfolio", "Live portfolio (read-only): each strategy currently or previously running algorithms in Trading Hub, with live parameters, size, position, PnL, trades, win rate, profit factor (overall and last 20 trades), current/maximum drawdown and recent trades with prices and quantities. " +
+                                   "Identifies each execution contract (e.g. MNQ for an NQ strategy): quantities and PnL refer to that contract.",
+                Schema(("recent_trades", "integer", "Recent trades per strategy (10)", false))),
+            Tool("propose_sizing", "Proposes position-size changes for live strategies. Applies NOTHING: proposals remain pending until the user approves or rejects each in Live → Proposals.",
+                Schema(("summary", "string", "Analysis summary in 1 to 3 lines", true),
+                    ("items", "array", "List of {key (from live_portfolio), proposed_size (multiplier: 1 = normal, 0 = paused, maximum 3), reason}", true))),
+            Tool("save_report", "Generates and saves a detailed report from saved runs: executive summary, data and assumptions, performance, trades, risk, long/short breakdown, monthly/hourly/weekday results, drawdowns, optimization sensitivity, walk-forward, Monte Carlo and portfolio. Supply the verdict and analysis in English. View it in Backtesting → Reports.",
+                Schema(("title", "string", "Short report title", true),
+                    ("verdict", "string", "Verdict code: ganadora (profitable), prometedora (promising), perdedora (unprofitable) or descartada (rejected)", true),
+                    ("file", "string", "Evaluated strategy (without .cs); omitted run IDs default to its latest runs", false),
+                    ("backtest_run_id", "string", "Main backtest run (preferably with Monte Carlo)", false),
+                    ("optimization_run_id", "string", "Optimization run", false),
+                    ("walk_forward_run_id", "string", "Walk-forward run", false),
+                    ("portfolio", "array", "Optional portfolio components [{file, run_id, weight}] to include a portfolio section", false),
+                    ("capital", "number", "Portfolio capital (10000)", false),
+                    ("summary", "string", "Executive summary of 2 to 5 lines with the conclusion", true),
+                    ("analysis", "string", "Markdown analysis: strengths, weaknesses, robustness, overfitting and comparisons between code versions", true),
+                    ("risks", "string", "Risks as a Markdown list", false),
+                    ("next_steps", "string", "Next steps as a Markdown list", false),
+                    ("extra_markdown", "string", "Optional extra sections (e.g. code changes)", false))),
         };
     }
 
@@ -242,7 +242,7 @@ internal static class LabServer
                 "propose_sizing" => ProposeSizing(args),
                 "suggest_portfolio" => SuggestPortfolio(args),
                 "save_report" => SaveReport(args),
-                _ => throw new ArgumentException($"Herramienta desconocida: {name}"),
+                _ => throw new ArgumentException($"Unknown tool: {name}"),
             };
             return Content(result.ToJsonString(new JsonSerializerOptions { WriteIndented = false }), false);
         }
@@ -263,7 +263,7 @@ internal static class LabServer
     private static string Str(JsonObject a, string key, string? def = null)
     {
         var v = a[key];
-        if (v == null) return def ?? throw new ArgumentException($"Falta «{key}».");
+        if (v == null) return def ?? throw new ArgumentException($"Missing «{key}».");
         return v.GetValueKind() == JsonValueKind.String ? v.GetValue<string>() : v.ToJsonString();
     }
 
@@ -280,7 +280,7 @@ internal static class LabServer
     {
         var s = Str(a, key);
         if (!DateTime.TryParse(s, Inv, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var d))
-            throw new ArgumentException($"Fecha inválida en «{key}»: {s} (usá AAAA-MM-DD)");
+            throw new ArgumentException($"Invalid date in «{key}»: {s} (use YYYY-MM-DD)");
         d = DateTime.SpecifyKind(d, DateTimeKind.Utc);
         // "hasta" con solo fecha incluye todo ese día
         return endOfDay && d.TimeOfDay == TimeSpan.Zero ? d.AddDays(1) : d;
@@ -326,12 +326,12 @@ internal static class LabServer
         Catalog.Refresh();
         file = Path.GetFileNameWithoutExtension(file);
         var f = Catalog.Files.FirstOrDefault(x => x.FileName.Equals(file, StringComparison.OrdinalIgnoreCase))
-                ?? throw new ArgumentException($"No existe la estrategia «{file}». Usá list_strategies.");
+                ?? throw new ArgumentException($"Strategy not found: «{file}». Use list_strategies.");
         var res = Catalog.Compile(f);
         if (!res.Success || f.Type == null)
         {
-            var errs = res.Diagnostics.Where(d => d.Severity == "error").Take(10).Select(d => $"línea {d.Line}: {d.Message}");
-            throw new ArgumentException($"«{file}» no compila: {string.Join(" | ", errs)}");
+            var errs = res.Diagnostics.Where(d => d.Severity == "error").Take(10).Select(d => $"line {d.Line}: {d.Message}");
+            throw new ArgumentException($"«{file}» does not compile: {string.Join(" | ", errs)}");
         }
 
         return f;
@@ -377,9 +377,9 @@ internal static class LabServer
                 max[p.Name] = opt.Max;
         if (max.Count > 0 && StrategyWarmup.Measure(t, max) is { Error: null } wm && wm.Bars != w.Bars) o["bars_at_optimize_max"] = wm.Bars;
         // «bars» no es el calentamiento completo: se lo aclara siempre al agente
-        var note = "«bars» cuenta solo los indicadores que la estrategia crea en OnInit: no incluye lo que lea a mano de las velas (Bars[n]) " +
-                   "ni los indicadores que cree más tarde. Si el código hace eso, sumale esas velas.";
-        if (!w.Complete) note = (w.Error != null ? $"No se pudo medir del todo ({w.Error}). " : $"A las {StrategyWarmup.MaxBars} velas todavía no estaban listos. ") + note;
+        var note = "«bars» only counts indicators created in OnInit: it excludes manual historical reads (Bars[n]) " +
+                   "and indicators created later. Add those bars if the code uses them.";
+        if (!w.Complete) note = (w.Error != null ? $"Could not fully measure warmup ({w.Error}). " : $"After {StrategyWarmup.MaxBars} bars they were still not ready. ") + note;
         o["note"] = note;
         return o;
     }
@@ -417,7 +417,7 @@ internal static class LabServer
         Catalog.Refresh();
         file = Path.GetFileNameWithoutExtension(file);
         var f = Catalog.Files.FirstOrDefault(x => x.FileName.Equals(file, StringComparison.OrdinalIgnoreCase))
-                ?? throw new ArgumentException($"No existe la estrategia «{file}».");
+                ?? throw new ArgumentException($"Strategy not found: «{file}».");
         var res = Catalog.Compile(f, force: true);
         var errors = new JsonArray(res.Diagnostics.Where(d => d.Severity == "error").Take(30)
             .Select(d => (JsonNode)new JsonObject { ["line"] = d.Line, ["column"] = d.Column, ["id"] = d.Id, ["message"] = d.Message }).ToArray());
@@ -440,7 +440,7 @@ internal static class LabServer
     {
         string text = Str(a, key).Trim().Replace('T', ' ');
         string[] formats = { "yyyy-MM-dd HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd H:mm", "yyyy-MM-dd" };
-        if (!DateTime.TryParseExact(text, formats, Inv, DateTimeStyles.None, out var local)) throw new ArgumentException($"«{key}» tiene que ser AAAA-MM-DD HH:mm (hora local).");
+        if (!DateTime.TryParseExact(text, formats, Inv, DateTimeStyles.None, out var local)) throw new ArgumentException($"«{key}» must be YYYY-MM-DD HH:mm (local time).");
         if (endOfDay && text.Length <= 10) local = local.AddDays(1);
         return TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), tz);
     }
@@ -457,14 +457,14 @@ internal static class LabServer
         try { tz = TimeZoneInfo.FindSystemTimeZoneById(tzId); }
         catch { tz = TimeZoneInfo.Local; }
         string periodCode = Str(a, "period", "M5");
-        if (!ChartPeriod.TryParse(periodCode, out var period)) throw new ArgumentException($"Período inválido: {periodCode}");
+        if (!ChartPeriod.TryParse(periodCode, out var period)) throw new ArgumentException($"Invalid period: {periodCode}");
         var fromUtc = LocalArg(a, "from", tz, false);
         var toUtc = LocalArg(a, "to", tz, true);
-        if (toUtc <= fromUtc) throw new ArgumentException("«to» tiene que ser posterior a «from».");
+        if (toUtc <= fromUtc) throw new ArgumentException("to must be later than from.");
         double warmDays = Num(a, "warmup_days", period.IsTimeBased && period.ApproxDuration >= TimeSpan.FromHours(1) ? 15 : 3);
         var inst = await ResolveInstrumentAsync(Str(a, "feed"), Str(a, "symbol").ToUpperInvariant());
         var ticks = await Task.Run(() => TickData.Load(AppPaths.Ticks, inst, fromUtc.AddDays(-warmDays), toUtc, null, CancellationToken.None));
-        if (ticks.Count == 0) throw new ArgumentException($"No hay ticks guardados de {inst.Symbol} ({inst.FeedId}) en ese rango. Mirá list_data o bajá días con download_data.");
+        if (ticks.Count == 0) throw new ArgumentException($"No saved ticks for {inst.Symbol} ({inst.FeedId}) in this range. See list_data or download days with download_data.");
 
         // la estrategia sobre todo lo cargado (como en el gráfico: sin costos y sin cerrar al final)
         var strategy = file.Create();
@@ -475,7 +475,7 @@ internal static class LabServer
             CommissionPercent = 0, SlippageTicks = 0, TimeZoneId = tz.Id, CloseAtEnd = false, InitialCapital = 10_000,
         };
         var result = await Task.Run(() => new BacktestEngine(strategy, ticks, settings) { ContextHistory = MarketConditions.HourlyBefore(inst.FeedId, inst.Symbol, ticks.FirstTime) }.Run(CancellationToken.None));
-        if (!result.Ok) throw new InvalidOperationException("La estrategia falló: " + result.Error);
+        if (!result.Ok) throw new InvalidOperationException("Strategy failed: " + result.Error);
 
         // el gráfico, igual que en la app
         var data = new InstrumentData(inst, new TradingHub.Feeds.SimulatedFeed());
@@ -490,7 +490,7 @@ internal static class LabServer
         model.Strategies.Add(new TradingHub.Charting.StrategyOverlay
         {
             Name = file.DisplayName,
-            Status = "captura del laboratorio",
+            Status = "laboratory snapshot",
             Color = color,
             Signals = signals,
             Links = links,
@@ -539,7 +539,7 @@ internal static class LabServer
         bool InWindow(DateTime t) => t >= fromUtc && t < toUtc;
         var trades = new JsonArray(result.Trades.Where(t => InWindow(t.EntryTime) || InWindow(t.ExitTime)).Take(50).Select(t => (JsonNode)new JsonObject
         {
-            ["side"] = t.IsLong ? "largo" : "corto",
+            ["side"] = t.IsLong ? "long" : "short",
             ["entry"] = L(t.EntryTime), ["entry_price"] = t.EntryPrice, ["entry_order"] = t.EntryName,
             ["exit"] = L(t.ExitTime), ["exit_price"] = t.ExitPrice, ["exit_order"] = t.ExitName,
             ["net_pnl"] = Math.Round(t.NetPnl, 2),
@@ -557,10 +557,10 @@ internal static class LabServer
         {
             ["image"] = path,
             ["timezone"] = tz.Id,
-            ["note"] = "Mirá la imagen con Read (es un PNG). Las velas tienen la hora de apertura; una orden a mercado que se manda al cerrar una vela se llena en la siguiente.",
+            ["note"] = "Read the PNG image with Read. Bar timestamps indicate opening time; a market order submitted at a bar close fills in the next bar.",
             ["bars"] = bars,
             ["trades"] = trades,
-            ["open_position"] = result.OpenPosition is { } op ? new JsonObject { ["side"] = op.IsLong ? "largo" : "corto", ["since"] = L(op.EntryTime), ["price"] = op.AveragePrice, ["quantity"] = op.Quantity } : null,
+            ["open_position"] = result.OpenPosition is { } op ? new JsonObject { ["side"] = op.IsLong ? "long" : "short", ["since"] = L(op.EntryTime), ["price"] = op.AveragePrice, ["quantity"] = op.Quantity } : null,
             ["drawings"] = shapes,
             ["log"] = log,
         };
@@ -601,7 +601,7 @@ internal static class LabServer
     {
         file = Path.GetFileNameWithoutExtension(file);
         var path = IndicatorFiles().FirstOrDefault(f => Path.GetFileNameWithoutExtension(f).Equals(file, StringComparison.OrdinalIgnoreCase))
-                   ?? throw new ArgumentException($"No existe el indicador «{file}» en {AppPaths.UserIndicators}.");
+                   ?? throw new ArgumentException($"Indicator not found: «{file}» in {AppPaths.UserIndicators}.");
         var (res, indicators) = CompileIndicators();
         var errors = res.Diagnostics.Where(d => d.Severity == "error").ToList();
         // errores de este archivo primero; los de otros archivos también frenan la compilación de todos
@@ -641,18 +641,18 @@ internal static class LabServer
         return new JsonObject
         {
             ["instruments"] = arr,
-            ["note"] = "Días con ticks guardados. Si faltan días seguidos, el rango igual se puede usar pero esos días quedan sin operaciones. Para Binance/Bybit podés bajar más con download_data. " +
-                       "Futuros con historia de Databento: «rithmic» es la combinada (Rithmic y, donde le falta, Databento; usá esa salvo que te pidan otra), «rithmic-solo» solo Rithmic y «databento» solo Databento.",
+            ["note"] = "Days with saved ticks. A range with missing consecutive days is still usable, but those days have no trades. For Binance/Bybit, download more with download_data. " +
+                       "Futures with Databento history: rithmic combines Rithmic with Databento gaps (use unless instructed otherwise); rithmic-solo uses only Rithmic; databento uses only Databento.",
         };
     }
 
     private static async Task<JsonNode> DownloadDataAsync(JsonObject a)
     {
         string feed = Str(a, "feed"), symbol = Str(a, "symbol").ToUpperInvariant();
-        if (!PublicArchives.Supports(feed)) throw new ArgumentException("Solo hay archivos públicos para binance-futures, binance-spot y bybit-linear.");
+        if (!PublicArchives.Supports(feed)) throw new ArgumentException("Public archives are only available for binance-futures, binance-spot and bybit-linear.");
         var from = DateOnly.FromDateTime(Date(a, "from", false));
         var to = DateOnly.FromDateTime(Date(a, "to", false));
-        if (to.DayNumber - from.DayNumber > 61) throw new ArgumentException("Máximo 62 días por llamada.");
+        if (to.DayNumber - from.DayNumber > 61) throw new ArgumentException("Maximum 62 days per call.");
         var inst = await ResolveInstrumentAsync(feed, symbol, preferExchange: true);
         int ok = 0, skipped = 0, missing = 0;
         long trades = 0;
@@ -739,8 +739,8 @@ internal static class LabServer
             TimeZoneId = a["timezone"] is { } tz ? tz.GetValue<string>() : null,
             SessionStart = TimeSpan.FromHours(Num(a, "session_start_hour", 0)),
         };
-        if (!ChartPeriod.TryParse(settings.Period, out _)) throw new ArgumentException($"Período inválido: {settings.Period}");
-        if (settings.ToUtc <= settings.FromUtc) throw new ArgumentException("«to» tiene que ser posterior a «from».");
+        if (!ChartPeriod.TryParse(settings.Period, out _)) throw new ArgumentException($"Invalid period: {settings.Period}");
+        if (settings.ToUtc <= settings.FromUtc) throw new ArgumentException("to must be later than from.");
 
         // comprimidos (ticks repetidos juntados) para optimizar y validar: la misma historia con muchos menos eventos
         string key = $"{settings.FeedId}|{settings.Symbol}|{settings.FromUtc:O}|{settings.ToUtc:O}|{(compress ? "c" : "")}";
@@ -751,7 +751,7 @@ internal static class LabServer
             var inst = await ResolveInstrumentAsync(settings.FeedId, settings.Symbol);
             var data = await Task.Run(() => TickData.Load(AppPaths.Ticks, inst, settings.FromUtc, settings.ToUtc, null, CancellationToken.None, compress));
             if (data.Count == 0)
-                throw new ArgumentException($"No hay ticks guardados de {settings.Symbol} ({settings.FeedId}) en ese rango. Mirá list_data o bajá días con download_data.");
+                throw new ArgumentException($"No saved ticks for {settings.Symbol} ({settings.FeedId}) in this range. See list_data or download days with download_data.");
             _ticks = data;
             _ticksKey = key;
         }
@@ -792,7 +792,7 @@ internal static class LabServer
 
     private static void Save(StrategyRun run, StrategyFile file)
     {
-        run.Notes = string.IsNullOrEmpty(run.Notes) ? "Laboratorio de Claude" : run.Notes;
+        run.Notes = string.IsNullOrEmpty(run.Notes) ? "Claude laboratory" : run.Notes;
         StrategyStore.Save(run, File.ReadAllText(file.Path));
     }
 
@@ -834,7 +834,7 @@ internal static class LabServer
         strategy.SetParameters(ParamsFor(a, file));
         // el contexto de mercado arranca con el mes anterior, como en vivo
         var res = await Task.Run(() => new BacktestEngine(strategy, data, settings) { ContextHistory = MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc) }.Run(CancellationToken.None));
-        if (!res.Ok) throw new InvalidOperationException("La estrategia falló: " + res.Error);
+        if (!res.Ok) throw new InvalidOperationException("Strategy failed: " + res.Error);
         var run = new StrategyRun
         {
             StrategyId = file.Id,
@@ -897,7 +897,7 @@ internal static class LabServer
             foreach (var (name, v) in custom)
             {
                 var r = ranges.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-                        ?? throw new ArgumentException($"«{name}» no es un parámetro numérico de la estrategia.");
+                        ?? throw new ArgumentException($"«{name}» is not a numeric strategy parameter.");
                 if (v is not JsonObject spec) continue;
                 r.Enabled = true;
                 r.Min = Num(spec, "min", r.Min);
@@ -909,7 +909,7 @@ internal static class LabServer
         // los fijos no se optimizan
         var pinned = PinnedFor(file);
         foreach (var r in ranges.Where(r => pinned.ContainsKey(r.Name))) r.Enabled = false;
-        if (!ranges.Any(r => r.Enabled)) throw new ArgumentException("No hay parámetros para optimizar: pasá «ranges» o marcá parámetros con [Optimize].");
+        if (!ranges.Any(r => r.Enabled)) throw new ArgumentException("No optimization parameters: provide ranges or mark parameters with [Optimize].");
         return ranges;
     }
 
@@ -922,7 +922,7 @@ internal static class LabServer
         var ranges = Ranges(a, file);
         long combos = Optimizer.Combinations(ranges.Where(r => r.Enabled));
         long max = (long)Num(a, "max_combinations", 5000);
-        if (combos > max) throw new ArgumentException($"Son {combos:N0} combinaciones (tope {max:N0}). Achicá los rangos o agrandá los pasos.");
+        if (combos > max) throw new ArgumentException($"There are {combos:N0} combinations (limit {max:N0}). Narrow the ranges or increase step sizes.");
         var (settings, data) = await PrepareAsync(a, Optimizer.CanCompress(file.Type!, Str(a, "period", "M5")));
         var metric = Metric(a);
         int minTrades = (int)Num(a, "min_trades", 10);
@@ -963,7 +963,7 @@ internal static class LabServer
             {
                 ["parameters"] = ParamsJson(rec.Parameters),
                 ["metrics"] = MetricsJson(rec.Metrics),
-                ["note"] = "La mejor meseta (promedio con sus vecinas en la grilla), no el mejor pico: es la que conviene usar.",
+                ["note"] = "The best plateau (average with neighboring grid combinations), not the highest peak: the recommended selection.",
             } : null,
         };
     }
@@ -1025,7 +1025,7 @@ internal static class LabServer
             ["windows"] = windows,
             ["seconds_per_combination"] = Math.Round(one, 2),
             ["estimated_seconds"] = Math.Round(estimate),
-            ["note"] = "Cada combinación se corre una sola vez sobre todo el rango. Si tarda demasiado, achicá la grilla o el budget, o usá un rango más corto.",
+            ["note"] = "Each combination runs once over the entire range. If too slow, reduce the grid, budget or date range.",
         };
     }
 
@@ -1036,7 +1036,7 @@ internal static class LabServer
         var (settings, data) = await PrepareAsync(a, Optimizer.CanCompress(file.Type!, Str(a, "period", "M5")));
         var metric = Metric(a);
         int inDays = (int)Num(a, "in_sample_days", 0), outDays = (int)Num(a, "out_sample_days", 0);
-        if (inDays <= 0 || outDays <= 0) throw new ArgumentException("in_sample_days y out_sample_days tienen que ser mayores a cero.");
+        if (inDays <= 0 || outDays <= 0) throw new ArgumentException("in_sample_days and out_sample_days must be greater than zero.");
         int minTrades = (int)Num(a, "min_trades", 5);
         var baseParams = ParamsFor(a, file);
         bool anchored = Bool(a, "anchored", false);
@@ -1085,8 +1085,8 @@ internal static class LabServer
                 ["pbo"] = Math.Round(pbo, 3),
                 ["best_loses_out_of_sample"] = res.PboLoss is { } l ? Math.Round(l, 3) : null,
                 ["splits"] = res.PboSplits,
-                ["note"] = "Con la mitad de la historia se elige la mejor combinación y se mira la otra mitad, de todas las formas posibles. best_loses_out_of_sample = en qué proporción perdió plata " +
-                           "(< 0,2 bien, ≥ 0,5 sobreoptimizada); pbo = en qué proporción quedó en la mitad de abajo de las demás (alta con todas ganando es una meseta, no un problema).",
+                ["note"] = "Selects the best combination on half the history and evaluates it on the other half, across all possible splits. best_loses_out_of_sample is the fraction that lost money " +
+                           "(< 0.2 is good; ≥ 0.5 suggests overfitting); pbo is the fraction ranked in the bottom half (high PBO with all combinations profitable can indicate a plateau, not a problem).",
             } : null,
             ["cpcv_paths"] = res.CpcvPaths.Count > 0 ? new JsonArray(res.CpcvPaths.Select(p => (JsonNode)new JsonObject
             {
@@ -1129,7 +1129,7 @@ internal static class LabServer
     private static StrategyRun? LoadRun(StrategyFile file, string? runId, RunKind kind)
     {
         if (!string.IsNullOrWhiteSpace(runId))
-            return StrategyStore.Load(file.Id, runId) ?? throw new ArgumentException($"No existe la corrida {runId} de {file.FileName}. Usá list_runs.");
+            return StrategyStore.Load(file.Id, runId) ?? throw new ArgumentException($"Run not found: {runId} of {file.FileName}. Use list_runs.");
         var latest = StrategyStore.List(file.Id).Where(r => r.Kind == kind).OrderByDescending(r => r.CreatedUtc).FirstOrDefault();
         return latest == null ? null : StrategyStore.Load(file.Id, latest.Id);
     }
@@ -1141,12 +1141,12 @@ internal static class LabServer
         {
             var file = FileOf(Str(item, "file"));
             var run = LoadRun(file, item["run_id"]?.GetValue<string>(), RunKind.Backtest)
-                      ?? throw new ArgumentException($"{file.FileName} no tiene backtests guardados: corré run_backtest primero.");
-            if (run.Trades is not { Count: > 0 }) throw new ArgumentException($"La corrida {run.Id} de {file.FileName} no tiene operaciones.");
+                      ?? throw new ArgumentException($"{file.FileName} has no saved backtests: run run_backtest first.");
+            if (run.Trades is not { Count: > 0 }) throw new ArgumentException($"Run {run.Id} of {file.FileName} has no trades.");
             res.Add(PortfolioComponent.FromRun(run, (decimal)Num(item, "weight", 1)));
         }
 
-        if (res.Count == 0) throw new ArgumentException("Pasá al menos una estrategia en «components».");
+        if (res.Count == 0) throw new ArgumentException("Provide at least one strategy in components.");
         return res;
     }
 
@@ -1186,7 +1186,7 @@ internal static class LabServer
 
     private static JsonNode AnalyzePortfolio(JsonObject a)
     {
-        var list = a["components"] as JsonArray ?? throw new ArgumentException("Falta «components».");
+        var list = a["components"] as JsonArray ?? throw new ArgumentException("Missing components.");
         var comps = Components(list);
         return PortfolioJson(PortfolioAnalyzer.Analyze(comps, (decimal)Num(a, "capital", 10_000)));
     }
@@ -1207,9 +1207,9 @@ internal static class LabServer
             }
         }
 
-        if (candidates.Count < 2) throw new ArgumentException("Hacen falta backtests de al menos dos estrategias (o instrumentos) para armar un portafolio.");
+        if (candidates.Count < 2) throw new ArgumentException("Backtests from at least two strategies or instruments are required to build a portfolio.");
         var chosen = PortfolioAnalyzer.SuggestUncorrelated(candidates, capital, (int)Num(a, "max_components", 5), Num(a, "max_correlation", 0.5));
-        if (chosen.Count == 0) throw new ArgumentException("Ninguna estrategia tiene resultado positivo con al menos 5 operaciones.");
+        if (chosen.Count == 0) throw new ArgumentException("No strategy has positive PnL with at least 5 trades.");
         var result = PortfolioAnalyzer.Analyze(chosen.Select(i => candidates[i]).ToList(), capital);
         var o = PortfolioJson(result);
         o["candidates_considered"] = candidates.Count;
@@ -1245,7 +1245,7 @@ internal static class LabServer
             var ratio = ContractRatio(info.Symbol, contract);
             return (JsonNode)new JsonObject
             {
-                ["side"] = t.IsLong ? "largo" : "corto",
+                ["side"] = t.IsLong ? "long" : "short",
                 ["entry"] = t.EntryTime.ToString("yyyy-MM-dd HH:mm", Inv),
                 ["entry_price"] = t.EntryPrice,
                 ["exit"] = t.ExitTime.ToString("yyyy-MM-dd HH:mm", Inv),
@@ -1288,13 +1288,13 @@ internal static class LabServer
                 ["last_trades"] = LiveTrades(s.Info, recent),
             }).ToArray()),
             ["pending_proposals"] = LiveStore.LoadProposals().Count(p => p.IsPending),
-            ["note"] = "Los tamaños son multiplicadores de la cantidad que pide cada estrategia (1 = normal, 0 = pausa). Para cambiarlos usá propose_sizing: el usuario aprueba cada cambio. " +
-                       "Horas en UTC. entry_price y exit_price son el último precio de mercado cuando la estrategia registró cada llenado (no el precio que informa el broker), " +
-                       "así que no sirven para medir el deslizamiento exacto. El resultado en vivo sale de esos precios y no descuenta comisiones (la contabilidad de cada estrategia no las registra): " +
-                       "para compararlo con un backtest, correlo sin comisión o sumásela vos. " +
-                       "position, quantity y pnl son del contrato en que se ejecutó (exec_symbol en cada estrategia, contract en cada operación: por ejemplo MNQ para una estrategia del NQ) " +
-                       "y ya incluyen el multiplicador de size. instrument_quantity es esa cantidad pasada al instrumento de la estrategia (5 MNQ = 0,5 NQ; exec_ratio dice cuántos contratos de ejecución son 1 del instrumento) " +
-                       "y pnl es lo que dio esa cantidad: para compararlo con un backtest en el instrumento, escalalo (pnl × cantidad del backtest / instrument_quantity).",
+            ["note"] = "Sizes multiply each strategy's requested quantity (1 = normal, 0 = paused). Use propose_sizing to change them; the user approves every change. " +
+                       "Times are UTC. entry_price and exit_price are the latest market prices when each fill was recorded, not broker-reported fill prices, " +
+                       "so they cannot measure exact slippage. Live PnL uses those prices and excludes commissions (the strategy ledger does not record them): " +
+                       "compare against a zero-commission backtest or account for fees separately. " +
+                       "position, quantity and pnl refer to the execution contract (exec_symbol per strategy, contract per trade; e.g. MNQ for an NQ strategy) " +
+                       "and already include the size multiplier. instrument_quantity converts to the strategy's instrument (5 MNQ = 0.5 NQ; exec_ratio is execution contracts per instrument unit) " +
+                       "and pnl is for that quantity: scale it for a backtest comparison (pnl × backtest quantity / instrument_quantity).",
         };
     }
 
@@ -1302,12 +1302,12 @@ internal static class LabServer
     {
         LiveStore.Root = LiveRoot;
         var runners = LiveStore.LoadRunners();
-        var list = a["items"] as JsonArray ?? throw new ArgumentException("Falta «items».");
+        var list = a["items"] as JsonArray ?? throw new ArgumentException("Missing items.");
         var proposal = new SizingProposal { Source = "claude", Summary = Str(a, "summary", "") };
         foreach (var item in list.OfType<JsonObject>())
         {
             string key = Str(item, "key");
-            var info = runners.FirstOrDefault(r => r.Key == key) ?? throw new ArgumentException($"No existe la estrategia «{key}» en la cartera. Usá las keys de live_portfolio.");
+            var info = runners.FirstOrDefault(r => r.Key == key) ?? throw new ArgumentException($"Strategy not found: «{key}» in the portfolio. Use keys from live_portfolio.");
             decimal size = Math.Clamp((decimal)Num(item, "proposed_size", (double)info.Size), 0, LiveSizing.MaxSize);
             if (size == info.Size) continue;
             proposal.Items.Add(new SizingItem
@@ -1320,14 +1320,14 @@ internal static class LabServer
             });
         }
 
-        if (proposal.Items.Count == 0) return new JsonObject { ["created"] = false, ["note"] = "No hay cambios respecto de los tamaños actuales." };
+        if (proposal.Items.Count == 0) return new JsonObject { ["created"] = false, ["note"] = "No changes from current sizes." };
         LiveStore.AddProposal(proposal);
         return new JsonObject
         {
             ["created"] = true,
             ["proposal_id"] = proposal.Id,
             ["items"] = proposal.Items.Count,
-            ["note"] = "Quedó pendiente: el usuario la ve en En vivo → Propuestas y aprueba o rechaza cada cambio. No se aplicó nada todavía.",
+            ["note"] = "Pending: the user reviews each change in Live → Proposals. Nothing has been applied.",
         };
     }
 
@@ -1359,7 +1359,7 @@ internal static class LabServer
 
         if (a["portfolio"] is JsonArray pl && pl.Count > 0) input.Portfolio = PortfolioAnalyzer.Analyze(Components(pl), input.PortfolioCapital);
         if (input.Backtest == null && input.Portfolio == null && input.WalkForward == null)
-            throw new ArgumentException("No hay corridas para el informe: corré run_backtest (o pasá un portafolio) antes de save_report.");
+            throw new ArgumentException("No runs for the report: run run_backtest or provide a portfolio before save_report.");
         var (markdown, images) = ReportBuilder.Build(input);
         var report = ReportStore.Save(title, markdown, file?.FileName, input.Verdict, images);
         return new JsonObject { ["saved"] = report.Path, ["verdict"] = report.Verdict, ["charts"] = images.Count };

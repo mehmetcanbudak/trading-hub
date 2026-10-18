@@ -127,7 +127,7 @@ public static class PublicArchives
     /// <summary>Descarga un día. Devuelve null si el archivo todavía no está publicado (404).</summary>
     public static async Task<List<Trade>?> DownloadDayAsync(Instrument instrument, DateOnly day, IProgress<double>? progress, CancellationToken ct)
     {
-        var url = DailyUrl(instrument.FeedId, instrument.Symbol, day) ?? throw new NotSupportedException("Esta conexión no tiene archivos públicos.");
+        var url = DailyUrl(instrument.FeedId, instrument.Symbol, day) ?? throw new NotSupportedException("This connection has no public archives.");
         using var resp = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();

@@ -12,21 +12,21 @@ namespace TradingHub.Indicators.Native;
 /// orden a mercado se suman, aunque haya barrido varios niveles). Azul = compra, rojo = venta.
 /// El umbral puede ser fijo o adaptativo (percentil de las operaciones recientes).
 /// </summary>
-[DisplayName("Big Trades (grandes operaciones)")]
+[DisplayName("Big Trades")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 public class BigTrades : Indicator
 {
     public enum ThresholdMode
     {
-        [Display(Name = "Fijo")] Fixed,
-        [Display(Name = "Adaptativo (percentil)")] Adaptive,
+        [Display(Name = "Fixed")] Fixed,
+        [Display(Name = "Adaptive (percentile)")] Adaptive,
     }
 
     public enum PriceAnchor
     {
-        [Display(Name = "Precio promedio de la orden")] Average,
-        [Display(Name = "Último precio de la orden")] Last,
-        [Display(Name = "Primer precio de la orden")] First,
+        [Display(Name = "Order average price")] Average,
+        [Display(Name = "Order last price")] Last,
+        [Display(Name = "Order first price")] First,
     }
 
     private sealed class Bubble
@@ -63,15 +63,15 @@ public class BigTrades : Indicator
 
     // ------------------------------------------------------------------ parámetros
 
-    [Display(Name = "Tipo de umbral", GroupName = "Filtro", Order = 10)]
+    [Display(Name = "Threshold type", GroupName = "Filter", Order = 10)]
     public ThresholdMode Mode
     {
         get => _mode;
         set { _mode = value; RecalculateValues(); }
     }
 
-    [Display(Name = "Volumen mínimo (fijo)", GroupName = "Filtro", Order = 20,
-        Description = "Tamaño mínimo de la orden para dibujarla cuando el umbral es fijo.")]
+    [Display(Name = "Minimum volume (fixed)", GroupName = "Filter", Order = 20,
+        Description = "Minimum order size to display when using a fixed threshold.")]
     [Range(0, 100000000)]
     public decimal MinVolume
     {
@@ -79,8 +79,8 @@ public class BigTrades : Indicator
         set { _minVolume = Math.Max(0, value); RecalculateValues(); }
     }
 
-    [Display(Name = "Percentil (adaptativo)", GroupName = "Filtro", Order = 30,
-        Description = "Solo se marcan las órdenes más grandes que este percentil de las recientes (99.5 = el 0,5% más grande).")]
+    [Display(Name = "Percentile (adaptive)", GroupName = "Filter", Order = 30,
+        Description = "Only highlight orders above this percentile of recent sizes (99.5 = largest 0.5%).")]
     [Range(50, 99.999)]
     public decimal Percentile
     {
@@ -88,7 +88,7 @@ public class BigTrades : Indicator
         set { _percentile = Math.Clamp(value, 50, 99.999m); RecalculateValues(); }
     }
 
-    [Display(Name = "Muestra (órdenes recientes)", GroupName = "Filtro", Order = 40)]
+    [Display(Name = "Sample (recent orders)", GroupName = "Filter", Order = 40)]
     [Range(100, 200000)]
     public int Sample
     {
@@ -96,31 +96,31 @@ public class BigTrades : Indicator
         set { _sample = Math.Clamp(value, 100, 200000); RecalculateValues(); }
     }
 
-    [Display(Name = "Ubicación en el precio", GroupName = "Filtro", Order = 50)]
+    [Display(Name = "Price placement", GroupName = "Filter", Order = 50)]
     public PriceAnchor Anchor
     {
         get => _anchor;
         set { _anchor = value; RecalculateValues(); }
     }
 
-    [Display(Name = "Color compras", GroupName = "Visualización", Order = 100)]
+    [Display(Name = "Buy color", GroupName = "Visualization", Order = 100)]
     public Color BuyColor { get; set; } = Color.FromArgb(150, 50, 140, 230);
 
-    [Display(Name = "Color ventas", GroupName = "Visualización", Order = 110)]
+    [Display(Name = "Sell color", GroupName = "Visualization", Order = 110)]
     public Color SellColor { get; set; } = Color.FromArgb(150, 232, 70, 70);
 
-    [Display(Name = "Tamaño mínimo (px)", GroupName = "Visualización", Order = 120)]
+    [Display(Name = "Minimum size (px)", GroupName = "Visualization", Order = 120)]
     [Range(2, 100)]
     public int MinSize { get; set; } = 10;
 
-    [Display(Name = "Tamaño máximo (px)", GroupName = "Visualización", Order = 130)]
+    [Display(Name = "Maximum size (px)", GroupName = "Visualization", Order = 130)]
     [Range(4, 300)]
     public int MaxSize { get; set; } = 60;
 
-    [Display(Name = "Mostrar volumen", GroupName = "Visualización", Order = 140)]
+    [Display(Name = "Show volume", GroupName = "Visualization", Order = 140)]
     public bool ShowVolume { get; set; } = true;
 
-    [Display(Name = "Borde", GroupName = "Visualización", Order = 150)]
+    [Display(Name = "Border", GroupName = "Visualization", Order = 150)]
     public bool ShowBorder { get; set; } = true;
 
     /// <summary>Umbral actual (para mostrar en la UI).</summary>

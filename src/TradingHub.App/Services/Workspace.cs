@@ -149,7 +149,7 @@ internal static partial class Workspace
         }
         catch (Exception ex)
         {
-            ind.LogWarn($"No se pudo restaurar toda la configuración de {ind.Name}: {ex.Message}");
+            ind.LogWarn($"Could not restore all settings for {ind.Name}: {ex.Message}");
         }
 
         if (series == null) return;
@@ -190,7 +190,7 @@ internal static partial class Workspace
         }
         catch (Exception ex)
         {
-            ind.LogWarn($"No se pudo copiar {ind.Name}: {ex.Message}");
+            ind.LogWarn($"Could not copy {ind.Name}: {ex.Message}");
             return null;
         }
     }
@@ -247,7 +247,7 @@ internal static partial class Workspace
             var ind = w.Services.Catalog.Create(idto.Type);
             if (ind == null)
             {
-                w.SetStatus($"No encontré el indicador {idto.Type} (¿se borró o no compila?)");
+                w.SetStatus($"Indicator not found: {idto.Type} (deleted or failing to compile?)");
                 continue;
             }
 

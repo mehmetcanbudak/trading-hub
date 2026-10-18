@@ -8,15 +8,15 @@ namespace TradingHub.Charting.Dom;
 
 public enum DomColumn
 {
-    [Display(Name = "Órdenes de compra")] BuyOrders,
-    [Display(Name = "Bid (libro)")] Bid,
-    [Display(Name = "Precio")] Price,
-    [Display(Name = "Ask (libro)")] Ask,
-    [Display(Name = "Órdenes de venta")] SellOrders,
-    [Display(Name = "Volumen de la sesión")] Volume,
-    [Display(Name = "Delta de la sesión")] Delta,
-    [Display(Name = "Operado al bid")] TradedBid,
-    [Display(Name = "Operado al ask")] TradedAsk,
+    [Display(Name = "Buy orders")] BuyOrders,
+    [Display(Name = "Bid (book)")] Bid,
+    [Display(Name = "Price")] Price,
+    [Display(Name = "Ask (book)")] Ask,
+    [Display(Name = "Sell orders")] SellOrders,
+    [Display(Name = "Session volume")] Volume,
+    [Display(Name = "Session delta")] Delta,
+    [Display(Name = "Traded at bid")] TradedBid,
+    [Display(Name = "Traded at ask")] TradedAsk,
 }
 
 /// <summary>Una columna del DOM: si se ve y cuánto ancho relativo ocupa.</summary>
@@ -33,54 +33,54 @@ public sealed class DomSettings
     [Browsable(false)]
     public List<DomColumnSetting> Columns { get; set; } = DefaultColumns();
 
-    [Display(Name = "Alto de fila (px)", GroupName = "Tamaño", Order = 10)]
+    [Display(Name = "Row height (px)", GroupName = "Size", Order = 10)]
     [Range(12, 40)]
     public int RowHeight { get; set; } = 18;
 
-    [Display(Name = "Tamaño de letra", GroupName = "Tamaño", Order = 20)]
+    [Display(Name = "Font size", GroupName = "Size", Order = 20)]
     [Range(8, 20)]
     public int FontSize { get; set; } = 12;
 
-    [Display(Name = "Mostrar encabezados", GroupName = "Tamaño", Order = 30)]
+    [Display(Name = "Show headers", GroupName = "Size", Order = 30)]
     public bool ShowHeader { get; set; } = true;
 
-    [Display(Name = "Centrar en el precio automáticamente", GroupName = "Comportamiento", Order = 10)]
+    [Display(Name = "Automatically center on price", GroupName = "Behavior", Order = 10)]
     public bool AutoCenter { get; set; } = true;
 
-    [Display(Name = "Doble clic para operar", GroupName = "Comportamiento", Order = 20, Description = "Evita mandar órdenes por un clic accidental.")]
+    [Display(Name = "Double-click to trade", GroupName = "Behavior", Order = 20, Description = "Prevents submitting orders with an accidental single click.")]
     public bool DoubleClickToTrade { get; set; }
 
-    [Display(Name = "Resaltar tamaños desde", GroupName = "Comportamiento", Order = 30, Description = "Tamaños del libro iguales o mayores se resaltan (0 = no).")]
+    [Display(Name = "Highlight sizes from", GroupName = "Behavior", Order = 30, Description = "Highlight order-book sizes at or above this threshold (0 = disabled).")]
     public decimal LargeSize { get; set; }
 
-    [Display(Name = "Barras del libro", GroupName = "Comportamiento", Order = 40, Description = "Dibuja barras proporcionales al tamaño de cada nivel.")]
+    [Display(Name = "Order-book bars", GroupName = "Behavior", Order = 40, Description = "Draw bars proportional to each level's size.")]
     public bool BookBars { get; set; } = true;
 
-    [Display(Name = "Bid", GroupName = "Colores", Order = 10)]
+    [Display(Name = "Bid", GroupName = "Colors", Order = 10)]
     public Color BidColor { get; set; } = Color.FromArgb(255, 30, 110, 200);
 
-    [Display(Name = "Ask", GroupName = "Colores", Order = 20)]
+    [Display(Name = "Ask", GroupName = "Colors", Order = 20)]
     public Color AskColor { get; set; } = Color.FromArgb(255, 200, 50, 60);
 
-    [Display(Name = "Fondo debajo del precio", GroupName = "Colores", Order = 30)]
+    [Display(Name = "Background below price", GroupName = "Colors", Order = 30)]
     public Color BidBackground { get; set; } = Color.FromArgb(255, 10, 22, 40);
 
-    [Display(Name = "Fondo encima del precio", GroupName = "Colores", Order = 40)]
+    [Display(Name = "Background above price", GroupName = "Colors", Order = 40)]
     public Color AskBackground { get; set; } = Color.FromArgb(255, 40, 14, 18);
 
-    [Display(Name = "Fondo entre bid y ask", GroupName = "Colores", Order = 50)]
+    [Display(Name = "Background between bid and ask", GroupName = "Colors", Order = 50)]
     public Color SpreadBackground { get; set; } = Color.FromArgb(255, 16, 18, 26);
 
-    [Display(Name = "Último precio", GroupName = "Colores", Order = 60)]
+    [Display(Name = "Last price", GroupName = "Colors", Order = 60)]
     public Color LastPriceColor { get; set; } = Color.FromArgb(255, 242, 181, 58);
 
-    [Display(Name = "Volumen comprador", GroupName = "Colores", Order = 70)]
+    [Display(Name = "Buy volume", GroupName = "Colors", Order = 70)]
     public Color BuyVolumeColor { get; set; } = Color.FromArgb(150, 38, 194, 129);
 
-    [Display(Name = "Volumen vendedor", GroupName = "Colores", Order = 80)]
+    [Display(Name = "Sell volume", GroupName = "Colors", Order = 80)]
     public Color SellVolumeColor { get; set; } = Color.FromArgb(150, 240, 82, 90);
 
-    [Display(Name = "Texto de precios", GroupName = "Colores", Order = 90)]
+    [Display(Name = "Price text", GroupName = "Colors", Order = 90)]
     public Color PriceText { get; set; } = Color.FromArgb(255, 160, 175, 200);
 
     public static List<DomColumnSetting> DefaultColumns() => new()

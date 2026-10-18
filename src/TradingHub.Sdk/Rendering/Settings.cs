@@ -26,7 +26,7 @@ namespace TradingHub.Rendering.Settings
             set => Set(ref _color, value);
         }
 
-        [Display(Name = "Grosor", Order = 20)]
+        [Display(Name = "Width", Order = 20)]
         [Range(1, 20)]
         public int Width
         {
@@ -34,7 +34,7 @@ namespace TradingHub.Rendering.Settings
             set => Set(ref _width, Math.Max(1, value));
         }
 
-        [Display(Name = "Estilo", Order = 30)]
+        [Display(Name = "Style", Order = 30)]
         public LineDashStyle LineDashStyle
         {
             get => _lineDashStyle;
@@ -95,14 +95,14 @@ namespace TradingHub.Rendering.Settings
 
         public event PropertyChangedEventHandler PropertyChanged;
 
-        [Display(Name = "Fuente", Order = 10)]
+        [Display(Name = "Source", Order = 10)]
         public string FontFamily
         {
             get => _fontFamily;
             set => Set(ref _fontFamily, value);
         }
 
-        [Display(Name = "Tamaño", Order = 20)]
+        [Display(Name = "Size", Order = 20)]
         [Range(4, 72)]
         public int Size
         {
@@ -110,14 +110,14 @@ namespace TradingHub.Rendering.Settings
             set => Set(ref _size, value);
         }
 
-        [Display(Name = "Negrita", Order = 30)]
+        [Display(Name = "Bold", Order = 30)]
         public bool Bold
         {
             get => _bold;
             set => Set(ref _bold, value);
         }
 
-        [Display(Name = "Cursiva", Order = 40)]
+        [Display(Name = "Italic", Order = 40)]
         public bool Italic
         {
             get => _italic;

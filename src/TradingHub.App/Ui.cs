@@ -130,7 +130,7 @@ internal static class Ui
     public static Flyout ConfirmFlyout(string text, string action, Action onConfirm, bool danger = true, string? title = null)
     {
         var flyout = new Flyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
-        var cancel = new Button { Content = "Cancelar", MinWidth = 84, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var cancel = new Button { Content = "Cancel", MinWidth = 84, HorizontalContentAlignment = HorizontalAlignment.Center };
         cancel.Click += (_, _) => flyout.Hide();
         var ok = new Button { Content = action, MinWidth = 84, HorizontalContentAlignment = HorizontalAlignment.Center };
         ok.Classes.Add(danger ? "danger" : "primary");
@@ -262,9 +262,9 @@ internal static class Ui
     public static string Ago(DateTime utc)
     {
         var d = DateTime.UtcNow - utc;
-        if (d.TotalSeconds < 60) return "recién";
-        if (d.TotalMinutes < 60) return $"hace {(int)d.TotalMinutes} min";
-        if (d.TotalHours < 24) return $"hace {(int)d.TotalHours} h";
-        return $"hace {(int)d.TotalDays} días";
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"ago {(int)d.TotalMinutes} min";
+        if (d.TotalHours < 24) return $"ago {(int)d.TotalHours} h";
+        return $"ago {(int)d.TotalDays} days";
     }
 }

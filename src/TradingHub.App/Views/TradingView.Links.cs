@@ -24,14 +24,14 @@ public sealed partial class TradingView
             RefreshLinkButtons();
             if (group == 0)
             {
-                _status("Gráfico desvinculado");
+                _status("Chart unlinked");
                 return;
             }
 
             string name = ChartLinks.NameOf(group).ToLowerInvariant();
             if (leader?.Model == null || chart.Model == null)
             {
-                _status($"Grupo {name}: poné el mismo color en otro gráfico para sincronizarlos");
+                _status($"Group {name}: select the same color on another chart to synchronize");
                 return;
             }
 
@@ -52,11 +52,11 @@ public sealed partial class TradingView
             var synced = Synced().ToList();
             string what = synced.Count switch
             {
-                0 => "nada (activá algo en el menú del color)",
+                0 => "nothing (enable synchronization in the color menu)",
                 1 => synced[0],
-                _ => string.Join(", ", synced.Take(synced.Count - 1)) + " y " + synced[^1],
+                _ => string.Join(", ", synced.Take(synced.Count - 1)) + " and " + synced[^1],
             };
-            _status($"Vinculado al grupo {name}: {what} se sincroniza{(synced.Count > 1 ? "n" : "")} entre sus gráficos");
+            _status($"Linked to group {name}: {what} synchronized{(synced.Count > 1 ? "n" : "")} across charts");
         }
         catch (Exception ex)
         {
@@ -67,9 +67,9 @@ public sealed partial class TradingView
     private IEnumerable<string> Synced()
     {
         var s = _svc.Settings;
-        if (s.LinkSymbol) yield return "el instrumento";
-        if (s.LinkPeriod) yield return "el período";
-        if (s.LinkCrosshair) yield return "la cruz del cursor";
+        if (s.LinkSymbol) yield return "instrument";
+        if (s.LinkPeriod) yield return "period";
+        if (s.LinkCrosshair) yield return "crosshair";
     }
 
     private static bool SameInstrument(ChartTab a, ChartTab b) =>

@@ -8,6 +8,9 @@ using Avalonia.VisualTree;
 using TradingHub.App;
 using TradingHub.App.Windows;
 
+if (args is ["--check-english", var sourceRoot])
+    return TradingHub.UiSnapshot.EnglishLocalizationAudit.Run(sourceRoot);
+
 string outDir = args.Length > 0 ? args[0] : "ui-snapshots";
 double seconds = args.Length > 1 && double.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : 6;
 var pages = new List<string>();
@@ -26,6 +29,30 @@ for (int i = 2; i < args.Length; i++)
 }
 
 if (pages.Count == 0) pages.Add("trading");
+
+// Resolve parent symlinks as well: an explicit test override must never alias production storage.
+static string CanonicalPath(string path)
+{
+    path = Path.GetFullPath(path);
+    string resolved = Path.GetPathRoot(path)!;
+    foreach (var part in path[resolved.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+    {
+        resolved = Path.Combine(resolved, part);
+        FileSystemInfo entry = Directory.Exists(resolved) ? new DirectoryInfo(resolved) : new FileInfo(resolved);
+        if (entry.LinkTarget != null) resolved = entry.ResolveLinkTarget(true)!.FullName;
+    }
+    return resolved.TrimEnd(Path.DirectorySeparatorChar);
+}
+var protectedRoots = new[] { TradingHub.Common.Product.AppData, Path.Combine(TradingHub.Common.Product.Documents, "Estrategias"), Path.Combine(TradingHub.Common.Product.Documents, "Indicadores") }.Select(CanonicalPath).ToArray();
+var overrides = new[] { "TRADINGHUB_DATA_DIR", "TRADINGHUB_STRATEGIES_DIR", "TRADINGHUB_INDICATORS_DIR", "TRADINGHUB_BACKTESTS_DIR", "TRADINGHUB_LIVE_DIR", "TRADINGHUB_KEYCHAIN_FILE" }
+    .Select(Environment.GetEnvironmentVariable).OfType<string>().Where(p => p.Length > 0).Append(outDir);
+foreach (var path in overrides)
+{
+    var resolved = CanonicalPath(path);
+    if (!protectedRoots.Any(root => resolved.Equals(root, StringComparison.OrdinalIgnoreCase) || resolved.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) continue;
+    Console.Error.WriteLine("Refusing to use production storage for a UI fixture: " + path);
+    return 2;
+}
 Directory.CreateDirectory(outDir);
 
 // una escena a la vez por carpeta temporal: todas usan las mismas copias (tradinghub-snap-*, tradinghub-fake-claude…) y otra
@@ -57,7 +84,7 @@ Environment.SetEnvironmentVariable("TRADINGHUB_SLEEP_GUARD", "off");
 // (además, entrar con el usuario real desde acá puede desconectar la sesión del Trading Hub abierto)
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE")))
     Environment.SetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE", Path.Combine(Path.GetTempPath(), "tradinghub-snap-keychain.json"));
-TradingHub.Tests.FakeRithmicServer? fakeRithmic = null;
+using var fakeRithmic = FakeMarket();
 
 // las estrategias también en una copia: una herramienta nunca escribe en la carpeta real del usuario
 // (hay escenas que crean estrategias y las mueven de carpeta)
@@ -127,10 +154,10 @@ if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR
     if (Directory.Exists(Path.Combine(snapRoot, "Accounts"))) Directory.Delete(Path.Combine(snapRoot, "Accounts"), true);
 
     // Rithmic contra un servidor de mentira (usuario demo, cuenta ACC1) y sin claves de exchanges
-    fakeRithmic = FakeMarket();
-    SanitizeConnections(Path.Combine(snapRoot, "connections.json"), fakeRithmic.Uri, Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE")!);
     Environment.SetEnvironmentVariable("TRADINGHUB_DATA_DIR", snapRoot);
 }
+SanitizeConnections(Path.Combine(Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR")!, "connections.json"),
+    fakeRithmic.Uri, Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE")!);
 
 static TradingHub.Tests.FakeRithmicServer FakeMarket()
 {
@@ -158,6 +185,7 @@ static TradingHub.Tests.FakeRithmicServer FakeMarket()
 
 static void SanitizeConnections(string path, string fakeUri, string keychainFile)
 {
+    if (!File.Exists(path)) _ = new TradingHub.App.Services.ConnectionManager();
     var secrets = new Dictionary<string, string>();
     if (File.Exists(path))
     {
@@ -170,6 +198,7 @@ static void SanitizeConnections(string path, string fakeUri, string keychainFile
             if (Enum.TryParse<TradingHub.App.Services.ConnectionKind>(o["Kind"]?.ToString(), out var kind)
                 && kind is TradingHub.App.Services.ConnectionKind.Rithmic or TradingHub.App.Services.ConnectionKind.AmpFutures)
             {
+                o["Enabled"] = true;
                 o["RithmicUri"] = fakeUri;
                 o["RithmicSystem"] = "Rithmic Paper Trading";
                 o["RithmicUser"] = "demo";
@@ -257,6 +286,11 @@ if (Environment.GetEnvironmentVariable("TRADINGHUB_SNAP_DEBUG") == "1")
 int exitCode = 0;
 foreach (var page in pages)
 {
+    if (page == "english")
+    {
+        exitCode += EnglishScene.Run(window, Pump, outDir);
+        continue;
+    }
 
     if (page == "conexiones")
     {
@@ -340,7 +374,7 @@ foreach (var page in pages)
         var es = (await App.Services.Connections.GetFeed("rithmic").GetInstrumentsAsync(CancellationToken.None)).First(i => i.Symbol == "ES");
         vt.GetField("_dlProfile", fl)!.SetValue(view, "rithmic");
         vt.GetField("_dlInstrument", fl)!.SetValue(view, es);
-        var chip = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "1 año");
+        var chip = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "1 year");
         chip.IsChecked = true;
         chip.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
         Pump(0.5);
@@ -348,7 +382,7 @@ foreach (var page in pages)
         Console.WriteLine("1 año: " + status.Text);
         window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "data_rithmic_year.png"));
         // descarga de ayer (el servidor falso tiene operaciones de las últimas 2 horas: hoy no se baja, ayer da vacío)
-        var y = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "Ayer");
+        var y = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "Yesterday");
         y.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
         Console.WriteLine($"antes: perfil={vt.GetField("_dlProfile", fl)!.GetValue(view)} inst={vt.GetField("_dlInstrument", fl)!.GetValue(view)} puede={vt.GetProperty("CanDownload", fl)!.GetValue(view)}");
         var dl = (Task)vt.GetMethod("DownloadAsync", fl)!.Invoke(view, null)!;
@@ -644,8 +678,8 @@ foreach (var page in pages)
             ds.InitPosition(r / 2, T(1));
             cm.Drawings.Add(dl);
             cm.Drawings.Add(ds);
-            cm.Drawings.Add(new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.Rectangle, Points = { new(T(28), hi), new(T(18), hi - r) }, Text = "Zona de oferta", ExtendRight = true, ColorArgb = 0xFFF2B53A });
-            cm.Drawings.Add(new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.TrendLine, Points = { new(T(35), lo), new(T(20), lo + r) }, ExtendRight = true, Text = "Soporte", LineStyle = TradingHub.Charting.Drawings.LineStyleKind.Dashed });
+            cm.Drawings.Add(new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.Rectangle, Points = { new(T(28), hi), new(T(18), hi - r) }, Text = "Supply zone", ExtendRight = true, ColorArgb = 0xFFF2B53A });
+            cm.Drawings.Add(new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.TrendLine, Points = { new(T(35), lo), new(T(20), lo + r) }, ExtendRight = true, Text = "Support", LineStyle = TradingHub.Charting.Drawings.LineStyleKind.Dashed });
             cm.Drawings.Add(new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.HorizontalLine, Points = { new(T(5), last + r * 1.5) }, Alert = true, ColorArgb = 0xFFF2B53A });
             cm.Invalidate();
             Pump(0.6);
@@ -906,14 +940,14 @@ foreach (var page in pages)
             foreach (var slot in model.Indicators.ToList()) model.RemoveIndicator(slot);
             model.AddIndicator((TradingHub.Indicators.Indicator)Activator.CreateInstance(vwapInfo.Type)!);
             var styleBefore = model.Settings.Style;
-            TradingHub.App.Services.Workspace.SaveChartTemplate(ch, "Prueba plantilla");
+            TradingHub.App.Services.Workspace.SaveChartTemplate(ch, "Template test");
             tv.Toolbar.SetStyle(styleBefore == TradingHub.Charting.ChartStyle.Footprint ? TradingHub.Charting.ChartStyle.Candles : TradingHub.Charting.ChartStyle.Footprint);
             model.Settings.Colors = null;
             model.ApplyColors();
             foreach (var slot in model.Indicators.ToList()) model.RemoveIndicator(slot);
             Pump(0.5);
             Console.WriteLine($"Plantillas guardadas: {string.Join(", ", TradingHub.App.Services.Workspace.ChartTemplateNames())} · antes de aplicar: estilo {model.Settings.Style}, {model.Indicators.Count} indicadores, fondo {model.Theme.BackgroundTop}");
-            bool applied = TradingHub.App.Services.Workspace.ApplyChartTemplate(tv, ch, "Prueba plantilla");
+            bool applied = TradingHub.App.Services.Workspace.ApplyChartTemplate(tv, ch, "Template test");
             Pump(0.5);
             Console.WriteLine($"Aplicada={applied}: estilo {model.Settings.Style} (era {styleBefore}), indicadores [{string.Join(", ", model.Indicators.Select(i => i.Indicator.Name))}], fondo {model.Theme.BackgroundTop}");
 
@@ -921,12 +955,12 @@ foreach (var page in pages)
             var ind = model.Indicators.First().Indicator;
             var numeric = ind.GetType().GetProperties().FirstOrDefault(p => p.CanWrite && p.PropertyType == typeof(int) && p.GetCustomAttributes(typeof(System.ComponentModel.BrowsableAttribute), true).Length == 0 && p.DeclaringType != typeof(TradingHub.Indicators.Indicator));
             if (numeric != null) numeric.SetValue(ind, (int)numeric.GetValue(ind)! + 7);
-            TradingHub.App.Services.Workspace.SaveIndicatorTemplate(ind, "Mi " + ind.Name);
+            TradingHub.App.Services.Workspace.SaveIndicatorTemplate(ind, "My " + ind.Name);
             var fresh = (TradingHub.Indicators.Indicator)Activator.CreateInstance(ind.GetType())!;
-            bool indApplied = TradingHub.App.Services.Workspace.ApplyIndicatorTemplate(fresh, "Mi " + ind.Name);
+            bool indApplied = TradingHub.App.Services.Workspace.ApplyIndicatorTemplate(fresh, "My " + ind.Name);
             var a1 = TradingHub.App.Services.Workspace.SaveIndicator(ind, out _).ToString();
             var a2 = TradingHub.App.Services.Workspace.SaveIndicator(fresh, out _).ToString();
-            App.Services.Settings.DefaultIndicatorTemplates[ind.GetType().FullName!] = "Mi " + ind.Name;
+            App.Services.Settings.DefaultIndicatorTemplates[ind.GetType().FullName!] = "My " + ind.Name;
             var fresh2 = (TradingHub.Indicators.Indicator)Activator.CreateInstance(ind.GetType())!;
             bool byDefault = TradingHub.App.Services.Workspace.ApplyDefaultIndicatorTemplate(App.Services, fresh2);
             Console.WriteLine($"Plantilla de indicador: {string.Join(", ", TradingHub.App.Services.Workspace.IndicatorTemplateNames(ind.GetType()))} · cambiado {numeric?.Name}={numeric?.GetValue(ind)} · aplicada={indApplied} iguales={a1 == a2} · predeterminada={byDefault} ({numeric?.Name}={numeric?.GetValue(fresh2)})");
@@ -946,7 +980,7 @@ foreach (var page in pages)
             if (strategiesDir != Path.GetFullPath(Path.Combine(TradingHub.Common.Product.Documents, "Estrategias")))
             {
                 var example = TradingHub.App.Services.StrategyTemplates.All.First(t => t.FileName == "CruceDeMedias");
-                File.WriteAllText(Path.Combine(strategiesDir, "CruceDeMedias.cs"), example.Code("CruceDeMedias").Replace("__NOMBRE__", "Cruce de medias"));
+                File.WriteAllText(Path.Combine(strategiesDir, "CruceDeMedias.cs"), example.Code("CruceDeMedias").Replace("__NOMBRE__", "Moving-average crossover"));
             }
 
             App.Services.Strategies.Refresh();
@@ -957,7 +991,7 @@ foreach (var page in pages)
             while (!add.IsCompleted) Pump(0.1);
             var cs = ch.Strategies[^1];
             // si el gráfico carga más historia la estrategia se recalcula: se espera a que termine la última corrida
-            bool Calculating() => cs.Busy || cs.Overlay.Status is "calculando…" or "esperando la historia…";
+            bool Calculating() => cs.Busy || cs.Overlay.Status is "calculating…" or "waiting for history…";
             for (int round = 0; round < 3; round++)
             {
                 for (int i = 0; i < 600 && Calculating(); i++) Pump(0.1);
@@ -976,6 +1010,11 @@ foreach (var page in pages)
                 ? lt.Windows.OfType<TradingHub.App.Windows.StrategyChartWindow>().FirstOrDefault() : null;
             sw ??= window.OwnedWindows.OfType<TradingHub.App.Windows.StrategyChartWindow>().FirstOrDefault();
             sw?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "strategy_settings.png"));
+            if (sw == null || EnglishScene.Labels(sw).Any(TradingHub.UiSnapshot.EnglishLocalizationAudit.LooksSpanish))
+            {
+                Console.WriteLine("FAIL chart-strategy settings contain an untranslated label or did not open");
+                exitCode++;
+            }
             // y abajo, cómo le fue en la historia del gráfico (resultado real, curva y estadísticas)
             if (sw?.GetVisualDescendants().OfType<Avalonia.Controls.ScrollViewer>().FirstOrDefault() is { } scroll)
             {
@@ -995,6 +1034,11 @@ foreach (var page in pages)
             while (!run.IsCompleted) Pump(0.1);
             Pump(2);
             Console.WriteLine($"En vivo: estado «{cs.Overlay.Status}» · en la lista de Estrategias={App.Services.Runners.Contains(cs.Runner!)} · cuenta {cs.Runner?.Account.Name}");
+            if (TradingHub.UiSnapshot.EnglishLocalizationAudit.LooksSpanish(cs.Overlay.Status))
+            {
+                Console.WriteLine("FAIL live chart-strategy status is not English");
+                exitCode++;
+            }
             TradingHub.App.Services.Workspace.Save(tv);
             var ws = File.ReadAllText(TradingHub.App.Services.AppPaths.WorkspaceFile);
             Console.WriteLine($"Guardada en el espacio de trabajo: {ws.Contains("CruceDeMedias") || ws.Contains("Cruce")} (Live={ws.Contains("\"Live\": true")})");
@@ -1055,9 +1099,9 @@ foreach (var page in pages)
         if (parts[1] == "claudefloat")
         {
             // conversación de ejemplo en el historial (carpeta de datos aparte) y chat en una ventana
-            var conv = new TradingHub.App.Services.ChatConversation { Title = "Creá una estrategia de ruptura del rango de 30 minutos", SessionId = "prueba", Strategy = "Ruptura.cs" };
+            var conv = new TradingHub.App.Services.ChatConversation { Title = "Create a 30-minute opening-range breakout strategy", SessionId = "prueba", Strategy = "Ruptura.cs" };
             conv.Messages.Add(new TradingHub.App.Services.ChatMessage { Role = "user", Text = conv.Title });
-            conv.Messages.Add(new TradingHub.App.Services.ChatMessage { Role = "assistant", Text = "Listo: creé Ruptura.cs con la ruptura del rango de los primeros 30 minutos, stop por ATR y salida al cierre." });
+            conv.Messages.Add(new TradingHub.App.Services.ChatMessage { Role = "assistant", Text = "Created Ruptura.cs with a 30-minute opening-range breakout, ATR stop and session-end exit." });
             TradingHub.App.Services.ChatHistory.Save(conv);
             t.GetMethod("ShowTab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { "code" });
             Pump(0.5);
@@ -1079,7 +1123,7 @@ foreach (var page in pages)
             t.GetMethod("ShowTab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { "code" });
             if (parts[1] == "claudelab")
                 ((Avalonia.Controls.Primitives.ToggleButton)t.GetField("_labToggle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view)!).IsChecked = true;
-            string ask = parts[1] == "claudelab" ? "Investigá y optimizá la estrategia abierta" : "Creá una estrategia que opere la ruptura del rango de los primeros 30 minutos";
+            string ask = parts[1] == "claudelab" ? "Research and optimize the current strategy" : "Create a strategy trading the first 30-minute range breakout";
             var send = (Task)t.GetMethod("SendToClaudeAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { ask })!;
             var until = DateTime.UtcNow.AddSeconds(40);
             while (!send.IsCompleted && DateTime.UtcNow < until) Pump(0.05);

@@ -49,14 +49,14 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     public string DisplayName => "OANDA";
     public bool SupportsHistory => true;
     public bool IsLive => true;
-    public string HistoryNote => "velas de 5 segundos de OANDA convertidas en operaciones (los CFDs no tienen operaciones reales)";
+    public string HistoryNote => "OANDA 5-second bars converted to synthetic trades (CFDs have no centralized exchange trades)";
 
     private string Rest => (_s.RestUrl ?? (_s.Practice ? "https://api-fxpractice.oanda.com" : "https://api-fxtrade.oanda.com")).TrimEnd('/');
     private string StreamBase => (_s.StreamUrl ?? (_s.Practice ? "https://stream-fxpractice.oanda.com" : "https://stream-fxtrade.oanda.com")).TrimEnd('/');
 
     private async Task<JsonDocument> GetAsync(string path, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_s.Token)) throw new InvalidOperationException("Falta el token de OANDA (se genera en tu cuenta: Manage API Access).");
+        if (string.IsNullOrWhiteSpace(_s.Token)) throw new InvalidOperationException("OANDA token is missing (generate it under Manage API Access).");
         using var resp = await _http.GetAsync(Rest + path, ct).ConfigureAwait(false);
         var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
@@ -72,8 +72,8 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
             }
 
             throw new HttpRequestException(resp.StatusCode == System.Net.HttpStatusCode.Unauthorized
-                ? "OANDA rechazó el token (¿es de práctica y elegiste real, o al revés?)"
-                : $"OANDA respondió {(int)resp.StatusCode}: {msg}");
+                ? "OANDA rejected token (check that practice/real environment matches the token)"
+                : $"OANDA returned {(int)resp.StatusCode}: {msg}");
         }
 
         return JsonDocument.Parse(body);
@@ -86,7 +86,7 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
         if (!string.IsNullOrWhiteSpace(_s.AccountId)) return _account = _s.AccountId.Trim();
         using var doc = await GetAsync("/v3/accounts", ct).ConfigureAwait(false);
         var first = doc.RootElement.GetProperty("accounts").EnumerateArray().FirstOrDefault();
-        if (first.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("El token no tiene cuentas.");
+        if (first.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("The token has no accounts.");
         return _account = first.GetProperty("id").GetString()!;
     }
 
@@ -222,19 +222,19 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
         while (!ct.IsCancellationRequested)
         {
             var conn = live.BeginConnection();
-            string reason = "se cortó la conexión";
+            string reason = "connection lost";
             bool any = false;
             try
             {
-                if (!ever) live.SetChannel("precios", FeedStatus.Connecting, "Conectando a OANDA…");
+                if (!ever) live.SetChannel("prices", FeedStatus.Connecting, "Connecting to OANDA…");
                 var account = await AccountAsync(conn.Token).ConfigureAwait(false);
                 using var req = new HttpRequestMessage(HttpMethod.Get, $"{StreamBase}/v3/accounts/{account}/pricing/stream?instruments={instrument.Symbol}");
                 using var resp = await _stream.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, conn.Token).ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode)
-                    throw new HttpRequestException(resp.StatusCode == System.Net.HttpStatusCode.Unauthorized ? "OANDA rechazó el token" : $"OANDA respondió {(int)resp.StatusCode}");
+                    throw new HttpRequestException(resp.StatusCode == System.Net.HttpStatusCode.Unauthorized ? "OANDA rejected token" : $"OANDA returned {(int)resp.StatusCode}");
                 await using var body = await resp.Content.ReadAsStreamAsync(conn.Token).ConfigureAwait(false);
                 using var reader = new StreamReader(body);
-                live.SetChannel("precios", FeedStatus.Connected, null);
+                live.SetChannel("prices", FeedStatus.Connected, null);
                 ever = true;
                 conn.CancelAfter(TimeSpan.FromSeconds(20)); // llega un latido cada 5 s
                 var book = new OrderBookBuilder();
@@ -243,7 +243,7 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
                     var line = await reader.ReadLineAsync(conn.Token).ConfigureAwait(false);
                     if (line == null)
                     {
-                        reason = "OANDA cerró la conexión";
+                        reason = "OANDA closed the connection";
                         break;
                     }
 
@@ -274,7 +274,7 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
             }
             catch (OperationCanceledException)
             {
-                reason = live.WasRequested(ref requested) ? "reconexión pedida" : any ? "no llegaban precios" : "no respondió a tiempo";
+                reason = live.WasRequested(ref requested) ? "reconnection requested" : any ? "no prices arriving" : "response timed out";
                 if (!any) failures++;
             }
             catch (Exception ex)
@@ -289,11 +289,11 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 
             if (ct.IsCancellationRequested) break;
             var wait = LiveSubscription.Backoff(failures);
-            live.SetChannel("precios", FeedStatus.Reconnecting, $"Reconectando en {wait.TotalSeconds:0} s ({reason})");
+            live.SetChannel("prices", FeedStatus.Reconnecting, $"Reconnecting in {wait.TotalSeconds:0} s ({reason})");
             await Task.Delay(wait, ct).ContinueWith(_ => { }).ConfigureAwait(false);
         }
 
-        live.SetChannel("precios", FeedStatus.Disconnected, null);
+        live.SetChannel("prices", FeedStatus.Disconnected, null);
     }
 
     /// <summary>Prueba el token: cuenta e instrumentos.</summary>
@@ -302,7 +302,7 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
         var account = await AccountAsync(ct).ConfigureAwait(false);
         var list = await GetInstrumentsAsync(ct).ConfigureAwait(false);
         int cfds = list.Count(i => i.Description.Contains("CFD", StringComparison.Ordinal));
-        return (true, $"Cuenta {account} ({(_s.Practice ? "práctica" : "real")}): {list.Count} instrumentos, {cfds} CFDs (índices como NAS100_USD y SPX500_USD).");
+        return (true, $"Account {account} ({(_s.Practice ? "demo" : "real")}): {list.Count} instruments, {cfds} CFDs (indices such as NAS100_USD and SPX500_USD).");
     }
 
     public void Dispose()

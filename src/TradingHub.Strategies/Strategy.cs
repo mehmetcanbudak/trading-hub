@@ -77,7 +77,7 @@ public sealed class StrategyOrder
 
     public bool IsActive => State == StrategyOrderState.Active;
 
-    public override string ToString() => $"{Name}: {(Side == OrderSide.Buy ? "compra" : "venta")} {Type} {Quantity}{(Type == StrategyOrderType.Market ? "" : " @ " + Price)}";
+    public override string ToString() => $"{Name}: {(Side == OrderSide.Buy ? "buy" : "sell")} {Type} {Quantity}{(Type == StrategyOrderType.Market ? "" : " @ " + Price)}";
 }
 
 /// <summary>Lo que la estrategia necesita del entorno (backtest o vivo).</summary>
@@ -115,31 +115,31 @@ public abstract class Strategy
     // ----------------------------------------------------------------- parámetros comunes
 
     /// <summary>Cantidad por defecto de cada orden.</summary>
-    [Parameter("Cantidad", Description = "Contratos o unidades por orden")]
+    [Parameter("Quantity", Description = "Contracts or units per order")]
     public decimal Quantity { get; set; } = 1;
 
     /// <summary>Stop loss automático en ticks para cada posición (0 = sin stop).</summary>
-    [Parameter("Stop loss (ticks)", Description = "0 = sin stop automático")]
+    [Parameter("Stop loss (ticks)", Description = "0 = no automatic stop")]
     public int StopLossTicks { get; set; }
 
     /// <summary>Take profit automático en ticks (0 = sin objetivo).</summary>
-    [Parameter("Take profit (ticks)", Description = "0 = sin objetivo automático")]
+    [Parameter("Take profit (ticks)", Description = "0 = no automatic target")]
     public int TakeProfitTicks { get; set; }
 
     /// <summary>Stop que sigue al precio a esta distancia en ticks (0 = no).</summary>
-    [Parameter("Trailing stop (ticks)", Description = "0 = sin trailing")]
+    [Parameter("Trailing stop (ticks)", Description = "0 = no trailing stop")]
     public int TrailingStopTicks { get; set; }
 
     /// <summary>Filtro de contexto: solo abre operaciones en esta condición de mercado (las salidas siempre pasan).</summary>
-    [Parameter("Filtro de régimen", Description = "Solo abre operaciones en esa condición de mercado (rango, mixto o tendencia —alcista o bajista— de las últimas 24 h). Todas = sin filtro")]
+    [Parameter("Regime filter", Description = "Only opens trades in the selected market regime (range, mixed, uptrend or downtrend over the last 24 h). All = no filter")]
     public RegimeFilter RegimeFilter { get; set; } = RegimeFilter.All;
 
     /// <summary>Filtro de contexto: no abre si la volatilidad está por debajo de este percentil del último mes.</summary>
-    [Parameter("Volatilidad mínima (percentil)", Description = "0 a 100: no abre operaciones si la volatilidad de las últimas 24 h está por debajo de ese percentil del último mes. 0 = sin filtro")]
+    [Parameter("Minimum volatility (percentile)", Description = "0 to 100: blocks entries when 24-hour volatility is below this percentile of the last month. 0 = no filter")]
     public int MinVolatilityRank { get; set; }
 
     /// <summary>Filtro de contexto: no abre si la volatilidad está por encima de este percentil del último mes.</summary>
-    [Parameter("Volatilidad máxima (percentil)", Description = "0 a 100: no abre operaciones si la volatilidad de las últimas 24 h está por encima de ese percentil del último mes. 100 = sin filtro")]
+    [Parameter("Maximum volatility (percentile)", Description = "0 to 100: blocks entries when 24-hour volatility is above this percentile of the last month. 100 = no filter")]
     public int MaxVolatilityRank { get; set; } = 100;
 
     /// <summary>Si las velas guardan el volumen por precio (footprint). Activalo en OnInit si lo usás.</summary>
@@ -217,12 +217,12 @@ public abstract class Strategy
 
     // ----------------------------------------------------------------- órdenes
 
-    protected StrategyOrder Buy(decimal? quantity = null, string name = "Compra") => Send(OrderSide.Buy, StrategyOrderType.Market, quantity ?? Quantity, 0, name);
-    protected StrategyOrder Sell(decimal? quantity = null, string name = "Venta") => Send(OrderSide.Sell, StrategyOrderType.Market, quantity ?? Quantity, 0, name);
-    protected StrategyOrder BuyLimit(decimal price, decimal? quantity = null, string name = "Compra límite") => Send(OrderSide.Buy, StrategyOrderType.Limit, quantity ?? Quantity, Round(price), name);
-    protected StrategyOrder SellLimit(decimal price, decimal? quantity = null, string name = "Venta límite") => Send(OrderSide.Sell, StrategyOrderType.Limit, quantity ?? Quantity, Round(price), name);
-    protected StrategyOrder BuyStop(decimal price, decimal? quantity = null, string name = "Compra stop") => Send(OrderSide.Buy, StrategyOrderType.Stop, quantity ?? Quantity, Round(price), name);
-    protected StrategyOrder SellStop(decimal price, decimal? quantity = null, string name = "Venta stop") => Send(OrderSide.Sell, StrategyOrderType.Stop, quantity ?? Quantity, Round(price), name);
+    protected StrategyOrder Buy(decimal? quantity = null, string name = "Buy") => Send(OrderSide.Buy, StrategyOrderType.Market, quantity ?? Quantity, 0, name);
+    protected StrategyOrder Sell(decimal? quantity = null, string name = "Sell") => Send(OrderSide.Sell, StrategyOrderType.Market, quantity ?? Quantity, 0, name);
+    protected StrategyOrder BuyLimit(decimal price, decimal? quantity = null, string name = "Limit buy") => Send(OrderSide.Buy, StrategyOrderType.Limit, quantity ?? Quantity, Round(price), name);
+    protected StrategyOrder SellLimit(decimal price, decimal? quantity = null, string name = "Limit sell") => Send(OrderSide.Sell, StrategyOrderType.Limit, quantity ?? Quantity, Round(price), name);
+    protected StrategyOrder BuyStop(decimal price, decimal? quantity = null, string name = "Buy stop") => Send(OrderSide.Buy, StrategyOrderType.Stop, quantity ?? Quantity, Round(price), name);
+    protected StrategyOrder SellStop(decimal price, decimal? quantity = null, string name = "Sell stop") => Send(OrderSide.Sell, StrategyOrderType.Stop, quantity ?? Quantity, Round(price), name);
 
     private DateTime _filterLogged = DateTime.MinValue;
 
@@ -238,15 +238,15 @@ public abstract class Strategy
         if (closing < quantity && Host.Time - _filterLogged >= (Host.IsBacktest ? TimeSpan.FromDays(1) : TimeSpan.FromHours(1)))
         {
             _filterLogged = Host.Time;
-            Host.Log($"Filtro de contexto: no abre operaciones ahora ({Context.Describe()})");
+            Host.Log($"Context filter: entries are currently blocked ({Context.Describe()})");
         }
 
         if (closing > 0) return Host.Submit(side, type, closing, price, name);
-        return new StrategyOrder { Side = side, Type = type, Quantity = quantity, Price = price, Name = name + " (filtro de contexto)", State = StrategyOrderState.Canceled, Time = Host.Time };
+        return new StrategyOrder { Side = side, Type = type, Quantity = quantity, Price = price, Name = name + " (context filter)", State = StrategyOrderState.Canceled, Time = Host.Time };
     }
 
     /// <summary>Entra largo a mercado (si estaba corto, da vuelta la posición).</summary>
-    protected void EnterLong(decimal? quantity = null, string name = "Largo")
+    protected void EnterLong(decimal? quantity = null, string name = "Long")
     {
         decimal q = quantity ?? Quantity;
         if (Position < 0) q += -Position;
@@ -254,7 +254,7 @@ public abstract class Strategy
     }
 
     /// <summary>Entra corto a mercado (si estaba largo, da vuelta la posición).</summary>
-    protected void EnterShort(decimal? quantity = null, string name = "Corto")
+    protected void EnterShort(decimal? quantity = null, string name = "Short")
     {
         decimal q = quantity ?? Quantity;
         if (Position > 0) q += Position;
@@ -262,7 +262,7 @@ public abstract class Strategy
     }
 
     /// <summary>Cierra la posición a mercado y cancela las órdenes de entrada pendientes.</summary>
-    protected void ClosePosition(string name = "Cierre")
+    protected void ClosePosition(string name = "Close")
     {
         foreach (var o in Host.ActiveOrders.Where(o => !o.IsProtective).ToList()) Host.Cancel(o);
         if (Position > 0) Sell(Position, name);
@@ -436,8 +436,8 @@ public abstract class Strategy
 
     // ----------------------------------------------------------------- metadatos
 
-    public static string DisplayName(Type t) => t.GetCustomAttribute<StrategyAttribute>()?.Name ?? t.Name;
-    public static string Description(Type t) => t.GetCustomAttribute<StrategyAttribute>()?.Description ?? "";
+    public static string DisplayName(Type t) => TradingHub.Common.EnglishText.Of(t.GetCustomAttribute<StrategyAttribute>()?.Name ?? t.Name);
+    public static string Description(Type t) => TradingHub.Common.EnglishText.Of(t.GetCustomAttribute<StrategyAttribute>()?.Description ?? "");
 
     /// <summary>Propiedades configurables (con [Parameter]).</summary>
     public static IEnumerable<PropertyInfo> Parameters(Type t) =>
@@ -446,7 +446,7 @@ public abstract class Strategy
             .OrderBy(p => p.DeclaringType == typeof(Strategy) ? 1 : 0)
             .ThenBy(p => p.MetadataToken);
 
-    public static string ParameterName(PropertyInfo p) => p.GetCustomAttribute<ParameterAttribute>()?.Name ?? p.Name;
+    public static string ParameterName(PropertyInfo p) => TradingHub.Common.EnglishText.Of(p.GetCustomAttribute<ParameterAttribute>()?.Name ?? p.Name);
 
     /// <summary>Valores actuales de los parámetros.</summary>
     public Dictionary<string, object?> GetParameters() => Parameters(GetType()).ToDictionary(p => p.Name, p => p.GetValue(this));

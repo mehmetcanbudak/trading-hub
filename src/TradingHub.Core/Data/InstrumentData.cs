@@ -89,7 +89,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         HistoryFrom = historyFrom;
         HistoryProgress = 0;
         HistoryError = null;
-        SetStatus(FeedStatus.Connecting, "Conectando…");
+        SetStatus(FeedStatus.Connecting, "Connecting…");
 
         if (Feed.IsLive && RecordingRoot != null && RecordLive)
             _recorder = new TickRecorder(RecordingRoot, Instrument);

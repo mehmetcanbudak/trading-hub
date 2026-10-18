@@ -159,22 +159,22 @@ public static class Robustness
             return new RegimeStats(name, g.Count, g.Sum(t => t.NetPnl), loss > 0 ? Math.Round(win / loss, 2) : win > 0 ? 999 : 0, detail);
         }
 
-        list.Add(Of("rango", known.Where(t => t.EntryTrend <= RangeTrend)));
-        list.Add(Of("mixto", known.Where(t => t.EntryTrend > RangeTrend && t.EntryTrend < TrendingTrend)));
+        list.Add(Of("range", known.Where(t => t.EntryTrend <= RangeTrend)));
+        list.Add(Of("mixed", known.Where(t => t.EntryTrend > RangeTrend && t.EntryTrend < TrendingTrend)));
         var trending = known.Where(t => t.EntryTrend >= TrendingTrend).ToList();
-        list.Add(Of("tendencia", trending));
+        list.Add(Of("trend", trending));
         // la tendencia, separada en alcista y bajista (detalle: no cuenta aparte para la regla de regímenes)
         if (trending.Count > 0 && trending.Count(t => t.EntryMarketDirection != null) >= trending.Count * 0.8)
         {
-            list.Add(Of("tendencia alcista", trending.Where(t => t.EntryMarketDirection > 0), detail: true));
-            list.Add(Of("tendencia bajista", trending.Where(t => t.EntryMarketDirection < 0), detail: true));
+            list.Add(Of("uptrend", trending.Where(t => t.EntryMarketDirection > 0), detail: true));
+            list.Add(Of("downtrend", trending.Where(t => t.EntryMarketDirection < 0), detail: true));
         }
         // volatilidad: con el percentil del último mes (el mismo que usa el filtro de contexto); las corridas de antes,
         // por tercios de las propias operaciones
         if (known.Count(t => t.EntryVolatilityRank != null) >= known.Count * 0.8)
         {
-            list.Add(Of("volatilidad baja", known.Where(t => t.EntryVolatilityRank <= LowVolatilityRank)));
-            list.Add(Of("volatilidad alta", known.Where(t => t.EntryVolatilityRank >= HighVolatilityRank)));
+            list.Add(Of("low volatility", known.Where(t => t.EntryVolatilityRank <= LowVolatilityRank)));
+            list.Add(Of("high volatility", known.Where(t => t.EntryVolatilityRank >= HighVolatilityRank)));
         }
         else
         {
@@ -182,8 +182,8 @@ public static class Robustness
             if (vols.Count >= 9)
             {
                 double low = vols[vols.Count / 3], high = vols[vols.Count * 2 / 3];
-                list.Add(Of("volatilidad baja", known.Where(t => t.EntryVolatility < low)));
-                list.Add(Of("volatilidad alta", known.Where(t => t.EntryVolatility >= high)));
+                list.Add(Of("low volatility", known.Where(t => t.EntryVolatility < low)));
+                list.Add(Of("high volatility", known.Where(t => t.EntryVolatility >= high)));
             }
         }
 
@@ -259,20 +259,20 @@ public static class Robustness
     public static string? DescribeRegimes(RegimeSet set)
     {
         if (set is RegimeSet.All or RegimeSet.None) return null;
-        if (set == (RegimeSet.UpTrend | RegimeSet.DownTrend)) return "solo en tendencia";
-        if (set == (RegimeSet.Range | RegimeSet.Mixed)) return "sin tendencia (rango o mixto)";
-        if (set == (RegimeSet.Mixed | RegimeSet.UpTrend | RegimeSet.DownTrend)) return "sin rango (mixto o tendencia)";
+        if (set == (RegimeSet.UpTrend | RegimeSet.DownTrend)) return "trend only";
+        if (set == (RegimeSet.Range | RegimeSet.Mixed)) return "no trend (range or mixed)";
+        if (set == (RegimeSet.Mixed | RegimeSet.UpTrend | RegimeSet.DownTrend)) return "no range (mixed or trend)";
         static string Name(RegimeSet one) => one switch
         {
-            RegimeSet.Range => "rango",
-            RegimeSet.Mixed => "mixto",
-            RegimeSet.UpTrend => "tendencia alcista",
-            _ => "tendencia bajista",
+            RegimeSet.Range => "range",
+            RegimeSet.Mixed => "mixed",
+            RegimeSet.UpTrend => "uptrend",
+            _ => "downtrend",
         };
         var on = new[] { RegimeSet.Range, RegimeSet.Mixed, RegimeSet.UpTrend, RegimeSet.DownTrend }.Where(x => set.HasFlag(x)).ToList();
-        if (on.Count == 1) return "solo en " + Name(on[0]);
-        if (on.Count == 3) return "todo menos " + Name(RegimeSet.All & ~set);
-        return string.Join(" o ", on.Select(Name));
+        if (on.Count == 1) return "only in " + Name(on[0]);
+        if (on.Count == 3) return "all except " + Name(RegimeSet.All & ~set);
+        return string.Join(" or ", on.Select(Name));
     }
 
     /// <summary>«solo en rango, volatilidad hasta el percentil 66».</summary>
@@ -280,9 +280,9 @@ public static class Robustness
     {
         var parts = new List<string>();
         if (DescribeRegimes(MarketContextTracker.SetOf(regime)) is { } r) parts.Add(r);
-        if (minRank > 0 && maxRank < 100) parts.Add($"volatilidad entre los percentiles {minRank} y {maxRank}");
-        else if (maxRank < 100) parts.Add(maxRank <= 33 ? "volatilidad baja" : $"volatilidad hasta el percentil {maxRank}");
-        else if (minRank > 0) parts.Add(minRank >= 67 ? "volatilidad alta" : $"volatilidad desde el percentil {minRank}");
+        if (minRank > 0 && maxRank < 100) parts.Add($"volatility between percentiles {minRank} and {maxRank}");
+        else if (maxRank < 100) parts.Add(maxRank <= 33 ? "low volatility" : $"volatility up to percentile {maxRank}");
+        else if (minRank > 0) parts.Add(minRank >= 67 ? "high volatility" : $"volatility from percentile {minRank}");
         return string.Join(", ", parts);
     }
 
@@ -428,10 +428,10 @@ public sealed class GateResult
 
     public string StatusText => Status switch
     {
-        GateStatus.Pass => "pasa",
-        GateStatus.Warn => "dudosa",
-        _ when NeedsMoreSample => "falta muestra",
-        _ => "no pasa",
+        GateStatus.Pass => "pass",
+        GateStatus.Warn => "uncertain",
+        _ when NeedsMoreSample => "insufficient sample",
+        _ => "fail",
     };
 }
 
@@ -451,25 +451,27 @@ public static class ValidationGate
     public const double MinDeflated = 0.9, FailDeflated = 0.5;
 
     /// <summary>Cómo empieza la línea del Sharpe deflactado (las de antes decían «Probabilidad de que no sea suerte»).</summary>
-    public const string LuckPassPrefix = "Probabilidad de que la ventaja sea real y no suerte:", LuckFailPrefix = "Puede ser suerte:";
+    public const string LuckPassPrefix = "Probability that the edge is real rather than luck:", LuckFailPrefix = "May be luck:";
 
     /// <summary>¿Es la línea del Sharpe deflactado? (la de ahora o la de las pruebas guardadas antes)</summary>
     public static bool IsLuckLine(string text) =>
         text.StartsWith(LuckFailPrefix, StringComparison.Ordinal) || text.StartsWith(LuckPassPrefix, StringComparison.Ordinal) ||
-        text.StartsWith("Probabilidad de que no sea suerte", StringComparison.Ordinal);
+        text.StartsWith("Probabilidad de que no sea suerte", StringComparison.Ordinal) ||
+        text.StartsWith("Probabilidad de que la ventaja sea real y no suerte:", StringComparison.Ordinal) ||
+        text.StartsWith("Puede ser suerte:", StringComparison.Ordinal);
 
     /// <summary>Hasta cuántas veces más operaciones se considera ir a buscar para que el Sharpe deflactado pase.</summary>
     public const double MaxSampleFactor = 8;
 
     /// <summary>Pruebas que dependen del tamaño de la muestra (con pocas operaciones, y con suficientes).</summary>
-    private static readonly HashSet<string> SmallSampleChecks = new() { "Muestra", "Sharpe deflactado", "Consistencia", "Eficiencia", "Ventanas", "Sobreajuste", "Caminos" };
+    private static readonly HashSet<string> SmallSampleChecks = new() { "Sample", "Deflated Sharpe", "Consistency", "Efficiency", "Windows", "Overfitting", "Paths" };
 
     /// <summary>Sobreajuste (PBO): la elegida pierde fuera de muestra en menos del 20 % de las particiones (pasa) o en la mitad o más (no pasa).</summary>
     public const double MaxPboLoss = 0.2, FailPboLoss = 0.5;
 
     /// <summary>Caminos de la CPCV que tienen que ganar (y la mediana tiene que ser positiva).</summary>
     public const double MinProfitablePaths = 0.7;
-    private static readonly HashSet<string> LargeSampleChecks = new() { "Sharpe deflactado", "Ventanas" };
+    private static readonly HashSet<string> LargeSampleChecks = new() { "Deflated Sharpe", "Windows" };
 
     public static GateResult Evaluate(GateInput input)
     {
@@ -477,34 +479,34 @@ public static class ValidationGate
         var m = wf.OutSampleMetrics;
         var checks = new List<GateCheck>();
         void Add(string name, GateStatus st, string text) => checks.Add(new GateCheck(name, st, text));
-        var es = CultureInfo.GetCultureInfo("es-AR");
+        var es = CultureInfo.GetCultureInfo("en-US");
 
         int trades = m.TotalTrades;
-        Add("Muestra", trades >= input.MinTrades ? GateStatus.Pass : GateStatus.Fail,
-            trades >= input.MinTrades ? $"{trades} operaciones fuera de muestra"
-            : trades == 0 ? "No operó fuera de muestra (0 operaciones): sus condiciones no se dieron en el período probado"
-            : $"Solo {trades} operaciones fuera de muestra (mínimo {input.MinTrades}): no alcanza para concluir nada");
-        Add("Resultado", m.NetProfit > 0 ? GateStatus.Pass : GateStatus.Fail,
-            m.NetProfit > 0 ? $"Gana {m.NetProfit.ToString("N2", es)} fuera de muestra" : $"Pierde fuera de muestra ({m.NetProfit.ToString("N2", es)})");
+        Add("Sample", trades >= input.MinTrades ? GateStatus.Pass : GateStatus.Fail,
+            trades >= input.MinTrades ? $"{trades} out-of-sample trades"
+            : trades == 0 ? "No out-of-sample trades (0 trades): entry conditions did not occur during the test period"
+            : $"Only {trades} out-of-sample trades (minimum {input.MinTrades}): insufficient evidence for a conclusion");
+        Add("PnL", m.NetProfit > 0 ? GateStatus.Pass : GateStatus.Fail,
+            m.NetProfit > 0 ? $"Earns {m.NetProfit.ToString("N2", es)} out of sample" : $"Loses out of sample ({m.NetProfit.ToString("N2", es)})");
         decimal pf = m.ProfitFactor;
         Add("Profit factor", pf >= (decimal)MinProfitFactor ? GateStatus.Pass : pf >= (decimal)FailProfitFactor ? GateStatus.Warn : GateStatus.Fail,
-            $"PF fuera de muestra {(pf >= 999 ? "∞" : pf.ToString("0.00", es))} (pide ≥ {MinProfitFactor.ToString("0.0", es)})");
+            $"Out-of-sample PF {(pf >= 999 ? "∞" : pf.ToString("0.00", es))} (requires ≥ {MinProfitFactor.ToString("0.0", es)})");
         double wfe = wf.WalkForwardEfficiency;
-        Add("Eficiencia", wfe >= MinEfficiency ? GateStatus.Pass : wfe >= FailEfficiency ? GateStatus.Warn : GateStatus.Fail,
-            wfe >= MinEfficiency ? $"Eficiencia walk-forward {wfe.ToString("0.00", es)}: rinde fuera de muestra parecido a lo optimizado"
-            : wfe >= FailEfficiency ? $"Eficiencia walk-forward {wfe.ToString("0.00", es)}: pierde bastante fuera de muestra (pide ≥ {MinEfficiency.ToString("0.0", es)})"
-            : $"Eficiencia walk-forward {wfe.ToString("0.00", es)}: sobreoptimizada (lo optimizado no se repite fuera de muestra)");
+        Add("Efficiency", wfe >= MinEfficiency ? GateStatus.Pass : wfe >= FailEfficiency ? GateStatus.Warn : GateStatus.Fail,
+            wfe >= MinEfficiency ? $"Walk-forward efficiency {wfe.ToString("0.00", es)}: out-of-sample performance is similar to optimization"
+            : wfe >= FailEfficiency ? $"Walk-forward efficiency {wfe.ToString("0.00", es)}: substantial degradation out of sample (requires ≥ {MinEfficiency.ToString("0.0", es)})"
+            : $"Walk-forward efficiency {wfe.ToString("0.00", es)}: overfit (optimized performance does not repeat out of sample)");
         double win = wf.ProfitableWindowsPercent;
-        Add("Consistencia", win >= MinWindowsPercent ? GateStatus.Pass : win >= FailWindowsPercent ? GateStatus.Warn : GateStatus.Fail,
-            $"{win.ToString("0", es)}% de las ventanas fuera de muestra ganan (pide ≥ {MinWindowsPercent}%)");
-        Add("Ventanas", wf.Windows.Count >= MinWindows ? GateStatus.Pass : GateStatus.Warn,
-            wf.Windows.Count >= MinWindows ? $"{wf.Windows.Count} ventanas de walk-forward" : $"Solo {wf.Windows.Count} ventanas: poca evidencia de que se repita en el tiempo");
+        Add("Consistency", win >= MinWindowsPercent ? GateStatus.Pass : win >= FailWindowsPercent ? GateStatus.Warn : GateStatus.Fail,
+            $"{win.ToString("0", es)}% of out-of-sample windows are profitable (requires ≥ {MinWindowsPercent}%)");
+        Add("Windows", wf.Windows.Count >= MinWindows ? GateStatus.Pass : GateStatus.Warn,
+            wf.Windows.Count >= MinWindows ? $"{wf.Windows.Count} walk-forward windows" : $"Only {wf.Windows.Count} windows: little evidence of repeatability over time");
 
         double? instability = Robustness.ParameterInstability(wf.Windows, wf.Ranges);
         if (instability is { } inst)
-            Add("Estabilidad", inst <= MaxInstability ? GateStatus.Pass : GateStatus.Warn,
-                inst <= MaxInstability ? $"Los parámetros elegidos son estables entre ventanas (dispersión {inst.ToString("0.00", es)})"
-                : $"Los parámetros elegidos saltan por todo el rango entre ventanas (dispersión {inst.ToString("0.00", es)}): la ventaja depende de afinarlos");
+            Add("Stability", inst <= MaxInstability ? GateStatus.Pass : GateStatus.Warn,
+                inst <= MaxInstability ? $"Selected parameters are stable across windows (dispersion {inst.ToString("0.00", es)})"
+                : $"Selected parameters vary across the entire range between windows (dispersion {inst.ToString("0.00", es)}): the edge depends on fine-tuning them");
 
         (double, int)? plateau = null;
         double? profitableCombos = null;
@@ -512,26 +514,26 @@ public static class ValidationGate
         {
             plateau = Robustness.Plateau(opt);
             if (plateau is { } p)
-                Add("Meseta", p.Item1 >= MinPlateau ? GateStatus.Pass : GateStatus.Warn,
-                    p.Item1 >= MinPlateau ? $"{p.Item1 * 100:0}% de las combinaciones vecinas a la mejor también ganan (meseta)"
-                    : $"Solo {p.Item1 * 100:0}% de las vecinas a la mejor combinación ganan: pico aislado, típico de sobreajuste");
+                Add("Plateau", p.Item1 >= MinPlateau ? GateStatus.Pass : GateStatus.Warn,
+                    p.Item1 >= MinPlateau ? $"{p.Item1 * 100:0}% of combinations neighboring the best are also profitable (plateau)"
+                    : $"Only {p.Item1 * 100:0}% of neighbors of the best combination are profitable: an isolated peak, typical of overfitting");
             profitableCombos = Robustness.ProfitableShare(opt);
             if (profitableCombos is { } pc)
-                Add("Robustez", pc >= MinProfitableCombos ? GateStatus.Pass : GateStatus.Warn,
-                    $"{pc * 100:0}% de todas las combinaciones probadas ganan plata");
+                Add("Robustness", pc >= MinProfitableCombos ? GateStatus.Pass : GateStatus.Warn,
+                    $"{pc * 100:0}% of all tested combinations are profitable");
         }
 
         // sobreajuste (Bailey, Borwein, López de Prado y Zhu): con la mitad de la historia se elige la mejor combinación y se
         // mira la otra mitad, de todas las formas posibles. Lo que decide es si la elegida pierde plata en la otra mitad; la
         // PBO (si queda en la mitad de abajo de las demás) se informa: alta con todas ganando es una meseta, no un problema
         if (wf.Pbo is { } pbo && wf.PboLoss is { } pboLoss && wf.PboSplits > 0)
-            Add("Sobreajuste", pboLoss < MaxPboLoss ? GateStatus.Pass : pboLoss < FailPboLoss ? GateStatus.Warn : GateStatus.Fail,
+            Add("Overfitting", pboLoss < MaxPboLoss ? GateStatus.Pass : pboLoss < FailPboLoss ? GateStatus.Warn : GateStatus.Fail,
                 (pboLoss < MaxPboLoss
-                    ? $"La optimización no elige suerte: la combinación que mejor le fue con una mitad de la historia ganó plata en la otra mitad en el {(1 - pboLoss) * 100:0}% de las {wf.PboSplits} particiones"
+                    ? $"Optimization is not selecting luck: the best combination on half the history was profitable on the other half in {(1 - pboLoss) * 100:0}% of the {wf.PboSplits} partitions"
                     : pboLoss < FailPboLoss
-                        ? $"Algo de sobreajuste: la combinación que mejor le fue con una mitad de la historia perdió plata en la otra mitad en el {pboLoss * 100:0}% de las {wf.PboSplits} particiones (pide menos del {MaxPboLoss * 100:0}%)"
-                        : $"Sobreoptimizada: la combinación que mejor le fue con una mitad de la historia perdió plata en la otra mitad en el {pboLoss * 100:0}% de las {wf.PboSplits} particiones; elegir la mejor es elegir suerte") +
-                $" (entre las {wf.Evaluated} combinaciones probadas, quedó en la mitad de abajo en el {pbo * 100:0}%: PBO)");
+                        ? $"Some overfitting: the best combination on half the history lost money on the other half in {pboLoss * 100:0}% of the {wf.PboSplits} partitions (requires less than {MaxPboLoss * 100:0}%)"
+                        : $"Overfit: the best combination on half the history lost money on the other half in {pboLoss * 100:0}% of the {wf.PboSplits} partitions; selecting the best is selecting luck") +
+                $" (among the {wf.Evaluated} tested combinations, it ranked in the bottom half in {pbo * 100:0}%: PBO)");
 
         // caminos fuera de muestra de la validación cruzada combinatoria purgada: no un solo camino como el walk-forward
         if (wf.CpcvPaths.Count >= 3)
@@ -540,10 +542,10 @@ public static class ValidationGate
             int good = paths.Count(p => p.Net > 0);
             decimal median = paths[paths.Count / 2].Net, worst = paths[0].Net;
             double share = (double)good / paths.Count;
-            Add("Caminos", median <= 0 ? GateStatus.Fail : share >= MinProfitablePaths ? GateStatus.Pass : GateStatus.Warn,
-                $"{good} de {paths.Count} caminos fuera de muestra ganan (validación cruzada con {wf.CpcvGroups} bloques y {wf.EmbargoDays} día(s) de embargo): " +
-                $"el del medio {median.ToString("N0", es)}, el peor {worst.ToString("N0", es)}" +
-                (median <= 0 ? ". Con otra forma de partir la historia, pierde" : share >= MinProfitablePaths ? "" : $" (pide que ganen al menos el {MinProfitablePaths * 100:0}%)"));
+            Add("Paths", median <= 0 ? GateStatus.Fail : share >= MinProfitablePaths ? GateStatus.Pass : GateStatus.Warn,
+                $"{good} of {paths.Count} out-of-sample paths are profitable (cross-validation with {wf.CpcvGroups} groups and {wf.EmbargoDays} embargo day(s)): " +
+                $"median {median.ToString("N0", es)}, worst {worst.ToString("N0", es)}" +
+                (median <= 0 ? ". With a different historical split, it loses money" : share >= MinProfitablePaths ? "" : $" (requires at least this percentage to be profitable: {MinProfitablePaths * 100:0}%)"));
         }
 
         var (sr, skew, kurt, n) = Robustness.TradeSharpe(wf.OutSampleTrades);
@@ -555,14 +557,14 @@ public static class ValidationGate
         double mean = pnls.Count > 0 ? pnls.Average() : 0;
         double sd = pnls.Count > 1 ? Math.Sqrt(pnls.Sum(x => (x - mean) * (x - mean)) / (pnls.Count - 1)) : 0;
         string money = n >= 2 && sd > 0
-            ? $". Gana en promedio {mean.ToString("N0", es)} por operación, pero cada operación varía unos ±{sd.ToString("N0", es)}: entre {input.Trials} estrategias sin ninguna ventaja " +
-              $"(las que se probaron), la de mejor suerte suele mostrar ~{(bar * sd).ToString("N0", es)} por operación con esa variación"
+            ? $". Average profit {mean.ToString("N0", es)} per trade, but individual trades vary by about ±{sd.ToString("N0", es)}: among {input.Trials} strategies with no edge " +
+              $"(the number tested), the luckiest typically shows ~{(bar * sd).ToString("N0", es)} per trade with that variability"
             : "";
-        Add("Sharpe deflactado", dsr >= MinDeflated ? GateStatus.Pass : dsr >= FailDeflated ? GateStatus.Warn : GateStatus.Fail,
+        Add("Deflated Sharpe", dsr >= MinDeflated ? GateStatus.Pass : dsr >= FailDeflated ? GateStatus.Warn : GateStatus.Fail,
             dsr >= MinDeflated
-                ? $"{LuckPassPrefix} {dsr * 100:0}% (pide ≥ {MinDeflated * 100:0}%, descontando las {input.Trials} estrategias que se probaron){money}"
-                : $"{LuckFailPrefix} solo {dsr * 100:0}% de probabilidad de que la ventaja sea real (pide ≥ {MinDeflated * 100:0}%){money}" +
-                  (dsr < FailDeflated ? ". Con esto no se distingue del azar" : ""));
+                ? $"{LuckPassPrefix} {dsr * 100:0}% (requires ≥ {MinDeflated * 100:0}%, accounting for the {input.Trials} tested strategies){money}"
+                : $"{LuckFailPrefix} only {dsr * 100:0}% probability that the edge is real (requires ≥ {MinDeflated * 100:0}%){money}" +
+                  (dsr < FailDeflated ? ". This is indistinguishable from chance" : ""));
 
         // desgaste de la ventaja: con 30 operaciones o más, ¿el último tercio rinde como el primero?
         var (early, late, tDecay, _) = Robustness.EdgeDecay(wf.OutSampleTrades);
@@ -570,10 +572,10 @@ public static class ValidationGate
         {
             bool dying = early > 0 && late < 0 && tDecay <= -2;
             bool fading = (early > 0 && late < early * 0.5m) || tDecay <= -1.5;
-            Add("Desgaste", dying ? GateStatus.Fail : fading ? GateStatus.Warn : GateStatus.Pass,
-                dying ? $"La ventaja se está apagando: el último tercio de las operaciones pierde ({late.ToString("N2", es)} por operación) cuando el primero ganaba {early.ToString("N2", es)} (tendencia en contra, t {tDecay.ToString("0.0", es)})"
-                : fading ? $"La ventaja se achica con el tiempo: el último tercio de las operaciones rinde {late.ToString("N2", es)} por operación contra {early.ToString("N2", es)} del primero"
-                : $"La ventaja se sostiene en el tiempo: el último tercio de las operaciones rinde {late.ToString("N2", es)} por operación (el primero {early.ToString("N2", es)})");
+            Add("Edge decay", dying ? GateStatus.Fail : fading ? GateStatus.Warn : GateStatus.Pass,
+                dying ? $"The edge is fading: the last third of trades loses ({late.ToString("N2", es)} per trade), whereas the first third earned {early.ToString("N2", es)} (adverse trend, t {tDecay.ToString("0.0", es)})"
+                : fading ? $"The edge weakens over time: the last third of trades earns {late.ToString("N2", es)} per trade versus {early.ToString("N2", es)} in the first third"
+                : $"The edge holds up over time: the last third of trades earns {late.ToString("N2", es)} per trade (first third {early.ToString("N2", es)})");
         }
 
         // regímenes de mercado: cómo le va en rango, en tendencia y con volatilidad baja o alta (grupos con muestra)
@@ -585,10 +587,10 @@ public static class ValidationGate
             string Line(RegimeStats r) => $"{r.Name} ({r.Trades} op, PF {(r.ProfitFactor >= 999 ? "∞" : r.ProfitFactor.ToString("0.00", es))})";
             var losing = judged.Where(r => r.Net < 0).ToList();
             var winning = judged.Except(losing).ToList();
-            Add("Regímenes", losing.Count == 0 ? GateStatus.Pass : GateStatus.Warn,
-                losing.Count == 0 ? $"Gana en todas las condiciones de mercado con muestra: {string.Join(", ", judged.Select(Line))}"
-                : winning.Count == 0 ? $"Pierde en todas las condiciones de mercado: {string.Join(", ", losing.Select(Line))}"
-                : $"Depende del régimen: pierde en {string.Join(", ", losing.Select(Line))} y gana en {string.Join(", ", winning.Select(Line))}. Conviene un filtro de régimen");
+            Add("Regimes", losing.Count == 0 ? GateStatus.Pass : GateStatus.Warn,
+                losing.Count == 0 ? $"Profitable in every market condition with sufficient data: {string.Join(", ", judged.Select(Line))}"
+                : winning.Count == 0 ? $"Loses in every market condition: {string.Join(", ", losing.Select(Line))}"
+                : $"Regime-dependent: loses in {string.Join(", ", losing.Select(Line))} and earns in {string.Join(", ", winning.Select(Line))}. Consider a regime filter");
         }
 
         var status = checks.Any(c => c.Status == GateStatus.Fail) ? GateStatus.Fail : checks.Any(c => c.Status == GateStatus.Warn) ? GateStatus.Warn : GateStatus.Pass;

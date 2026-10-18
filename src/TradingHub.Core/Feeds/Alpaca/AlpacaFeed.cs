@@ -48,7 +48,7 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     public string DisplayName => "Alpaca";
     public bool SupportsHistory => true;
     public bool IsLive => true;
-    public string HistoryNote => "operaciones de todas las bolsas de EE.UU. (SIP) por Alpaca, gratis desde 2016";
+    public string HistoryNote => "US consolidated (SIP) trade history via Alpaca, available from 2016 subject to provider entitlement";
 
     private string Data => (_s.DataUrl ?? "https://data.alpaca.markets").TrimEnd('/');
     private string Trading => (_s.TradingUrl ?? "https://paper-api.alpaca.markets").TrimEnd('/');
@@ -58,7 +58,7 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     private async Task<JsonDocument> GetAsync(string url, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(_s.KeyId) || string.IsNullOrWhiteSpace(_s.Secret))
-            throw new InvalidOperationException("Faltan la API key y el secret de Alpaca (se generan gratis en tu cuenta de práctica).");
+            throw new InvalidOperationException("Alpaca API key and secret are missing (generate them in your practice account).");
         for (int attempt = 0; ; attempt++)
         {
             await _rate.WaitAsync(ct).ConfigureAwait(false);
@@ -96,8 +96,8 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 
                 throw new HttpRequestException(resp.StatusCode switch
                 {
-                    System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden => "Alpaca rechazó las claves (o tu plan no incluye esos datos): " + msg,
-                    _ => $"Alpaca respondió {(int)resp.StatusCode}: {msg}",
+                    System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden => "Alpaca rejected credentials or your plan does not include these data: " + msg,
+                    _ => $"Alpaca returned {(int)resp.StatusCode}: {msg}",
                 });
             }
 
@@ -244,11 +244,11 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
         {
             using var ws = new ClientWebSocket();
             var conn = live.BeginConnection();
-            string reason = "se cortó la conexión";
+            string reason = "connection lost";
             bool any = false;
             try
             {
-                if (!ever) live.SetChannel("datos", FeedStatus.Connecting, "Conectando a Alpaca…");
+                if (!ever) live.SetChannel("data", FeedStatus.Connecting, "Connecting to Alpaca…");
                 using (var c = CancellationTokenSource.CreateLinkedTokenSource(conn.Token))
                 {
                     c.CancelAfter(TimeSpan.FromSeconds(15));
@@ -273,7 +273,7 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 
                     if (r.MessageType == WebSocketMessageType.Close)
                     {
-                        reason = "Alpaca cerró la conexión";
+                        reason = "Alpaca closed the connection";
                         break;
                     }
 
@@ -286,7 +286,7 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
                         switch (type)
                         {
                             case "success" when m.TryGetProperty("msg", out var msg) && msg.GetString() == "authenticated":
-                                live.SetChannel("datos", FeedStatus.Connected, null);
+                                live.SetChannel("data", FeedStatus.Connected, null);
                                 ever = true;
                                 failures = 0;
                                 break;
@@ -325,7 +325,7 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
             }
             catch (OperationCanceledException)
             {
-                reason = live.WasRequested(ref requested) ? "reconexión pedida" : "no respondió a tiempo";
+                reason = live.WasRequested(ref requested) ? "reconnection requested" : "response timed out";
                 if (!any) failures++;
             }
             catch (Exception ex)
@@ -340,11 +340,11 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 
             if (ct.IsCancellationRequested) break;
             var wait = LiveSubscription.Backoff(failures);
-            live.SetChannel("datos", FeedStatus.Reconnecting, $"Reconectando en {wait.TotalSeconds:0} s ({reason})");
+            live.SetChannel("data", FeedStatus.Reconnecting, $"Reconnecting in {wait.TotalSeconds:0} s ({reason})");
             await Task.Delay(wait, ct).ContinueWith(_ => { }).ConfigureAwait(false);
         }
 
-        live.SetChannel("datos", FeedStatus.Disconnected, null);
+        live.SetChannel("data", FeedStatus.Disconnected, null);
     }
 
     private static Task SendAsync(ClientWebSocket ws, string text, CancellationToken ct) =>
@@ -355,7 +355,7 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     {
         using var doc = await GetAsync($"{Data}/v2/stocks/SPY/trades?start={Uri.EscapeDataString(Rfc(DateTime.UtcNow.AddDays(-5)))}&end={Uri.EscapeDataString(Rfc(Latest))}&limit=5&feed=sip", ct).ConfigureAwait(false);
         int n = doc.RootElement.TryGetProperty("trades", out var t) && t.ValueKind == JsonValueKind.Array ? t.GetArrayLength() : 0;
-        return (true, n > 0 ? "Claves OK: historia tick a tick de todas las bolsas (SIP) disponible (SPY, QQQ…)." : "Claves OK, pero no llegaron operaciones de SPY de los últimos días.");
+        return (true, n > 0 ? "Credentials OK: consolidated SIP trade history is available (SPY, QQQ…)." : "Credentials OK, but no recent SPY trades were returned.");
     }
 
     public void Dispose() => _http.Dispose();

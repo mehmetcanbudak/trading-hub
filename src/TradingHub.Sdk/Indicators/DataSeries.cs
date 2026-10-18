@@ -263,14 +263,14 @@ namespace TradingHub.Indicators
         [JsonIgnore]
         public TradingHub.Trading.MoneyCurrency? ValueCurrency { get; set; }
 
-        [Display(Name = "Tipo", Order = 20)]
+        [Display(Name = "Type", Order = 20)]
         public VisualMode VisualType
         {
             get => _visualType;
             set => SetProperty(ref _visualType, value);
         }
 
-        [Display(Name = "Grosor", Order = 30)]
+        [Display(Name = "Width", Order = 30)]
         [Range(1, 20)]
         public int Width
         {
@@ -278,17 +278,17 @@ namespace TradingHub.Indicators
             set => SetProperty(ref _width, Math.Max(1, value));
         }
 
-        [Display(Name = "Estilo de línea", Order = 40)]
+        [Display(Name = "Line style", Order = 40)]
         public LineDashStyle LineDashStyle
         {
             get => _lineDashStyle;
             set => SetProperty(ref _lineDashStyle, value);
         }
 
-        [Display(Name = "Mostrar ceros", Order = 50)]
+        [Display(Name = "Show zeros", Order = 50)]
         public bool ShowZeroValue { get; set; } = true;
 
-        [Display(Name = "Valor actual en el eje", Order = 60)]
+        [Display(Name = "Current value on axis", Order = 60)]
         public bool ShowCurrentValue { get; set; } = true;
 
         [Browsable(false)]
@@ -371,7 +371,7 @@ namespace TradingHub.Indicators
         {
         }
 
-        [Display(Name = "Color de relleno", Order = 10)]
+        [Display(Name = "Fill color", Order = 10)]
         public Color RangeColor { get; set; } = Color.FromArgb(40, 70, 130, 230);
 
         protected override bool CreatesOnRead => true;
@@ -427,16 +427,16 @@ namespace TradingHub.Indicators
         {
         }
 
-        [Display(Name = "Vela alcista", Order = 10)]
+        [Display(Name = "Bullish candle", Order = 10)]
         public Color UpCandleColor { get; set; } = Color.FromArgb(255, 73, 209, 73);
 
-        [Display(Name = "Vela bajista", Order = 20)]
+        [Display(Name = "Bearish candle", Order = 20)]
         public Color DownCandleColor { get; set; } = Color.FromArgb(255, 232, 69, 72);
 
-        [Display(Name = "Borde", Order = 30)]
+        [Display(Name = "Border", Order = 30)]
         public Color BorderColor { get; set; } = Color.FromArgb(255, 120, 120, 120);
 
-        [Display(Name = "Dibujar borde", Order = 40)]
+        [Display(Name = "Draw border", Order = 40)]
         public bool DrawCandleBorder { get; set; } = true;
 
         [Browsable(false)]
@@ -446,7 +446,7 @@ namespace TradingHub.Indicators
         public SeriesColors Colors { get; } = new();
 
         /// <summary>Velas o barras.</summary>
-        [Display(Name = "Modo", Order = 50)]
+        [Display(Name = "Mode", Order = 50)]
         public CandleVisualMode Mode { get; set; } = CandleVisualMode.Candles;
 
         [Browsable(false)]

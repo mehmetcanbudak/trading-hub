@@ -54,14 +54,14 @@ internal sealed class ConfirmDialog : TradingHubDialog<bool>
         icon.Margin = new Thickness(0, 2, 14, 0);
         body.Children.Add(icon);
         body.Children.Add(text);
-        var cancel = new Button { Content = "Cancelar", IsCancel = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
         cancel.Click += (_, _) => Close(false);
         var ok = new Button { Content = okText, IsDefault = true }.Classes(danger ? "danger" : "primary");
         ok.Click += (_, _) => Close(true);
         Content = Shell(body, cancel, ok);
     }
 
-    public static Task<bool> ShowAsync(Window owner, string title, string message, string okText = "Aceptar", bool danger = false) =>
+    public static Task<bool> ShowAsync(Window owner, string title, string message, string okText = "OK", bool danger = false) =>
         new ConfirmDialog(title, message, okText, danger).ShowDialog<bool>(owner);
 }
 
@@ -76,13 +76,13 @@ internal sealed class PromptDialog : TradingHubDialog<string?>
             box.Focus();
             box.SelectAll();
         };
-        var cancel = new Button { Content = "Cancelar", IsCancel = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
         cancel.Click += (_, _) => Close(null);
         var ok = new Button { Content = okText, IsDefault = true }.Classes("primary");
         ok.Click += (_, _) => Close(string.IsNullOrWhiteSpace(box.Text) ? null : box.Text.Trim());
         Content = Shell(new StackPanel { Spacing = 10, Children = { new TextBlock { Text = title, Classes = { "h2" } }, Ui.Field(label, box) } }, cancel, ok);
     }
 
-    public static Task<string?> ShowAsync(Window owner, string title, string label, string initial = "", string okText = "Aceptar") =>
+    public static Task<string?> ShowAsync(Window owner, string title, string label, string initial = "", string okText = "OK") =>
         new PromptDialog(title, label, initial, okText).ShowDialog<string?>(owner);
 }

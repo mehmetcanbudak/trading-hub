@@ -86,7 +86,7 @@ public sealed partial class RithmicFeed : IKlineHistory, ISessionAwareFeed, IDay
 
     private void EnsureUser()
     {
-        if (string.IsNullOrWhiteSpace(_settings.User)) throw new InvalidOperationException("Configurá tu usuario de Rithmic en Conexiones");
+        if (string.IsNullOrWhiteSpace(_settings.User)) throw new InvalidOperationException("Configure your Rithmic username in Connections");
     }
 
     /// <summary>
@@ -241,7 +241,7 @@ public sealed partial class RithmicFeed : IKlineHistory, ISessionAwareFeed, IDay
 
     /// <summary>Contrato con el que se baja la historia de una fecha (para mostrarlo).</summary>
     public static string ContractNameOn(Instrument instrument, DateTime utc) =>
-        FuturesRolls.Supports(instrument.Symbol) ? FuturesRolls.On(instrument.Symbol, utc).Symbol : instrument.Symbol + " (mes activo)";
+        FuturesRolls.Supports(instrument.Symbol) ? FuturesRolls.On(instrument.Symbol, utc).Symbol : instrument.Symbol + " (active contract)";
 
     /// <summary>Un día completo tick a tick (UTC) con el contrato que operaba ese día; null si Rithmic no tiene operaciones.</summary>
     public async Task<List<Trade>?> DownloadDayAsync(Instrument instrument, DateOnly day, IProgress<double>? progress, CancellationToken ct)
@@ -259,7 +259,7 @@ public sealed partial class RithmicFeed : IKlineHistory, ISessionAwareFeed, IDay
     /// <summary>La caché de velas se separa de la vieja (armada con un solo contrato, sin los rolls).</summary>
     public string CacheTag => "continuo";
 
-    public string HistoryNote => "tick a tick desde Rithmic (solo desde el último vencimiento: no guarda los contratos vencidos)";
+    public string HistoryNote => "Rithmic ticks (from the latest expiry only; expired-contract history is not retained)";
 
     private async Task TicksAsync(RithmicClient client, string tag, Instrument instrument, RithmicContract contract, long start, long end,
         Func<IReadOnlyList<Trade>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
@@ -279,7 +279,7 @@ public sealed partial class RithmicFeed : IKlineHistory, ISessionAwareFeed, IDay
             while (true)
             {
                 var m = await reader.NextAsync(TimeSpan.FromSeconds(25)).ConfigureAwait(false)
-                        ?? throw new TimeoutException("Rithmic dejó de mandar la historia");
+                        ?? throw new TimeoutException("Rithmic stopped sending history");
                 if (m.Int(Rp.TemplateId) != RpH.ResponseTickBarReplay || !Mine(m, tag)) continue;
                 var rp = m.Strings(Rp.RpCode).ToList();
                 if (rp.Count > 0 || !m.Strings(RpH.RqHandlerRpCode).Any())
@@ -370,7 +370,7 @@ public sealed partial class RithmicFeed : IKlineHistory, ISessionAwareFeed, IDay
             while (true)
             {
                 var m = await reader.NextAsync(TimeSpan.FromSeconds(25)).ConfigureAwait(false)
-                        ?? throw new TimeoutException("Rithmic dejó de mandar las velas");
+                        ?? throw new TimeoutException("Rithmic stopped sending bars");
                 if (m.Int(Rp.TemplateId) != RpH.ResponseTimeBarReplay || !Mine(m, tag)) continue;
                 var rp = m.Strings(Rp.RpCode).ToList();
                 if (rp.Count > 0 || !m.Strings(RpH.RqHandlerRpCode).Any())

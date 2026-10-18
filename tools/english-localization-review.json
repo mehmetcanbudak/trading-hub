@@ -1,0 +1,703 @@
+{
+  "baseline": "9ee74a4c527ac43120423acd41e006ec9d7877ad",
+  "reviewNotes": [
+    "Non-text changes are reviewed display-only EnglishText calls, SDK lookup precedence, ignored display metadata, English formatting/pluralization, and exact legacy compatibility recognition.",
+    "Trading/account/storage identifiers are not translated. Existing and added regression tests cover ledger recovery, legacy drawing alerts, report recognition and parameter/template serialization.",
+    "Template raw C# is fingerprinted recursively, ignoring only comments and string text, so indicator/strategy math is not hidden by the raw-string envelope.",
+    "This file is a reviewed allowlist, not a request to suppress future failures. Investigate and review every new exception or structural hash.",
+    "Final visual review: live-launch dropdown refreshes compiled display metadata; the data-page action row sits below the full-width title to avoid narrow-window clipping."
+  ],
+  "allowedLiterals": [
+    {
+      "path": "src/TradingHub.App/Views/DataView.cs",
+      "value": "IMPORTADO",
+      "reason": "Legacy fallback ticker for an unidentifiable filename; changing it would split imported history identities."
+    },
+    {
+      "path": "src/TradingHub.App/App.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Controls/EquityChart.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/LabServer.cs",
+      "value": "Capturas del laboratorio",
+      "reason": "Existing laboratory screenshot directory name; preserve local storage compatibility."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/LabServer.cs",
+      "value": "bayesiana",
+      "reason": "Existing API/search-method code; not displayed as prose."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/LabServer.cs",
+      "value": "descartada",
+      "reason": "Persisted API verdict code mentioned in otherwise English schema prose.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Lab/LabServer.cs",
+      "value": "ganadora",
+      "reason": "Persisted API verdict code mentioned in otherwise English schema prose.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Lab/LabServer.cs",
+      "value": "grilla",
+      "reason": "Existing API/search-method code; not displayed as prose."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/LabServer.cs",
+      "value": "perdedora",
+      "reason": "Persisted API verdict code mentioned in otherwise English schema prose.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Lab/LabServer.cs",
+      "value": "prometedora",
+      "reason": "Persisted API verdict code mentioned in otherwise English schema prose.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Lab/LabServer.cs",
+      "value": "rithmic-solo",
+      "reason": "Stored feed ID mentioned in otherwise English explanatory prose.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportBuilder.cs",
+      "value": "descartada",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportBuilder.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportBuilder.cs",
+      "value": "ganadora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportBuilder.cs",
+      "value": "perdedora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportBuilder.cs",
+      "value": "portafolio.png",
+      "reason": "Existing report asset filename, including references in English image captions.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportBuilder.cs",
+      "value": "prometedora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportCharts.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportExport.cs",
+      "value": "lang=\"en\"",
+      "reason": "English HTML language metadata; not a Spanish word in report prose.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportStore.cs",
+      "value": "descartada",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportStore.cs",
+      "value": "ganadora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportStore.cs",
+      "value": "perdedora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Lab/ReportStore.cs",
+      "value": "prometedora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AccountCenter.cs",
+      "value": "th-cerrar-",
+      "reason": "Existing broker order-tag prefix; leave execution identifiers unchanged."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AppServices.cs",
+      "value": "Cuenta simulada",
+      "reason": "Legacy account identity included in saved live-ledger keys; EnglishText localizes presentation only."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AppServices.cs",
+      "value": "Estrategias",
+      "reason": "Existing user directory name; localization must not move scripts or reports."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AppServices.cs",
+      "value": "Indicadores",
+      "reason": "Existing user directory name; localization must not move scripts or reports."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AppServices.cs",
+      "value": "Reportes",
+      "reason": "Existing user directory name; localization must not move scripts or reports."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AppServices.cs",
+      "value": "Técnicos",
+      "reason": "Internal catalog-source tag; matching/grouping uses the original tag and English display labels."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AppServices.cs",
+      "value": "oscuro",
+      "reason": "Existing saved theme identity, not the translated appearance label."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AppTheme.cs",
+      "value": "claro",
+      "reason": "Existing saved light-theme identity."
+    },
+    {
+      "path": "src/TradingHub.App/Services/AppTheme.cs",
+      "value": "oscuro",
+      "reason": "Existing saved dark-theme identity."
+    },
+    {
+      "path": "src/TradingHub.App/Services/ClaudeCode.cs",
+      "value": "descartada",
+      "reason": "Persisted API verdict code mentioned in otherwise English agent instructions.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Services/ClaudeCode.cs",
+      "value": "ganadora",
+      "reason": "Persisted API verdict code mentioned in otherwise English agent instructions.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Services/ClaudeCode.cs",
+      "value": "perdedora",
+      "reason": "Persisted API verdict code mentioned in otherwise English agent instructions.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Services/ClaudeCode.cs",
+      "value": "prometedora",
+      "reason": "Persisted API verdict code mentioned in otherwise English agent instructions.",
+      "allowMentions": true
+    },
+    {
+      "path": "src/TradingHub.App/Services/Connections.cs",
+      "value": "Simulador",
+      "reason": "Exact legacy default-name migration match; custom profile names are not rewritten."
+    },
+    {
+      "path": "src/TradingHub.App/Services/LiveCenter.cs",
+      "value": "Cuenta simulada",
+      "reason": "Legacy account identity included in saved live-ledger keys; EnglishText localizes presentation only."
+    },
+    {
+      "path": "src/TradingHub.App/Services/LiveCenter.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Services/LiveRiskAgent.cs",
+      "value": "agente",
+      "reason": "Persisted proposal/agent routing identity; displayed source labels are English."
+    },
+    {
+      "path": "src/TradingHub.App/Services/LiveRiskAgent.cs",
+      "value": "agente (automático)",
+      "reason": "Persisted proposal/agent routing identity; displayed source labels are English."
+    },
+    {
+      "path": "src/TradingHub.App/Services/LiveRiskAgent.cs",
+      "value": "agente-riesgo",
+      "reason": "Persisted proposal/agent routing identity; displayed source labels are English."
+    },
+    {
+      "path": "src/TradingHub.App/Services/MenuBar.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Services/SleepGuard.cs",
+      "value": "tapa-cerrada.activo",
+      "reason": "Existing privileged power-helper coordination filename."
+    },
+    {
+      "path": "src/TradingHub.App/Services/SleepGuard.cs",
+      "value": "tapa-cerrada.solo-con-cargador",
+      "reason": "Existing power-helper coordination filename; not shown as interface prose."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "amarillo",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "azul",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "blanco",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "celeste",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "gris",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "naranja",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "negro",
+      "reason": "Accepted named-color alias in existing strategy source."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "rojo",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "rosa",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "verde",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/StrategyDrawingMap.cs",
+      "value": "violeta",
+      "reason": "Accepted named-color alias in existing strategy source; preserve the parser contract."
+    },
+    {
+      "path": "src/TradingHub.App/Services/UserScripts.cs",
+      "value": "Mis indicadores",
+      "reason": "Internal catalog-source tag; matching/grouping uses the original tag and English display labels."
+    },
+    {
+      "path": "src/TradingHub.App/Views/AccountsView.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Views/ConnectionsView.cs",
+      "value": "https://www.binance.com/en/my/settings/api-management",
+      "reason": "English provider URL; en denotes the URL language segment."
+    },
+    {
+      "path": "src/TradingHub.App/Views/ConnectionsView.cs",
+      "value": "rithmic-servidores.json",
+      "reason": "Existing Rithmic server-list cache filename."
+    },
+    {
+      "path": "src/TradingHub.App/Views/DataView.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Views/LiveTradesPanel.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Views/LiveTradesPanel.cs",
+      "value": "estrategia;mercado;cuenta;origen;numero;lado;entrada_utc;precio_entrada;salida_utc;precio_salida;duracion_min;cantidad;puntos;resultado;mae;mfe\n",
+      "reason": "Existing CSV export header contract retained for downstream consumers; see the English Data guide."
+    },
+    {
+      "path": "src/TradingHub.App/Views/LiveView.cs",
+      "value": "agente",
+      "reason": "Persisted proposal/agent routing identity; displayed source labels are English."
+    },
+    {
+      "path": "src/TradingHub.App/Views/LiveView.cs",
+      "value": "agente (automático)",
+      "reason": "Persisted proposal/agent routing identity; displayed source labels are English."
+    },
+    {
+      "path": "src/TradingHub.App/Views/LiveView.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Views/StrategiesView.Backtest.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Views/StrategiesView.Portfolio.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Views/StrategiesView.Portfolio.cs",
+      "value": "portafolio.json",
+      "reason": "Existing backtest-portfolio storage filename."
+    },
+    {
+      "path": "src/TradingHub.App/Views/StrategiesView.Reports.cs",
+      "value": "descartada",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Views/StrategiesView.Reports.cs",
+      "value": "ganadora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Views/StrategiesView.Reports.cs",
+      "value": "perdedora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Views/StrategiesView.Reports.cs",
+      "value": "prometedora",
+      "reason": "Persisted verdict/API code; UI and report display values are translated separately."
+    },
+    {
+      "path": "src/TradingHub.App/Views/TradingView.Side.cs",
+      "value": "alerta",
+      "reason": "Legacy saved drawing alert sentinel, suppressed from display; must remain recognized."
+    },
+    {
+      "path": "src/TradingHub.App/Views/TradingView.Strategies.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Views/TradingView.cs",
+      "value": "alerta",
+      "reason": "Legacy saved drawing alert sentinel, suppressed from display; must remain recognized."
+    },
+    {
+      "path": "src/TradingHub.App/Views/TradingView.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Windows/DrawingSettingsWindow.cs",
+      "value": "alerta",
+      "reason": "Legacy saved drawing alert sentinel, suppressed from display; must remain recognized."
+    },
+    {
+      "path": "src/TradingHub.App/Windows/DrawingSettingsWindow.cs",
+      "value": "alerta ",
+      "reason": "Legacy saved drawing alert sentinel, suppressed from display; must remain recognized."
+    },
+    {
+      "path": "src/TradingHub.App/Windows/IndicatorsWindow.cs",
+      "value": "Técnicos",
+      "reason": "Internal catalog-source tag; matching/grouping uses the original tag and English display labels."
+    },
+    {
+      "path": "src/TradingHub.App/Windows/LiveStrategyWindow.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Windows/MainWindow.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Windows/MenuBarPanel.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Windows/StrategyChartWindow.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.App/Windows/StrategyChartWindow.cs",
+      "value": "modo",
+      "reason": "Non-displayed radio-button grouping identifier."
+    },
+    {
+      "path": "src/TradingHub.Charting/Drawings/ChartDrawing.cs",
+      "value": "alerta",
+      "reason": "Legacy saved drawing alert sentinel, suppressed from display; must remain recognized."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Bid x Ask (clásico)",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Bid x Ask + perfil",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Delta (celdas)",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Doble escalera (bid | ask)",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Doble escalera de delta",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Escalera de delta + perfil de volumen",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Escalera de volumen + perfil",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Histograma bid / ask",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Perfil de volumen por vela",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/FootprintLayout.cs",
+      "value": "Volumen (celdas)",
+      "reason": "Stored built-in template identity; DisplayName supplies the English label without rewriting Name."
+    },
+    {
+      "path": "src/TradingHub.Charting/Rendering/ChartRenderer.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/ChartPeriod.cs",
+      "value": "diaria",
+      "reason": "Accepted legacy chart-period alias; persisted/user input remains compatible."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/ChartPeriod.cs",
+      "value": "diario",
+      "reason": "Accepted legacy chart-period alias; persisted/user input remains compatible."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/ChartPeriod.cs",
+      "value": "mensual",
+      "reason": "Accepted legacy chart-period alias; persisted/user input remains compatible."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/ChartPeriod.cs",
+      "value": "semanal",
+      "reason": "Accepted legacy chart-period alias; persisted/user input remains compatible."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "apertura",
+      "reason": "Accepted CSV header alias from existing Spanish data exports."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "cierre",
+      "reason": "Accepted CSV header alias from existing Spanish data exports."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "fecha",
+      "reason": "Accepted CSV header alias from existing Spanish data exports."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "hora",
+      "reason": "Accepted CSV header alias from existing Spanish data exports."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "máximo",
+      "reason": "Accepted CSV header alias from existing Spanish data exports."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "mínimo",
+      "reason": "Accepted CSV header alias from existing Spanish data exports."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "precio",
+      "reason": "Accepted CSV header alias from existing Spanish data exports."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "volumen",
+      "reason": "Accepted CSV header alias from existing Spanish data exports."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/HistorySources.cs",
+      "value": "-solo",
+      "reason": "Stored individual-history feed suffix; display descriptions use English."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/TickFile.cs",
+      "value": ".grabando.lock",
+      "reason": "Existing recording lock filename; preserve multi-process data protection."
+    },
+    {
+      "path": "src/TradingHub.Core/Feeds/Rithmic/RithmicFeed.History.cs",
+      "value": "continuo",
+      "reason": "Existing continuous-contract history cache identity."
+    },
+    {
+      "path": "src/TradingHub.Core/Trading/SimBroker.cs",
+      "value": "Cuenta simulada",
+      "reason": "Legacy account identity included in saved live-ledger keys; EnglishText localizes presentation only."
+    },
+    {
+      "path": "src/TradingHub.Core/Trading/TradingModels.cs",
+      "value": "Cuenta simulada",
+      "reason": "Legacy account identity included in saved live-ledger keys; EnglishText localizes presentation only."
+    },
+    {
+      "path": "src/TradingHub.Scripting/ScriptCompiler.cs",
+      "value": "en",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.Strategies/LivePortfolio.cs",
+      "value": "estrategias.json",
+      "reason": "Existing live-state filename; never rename stored data for display localization."
+    },
+    {
+      "path": "src/TradingHub.Strategies/LivePortfolio.cs",
+      "value": "llenados",
+      "reason": "Existing live-fill directory name."
+    },
+    {
+      "path": "src/TradingHub.Strategies/LivePortfolio.cs",
+      "value": "portafolios.json",
+      "reason": "Existing live-portfolio storage filename."
+    },
+    {
+      "path": "src/TradingHub.Strategies/LivePortfolio.cs",
+      "value": "propuestas.json",
+      "reason": "Existing proposal storage filename."
+    },
+    {
+      "path": "src/TradingHub.Strategies/LivePortfolio.cs",
+      "value": "reglas",
+      "reason": "Persisted sizing-proposal source; display as Rules-based proposal."
+    },
+    {
+      "path": "src/TradingHub.Strategies/Optimization.cs",
+      "value": "bayesiana",
+      "reason": "Persisted parameter-search method code; display through EnglishText."
+    },
+    {
+      "path": "src/TradingHub.Strategies/Optimization.cs",
+      "value": "grilla",
+      "reason": "Persisted parameter-search method code; display through EnglishText."
+    },
+    {
+      "path": "src/TradingHub.Strategies/Robustness.cs",
+      "value": "Probabilidad de que la ventaja sea real y no suerte:",
+      "reason": "Recognize old saved validation reports alongside new English messages."
+    },
+    {
+      "path": "src/TradingHub.Strategies/Robustness.cs",
+      "value": "Probabilidad de que no sea suerte",
+      "reason": "Recognize old saved validation reports alongside new English messages."
+    },
+    {
+      "path": "src/TradingHub.Strategies/Robustness.cs",
+      "value": "Puede ser suerte:",
+      "reason": "Recognize old saved validation reports alongside new English messages."
+    },
+    {
+      "path": "src/TradingHub.Strategies/Robustness.cs",
+      "value": "en-US",
+      "reason": "English culture/language identifier, not Spanish interface text."
+    },
+    {
+      "path": "src/TradingHub.Strategies/StrategyWarmup.cs",
+      "value": "PRUEBA",
+      "reason": "Internal warmup probe instrument identity; retain existing strategy compatibility."
+    },
+    {
+      "path": "src/TradingHub.Strategies/StrategyWarmup.cs",
+      "value": "calentamiento",
+      "reason": "Internal warmup probe instrument identity; retain existing strategy compatibility."
+    },
+    {
+      "path": "src/TradingHub.Core/Data/CsvImport.cs",
+      "value": "importado",
+      "reason": "Stored imported-market feed ID; display names use Imported without moving history."
+    }
+  ],
+  "approvedStructure": {
+    "src/TradingHub.App/App.cs": "81E94D28D8C20217883A4EF72438061D04C319DB8563338BF4ECEDE02F079A4E",
+    "src/TradingHub.App/Controls/PropertyGrid.cs": "3E9A35ECEF5D5325220D8F4421F0223468212C89EE52CE9A699FD837A3374CBC",
+    "src/TradingHub.App/Lab/ReportBuilder.cs": "4FD02EF323054CC01D0C520B5F0632722B32C031B67B781B1AE27BEF2BFB2CF3",
+    "src/TradingHub.App/Lab/ReportStore.cs": "CD212C4BBF6E522C939B07F08CCD4EE52A249C3A355D3C03A89385EC870490C6",
+    "src/TradingHub.App/Services/Connections.cs": "0F1B928F4EB0E6708AF92ECD316637FAC699BF11AF3143316415F7BB67824192",
+    "src/TradingHub.App/Services/LiveCenter.cs": "3AA496E5E6962275C8E129186CA5A26D19E4B8683EC2E45C9656DAED546F1B34",
+    "src/TradingHub.App/Services/LiveRiskAgent.cs": "DF336A645FCEF557783C6F77B53EC6A706D87C34510BDE198CCC5318837471DE",
+    "src/TradingHub.App/Views/AccountsView.cs": "ADEB58D3C9375D9C6933B127EDF78CB76526FD819EA6B316DEE376B35454DE82",
+    "src/TradingHub.App/Views/ChartToolbar.cs": "F4F42AA5B3C7E63C515B6DBA69554BBABCE04BCFB1D33F71D4B5DC6227730C7E",
+    "src/TradingHub.App/Views/DataView.cs": "6535394629BDC8EAB39A822901E3D71B2C8E3F761DB3E6919A2178687C7C73F8",
+    "src/TradingHub.App/Views/LiveTradesPanel.cs": "4449BE3BFF323041FDE18B3A3990CF008E5116CCA6D7795E42957214F7E326CD",
+    "src/TradingHub.App/Views/LiveView.Portfolios.cs": "094995CB1DB6DD1987FF03DD12D1896B4809E738CA5515BDA3784EC5C660BBB4",
+    "src/TradingHub.App/Views/LiveView.cs": "DA225EEE29E4213E5B80E29086DFFD08641DEB2CEC98629B090F2F6A734837B8",
+    "src/TradingHub.App/Views/StrategiesView.Backtest.cs": "AF454AC7E53D3EFAF89D4B96D2D88E96B02892EB53534618373A78F287DC980F",
+    "src/TradingHub.App/Views/StrategiesView.Optimize.cs": "D9A0CC6098FD6F30AFCADEAF40FCD7BA16774ECB9BF9D74943BB5CA52D439FFD",
+    "src/TradingHub.App/Views/StrategiesView.Reports.cs": "6D66C1086FBF252CABA0900284EDD57ACADA1CB4395A0E97F514064A6F8911BB",
+    "src/TradingHub.App/Views/TradingView.Strategies.cs": "4814C738017E209E14777F8A45584AD94D837FB31A216510A8FFDCDB24B1D8AA",
+    "src/TradingHub.App/Windows/FootprintEditorWindow.cs": "19E93E09FDD0543A0E9D3F907D0CC18D32CBC49F5831DECEABE573A898409DCA",
+    "src/TradingHub.App/Windows/IndicatorsWindow.cs": "47DE739EC6FDA0ECD8587E0668F56F5D63A44DC7AB9B38BE95AC4B2F40AC8BC4",
+    "src/TradingHub.App/Windows/LiveLaunchWindow.cs": "52DDA21DA97FB9852A787E8CB710C28D50912FA4622FA8478C199FAA3480E3CE",
+    "src/TradingHub.App/Windows/LivePortfolioWindow.cs": "62C9F9EC8D082BF3FF1C8D67C101610B8BFE6D560D4998F603285A2A1188FFB9",
+    "src/TradingHub.App/Windows/LiveStrategyWindow.cs": "F394508E4D408CB922B98E2E38D6BCC72D2E0CFB03CFAE53B3573B052C4887D9",
+    "src/TradingHub.App/Windows/MenuBarPanel.cs": "4C55CE157B521C5D170C628CB723D48FA8D87B8B39D7281B701A7B9B17E3FA34",
+    "src/TradingHub.Charting/FootprintLayout.cs": "34883E3C67E576BA561AFF74C2DBBC5218B26E1D913BA94C832D835F6674F9A9",
+    "src/TradingHub.Core/Data/CsvImport.cs": "C1DC53AEFFB22E1E370CCBDB104B7F3B9D77E1372923A814771F82258FBA3ED0",
+    "src/TradingHub.Core/Data/HistorySources.cs": "055141B61AE7100B43B39C3498E6BE7D5655E58824372FF5AAB5599D9D561110",
+    "src/TradingHub.Sdk/Indicators/Indicator.cs": "2FB5C866EFBEAE02CBEE39891AFE2BD995A963529C15A6C02A12D8FFFD0828D6",
+    "src/TradingHub.Sdk/Localization/Strings.cs": "9444CA54DB2DCE1203889F4933B1B74FF97CB7E8176E56A4793B233B74A652D5",
+    "src/TradingHub.Strategies/LiveStrategyRunner.cs": "739656FFDBBB081EAF1A713761035CE53B5D3010EE4F250BF4029F27145FF986",
+    "src/TradingHub.Strategies/Robustness.cs": "1D0C5C80D8370A8E82D83087A56A5DF9D5C29E79201100E2C50B15CC2BFC812F",
+    "src/TradingHub.Strategies/Strategy.cs": "BAD783F94D287657926963D58A3D5E4E3BB8EF01D8012DA10801867AB585818A",
+    "src/TradingHub.Core/Common/EnglishText.cs": "8F68A7B19AC07F2B4BDC37B88E2B6538FF575D3C780784036A52AF16E6D9A986",
+    "src/TradingHub.Sdk/Localization/Strings.English.cs": "535169FBA6AE3ED79A59EB6A3E19E3442BB46E3F3293AEB96D9CC637F4F9E8C7"
+  }
+}

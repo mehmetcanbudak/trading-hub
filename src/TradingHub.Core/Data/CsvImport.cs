@@ -199,8 +199,8 @@ public static class CsvImport
         string? first = reader.ReadLine();
         while (first != null && first.Trim().Length == 0) first = reader.ReadLine();
         string? second = reader.ReadLine();
-        if (first == null) throw new InvalidDataException("El archivo está vacío");
-        var l = Recognize(first, second) ?? throw new InvalidDataException("No reconozco el formato: hace falta una columna de fecha y precios (bid/ask, último u OHLC)");
+        if (first == null) throw new InvalidDataException("The file is empty");
+        var l = Recognize(first, second) ?? throw new InvalidDataException("Unrecognized format: date and price columns are required (bid/ask, last or OHLC)");
 
         // paso de precio: los decimales de las primeras filas
         decimal tick = tickSize ?? 0;
@@ -337,6 +337,6 @@ public static class CsvImport
 
         Flush();
         progress?.Report(1);
-        return new ImportResult(l.IsBars ? $"velas de {Math.Max(1, barMs / 60_000)} min" : "ticks", rows, trades, days, from, to, bad, tick);
+        return new ImportResult(l.IsBars ? $"{Math.Max(1, barMs / 60_000)}-minute bars" : "ticks", rows, trades, days, from, to, bad, tick);
     }
 }

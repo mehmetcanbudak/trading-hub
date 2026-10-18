@@ -41,7 +41,7 @@ namespace TradingHub.Indicators
 
         private Func<ValueChangingArgs<T>, T> _coerce;
 
-        [Display(Name = "Valor")]
+        [Display(Name = "Value")]
         public virtual T Value
         {
             get => _value;
@@ -55,7 +55,7 @@ namespace TradingHub.Indicators
             }
         }
 
-        [Display(Name = "Activado")]
+        [Display(Name = "Enabled")]
         public bool Enabled
         {
             get => _enabled;
@@ -170,8 +170,8 @@ namespace TradingHub.Indicators
     /// <summary>En qué se expresa un filtro de volumen.</summary>
     public enum VolumeFilterUnit
     {
-        [Display(Name = "Volumen")] Volume,
-        [Display(Name = "Dinero")] Money,
+        [Display(Name = "Volume")] Volume,
+        [Display(Name = "Money")] Money,
     }
 
     /// <summary>

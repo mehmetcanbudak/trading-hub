@@ -27,11 +27,11 @@ internal sealed partial class StrategiesView
     // walk-forward
     private readonly NumericUpDown _isDays = new() { Value = 14, Minimum = 1, Maximum = 365, Increment = 1, FormatString = "0" };
     private readonly NumericUpDown _osDays = new() { Value = 7, Minimum = 1, Maximum = 365, Increment = 1, FormatString = "0" };
-    private readonly ToggleSwitch _anchored = new() { OnContent = "Anclada (IS crece desde el inicio)", OffContent = "Móvil (IS de largo fijo)" };
+    private readonly ToggleSwitch _anchored = new() { OnContent = "Anchored (in-sample window grows from the start)", OffContent = "Rolling (fixed-length in-sample window)" };
     private readonly ComboBox _search = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _wfoPreview = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
     private readonly WrapPanel _wfoKpis = new() { ItemSpacing = 10, LineSpacing = 10 };
-    private readonly EquityChart _wfoChart = new() { Height = 250, EmptyText = "Corré el walk-forward para ver la curva fuera de muestra" };
+    private readonly EquityChart _wfoChart = new() { Height = 250, EmptyText = "Run walk-forward to view out-of-sample equity" };
     private readonly ListBox _wfoList = new() { Background = Brushes.Transparent };
 
     private const string OptColumns = "40,*,104,72,104,58,64,64,80";
@@ -39,14 +39,14 @@ internal sealed partial class StrategiesView
 
     private static readonly (FitnessMetric Metric, string Label)[] Metrics =
     {
-        (FitnessMetric.NetProfitOverDrawdown, "Resultado / drawdown"),
-        (FitnessMetric.NetProfit, "Resultado neto"),
+        (FitnessMetric.NetProfitOverDrawdown, "PnL / drawdown"),
+        (FitnessMetric.NetProfit, "Net PnL"),
         (FitnessMetric.ProfitFactor, "Profit factor"),
         (FitnessMetric.Sharpe, "Sharpe"),
         (FitnessMetric.Sortino, "Sortino"),
         (FitnessMetric.RecoveryFactor, "Recovery factor"),
-        (FitnessMetric.Expectancy, "Expectativa"),
-        (FitnessMetric.WinRate, "% ganadoras"),
+        (FitnessMetric.Expectancy, "Expectancy"),
+        (FitnessMetric.WinRate, "% winners"),
     };
 
     private Control BuildOptimizePage()
@@ -63,16 +63,16 @@ internal sealed partial class StrategiesView
             _state.MinTrades = (int)(_minTrades.Value ?? 0);
             SaveState();
         };
-        _optButton = Ui.Button("Optimizar", MaterialIconKind.TuneVertical, () => _ = RunOptimizationAsync(), "primary");
+        _optButton = Ui.Button("Optimize", MaterialIconKind.TuneVertical, () => _ = RunOptimizationAsync(), "primary");
 
         var config = Ui.Card(Ui.V(14,
-            Ui.H(8, Ui.Icon(MaterialIconKind.TuneVertical, 17, Ui.Accent), Ui.H2("Qué probar")),
-            new TextBlock { Text = "Marcá los parámetros a recorrer y su rango (también el período de las velas). Usa los datos y la ejecución configurados en Backtest.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap },
+            Ui.H(8, Ui.Icon(MaterialIconKind.TuneVertical, 17, Ui.Accent), Ui.H2("What to test")),
+            new TextBlock { Text = "Select parameters and ranges, including the bar period. Uses the data and execution settings from Backtest.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap },
             _rangesPanel,
             _comboCount,
             Ui.Divider(),
-            Ui.Field("Ordenar por", _metric),
-            Ui.Field("Mínimo de operaciones", _minTrades, "Descarta combinaciones con muy pocas operaciones (resultados por suerte)."),
+            Ui.Field("Rank by", _metric),
+            Ui.Field("Minimum trades", _minTrades, "Exclude combinations with too few trades (potentially lucky results)."),
             _optButton,
             _optSummary));
         config.Margin = new Thickness(0, 0, 10, 8);
@@ -80,7 +80,7 @@ internal sealed partial class StrategiesView
 
         // tabla de resultados
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions(OptColumns), Margin = new Thickness(12, 0, 12, 6) };
-        string[] titles = { "#", "Parameters", "Resultado", "PF", "Drawdown", "Oper.", "% gan.", "Sharpe", "Métrica" };
+        string[] titles = { "#", "Parameters", "PnL", "PF", "Drawdown", "Trades", "% win", "Sharpe", "Metric" };
         for (int i = 0; i < titles.Length; i++)
         {
             var t = new TextBlock { Text = titles[i], Classes = { "h3" }, TextAlignment = i >= 2 ? TextAlignment.Right : TextAlignment.Left, Margin = new Thickness(0, 0, 8, 0) };
@@ -114,12 +114,12 @@ internal sealed partial class StrategiesView
             return g;
         });
         _optList.DoubleTapped += (_, _) => UseSelectedOptimizationRow();
-        var use = Ui.Button("Usar en Backtest", MaterialIconKind.ArrowRightBoldBoxOutline, UseSelectedOptimizationRow);
-        ToolTip.SetTip(use, "Copia los parámetros de la fila elegida y corre el backtest (también con doble clic)");
+        var use = Ui.Button("Use in Backtest", MaterialIconKind.ArrowRightBoldBoxOutline, UseSelectedOptimizationRow);
+        ToolTip.SetTip(use, "Copy the selected row's parameters and run a backtest (also available by double-click)");
         var tableHead = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
         DockPanel.SetDock(use, Dock.Right);
         tableHead.Children.Add(use);
-        tableHead.Children.Add(Ui.V(2, Ui.H2("Results"), new TextBlock { Text = "Ordenados por la métrica elegida. Ojo con el sobreajuste: validá con walk-forward.", Classes = { "faint", "small" } }));
+        tableHead.Children.Add(Ui.V(2, Ui.H2("Results"), new TextBlock { Text = "Ranked by the selected metric. Beware of overfitting: validate with walk-forward.", Classes = { "faint", "small" } }));
         var table = new DockPanel();
         DockPanel.SetDock(header, Dock.Top);
         table.Children.Add(header);
@@ -149,7 +149,7 @@ internal sealed partial class StrategiesView
         _search.SelectedItem = _search.Items.OfType<ComboBoxItem>().FirstOrDefault(i => Equals(i.Tag, _state.Search)) ?? (_search.Items.Count > 0 ? _search.Items[0] : null);
         var numeric = _state.Ranges.Where(r => !r.IsPeriod).ToList();
         if (numeric.Count == 0)
-            _rangesPanel.Children.Add(new TextBlock { Text = "La estrategia no tiene parámetros numéricos. Agregá [Parameter] y [Optimize(mín, máx, paso)] en el código (igual podés probar períodos).", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap });
+            _rangesPanel.Children.Add(new TextBlock { Text = "No numeric strategy parameters. Add [Parameter] and [Optimize(min, max, step)] attributes (bar periods can still be tested).", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap });
         else RangeRows(numeric);
 
         // el período de las velas, como un parámetro más
@@ -161,7 +161,7 @@ internal sealed partial class StrategiesView
     private void RangeRows(IReadOnlyList<ParameterRange> ranges)
     {
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,76,76,66") };
-        foreach (var (text, col) in new[] { ("Parámetro", 0), ("Mín.", 1), ("Máx.", 2), ("Paso", 3) })
+        foreach (var (text, col) in new[] { ("Parameter", 0), ("Min.", 1), ("Max.", 2), ("Step", 3) })
         {
             var t = new TextBlock { Text = text, Classes = { "h3" }, Margin = new Thickness(col == 0 ? 0 : 6, 0, 0, 0) };
             Grid.SetColumn(t, col);
@@ -212,7 +212,7 @@ internal sealed partial class StrategiesView
     private Control PeriodRow(ParameterRange range)
     {
         var check = new CheckBox { Content = "Bar period", IsChecked = range.Enabled, FontSize = 12.5 };
-        ToolTip.SetTip(check, "Prueba cada combinación en cada período tildado, como un parámetro más");
+        ToolTip.SetTip(check, "Test every combination at each selected period, as another parameter");
         var chips = new WrapPanel { ItemSpacing = 4, LineSpacing = 4, Margin = new Thickness(26, 4, 0, 0) };
         var toggles = new List<(ToggleButton Button, string Code)>();
         foreach (var label in new[] { "M1", "M5", "M15", "M30", "H1", "H4", "D1" })
@@ -241,7 +241,7 @@ internal sealed partial class StrategiesView
         };
         foreach (var (t, _) in toggles) t.IsCheckedChanged += (_, _) => Changed();
         chips.IsEnabled = range.Enabled;
-        var hint = new TextBlock { Text = "Cada combinación se prueba en cada período tildado.", Classes = { "faint", "small" }, Margin = new Thickness(26, 0, 0, 0), TextWrapping = TextWrapping.Wrap };
+        var hint = new TextBlock { Text = "Each combination is tested at every selected period.", Classes = { "faint", "small" }, Margin = new Thickness(26, 0, 0, 0), TextWrapping = TextWrapping.Wrap };
         return Ui.V(4, check, chips, hint);
     }
 
@@ -251,7 +251,7 @@ internal sealed partial class StrategiesView
     private void UpdateComboCount()
     {
         long n = Optimizer.Combinations(_state.Ranges);
-        _comboCount.Text = n > 1 ? $"{n:N0} combinaciones" + (n > 3000 ? " · son muchas: achicá rangos o agrandá los pasos" : "") : "Marcá al menos un parámetro.";
+        _comboCount.Text = n > 1 ? $"{n:N0} combinations" + (n > 3000 ? " · too many: narrow ranges or increase steps" : "") : "Select at least one parameter.";
         _comboCount.Foreground = n > 3000 ? Ui.Warn : Ui.Text1;
         UpdateWfoPreview();
     }
@@ -265,13 +265,13 @@ internal sealed partial class StrategiesView
         long combos = Optimizer.Combinations(_state.Ranges);
         if (combos <= 1)
         {
-            _optSummary.Text = "Marcá al menos un parámetro con un rango.";
+            _optSummary.Text = "Select at least one parameter with a range.";
             return;
         }
 
         if (combos > 20_000)
         {
-            _optSummary.Text = $"{combos:N0} combinaciones es demasiado. Agrandá los pasos o desmarcá parámetros.";
+            _optSummary.Text = $"{combos:N0} combinations is too many. Increase steps or deselect parameters.";
             return;
         }
 
@@ -287,7 +287,7 @@ internal sealed partial class StrategiesView
         var ct = _cts.Token;
         SetRunning(true);
         _optButton.IsEnabled = false;
-        _optSummary.Text = "Cargando datos…";
+        _optSummary.Text = "Loading data…";
         try
         {
             var data = await LoadTicksAsync(settings, ct);
@@ -303,7 +303,7 @@ internal sealed partial class StrategiesView
             {
                 var el = DateTime.UtcNow - started;
                 var eta = p > 0.02 ? TimeSpan.FromSeconds(el.TotalSeconds / p * (1 - p)) : (TimeSpan?)null;
-                _optSummary.Text = $"Probando combinaciones… {p * 100:0}%{(eta is { } e ? $" · faltan ~{(e.TotalMinutes >= 1 ? $"{e.TotalMinutes:0} min" : $"{e.TotalSeconds:0} s")}" : "")}";
+                _optSummary.Text = $"Testing combinations… {p * 100:0}%{(eta is { } e ? $" · about {(e.TotalMinutes >= 1 ? $"{e.TotalMinutes:0} min" : $"{e.TotalSeconds:0} s")}" : "")}";
                 _runProgress.IsIndeterminate = false;
                 _runProgress.Value = p;
             });
@@ -328,12 +328,12 @@ internal sealed partial class StrategiesView
                 Seconds = res.Seconds,
             };
             StrategyStore.Save(run, _compiledSource.Length > 0 ? _compiledSource : File.ReadAllText(file.Path));
-            _optSummary.Text = $"{res.Combinations:N0} combinaciones en {res.Seconds:0.#} s · guardado en el historial";
-            _status($"Optimización de {file.DisplayName} terminada");
+            _optSummary.Text = $"{res.Combinations:N0} combinations on {res.Seconds:0.#} s · saved to history";
+            _status($"Optimization of {file.DisplayName} finished");
         }
         catch (OperationCanceledException)
         {
-            _optSummary.Text = "Cancelada.";
+            _optSummary.Text = "Canceled.";
         }
         catch (Exception ex)
         {
@@ -390,7 +390,7 @@ internal sealed partial class StrategiesView
 
     private Control BuildWalkForwardPage()
     {
-        _wfoButton = Ui.Button("Correr walk-forward", MaterialIconKind.ChartTimelineVariantShimmer, () => _ = RunWalkForwardAsync(), "primary");
+        _wfoButton = Ui.Button("Run walk-forward", MaterialIconKind.ChartTimelineVariantShimmer, () => _ = RunWalkForwardAsync(), "primary");
         _isDays.ValueChanged += (_, _) =>
         {
             _state.InSampleDays = (int)(_isDays.Value ?? 14);
@@ -411,9 +411,9 @@ internal sealed partial class StrategiesView
         };
         foreach (var (mode, label) in new[]
                  {
-                     (SearchMode.Auto, "Automática (grilla si es chica, bayesiana si es grande)"),
-                     (SearchMode.Grid, "Grilla completa (todas las combinaciones)"),
-                     (SearchMode.Bayesian, "Bayesiana (prueba primero lo más prometedor)"),
+                     (SearchMode.Auto, "Automatic (grid for small searches, Bayesian for large)"),
+                     (SearchMode.Grid, "Full grid (all combinations)"),
+                     (SearchMode.Bayesian, "Bayesian (prioritizes promising combinations)"),
                  })
             _search.Items.Add(new ComboBoxItem { Content = label, Tag = mode });
         _search.SelectedIndex = 0;
@@ -427,20 +427,20 @@ internal sealed partial class StrategiesView
         };
 
         var config = Ui.Card(Ui.V(14,
-            Ui.H(8, Ui.Icon(MaterialIconKind.ChartTimelineVariantShimmer, 17, Ui.Accent), Ui.H2("Ventanas")),
+            Ui.H(8, Ui.Icon(MaterialIconKind.ChartTimelineVariantShimmer, 17, Ui.Accent), Ui.H2("Windows")),
             new TextBlock
             {
-                Text = "Optimiza en una ventana (dentro de muestra) y prueba los mejores parámetros en los días siguientes, que la optimización no vio (fuera de muestra). Después avanza y repite. Usa los rangos de Optimización.",
+                Text = "Optimize in sample, test selected parameters on the following unseen days, advance and repeat. Uses the ranges selected in Optimization.",
                 Classes = { "muted", "small" },
                 TextWrapping = TextWrapping.Wrap,
             },
-            Ui.Row(10, Ui.Field("Dentro de muestra (días)", _isDays), Ui.Field("Fuera de muestra (días)", _osDays)),
+            Ui.Row(10, Ui.Field("In sample (days)", _isDays), Ui.Field("Out of sample (days)", _osDays)),
             _anchored,
-            Ui.Field("Búsqueda de parámetros", _search),
+            Ui.Field("Parameter search", _search),
             new TextBlock
             {
-                Text = "Cada combinación se corre una sola vez sobre toda la historia (los ticks repetidos se juntan) y en cada ventana se elige la mejor meseta, no el mejor pico. " +
-                       "Al final mide el sobreajuste: si la mejor de una mitad de la historia pierde en la otra (PBO) y varios caminos fuera de muestra (CPCV).",
+                Text = "Runs each combination once over the entire history (repeated ticks combined), selecting the best plateau in each window rather than the highest peak. " +
+                       "Measures overfitting with PBO and multiple out-of-sample CPCV paths.",
                 Classes = { "faint", "small" },
                 TextWrapping = TextWrapping.Wrap,
             },
@@ -450,7 +450,7 @@ internal sealed partial class StrategiesView
         var left = new ScrollViewer { Content = config, Width = 380 };
 
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions(WfoColumns), Margin = new Thickness(12, 0, 12, 6) };
-        string[] titles = { "#", "Optimization", "Prueba", "Mejores parámetros", "Dentro", "Fuera", "Efic." };
+        string[] titles = { "#", "Optimization", "Test", "Best parameters", "In sample", "Out of sample", "Efficiency" };
         for (int i = 0; i < titles.Length; i++)
         {
             var t = new TextBlock { Text = titles[i], Classes = { "h3" }, TextAlignment = i >= 4 ? TextAlignment.Right : TextAlignment.Left, Margin = new Thickness(0, 0, 8, 0) };
@@ -512,8 +512,8 @@ internal sealed partial class StrategiesView
         int windows = total > isD ? (int)Math.Ceiling((total - isD) / osD) : 0;
         long combos = Optimizer.Combinations(_state.Ranges);
         _wfoPreview.Text = windows > 0
-            ? $"{windows} ventana(s) en {total:0} días · {windows * combos:N0} backtests en total"
-            : $"El rango de Backtest ({total:0} días) es más corto que la ventana de optimización: descargá más días o achicá las ventanas.";
+            ? $"{windows} window(s) in {total:0} days · {windows * combos:N0} backtests total"
+            : $"Backtest range ({total:0} days) is shorter than the optimization window: download more days or shorten the windows.";
         _wfoPreview.Foreground = windows > 0 ? Ui.Text1 : Ui.Warn;
     }
 
@@ -530,7 +530,7 @@ internal sealed partial class StrategiesView
 
         if (Optimizer.Combinations(_state.Ranges) <= 1)
         {
-            _wfoPreview.Text = "Primero elegí en Optimización qué parámetros recorrer.";
+            _wfoPreview.Text = "First select parameter ranges in Optimization.";
             return;
         }
 
@@ -550,7 +550,7 @@ internal sealed partial class StrategiesView
 
             var progress = new Progress<double>(p =>
             {
-                _wfoPreview.Text = $"Optimizando y validando ventanas… {p * 100:0}%";
+                _wfoPreview.Text = $"Optimizing and validating windows… {p * 100:0}%";
                 _runProgress.IsIndeterminate = false;
                 _runProgress.Value = p;
             });
@@ -577,12 +577,12 @@ internal sealed partial class StrategiesView
                 Ticks = data.Count,
                 Seconds = res.Seconds,
             }, _compiledSource.Length > 0 ? _compiledSource : File.ReadAllText(file.Path));
-            _wfoPreview.Text = $"{res.Windows.Count} ventanas en {res.Seconds:0.#} s · búsqueda {res.Search}: {res.Evaluated} de {res.SpaceSize} combinaciones, cada una corrida una vez" +
-                               (res.Compression < 0.99 ? $" · ticks juntados al {res.Compression * 100:0}%" : "") + " · guardado en el historial";
+            _wfoPreview.Text = $"{res.Windows.Count} windows in {res.Seconds:0.#} s · search {TradingHub.Common.EnglishText.Of(res.Search)}: {res.Evaluated} of {res.SpaceSize} combinations, each run once" +
+                               (res.Compression < 0.99 ? $" · ticks compressed to {res.Compression * 100:0}%" : "") + " · saved to history";
         }
         catch (OperationCanceledException)
         {
-            _wfoPreview.Text = "Cancelado.";
+            _wfoPreview.Text = "Canceled.";
         }
         catch (Exception ex)
         {
@@ -600,18 +600,18 @@ internal sealed partial class StrategiesView
     {
         var m = res.OutSampleMetrics;
         _wfoKpis.Children.Clear();
-        _wfoKpis.Children.Add(Kpi("Fuera de muestra", Money(m.NetProfit), $"{m.TotalTrades} operaciones · PF {m.ProfitFactor:0.00}", m.NetProfit >= 0 ? Ui.Up : Ui.Down));
-        _wfoKpis.Children.Add(Kpi("Eficiencia WF", $"{res.WalkForwardEfficiency * 100:0}%", "ganancia diaria fuera / dentro · > 50% es buena señal", res.WalkForwardEfficiency >= 0.5 ? Ui.Up : res.WalkForwardEfficiency >= 0 ? Ui.Warn : Ui.Down));
-        _wfoKpis.Children.Add(Kpi("Ventanas ganadoras", $"{res.ProfitableWindowsPercent:0}%", $"{res.Windows.Count(w => w.OutSample.NetProfit > 0)} de {res.Windows.Count}", res.ProfitableWindowsPercent >= 60 ? Ui.Up : Ui.Warn));
-        _wfoKpis.Children.Add(Kpi("Drawdown fuera", Money(-m.MaxDrawdown), $"{m.MaxDrawdownPercent:0.##}%", Ui.Down));
+        _wfoKpis.Children.Add(Kpi("Out of sample", Money(m.NetProfit), $"{m.TotalTrades} trades · PF {m.ProfitFactor:0.00}", m.NetProfit >= 0 ? Ui.Up : Ui.Down));
+        _wfoKpis.Children.Add(Kpi("WF efficiency", $"{res.WalkForwardEfficiency * 100:0}%", "daily PnL outside / inside sample · > 50% is a good sign", res.WalkForwardEfficiency >= 0.5 ? Ui.Up : res.WalkForwardEfficiency >= 0 ? Ui.Warn : Ui.Down));
+        _wfoKpis.Children.Add(Kpi("Profitable windows", $"{res.ProfitableWindowsPercent:0}%", $"{res.Windows.Count(w => w.OutSample.NetProfit > 0)} of {res.Windows.Count}", res.ProfitableWindowsPercent >= 60 ? Ui.Up : Ui.Warn));
+        _wfoKpis.Children.Add(Kpi("Out-of-sample DD", Money(-m.MaxDrawdown), $"{m.MaxDrawdownPercent:0.##}%", Ui.Down));
         if (res.PboLoss is { } loss && res.Pbo is { } pbo)
-            _wfoKpis.Children.Add(Kpi("Sobreajuste", $"{(1 - loss) * 100:0}%", $"veces que la mejor de una mitad gana en la otra · PBO {pbo * 100:0}%",
+            _wfoKpis.Children.Add(Kpi("Overfitting", $"{(1 - loss) * 100:0}%", $"times the best on one half is profitable on the other · PBO {pbo * 100:0}%",
                 loss < ValidationGate.MaxPboLoss ? Ui.Up : loss < ValidationGate.FailPboLoss ? Ui.Warn : Ui.Down));
         if (res.CpcvPaths.Count > 0)
         {
             int good = res.CpcvPaths.Count(p => p.Net > 0);
             var median = res.CpcvPaths.OrderBy(p => p.Net).ElementAt(res.CpcvPaths.Count / 2).Net;
-            _wfoKpis.Children.Add(Kpi("Caminos (CPCV)", $"{good} de {res.CpcvPaths.Count}", $"ganan · el del medio {Money(median)}",
+            _wfoKpis.Children.Add(Kpi("Paths (CPCV)", $"{good} of {res.CpcvPaths.Count}", $"profitable · median {Money(median)}",
                 median <= 0 ? Ui.Down : (double)good / res.CpcvPaths.Count >= ValidationGate.MinProfitablePaths ? Ui.Up : Ui.Warn));
         }
 

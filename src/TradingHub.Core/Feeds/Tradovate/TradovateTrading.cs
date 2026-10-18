@@ -82,14 +82,14 @@ public sealed class TradovateTradingSession : IDisposable
         _conn.User.StateChanged += (up, why) =>
         {
             IsConnected = up;
-            StatusText = up ? "Conectada" : "Tradovate: " + why;
+            StatusText = up ? "Connected" : "Tradovate: " + why;
             Changed?.Invoke();
             if (!up && !_life.IsCancellationRequested) _ = Task.Run(() => RunAsync(_life.Token));
         };
     }
 
     public bool IsConnected { get; private set; }
-    public string StatusText { get; private set; } = "Conectando a Tradovate…";
+    public string StatusText { get; private set; } = "Connecting to Tradovate…";
     public bool IsDemo => _conn.IsDemo;
     public TradovateConnection Connection => _conn;
 
@@ -128,7 +128,7 @@ public sealed class TradovateTradingSession : IDisposable
                     var d = await _conn.User.RequestAsync("user/syncrequest", new JsonObject { ["users"] = new JsonArray(_conn.UserId) }, ct).ConfigureAwait(false);
                     ApplySnapshot(d);
                     IsConnected = true;
-                    StatusText = "Conectada";
+                    StatusText = "Connected";
                     Changed?.Invoke();
                     return;
                 }
@@ -375,14 +375,14 @@ public sealed class TradovateTradingSession : IDisposable
         string reason = Str(res, "failureReason");
         long id = Long(res, "orderId");
         if (id == 0 || (reason.Length > 0 && reason != "Success"))
-            throw new TradovateException("Tradovate rechazó la orden: " + (Str(res, "failureText") is { Length: > 0 } t ? t : reason.Length > 0 ? reason : "sin motivo"));
+            throw new TradovateException("Tradovate rejected order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : reason.Length > 0 ? reason : "no reason supplied"));
         return id;
     }
 
     public async Task CancelAsync(long orderId, CancellationToken ct)
     {
         var res = await _conn.PostAsync("/order/cancelorder", new JsonObject { ["orderId"] = orderId }, ct).ConfigureAwait(false);
-        if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateException("Tradovate no canceló la orden: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
+        if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateException("Tradovate did not cancel order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
     }
 
     public async Task ModifyAsync(TradovateOrderState o, int qty, decimal price, CancellationToken ct)
@@ -391,7 +391,7 @@ public sealed class TradovateTradingSession : IDisposable
         if (o.Type is "Stop" or "StopLimit") body["stopPrice"] = price;
         else body["price"] = price;
         var res = await _conn.PostAsync("/order/modifyorder", body, ct).ConfigureAwait(false);
-        if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateException("Tradovate no modificó la orden: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
+        if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateException("Tradovate did not modify order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
     }
 
     public async Task LiquidateAsync(long accountId, long contractId, CancellationToken ct) =>
@@ -450,7 +450,7 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
         }
         catch (Exception ex)
         {
-            LastError = "No se pudo saber el contrato del mes en Tradovate: " + ex.Message;
+            LastError = "Could not determine Tradovate's active contract: " + ex.Message;
             Changed?.Invoke();
             throw;
         }
@@ -493,7 +493,7 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
                 }
 
                 Apply(s, o);
-                if (s.Rejected && s.Text.Length > 0) LastError = "Tradovate rechazó la orden: " + s.Text;
+                if (s.Rejected && s.Text.Length > 0) LastError = "Tradovate rejected order: " + s.Text;
                 if (o.State == OrderStates.Active) active.Add(o);
             }
 
@@ -523,7 +523,7 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
         {
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
-            LastError = "En futuros la cantidad tiene que ser un número entero de contratos (1, 2, 3…)";
+            LastError = "Futures quantity must be a whole number of contracts (1, 2, 3…).";
             Changed?.Invoke();
             return order;
         }
@@ -614,7 +614,7 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
                 for (int i = 0; i < 30 && IdOf(order) == 0 && order.State == OrderStates.Active; i++) await Task.Delay(100).ConfigureAwait(false);
                 long id = IdOf(order);
                 var s = _contract is { } c ? _session.OrdersOf(_account.Id, c.Id).FirstOrDefault(x => x.Id == id) : null;
-                if (s == null) throw new InvalidOperationException("La orden todavía no figura en Tradovate");
+                if (s == null) throw new InvalidOperationException("The order is not available in Tradovate yet");
                 await _session.ModifyAsync(s, total, px, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -631,15 +631,15 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
     {
         CancelAll();
         var q = Position.Volume;
-        if (q > 0) Send(OrderDirections.Sell, OrderTypes.Market, q, 0, "Cerrar");
-        else if (q < 0) Send(OrderDirections.Buy, OrderTypes.Market, -q, 0, "Cerrar");
+        if (q > 0) Send(OrderDirections.Sell, OrderTypes.Market, q, 0, "Close");
+        else if (q < 0) Send(OrderDirections.Buy, OrderTypes.Market, -q, 0, "Close");
     }
 
     public void Reverse()
     {
         var q = Position.Volume;
-        if (q > 0) Market(OrderDirections.Sell, q * 2, "Revertir");
-        else if (q < 0) Market(OrderDirections.Buy, -q * 2, "Revertir");
+        if (q > 0) Market(OrderDirections.Sell, q * 2, "Reverse");
+        else if (q < 0) Market(OrderDirections.Buy, -q * 2, "Reverse");
     }
 
     public void Dispose() => _session.Changed -= Sync;

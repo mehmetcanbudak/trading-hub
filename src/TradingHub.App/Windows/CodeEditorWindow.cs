@@ -30,7 +30,7 @@ internal sealed class CodeEditorWindow : Window
     public CodeEditorWindow(AppServices svc, CodeKind kind)
     {
         _svc = svc;
-        Title = "Indicadores propios — editor";
+        Title = "Custom indicator editor";
         Width = 1180;
         Height = 780;
         MinWidth = 820;
@@ -54,13 +54,13 @@ internal sealed class CodeEditorWindow : Window
 
     private Control Build()
     {
-        var add = Ui.Button("Nuevo", MaterialIconKind.Plus, () => _ = NewAsync());
-        var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, "Abrir la carpeta en Finder", () => Shell.OpenFolder(AppPaths.UserIndicators));
+        var add = Ui.Button("New", MaterialIconKind.Plus, () => _ = NewAsync());
+        var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, "Open folder in Finder", () => Shell.OpenFolder(AppPaths.UserIndicators));
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
         var acts = Ui.H(4, folder, add);
         DockPanel.SetDock(acts, Dock.Right);
         head.Children.Add(acts);
-        head.Children.Add(Ui.H3("Archivos"));
+        head.Children.Add(Ui.H3("Files"));
         _files.SelectionChanged += (_, _) =>
         {
             if (_files.SelectedItem is ListBoxItem { Tag: string p }) Open(p);
@@ -70,7 +70,7 @@ internal sealed class CodeEditorWindow : Window
         left.Children.Add(head);
         var note = new TextBlock
         {
-            Text = "API de indicadores de Trading Hub (Indicator, OnCalculate, DataSeries, OnRender…); si pegás código escrito con esta API en otra plataforma, se adapta solo. Al guardar se recompila y queda disponible en Indicadores.",
+            Text = "Trading Hub indicator API (Indicator, OnCalculate, DataSeries, OnRender…); code written for compatible platforms is adapted automatically. Saving recompiles it and makes it available in Indicators.",
             Classes = { "faint", "small" },
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 12, 0, 0),
@@ -79,7 +79,7 @@ internal sealed class CodeEditorWindow : Window
         left.Children.Add(note);
         left.Children.Add(Ui.Card(_files, 6));
 
-        var save = Ui.Button("Guardar y compilar", MaterialIconKind.Hammer, SaveAndCompile, "primary");
+        var save = Ui.Button("Save and compile", MaterialIconKind.Hammer, SaveAndCompile, "primary");
         ToolTip.SetTip(save, "⌘S");
         var bar = new DockPanel { Margin = new Thickness(16, 10) };
         var right = Ui.H(10, new Border { Child = Ui.H(7, _dot, _state), Classes = { "pill" } }, save);
@@ -133,7 +133,7 @@ internal sealed class CodeEditorWindow : Window
     {
         Save();
         _dot.Fill = Ui.Warn;
-        _state.Text = "Compilando…";
+        _state.Text = "Compiling…";
         _svc.Scripts?.CompileAll();
     }
 
@@ -141,16 +141,16 @@ internal sealed class CodeEditorWindow : Window
     {
         int errors = r.Diagnostics.Count(d => d.Severity == "error");
         _dot.Fill = r.Success ? Ui.Up : Ui.Down;
-        _state.Text = r.Success ? $"Compilado · {r.Elapsed.TotalMilliseconds:0} ms" : $"{errors} error(es)";
+        _state.Text = r.Success ? $"Compiled · {r.Elapsed.TotalMilliseconds:0} ms" : $"{errors} error(s)";
         if (_path != null) _editor.ShowDiagnostics(r.Diagnostics, _path);
     }
 
     private async Task NewAsync()
     {
-        var name = await PromptDialog.ShowAsync(this, "Nuevo indicador", "Nombre de la clase", "MiIndicador", "Crear");
+        var name = await PromptDialog.ShowAsync(this, "New indicator", "Class name", "MyIndicator", "Create");
         if (name == null) return;
         string cls = new string(name.Where(char.IsLetterOrDigit).ToArray());
-        if (cls.Length == 0 || char.IsDigit(cls[0])) cls = "Indicador" + cls;
+        if (cls.Length == 0 || char.IsDigit(cls[0])) cls = "Indicator" + cls;
         var path = Path.Combine(AppPaths.UserIndicators, cls + ".cs");
         if (!File.Exists(path)) File.WriteAllText(path, IndicatorTemplate(cls, name));
         FillFiles(path);
@@ -163,12 +163,12 @@ internal sealed class CodeEditorWindow : Window
         using TradingHub.Indicators.Drawing;
 
         [DisplayName("{{display}}")]
-        [Category("Mis indicadores")]
+        [Category("My indicators")]
         public class {{cls}} : Indicator
         {
-            private readonly ValueDataSeries _serie = new("Serie", "Valor") { Color = System.Drawing.Color.Orange, Width = 2 };
+            private readonly ValueDataSeries _serie = new("Series", "Value") { Color = System.Drawing.Color.Orange, Width = 2 };
 
-            [Display(Name = "Período", GroupName = "Configuración")]
+            [Display(Name = "Period", GroupName = "Settings")]
             [Range(1, 1000)]
             public int Periodo { get; set; } = 20;
 
@@ -179,7 +179,7 @@ internal sealed class CodeEditorWindow : Window
 
             protected override void OnCalculate(int bar, decimal value)
             {
-                // media simple del cierre como ejemplo
+                // Example: simple moving average of closing prices.
                 if (bar < Periodo) return;
                 decimal suma = 0;
                 for (int i = 0; i < Periodo; i++) suma += GetCandle(bar - i).Close;

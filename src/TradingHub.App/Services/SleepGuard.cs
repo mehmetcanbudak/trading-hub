@@ -150,7 +150,7 @@ internal sealed class SleepGuard : IDisposable
             "if [ \"$want\" != \"$cur\" ]; then /usr/bin/pmset -a disablesleep $want; cur=$want; fi; " +
             "sleep 5; done; /usr/bin/pmset -a disablesleep 0";
         string escaped = sh.Replace("\\", "\\\\").Replace("\"", "\\\"");
-        return $"do shell script \"{escaped}\" with prompt \"Trading Hub necesita tu permiso para que la Mac siga funcionando con la tapa cerrada mientras corren tus estrategias o los agentes. Se deshace solo al cerrar Trading Hub.\" with administrator privileges";
+        return $"do shell script \"{escaped}\" with prompt \"Trading Hub needs permission to keep your Mac running with the lid closed while strategies or agents work. This is restored when Trading Hub quits.\" with administrator privileges";
     }
 
     private void StartLidHelper()
@@ -177,7 +177,7 @@ internal sealed class SleepGuard : IDisposable
             p.Exited += (_, _) =>
             {
                 // terminó: o cancelaste el permiso (código distinto de 0) o se apagó el modo
-                if (p.ExitCode != 0) LidError = "No se activó: hace falta tu permiso de administrador.";
+                if (p.ExitCode != 0) LidError = "Not enabled: administrator permission is required.";
             };
         }
         catch (Exception ex)

@@ -140,13 +140,13 @@ public sealed class CodeEditor : UserControl
             bool error = d.Severity == "error";
             var row = Ui.H(8,
                 Ui.Icon(error ? MaterialIconKind.CloseCircle : MaterialIconKind.AlertOutline, 14, error ? Ui.Down : Ui.Warn),
-                new TextBlock { Text = $"Línea {d.Line}", Classes = { "faint", "small" }, Width = 64 },
+                new TextBlock { Text = $"Line {d.Line}", Classes = { "faint", "small" }, Width = 64 },
                 new TextBlock { Text = $"{d.Message}  ({d.Id})", TextTrimming = TextTrimming.CharacterEllipsis, FontSize = 12 });
             _errors.Items.Add(new ListBoxItem { Content = row, Tag = d, Padding = new Thickness(12, 4) });
         }
 
         int errors = list.Count(d => d.Severity == "error");
-        _errorsTitle.Text = errors > 0 ? $"{errors} error{(errors == 1 ? "" : "es")}" + (list.Count > errors ? $" · {list.Count - errors} advertencia(s)" : "") : $"{list.Count} advertencia(s)";
+        _errorsTitle.Text = errors > 0 ? $"{errors} error{(errors == 1 ? "" : "s")}" + (list.Count > errors ? $" · {list.Count - errors} warning(s)" : "") : $"{list.Count} warning(s)";
         _errorsPanel.IsVisible = list.Count > 0;
     }
 

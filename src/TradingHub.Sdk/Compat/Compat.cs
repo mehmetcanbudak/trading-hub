@@ -29,13 +29,13 @@ namespace TradingHub.Indicators
 
     public enum FixedProfilePeriods
     {
-        [Display(Name = "Día actual")] CurrentDay,
-        [Display(Name = "Día anterior")] LastDay,
-        [Display(Name = "Semana actual")] CurrentWeek,
-        [Display(Name = "Semana anterior")] LastWeek,
-        [Display(Name = "Mes actual")] CurrentMonth,
-        [Display(Name = "Mes anterior")] LastMonth,
-        [Display(Name = "Contrato")] Contract,
+        [Display(Name = "Current day")] CurrentDay,
+        [Display(Name = "Previous day")] LastDay,
+        [Display(Name = "Current week")] CurrentWeek,
+        [Display(Name = "Previous week")] LastWeek,
+        [Display(Name = "Current month")] CurrentMonth,
+        [Display(Name = "Previous month")] LastMonth,
+        [Display(Name = "Contract")] Contract,
     }
 
     /// <summary>Pedido de perfil fijo de un período (día, semana, mes, contrato).</summary>
@@ -83,9 +83,9 @@ namespace TradingHub.Indicators
 
     public enum ContractRolloverType
     {
-        [Display(Name = "Vencimiento")] ExpirationDate,
-        [Display(Name = "Por volumen (fin del actual)")] VolumeBasedCurrentEnd,
-        [Display(Name = "Por volumen (inicio del siguiente)")] VolumeBasedNextStart,
+        [Display(Name = "Expiry")] ExpirationDate,
+        [Display(Name = "By volume (end of current contract)")] VolumeBasedCurrentEnd,
+        [Display(Name = "By volume (start of next contract)")] VolumeBasedNextStart,
     }
 
     /// <summary>Cambio de contrato de un futuro.</summary>
@@ -142,8 +142,8 @@ namespace TradingHub.Indicators
 
     public enum CandleVisualMode
     {
-        [Display(Name = "Velas")] Candles,
-        [Display(Name = "Barras")] Bars,
+        [Display(Name = "Candles")] Candles,
+        [Display(Name = "Bars")] Bars,
     }
 
     /// <summary>Lo que un indicador puede pedirle al proveedor de datos del gráfico.</summary>
@@ -301,11 +301,11 @@ namespace TradingHub.Rendering.Heatmap
 {
     public enum HeatmapTypes
     {
-        [Display(Name = "Rojo → oscuro → verde")] RedToDarkToGreen,
-        [Display(Name = "Rojo → verde")] RedToGreen,
-        [Display(Name = "Azul → rojo")] BlueToRed,
-        [Display(Name = "Escala de grises")] Grayscale,
-        [Display(Name = "Personalizado")] Custom,
+        [Display(Name = "Red → dark → green")] RedToDarkToGreen,
+        [Display(Name = "Red → green")] RedToGreen,
+        [Display(Name = "Blue → red")] BlueToRed,
+        [Display(Name = "Grayscale")] Grayscale,
+        [Display(Name = "Custom")] Custom,
     }
 
     public static class HeatmapColors
@@ -430,7 +430,7 @@ namespace TradingHub.Rendering.Settings
             }
         }
 
-        [Display(Name = "Color final", Order = 20)]
+        [Display(Name = "End color", Order = 20)]
         public Color EndColor
         {
             get => _endColor;

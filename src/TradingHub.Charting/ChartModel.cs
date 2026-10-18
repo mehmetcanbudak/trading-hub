@@ -358,7 +358,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         catch (Exception ex)
         {
             slot.Error = ex.Message;
-            this.LogError($"Error al inicializar {indicator.Name}", ex);
+            this.LogError($"Initialization error in {indicator.Name}", ex);
         }
 
         indicator.PropertyChanged += (_, e) =>
@@ -408,7 +408,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
 
         _timers.RemoveAll(t => t.Ind == slot.Indicator);
         try { slot.Indicator.HostDetach(); }
-        catch (Exception ex) { this.LogError("Error al quitar el indicador", ex); }
+        catch (Exception ex) { this.LogError("Error removing indicator", ex); }
         Invalidate();
     }
 
@@ -420,7 +420,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         {
             var a = _invokes.Dequeue();
             try { a(); }
-            catch (Exception ex) { this.LogError("Error en acción diferida", ex); }
+            catch (Exception ex) { this.LogError("Deferred action error", ex); }
         }
 
         ProcessPending();
@@ -434,7 +434,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
                 if (now < t.Next) continue;
                 _timers[i] = (t.Ind, t.Interval, t.Action, now + t.Interval);
                 try { t.Action(); }
-                catch (Exception ex) { this.LogError("Error en timer de indicador", ex); }
+                catch (Exception ex) { this.LogError("Indicator timer error", ex); }
             }
         }
     }
@@ -476,7 +476,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         }
         catch (Exception ex)
         {
-            if (slot.Error == null) this.LogError($"Error en el indicador {slot.Indicator.Name}: {ex.Message}", ex);
+            if (slot.Error == null) this.LogError($"Indicator error in {slot.Indicator.Name}: {ex.Message}", ex);
             slot.Error = ex.Message;
         }
     }
@@ -788,7 +788,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         }
         catch (Exception ex)
         {
-            indicator.LogWarn($"Error en el perfil fijo de {indicator.Name}: {ex.Message}");
+            indicator.LogWarn($"Fixed-profile error in {indicator.Name}: {ex.Message}");
         }
     }
 

@@ -77,11 +77,11 @@ public class RobustnessTests
     {
         // ventaja chica con muchas pruebas: dice cuánto gana por operación, cuánto varía y cuánto daría la suerte
         var gate = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(40, 110, 100), 0.7, 80, 8), Trials = 26, MinTrades = 30 });
-        var luck = gate.Checks.Single(c => c.Name == "Sharpe deflactado");
+        var luck = gate.Checks.Single(c => c.Name == "Deflated Sharpe");
         Assert.NotEqual(GateStatus.Pass, luck.Status);
         Assert.StartsWith(ValidationGate.LuckFailPrefix, luck.Text);
-        Assert.Contains("por operación", luck.Text);
-        Assert.Contains("26 estrategias sin ninguna ventaja", luck.Text);
+        Assert.Contains("per trade", luck.Text);
+        Assert.Contains("26 strategies with no edge", luck.Text);
         Assert.True(ValidationGate.IsLuckLine(luck.Text));
         // las pruebas guardadas antes con el texto viejo se siguen reconociendo
         Assert.True(ValidationGate.IsLuckLine("Probabilidad de que no sea suerte, descontando las 4 configuraciones que se probaron: 40%"));
@@ -94,7 +94,7 @@ public class RobustnessTests
         var gate = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(oos, 0.7, 80, 8), Trials = 1, MinTrades = 30 });
         Assert.Equal(GateStatus.Pass, gate.Status);
         Assert.All(gate.Checks, c => Assert.Equal(GateStatus.Pass, c.Status));
-        Assert.Equal("pasa", gate.StatusText);
+        Assert.Equal("pass", gate.StatusText);
     }
 
     [Fact]
@@ -103,12 +103,12 @@ public class RobustnessTests
         // eficiencia 0.2: lo optimizado no se repite fuera de muestra
         var overfit = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(120, 150, 100), 0.2, 80, 8) });
         Assert.Equal(GateStatus.Fail, overfit.Status);
-        Assert.Contains(overfit.Checks, c => c.Name == "Eficiencia" && c.Status == GateStatus.Fail);
+        Assert.Contains(overfit.Checks, c => c.Name == "Efficiency" && c.Status == GateStatus.Fail);
 
         // 12 operaciones: no alcanza
         var tiny = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(12, 150, 100), 0.8, 80, 6) });
         Assert.Equal(GateStatus.Fail, tiny.Status);
-        Assert.Contains(tiny.Checks, c => c.Name == "Muestra" && c.Status == GateStatus.Fail);
+        Assert.Contains(tiny.Checks, c => c.Name == "Sample" && c.Status == GateStatus.Fail);
 
         // pierde fuera de muestra
         var losing = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(100, 90, 100), 0.8, 30, 6) });
@@ -122,7 +122,7 @@ public class RobustnessTests
         var gate = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(8, 300, 100), 0.8, 50, 2), Trials = 4, MinTrades = 30 });
         Assert.Equal(GateStatus.Fail, gate.Status);
         Assert.True(gate.NeedsMoreSample);
-        Assert.Equal("falta muestra", gate.StatusText);
+        Assert.Equal("insufficient sample", gate.StatusText);
         Assert.True(gate.SampleFactor >= 30 / 8.0, $"factor {gate.SampleFactor}");
     }
 
@@ -131,11 +131,11 @@ public class RobustnessTests
     {
         var losing = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(8, 90, 100), 0.8, 50, 2), Trials = 4 });
         Assert.False(losing.NeedsMoreSample);
-        Assert.Equal("no pasa", losing.StatusText);
+        Assert.Equal("fail", losing.StatusText);
 
         var none = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(new List<ClosedTrade>(), 0, 0, 4), Trials = 4 });
         Assert.False(none.NeedsMoreSample);
-        Assert.Contains(none.Checks, c => c.Name == "Muestra" && c.Text.StartsWith("No operó", StringComparison.Ordinal));
+        Assert.Contains(none.Checks, c => c.Name == "Sample" && c.Text.StartsWith("No out-of-sample trades", StringComparison.Ordinal));
 
         // con pocas operaciones pero sobreajustada de verdad y perdiendo plata, tampoco
         var overfit = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(12, 95, 100), 0.1, 20, 4), Trials = 4 });
@@ -149,7 +149,7 @@ public class RobustnessTests
         // operación pasaría con unas 3 veces más operaciones
         var gate = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(40, 200, 100), 0.8, 80, 8), Trials = 100, MinTrades = 30 });
         Assert.Equal(GateStatus.Fail, gate.Status);
-        Assert.Equal(GateStatus.Fail, gate.Checks.First(c => c.Name == "Sharpe deflactado").Status);
+        Assert.Equal(GateStatus.Fail, gate.Checks.First(c => c.Name == "Deflated Sharpe").Status);
         Assert.True(gate.NeedsMoreSample);
         Assert.InRange(gate.SampleFactor, 1.5, ValidationGate.MaxSampleFactor);
 
@@ -157,7 +157,7 @@ public class RobustnessTests
         var doubtful = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(40, 200, 100), 0.8, 80, 8), Trials = 20, MinTrades = 30 });
         Assert.Equal(GateStatus.Warn, doubtful.Status);
         Assert.True(doubtful.NeedsMoreSample);
-        Assert.Equal("dudosa", doubtful.StatusText);
+        Assert.Equal("uncertain", doubtful.StatusText);
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public class RobustnessTests
         var gate = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(100, 105, 100), 0.8, 80, 8), Trials = 200, TrialVariance = 0.02, MinTrades = 30 });
         Assert.Equal(GateStatus.Fail, gate.Status);
         Assert.False(gate.NeedsMoreSample);
-        Assert.Equal("no pasa", gate.StatusText);
+        Assert.Equal("fail", gate.StatusText);
     }
 
     [Fact]
@@ -176,14 +176,14 @@ public class RobustnessTests
         // 90 operaciones que empiezan ganando y terminan perdiendo (en promedio gana: no lo frena ninguna otra regla)
         var dying = Trades(Enumerable.Range(0, 90).Select(i => 240m - 4m * i + (i % 2 == 0 ? 60 : -60)).ToArray());
         var gate = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(dying, 0.8, 80, 8), Trials = 1, MinTrades = 30 });
-        var decay = gate.Checks.Single(c => c.Name == "Desgaste");
+        var decay = gate.Checks.Single(c => c.Name == "Edge decay");
         Assert.Equal(GateStatus.Fail, decay.Status);
-        Assert.Contains("se está apagando", decay.Text);
+        Assert.Contains("is fading", decay.Text);
         Assert.True(gate.DecayEarly > 0 && gate.DecayLate < 0 && gate.DecayT < -2);
 
         // la misma ventaja de punta a punta: se sostiene
         var steady = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(90, 150, 100), 0.8, 80, 8), Trials = 1, MinTrades = 30 });
-        Assert.Equal(GateStatus.Pass, steady.Checks.Single(c => c.Name == "Desgaste").Status);
+        Assert.Equal(GateStatus.Pass, steady.Checks.Single(c => c.Name == "Edge decay").Status);
     }
 
     [Fact]
@@ -201,20 +201,20 @@ public class RobustnessTests
             };
         }).ToList();
         var regimes = Robustness.Regimes(trades);
-        Assert.Equal(30, regimes.Single(r => r.Name == "tendencia").Trades);
-        Assert.True(regimes.Single(r => r.Name == "tendencia").Net > 0);
-        Assert.True(regimes.Single(r => r.Name == "rango").Net < 0);
-        Assert.Contains(regimes, r => r.Name == "volatilidad alta");
+        Assert.Equal(30, regimes.Single(r => r.Name == "trend").Trades);
+        Assert.True(regimes.Single(r => r.Name == "trend").Net > 0);
+        Assert.True(regimes.Single(r => r.Name == "range").Net < 0);
+        Assert.Contains(regimes, r => r.Name == "high volatility");
 
         var gate = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(trades, 0.8, 80, 8), Trials = 1, MinTrades = 30 });
-        var check = gate.Checks.Single(c => c.Name == "Regímenes");
+        var check = gate.Checks.Single(c => c.Name == "Regimes");
         Assert.Equal(GateStatus.Warn, check.Status);
-        Assert.Contains("pierde en rango", check.Text);
-        Assert.Contains("gana en tendencia", check.Text);
+        Assert.Contains("loses in range", check.Text);
+        Assert.Contains("earns in trend", check.Text);
 
         // las corridas viejas (sin el régimen de cada operación) no tienen esta prueba
         var old = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(60, 150, 100), 0.8, 80, 8) });
-        Assert.DoesNotContain(old.Checks, c => c.Name == "Regímenes");
+        Assert.DoesNotContain(old.Checks, c => c.Name == "Regimes");
     }
 
     [Fact]
@@ -244,9 +244,9 @@ public class RobustnessTests
         var j = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(120, 150, 100), 0.7, 80, 6, jumping) });
         var s = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(120, 150, 100), 0.7, 80, 6, stable) });
         Assert.True(j.Instability > ValidationGate.MaxInstability);
-        Assert.Equal(GateStatus.Warn, j.Checks.First(c => c.Name == "Estabilidad").Status);
+        Assert.Equal(GateStatus.Warn, j.Checks.First(c => c.Name == "Stability").Status);
         Assert.True(s.Instability < ValidationGate.MaxInstability);
-        Assert.Equal(GateStatus.Pass, s.Checks.First(c => c.Name == "Estabilidad").Status);
+        Assert.Equal(GateStatus.Pass, s.Checks.First(c => c.Name == "Stability").Status);
     }
 
     [Fact]
@@ -287,7 +287,7 @@ public class RobustnessTests
         var spike = Robustness.Plateau(Grid((a, b) => a == 5 && b == 5 ? 5000 : -200))!.Value;
         Assert.Equal(0.0, spike.ProfitableShare, 3);
         var gate = ValidationGate.Evaluate(new GateInput { WalkForward = Wf(Edge(120, 150, 100), 0.7, 80, 8), Optimization = Grid((a, b) => a == 5 && b == 5 ? 5000 : -200) });
-        Assert.Equal(GateStatus.Warn, gate.Checks.First(c => c.Name == "Meseta").Status);
-        Assert.Equal(GateStatus.Warn, gate.Checks.First(c => c.Name == "Robustez").Status);
+        Assert.Equal(GateStatus.Warn, gate.Checks.First(c => c.Name == "Plateau").Status);
+        Assert.Equal(GateStatus.Warn, gate.Checks.First(c => c.Name == "Robustness").Status);
     }
 }

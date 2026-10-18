@@ -83,7 +83,7 @@ internal sealed class BarBuilder
         if (period.Type is PeriodType.Seconds or PeriodType.Minutes or PeriodType.Hours or PeriodType.Days or PeriodType.Weeks or PeriodType.Months)
             _timeHelper = new CandleSeries(instrument, period, 1, session);
         else if (period.Type is not (PeriodType.Tick or PeriodType.Volume or PeriodType.Range or PeriodType.Delta))
-            throw new NotSupportedException($"El período {period.DisplayName} no está disponible en backtests (usá tiempo, ticks, volumen, rango o delta).");
+            throw new NotSupportedException($"Period {period.DisplayName} is unavailable in backtests (use time, tick, volume, range or delta bars).");
     }
 
     public Bar? Current => _current;

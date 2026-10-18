@@ -78,14 +78,14 @@ public sealed class AccountCenter
 
     public IReadOnlyList<AccountEntry> Accounts()
     {
-        var list = new List<AccountEntry> { new(SimId, "Cuenta simulada", AccountKind.Sim, false, true) };
+        var list = new List<AccountEntry> { new(SimId, "Simulated account", AccountKind.Sim, false, true) };
         foreach (var p in _svc.Connections.Enabled.Where(p => p.IsRithmic && !string.IsNullOrWhiteSpace(p.RithmicUser)))
         {
             var session = _svc.RithmicSessionFor(p);
             foreach (var a in session.Accounts)
             {
                 bool real = !session.IsPractice;
-                list.Add(new AccountEntry(AppServices.RithmicAccountId(p, a.AccountId), $"{a.AccountId} · {p.Name}{(real ? " — REAL" : " (práctica)")}",
+                list.Add(new AccountEntry(AppServices.RithmicAccountId(p, a.AccountId), $"{a.AccountId} · {p.Name}{(real ? " — REAL" : " (practice)")}",
                     AccountKind.Rithmic, real, !real || p.AllowRealOrders, p, a.AccountId));
             }
         }
@@ -141,9 +141,9 @@ public sealed class AccountCenter
 
     private static string TypeName(OrderTypes t) => t switch
     {
-        OrderTypes.Market => "Mercado",
+        OrderTypes.Market => "Market",
         OrderTypes.Stop => "Stop",
-        _ => "Límite",
+        _ => "Limit",
     };
 
     private void FillSim(AccountSnapshot s, decimal realizedToday)
@@ -161,13 +161,13 @@ public sealed class AccountCenter
                 decimal avg = qty > 0 ? fills.Sum(t => t.Price * t.Volume) / qty : 0;
                 bool active = o.State == OrderStates.Active;
                 string status = active
-                    ? o.Filled > 0 ? "Parcial" : "Activa"
+                    ? o.Filled > 0 ? "Partial" : "Active"
                     : o.Status switch
                     {
-                        OrderStatus.Filled => "Ejecutada",
-                        OrderStatus.Canceled => o.Filled > 0 ? "Cancelada (parcial)" : "Cancelada",
-                        OrderStatus.Rejected => "Rechazada",
-                        _ => o.State == OrderStates.Failed ? "Rechazada" : o.Filled > 0 ? "Ejecutada" : "Terminada",
+                        OrderStatus.Filled => "Filled",
+                        OrderStatus.Canceled => o.Filled > 0 ? "Canceled (partial)" : "Canceled",
+                        OrderStatus.Rejected => "Rejected",
+                        _ => o.State == OrderStates.Failed ? "Rejected" : o.Filled > 0 ? "Filled" : "Completed",
                     };
                 s.Orders.Add(new OrderLine("sim|" + o.Id, o.Time, b.Instrument.Symbol, o.Direction == OrderDirections.Buy, TypeName(o.Type),
                     o.QuantityToFill, o.Type == OrderTypes.Stop ? o.TriggerPrice : o.Price, o.Filled, avg, status, active, (b, o)));
@@ -180,7 +180,7 @@ public sealed class AccountCenter
         s.Balance = s.StartBalance + s.Analysis.RealizedNet + s.OpenPnl;
         s.RealizedToday = realizedToday;
         s.DayPnl = realizedToday + s.OpenPnl;
-        s.Status = "Trading Hub simula las ejecuciones con el mercado real";
+        s.Status = "Trading Hub simulates fills using real market data";
     }
 
     private void FillRithmic(AccountSnapshot s, decimal realizedToday)
@@ -188,18 +188,18 @@ public sealed class AccountCenter
         var session = _svc.RithmicSessionFor(s.Account.Profile!);
         string acc = s.Account.RithmicAccount;
         s.Connected = session.IsConnected;
-        s.Status = session.IsConnected ? $"Conectada a Rithmic ({session.System})" : session.StatusText;
+        s.Status = session.IsConnected ? $"Connected to Rithmic ({session.System})" : session.StatusText;
         foreach (var (sym, ex, p) in session.PositionsOf(acc))
             s.Positions.Add(new PositionLine(sym + "|" + ex, sym, p.Net, p.AvgPrice, p.OpenPnl, p.ClosedPnl, (sym, ex)));
 
         foreach (var o in session.OrdersOf(acc))
         {
-            string type = o.PriceType switch { 2 => "Mercado", 3 => "Stop límite", 4 => "Stop", _ => "Límite" };
+            string type = o.PriceType switch { 2 => "Market", 3 => "Stop limit", 4 => "Stop", _ => "Limit" };
             string status = !o.Done
-                ? o.Filled > 0 ? "Parcial" : "Activa"
-                : o.Rejected ? "Rechazada" + (o.Reason.Length > 0 ? ": " + o.Reason : "")
-                : o.Cancelled ? o.Filled > 0 ? "Cancelada (parcial)" : "Cancelada"
-                : "Ejecutada";
+                ? o.Filled > 0 ? "Partial" : "Active"
+                : o.Rejected ? "Rejected" + (o.Reason.Length > 0 ? ": " + o.Reason : "")
+                : o.Cancelled ? o.Filled > 0 ? "Canceled (partial)" : "Canceled"
+                : "Filled";
             s.Orders.Add(new OrderLine(o.BasketId, o.Time, o.Symbol, o.IsBuy, type, o.Quantity, o.PriceType is 3 or 4 ? o.Trigger : o.Price,
                 o.Filled, o.AvgFillPrice, status, !o.Done, o));
         }
@@ -220,7 +220,7 @@ public sealed class AccountCenter
         var session = _svc.TradovateSessionFor(s.Account.Profile!);
         long acc = TradovateIdOf(s.Account);
         s.Connected = session.IsConnected;
-        s.Status = session.IsConnected ? $"Conectada a Tradovate ({(session.IsDemo ? "demo" : "real")})" : session.StatusText;
+        s.Status = session.IsConnected ? $"Connected to Tradovate ({(session.IsDemo ? "demo" : "real")})" : session.StatusText;
         foreach (var p in session.PositionsOf(acc))
         {
             decimal pv = PointValueOf(p.Symbol);
@@ -230,12 +230,12 @@ public sealed class AccountCenter
 
         foreach (var o in session.OrdersOf(acc))
         {
-            string type = o.Type switch { "Market" => "Mercado", "Stop" => "Stop", "StopLimit" => "Stop límite", "TrailingStop" => "Stop móvil", _ => "Límite" };
+            string type = o.Type switch { "Market" => "Market", "Stop" => "Stop", "StopLimit" => "Stop limit", "TrailingStop" => "Trailing stop", _ => "Limit" };
             string status = !o.Done
-                ? o.Filled > 0 ? "Parcial" : "Activa"
-                : o.Rejected ? "Rechazada" + (o.Text.Length > 0 ? ": " + o.Text : "")
-                : o.Cancelled ? o.Filled > 0 ? "Cancelada (parcial)" : "Cancelada"
-                : "Ejecutada";
+                ? o.Filled > 0 ? "Partial" : "Active"
+                : o.Rejected ? "Rejected" + (o.Text.Length > 0 ? ": " + o.Text : "")
+                : o.Cancelled ? o.Filled > 0 ? "Canceled (partial)" : "Canceled"
+                : "Filled";
             s.Orders.Add(new OrderLine("tv|" + o.Id, o.Time, o.Symbol, o.IsBuy, type, o.Quantity, o.Type is "Stop" or "StopLimit" ? o.StopPrice : o.Price,
                 o.Filled, o.AvgFill, status, !o.Done, o));
         }

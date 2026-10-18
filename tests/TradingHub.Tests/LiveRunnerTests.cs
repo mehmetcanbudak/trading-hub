@@ -92,7 +92,7 @@ public class LiveRunnerTests : IDisposable
         Assert.Equal(1, s.MarketDirection);
         Assert.NotNull(s.VolatilityRank);
         Assert.Equal(31, r.ContextDays);
-        Assert.Contains(r.LogLines, l => l.Contains("Contexto del mercado con 31 días", StringComparison.Ordinal));
+        Assert.Contains(r.LogLines, l => l.Contains("Market context with 31 days", StringComparison.Ordinal));
 
         // un filtro «solo en rango» ahora no deja entrar (antes, sin datos, habría entrado en cualquier contexto)
         s.RegimeFilter = RegimeFilter.RangeOnly;
@@ -110,7 +110,7 @@ public class LiveRunnerTests : IDisposable
         r.SetContextFilter(RegimeFilter.RangeOrDownTrend, 0, 100);
         Assert.Equal(RegimeFilter.RangeOrDownTrend, s.RegimeFilter);
         Assert.False(s.ContextAllowsEntries); // viene subiendo
-        Assert.Contains(r.LogLines, l => l.Contains("opera rango o tendencia bajista", StringComparison.Ordinal));
+        Assert.Contains(r.LogLines, l => l.Contains("trades in range or downtrend", StringComparison.Ordinal));
         Assert.True(r.IsRunning);
         r.SetContextFilter(RegimeFilter.NoDownTrend, 0, 100);
         Assert.True(s.ContextAllowsEntries);
@@ -195,8 +195,8 @@ public class LiveRunnerTests : IDisposable
         Assert.False(r.SizeBelowMinimum(1));
         // el aviso dice cuántos contratos, de cuál y que es el micro (con su equivalente en el mini)
         var notice = Assert.Single(notices);
-        Assert.Contains("compró 5 MTEST", notice);
-        Assert.Contains("micro: equivale a 0.5 TEST", notice);
+        Assert.Contains("bought 5 MTEST", notice);
+        Assert.Contains("micro: equivalent to 0.5 TEST", notice);
 
         microData.Trades.Add(new Trade(2, T0.AddMinutes(10), 110, 1, TradeSide.Buy)); // el micro sube 10 puntos
         s.Next.Enqueue(x => x.DoClose());
@@ -248,7 +248,7 @@ public class LiveRunnerTests : IDisposable
         Tick(101);
         Tick(102);
         Assert.Equal(0m, broker.Position!.Volume);
-        Assert.Contains(r.LogLines, l => l.Contains("Pausada: no se envió", StringComparison.Ordinal));
+        Assert.Contains(r.LogLines, l => l.Contains("Paused: did not submit", StringComparison.Ordinal));
 
         r.SetPaused(false);
         s.Next.Enqueue(x => x.DoBuy(1));
@@ -339,7 +339,7 @@ public class LiveRunnerTests : IDisposable
         r.ClosePosition();
         Assert.Equal(0m, broker.Position!.Volume); // no abrió un corto
         Assert.Equal(0m, r.Ledger.Position);
-        Assert.Contains(r.LogLines, l => l.Contains("no tenía", StringComparison.Ordinal));
+        Assert.Contains(r.LogLines, l => l.Contains("did not have", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -402,7 +402,7 @@ public class LiveRunnerTests : IDisposable
         var r3 = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true };
         r3.Start();
         Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
-        Assert.True(r3.LogLines.Any(l => l.Contains("no se ponen stop", StringComparison.Ordinal)), string.Join(" | ", r3.LogLines));
+        Assert.True(r3.LogLines.Any(l => l.Contains("no additional stop", StringComparison.Ordinal)), string.Join(" | ", r3.LogLines));
     }
 
     /// <summary>Limitador de prueba: deja pasar hasta cierta posición.</summary>
@@ -428,7 +428,7 @@ public class LiveRunnerTests : IDisposable
         Tick(102);
         Assert.Equal(0m, broker.Position!.Volume);
         Assert.Equal(1, guard.Blocked);
-        Assert.Contains(r.LogLines, l => l.Contains("Limitador de riesgo", StringComparison.Ordinal));
+        Assert.Contains(r.LogLines, l => l.Contains("Risk guard", StringComparison.Ordinal));
         s.Next.Enqueue(x => x.DoBuy(1)); // dentro del tope
         Tick(103);
         Tick(104);

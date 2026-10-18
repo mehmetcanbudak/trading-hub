@@ -48,7 +48,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
                     VolumeStep = Dec(s.GetProperty("lotSizeFilter").GetProperty("qtyStep")) / 1.0000000000000000000000000000m,
                     BaseAsset = s.GetProperty("baseCoin").GetString() ?? "",
                     QuoteAsset = s.GetProperty("quoteCoin").GetString() ?? "",
-                    Description = $"{s.GetProperty("baseCoin").GetString()}/{s.GetProperty("quoteCoin").GetString()} perpetuo",
+                    Description = $"{s.GetProperty("baseCoin").GetString()}/{s.GetProperty("quoteCoin").GetString()} perpetual",
                 });
             }
 
@@ -168,10 +168,10 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
             var conn = liveSub.BeginConnection();
             var book = new OrderBookBuilder();
             bool receivedAny = false;
-            string reason = "se cortó la conexión";
+            string reason = "connection lost";
             try
             {
-                if (!everConnected) liveSub.SetChannel("datos", FeedStatus.Connecting, "Conectando a Bybit…");
+                if (!everConnected) liveSub.SetChannel("data", FeedStatus.Connecting, "Connecting to Bybit…");
                 using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(conn.Token))
                 {
                     connectCts.CancelAfter(TimeSpan.FromSeconds(15));
@@ -199,7 +199,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
                     }
                 }
 
-                liveSub.SetChannel("datos", FeedStatus.Connected, null);
+                liveSub.SetChannel("data", FeedStatus.Connected, null);
                 everConnected = true;
                 conn.CancelAfter(stale);
 
@@ -229,7 +229,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
 
                     if (r.MessageType == WebSocketMessageType.Close)
                     {
-                        reason = "el servidor cerró la conexión";
+                        reason = "server closed the connection";
                         break;
                     }
 
@@ -283,7 +283,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
             }
             catch (OperationCanceledException)
             {
-                reason = liveSub.WasRequested(ref requested) ? "reconexión pedida" : receivedAny ? "no llegaban datos" : "no respondió a tiempo";
+                reason = liveSub.WasRequested(ref requested) ? "reconnection requested" : receivedAny ? "no data arriving" : "response timed out";
                 if (!receivedAny) failures++;
             }
             catch (Exception ex)
@@ -298,13 +298,13 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
 
             if (ct.IsCancellationRequested) break;
             var wait = LiveSubscription.Backoff(failures);
-            liveSub.SetChannel("datos", FeedStatus.Reconnecting, failures == 0
-                ? $"Reconectando ({reason})…"
-                : $"Reconectando en {wait.TotalSeconds:0} s · intento {failures} ({reason})");
+            liveSub.SetChannel("data", FeedStatus.Reconnecting, failures == 0
+                ? $"Reconnecting ({reason})…"
+                : $"Reconnecting in {wait.TotalSeconds:0} s · attempt {failures} ({reason})");
             await Task.Delay(wait, ct).ContinueWith(_ => { }).ConfigureAwait(false);
         }
 
-        liveSub.SetChannel("datos", FeedStatus.Disconnected, null);
+        liveSub.SetChannel("data", FeedStatus.Disconnected, null);
     }
 
     public void Dispose() => _http.Dispose();

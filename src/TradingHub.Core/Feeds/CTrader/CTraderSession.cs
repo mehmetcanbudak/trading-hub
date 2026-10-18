@@ -105,10 +105,10 @@ public sealed class CTraderSession : IDisposable
     {
         var s = _settings();
         if (string.IsNullOrWhiteSpace(s.ClientId) || string.IsNullOrWhiteSpace(s.ClientSecret))
-            throw new InvalidOperationException("Faltan el Client ID y el Secret de tu aplicación de cTrader (se crean gratis en openapi.ctrader.com).");
+            throw new InvalidOperationException("cTrader application Client ID and Secret are missing (register at openapi.ctrader.com).");
         if (string.IsNullOrWhiteSpace(s.AccessToken))
-            throw new InvalidOperationException("Falta el token de acceso de cTrader: tocá «Conectar con cTrader» o pegá el del Playground de tu aplicación.");
-        Drop("reconectando");
+            throw new InvalidOperationException("cTrader access token is missing: click Connect with cTrader or paste your application's Playground token.");
+        Drop("reconnecting");
         var ws = new ClientWebSocket();
         ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
         using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
@@ -129,11 +129,11 @@ public sealed class CTraderSession : IDisposable
         var match = list.Where(a => (a.TryGetProperty("isLive", out var il) && il.ValueKind == JsonValueKind.True) == s.Live).ToList();
         if (match.Count == 0)
             throw new InvalidOperationException(list.Count == 0
-                ? "El token no tiene cuentas de cTrader autorizadas."
-                : $"El token tiene {list.Count} cuenta(s) pero ninguna {(s.Live ? "real" : "demo")}: cambiá el entorno en la conexión.");
+                ? "The token has no authorized cTrader accounts."
+                : $"The token has {list.Count} account(s), but none in {(s.Live ? "real" : "demo")}: change the connection environment.");
         var chosen = s.TraderLogin > 0 ? match.FirstOrDefault(a => Long(a, "traderLogin") == s.TraderLogin) : match[0];
         if (chosen.ValueKind != JsonValueKind.Object)
-            throw new InvalidOperationException($"No encontré la cuenta {s.TraderLogin} en el token. Cuentas {(s.Live ? "reales" : "demo")}: {string.Join(", ", match.Select(a => Long(a, "traderLogin")))}.");
+            throw new InvalidOperationException($"Account not found: {s.TraderLogin} in the token. Available accounts {(s.Live ? "real" : "demo")}: {string.Join(", ", match.Select(a => Long(a, "traderLogin")))}.");
         AccountId = Long(chosen, "ctidTraderAccountId");
         AccountTitle = $"{(chosen.TryGetProperty("brokerTitleShort", out var bt) ? bt.GetString() : "cTrader")} {Long(chosen, "traderLogin")}";
         await RawRequestAsync(AccountAuthReq, new JsonObject { ["ctidTraderAccountId"] = AccountId, ["accessToken"] = s.AccessToken.Trim() }, ct).ConfigureAwait(false);
@@ -194,7 +194,7 @@ public sealed class CTraderSession : IDisposable
         AccountId = 0;
         foreach (var p in _pending)
             if (_pending.TryRemove(p.Key, out var tcs))
-                tcs.TrySetException(new IOException("Se cortó la conexión con cTrader (" + why + ")"));
+                tcs.TrySetException(new IOException("cTrader connection lost (" + why + ")"));
         if (was) ConnectionChanged?.Invoke(false, why);
     }
 
@@ -218,7 +218,7 @@ public sealed class CTraderSession : IDisposable
     {
         var buf = new byte[1 << 16];
         var ms = new MemoryStream();
-        string why = "se cortó la conexión";
+        string why = "connection lost";
         try
         {
             while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
@@ -234,7 +234,7 @@ public sealed class CTraderSession : IDisposable
 
                 if (r.MessageType == WebSocketMessageType.Close)
                 {
-                    why = "cTrader cerró la conexión";
+                    why = "cTrader closed the connection";
                     break;
                 }
 
@@ -281,10 +281,10 @@ public sealed class CTraderSession : IDisposable
                 Spot?.Invoke(symbol, bid, ask, ts);
                 return;
             case TokenInvalidatedEvent:
-                Drop("cTrader invalidó el token: volvé a conectar la cuenta");
+                Drop("cTrader invalidated the token: authorize the account again");
                 return;
             case ClientDisconnectEvent:
-                Drop("cTrader cortó la sesión: " + Str(payload, "reason"));
+                Drop("cTrader ended the session: " + Str(payload, "reason"));
                 return;
         }
 
@@ -313,7 +313,7 @@ public sealed class CTraderSession : IDisposable
     /// <summary>Pedido sin exigir la cuenta autenticada (para la autenticación misma).</summary>
     private async Task<JsonElement> RawRequestAsync(int type, JsonObject payload, CancellationToken ct)
     {
-        var ws = _ws ?? throw new IOException("Sin conexión con cTrader");
+        var ws = _ws ?? throw new IOException("No cTrader connection");
         string id = "v" + Interlocked.Increment(ref _msgId).ToString(CultureInfo.InvariantCulture);
         var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[id] = tcs;
@@ -327,7 +327,7 @@ public sealed class CTraderSession : IDisposable
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new TimeoutException("cTrader no respondió a tiempo");
+            throw new TimeoutException("cTrader timed out");
         }
         finally
         {
@@ -443,7 +443,7 @@ public sealed class CTraderSession : IDisposable
     public void Dispose()
     {
         _life.Cancel();
-        Drop("cerrada");
+        Drop("closed");
     }
 }
 

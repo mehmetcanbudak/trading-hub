@@ -560,16 +560,16 @@ public static class LiveSizing
             bool deepDd = maxDd > 0 && s.CurrentDrawdown >= maxDd * 0.9m && s.CurrentDrawdown >= typicalLoss * 3 && s.CurrentDrawdown > 0;
             bool shallowDd = s.CurrentDrawdown <= Math.Max(maxDd * 0.5m, typicalLoss * 2);
             if (pf < 0.7m && deepDd && s.RecentTrades >= 15)
-                p.Items.Add(new SizingItem { Key = s.Info.Key, Strategy = name, CurrentSize = size, ProposedSize = 0, Reason = $"Pausar: PF de las últimas {s.RecentTrades} operaciones {pf:0.00} y está en su peor drawdown ({s.CurrentDrawdown:N2})." });
+                p.Items.Add(new SizingItem { Key = s.Info.Key, Strategy = name, CurrentSize = size, ProposedSize = 0, Reason = $"Pause: PF over the last {s.RecentTrades} trades {pf:0.00} and at its worst drawdown ({s.CurrentDrawdown:N2})." });
             else if (pf < 0.9m || deepDd)
-                p.Items.Add(new SizingItem { Key = s.Info.Key, Strategy = name, CurrentSize = size, ProposedSize = Math.Max(MinSize, Math.Round(size * 0.5m, 2)), Reason = $"Reducir a la mitad: PF reciente {pf:0.00}{(deepDd ? ", drawdown cerca del máximo" : "")}." });
+                p.Items.Add(new SizingItem { Key = s.Info.Key, Strategy = name, CurrentSize = size, ProposedSize = Math.Max(MinSize, Math.Round(size * 0.5m, 2)), Reason = $"Halve size: recent PF {pf:0.00}{(deepDd ? ", drawdown near its maximum" : "")}." });
             else if (pf >= 1.5m && s.RecentExpectancy > 0 && shallowDd && size < MaxSize)
-                p.Items.Add(new SizingItem { Key = s.Info.Key, Strategy = name, CurrentSize = size, ProposedSize = Math.Min(MaxSize, Math.Round(size * 1.25m, 2)), Reason = $"Aumentar 25 %: PF reciente {pf:0.00}, expectativa {s.RecentExpectancy:N2} por operación y drawdown bajo." });
+                p.Items.Add(new SizingItem { Key = s.Info.Key, Strategy = name, CurrentSize = size, ProposedSize = Math.Min(MaxSize, Math.Round(size * 1.25m, 2)), Reason = $"Increase 25%: recent PF {pf:0.00}, expectancy {s.RecentExpectancy:N2} per trade and low drawdown." });
         }
 
         p.Summary = p.Items.Count == 0
-            ? "Sin cambios: las estrategias con suficientes operaciones están dentro de lo esperado (o todavía tienen poca muestra)."
-            : $"{p.Items.Count} cambio(s) sugerido(s) por las reglas (PF de las últimas 20 operaciones y drawdown).";
+            ? "No changes: strategies with enough trades are performing as expected (or the sample is still too small)."
+            : $"{p.Items.Count} change(s) suggested by the rules (PF over the last 20 trades and drawdown).";
         return p;
     }
 }

@@ -22,13 +22,13 @@ public sealed partial class TradingView
             .OrderByDescending(c => c.Model!.Period.Code == period.Code).FirstOrDefault();
         if (chart == null)
         {
-            if (_svc.Connections.Find(profileId) == null) return $"La conexión {profileId} no existe; revisá Conexiones.";
+            if (_svc.Connections.Find(profileId) == null) return $"Connection {profileId} does not exist; check Connections.";
             chart = await NewTabAsync(profileId, symbol, PeriodFor(period, trade), _active?.Model?.Settings.Clone());
         }
 
         if (chart.Window is { } w) w.Activate();
         else Activate(chart);
-        if (chart.Model is not { } model) return $"No se pudo abrir {symbol}.";
+        if (chart.Model is not { } model) return $"Could not open {symbol}.";
         if (trade == null) return null;
 
         // historia hasta la entrada (con un poco de aire antes)
@@ -37,7 +37,7 @@ public sealed partial class TradingView
         if (data.Trades.Count == 0 || data.Trades.FirstTime > trade.EntryTime.AddMinutes(-30))
         {
             double hours = Math.Max(1, (data.Feed.Now - trade.EntryTime).TotalHours + 2);
-            _status($"Cargando la historia de {symbol} hasta la operación…");
+            _status($"Loading history for {symbol} up to the trade…");
             await LoadHistoryAsync(chart, hours, quiet: true);
         }
 
@@ -47,13 +47,13 @@ public sealed partial class TradingView
         string when = TimeZoneInfo.ConvertTimeFromUtc(trade.EntryTime, model.Settings.TimeZone).ToString("dd/MM HH:mm:ss", inv) + " – " +
                       TimeZoneInfo.ConvertTimeFromUtc(trade.ExitTime, model.Settings.TimeZone).ToString("HH:mm:ss", inv);
         model.FocusTrade = new TradeFocus(trade.EntryTime, trade.EntryPrice, trade.ExitTime, trade.ExitPrice, trade.IsLong, trade.Quantity, trade.NetPnl,
-            $"{strategyName} · #{trade.Number} {(trade.IsLong ? "Largo" : "Corto")} {trade.Quantity.ToString("0.####", inv)} · {pnl} · {when}");
+            $"{strategyName} · #{trade.Number} {(trade.IsLong ? "Long" : "Short")} {trade.Quantity.ToString("0.####", inv)} · {pnl} · {when}");
         // la vela se arma con lo que ya está cargado: esperar un cuadro para tener el ancho real del gráfico
         model.Invalidate();
         await Task.Delay(80);
         model.CenterOn(trade.EntryTime, trade.ExitTime);
         if (model.Series.Count == 0 || model.Series[0].Time > trade.EntryTime)
-            return $"El gráfico no tiene datos de ese momento ({trade.EntryTime.ToLocalTime():dd/MM HH:mm}): bajá esos días en Datos.";
+            return $"The chart has no data for this time ({trade.EntryTime.ToLocalTime():dd/MM HH:mm}): download those days in Data.";
         return null;
     }
 

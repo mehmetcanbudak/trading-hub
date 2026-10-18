@@ -1,40 +1,76 @@
-[← English documentation](README.md)
+[← Documentation index](README.md)
 
 # Privacy and security
 
-Trading Hub runs locally on your Mac. The repository describes no Trading Hub-hosted telemetry, account service, or automatic crash upload. However, connected brokers, exchanges, and Claude Code do exchange information with their respective remote services.
+Trading Hub runs locally: app, market data, scripts, backtests and connection credentials. It has no Trading Hub account/backend and the reviewed source does not implement usage telemetry or automatic error uploads. Configured providers and optional Claude Code still make network requests.
 
-## Stored locally
+## Local storage
 
-| Location | Contains |
+| Location | Contents |
 |---|---|
-| `~/Library/Application Support/Trading Hub` | Settings, nonsecret connection metadata, workspace, tick and candle history, drawings, templates, account records, backtests, live portfolios |
-| `~/Documents/Trading Hub` | C# strategies, C# indicators, and generated reports |
-| macOS Keychain | Passwords, API secrets, access tokens, Databento API key |
+| Application Support/Trading Hub | Settings, nonsecret connection metadata, workspace, ticks/bars, drawings, templates, account records, backtests, live runners and portfolios. |
+| Documents/Trading Hub | Strategies, Estrategias/Reportes reports and custom indicators. |
+| macOS Keychain | Passwords, secrets, tokens and Databento keys under service Trading Hub. |
 
-The application also keeps Claude chat history and some lab chart screenshots locally and records unexpected errors in `crash.log`. Secrets should not be written to project source files or bundled into bug reports.
+See [Installation](instalacion.md#where-your-data-lives) for exact paths. AI-related local files include Chats, the compatibility-named `Capturas del laboratorio` screenshot folder (most recent 60), and claude-lab-mcp.json. Unexpected errors go to local crash.log; they are not automatically submitted.
 
-## When data leaves the Mac
+## Credentials
 
-- Live market data/history connects to the configured broker or exchange.
-- Actual broker account orders go to that broker; simulated orders remain local.
-- Databento requests transmit your credential to Databento and paid downloads should be cost-confirmed.
-- Claude Code interactions, accessible code files, strategy results, metrics, and selected screenshots may be transmitted to **Anthropic** through your Claude account. Anthropic's data policies apply.
-- Browser links and provider OAuth authorization pages open only when requested.
-- Package restore during builds downloads .NET/NuGet dependencies.
+- Production secrets use macOS `security` and Keychain, not normal JSON files.
+- connections.json contains name, username, server, public API identifiers and options. Public IDs/account names can still be sensitive metadata; avoid sharing them unnecessarily.
+- Deleting a connection also deletes its Keychain secrets.
+- Laboratory tools do not expose stored credentials. Do not put credentials into source, prompts or reports, where file-reading tools could access them.
 
-## Keychain
+## Network access
 
-Passwords, tokens, and private keys live in macOS Keychain. `connections.json` retains public connection properties, such as usernames and public key IDs. Deleting a connection removes its associated stored secrets. The lab must never expose credentials to Claude or to test fixtures.
+| Feature | When | Destination |
+|---|---|---|
+| Market data | Opening/using an instrument on an enabled connection. | Configured Binance, Bybit, Rithmic, Tradovate, OANDA, Alpaca or cTrader provider. |
+| History | User download or laboratory download_data request. | Public archives or configured provider APIs. |
+| Long-history/context bars | Loading older charts or context without stored ticks. | Relevant market provider; crypto can use public Binance/Bybit bars without account login. |
+| Orders | Manual or strategy submission to a broker account. | That broker; simulated orders are internal. |
+| Databento | Connection tests, availability/cost estimates and confirmed paid downloads. | Databento using the stored key. |
+| Claude Code | Assistant, laboratory or risk-agent invocation. | Anthropic through the user's CLI/account. |
+| Interactive Brokers probe | Test connection only. | TWS/IB Gateway, local by default. |
+| Links / cTrader authorization | Clicking external links or authorizing access. | System browser and the selected provider/author site. |
 
-## Real trading controls
+There is no built-in updater or automatic crash-report submission in the reviewed source. Building requires NuGet/network access independently of normal app operation. Providers and CLI software have their own policies; this is not a packet-level audit of third-party components.
 
-Real order capability is opt-in per connection. Confirmation preferences may be adjusted; verify all live risk limits before enabling execution. Automated real-account strategies do not automatically resume by default. A live risk agent's real-account allocation proposals require approval.
+## Claude
 
-## Development safety
+Prompts, read strategy/indicator files, metrics/trades/data summaries, chart images and requested live exposure may be sent to Anthropic. The assistant's working directory is the strategy folder, with file tools limited to strategy/indicator/screenshot roots and without terminal/web or unrelated MCP tools. Risk reviews have no tools, only supplied portfolio figures.
 
-Unit tests and headless visual tests must run against temporary directories, including `TRADINGHUB_DATA_DIR`, `TRADINGHUB_STRATEGIES_DIR`, and `TRADINGHUB_INDICATORS_DIR`, plus a fake secrets store under `TRADINGHUB_KEYCHAIN_FILE`. Do not run two instances against the same live tick-data files.
+Data handling depends on your Claude account and Anthropic policies. See [Claude](asistente-claude.md). Local storage does **not** mean AI requests stay local. Historical conversations/reports are retained in their original language/content.
 
-## Removing your data
+## Real money
 
-Completely quit the application; delete its Application Support directory and optional Documents directory only if you no longer need those assets; remove Trading Hub credentials from Keychain Access; and uninstall the app. Back up your strategies and recorded history first. Deletion cannot be undone.
+- Simulation is the default; real destinations require per-connection permission.
+- Existing manual-order confirmation rules remain; manually launching/resuming an automatic real strategy asks once. Automatic real resumption is disabled by default because it does not show that dialog.
+- Live sizing, daily-loss/drawdown limits and Stop all remain available. Automatic risk-agent changes are not allowed for portfolios containing real-account members.
+
+See [Connections](conexiones.md#real-and-test-accounts), [Trading safety](operar.md#safety) and [Live](en-vivo.md). Limits/actions cannot guarantee execution during outages. Imported C# and plugin DLLs are unsandboxed and should be trusted/reviewed before running.
+
+## macOS permissions
+
+- **Administrator password:** only for explicitly enabled closed-lid operation, using a privileged power helper. It restores normal sleep when the app exits; see [Settings](ajustes.md#keep-awake).
+- **Control Terminal:** Claude sign-in opens Terminal with `claude /login`.
+- Locally built apps use ad-hoc signing unless a certificate is configured; see [Signing](instalacion.md#ad-hoc-signing).
+
+Localization tests do not enable privileged closed-lid operation or request broker credentials.
+
+## Development isolation
+
+Tests/scenes use temporary data, strategy and indicator directories plus fake JSON credentials. Default screenshot tooling copies/sanitizes configuration, disables real orders and points Rithmic at a local fake server. Explicit fresh fixtures are preferred to copying user history. See [Development](desarrollo.md).
+
+TRADINGHUB_KEYCHAIN_FILE is a **plaintext testing override**, not encrypted production credential storage. Do not place real secrets there or include it in diagnostics.
+
+## Delete everything
+
+This is optional irreversible removal, not an update step:
+
+1. Fully quit using ⌘Q / Quit Trading Hub.
+2. Back up anything required; delete Application Support/Trading Hub, and Documents/Trading Hub only if you also intend to erase scripts/reports.
+3. In Keychain Access remove the relevant Trading Hub entries.
+4. Remove the Applications bundle; see [Uninstalling](instalacion.md#uninstalling).
+
+The English upgrade itself does not delete data, rename stable folders or translate personal records in place.

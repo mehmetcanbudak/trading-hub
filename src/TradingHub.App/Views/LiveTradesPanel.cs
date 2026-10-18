@@ -19,7 +19,7 @@ namespace TradingHub.App.Views;
 /// </summary>
 internal sealed class LiveTradesPanel : UserControl
 {
-    private static readonly CultureInfo Es = new("es-AR");
+    private static readonly CultureInfo Es = new("en-US");
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     private const string Columns = "44,2*,96,58,118,84,118,84,76,58,74,96,88,88,70";
     private readonly AppServices _svc;
@@ -28,7 +28,7 @@ internal sealed class LiveTradesPanel : UserControl
     private readonly ComboBox _order = new() { MinWidth = 170 };
     private readonly TextBlock _summary = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
     private readonly ListBox _list = new() { Background = Brushes.Transparent };
-    private readonly TextBlock _empty = new() { Text = "Todavía no hay operaciones cerradas en vivo.", Classes = { "muted" }, Margin = new Thickness(12), IsVisible = false };
+    private readonly TextBlock _empty = new() { Text = "No completed live trades yet.", Classes = { "muted" }, Margin = new Thickness(12), IsVisible = false };
     private List<Row> _rows = new();
     private Dictionary<string, (decimal Mae, decimal Mfe, bool Exact)> _ex = new();
     private string? _only;
@@ -47,11 +47,11 @@ internal sealed class LiveTradesPanel : UserControl
         _status = status;
         _only = onlyKey;
         _scope = scope != null ? new HashSet<string>(scope) : null;
-        _order.Items.Add(new ComboBoxItem { Content = "Más recientes primero", Tag = "recent" });
-        _order.Items.Add(new ComboBoxItem { Content = "Más viejas primero", Tag = "old" });
-        _order.Items.Add(new ComboBoxItem { Content = "Mejor resultado", Tag = "best" });
-        _order.Items.Add(new ComboBoxItem { Content = "Peor resultado", Tag = "worst" });
-        _order.Items.Add(new ComboBoxItem { Content = "Peor MAE", Tag = "mae" });
+        _order.Items.Add(new ComboBoxItem { Content = "Newest first", Tag = "recent" });
+        _order.Items.Add(new ComboBoxItem { Content = "Oldest first", Tag = "old" });
+        _order.Items.Add(new ComboBoxItem { Content = "Best PnL", Tag = "best" });
+        _order.Items.Add(new ComboBoxItem { Content = "Worst PnL", Tag = "worst" });
+        _order.Items.Add(new ComboBoxItem { Content = "Worst MAE", Tag = "mae" });
         _order.SelectedIndex = 0;
         _filter.SelectionChanged += (_, _) =>
         {
@@ -64,20 +64,20 @@ internal sealed class LiveTradesPanel : UserControl
             if (!_filling) Render();
         };
 
-        var copy = Ui.Button("Copiar (CSV)", MaterialIconKind.ContentCopy, () => _ = CopyAsync());
-        ToolTip.SetTip(copy, "Copia las operaciones (con MAE y MFE) para pegarlas en una planilla");
+        var copy = Ui.Button("Copy (CSV)", MaterialIconKind.ContentCopy, () => _ = CopyAsync());
+        ToolTip.SetTip(copy, "Copy trades, including MAE and MFE, to paste into a spreadsheet");
         var bar = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
         DockPanel.SetDock(copy, Dock.Right);
         bar.Children.Add(copy);
-        bar.Children.Add(Ui.H(10, Ui.Muted("Estrategia"), _filter, Ui.Muted("Orden"), _order));
+        bar.Children.Add(Ui.H(10, Ui.Muted("Strategy"), _filter, Ui.Muted("Order"), _order));
 
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions(Columns), Margin = new Thickness(12, 0, 12, 6) };
-        string[] titles = { "#", "Estrategia", "Mercado", "Lado", "Entrada", "Precio", "Salida", "Precio", "Duración", "Cant.", "Puntos", "Resultado", "MAE", "MFE", "Captura" };
+        string[] titles = { "#", "Strategy", "Market", "Side", "Entry", "Price", "Exit", "Price", "Duration", "Qty", "Points", "PnL", "MAE", "MFE", "Capture" };
         string[] tips =
         {
-            "Número de la operación en esa estrategia", "", "", "", "", "Precio promedio de entrada", "", "Precio de salida", "", "Cantidad real (con el tamaño)",
-            "Puntos a favor (+) o en contra (−)", "Resultado en dinero", "MAE: lo peor que estuvo (en dinero) antes de cerrar", "MFE: lo mejor que estuvo (en dinero) antes de cerrar",
-            "En las ganadoras: qué parte del mejor momento (MFE) se llevó al cerrar",
+            "Trade number within this strategy", "", "", "", "", "Average entry price", "", "Exit price", "", "Actual quantity (including sizing)",
+            "Favorable (+) or adverse (−) points", "Monetary PnL", "MAE: worst monetary excursion before closing", "MFE: best monetary excursion before closing",
+            "For winners: fraction of the best excursion (MFE) captured at exit",
         };
         for (int i = 0; i < titles.Length; i++)
         {
@@ -96,7 +96,7 @@ internal sealed class LiveTradesPanel : UserControl
         table.Children.Add(_list);
         var scroll = new ScrollViewer { Content = table, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
 
-        var hint = Ui.Faint("Tocá una operación para verla en el gráfico (recuadro de la entrada a la salida, con su peor y su mejor precio). La ✕ de su etiqueta (o Escape) la saca.");
+        var hint = Ui.Faint("Select a trade to view its entry-to-exit box, worst and best prices on the chart. Close its label or press Escape to clear it.");
         hint.Margin = new Thickness(0, 8, 0, 0);
         var root = new DockPanel();
         DockPanel.SetDock(bar, Dock.Top);
@@ -118,9 +118,9 @@ internal sealed class LiveTradesPanel : UserControl
         _filling = true;
         var keep = _only;
         _filter.Items.Clear();
-        _filter.Items.Add(new ComboBoxItem { Content = _scope == null ? "Todas las estrategias" : "Todas las del portafolio", Tag = null });
+        _filter.Items.Add(new ComboBoxItem { Content = _scope == null ? "All strategies" : "All portfolio trades", Tag = null });
         foreach (var e in entries.Where(e => e.Ledger.Trades.Count > 0).OrderBy(e => e.Info.Strategy))
-            _filter.Items.Add(new ComboBoxItem { Content = $"{e.Info.Strategy} · {e.Info.Symbol} · {e.Info.Account} ({e.Ledger.Trades.Count})", Tag = e.Key });
+            _filter.Items.Add(new ComboBoxItem { Content = $"{e.Info.Strategy} · {e.Info.Symbol} · {TradingHub.Common.EnglishText.Of(e.Info.Account)} ({e.Ledger.Trades.Count})", Tag = e.Key });
         _filter.SelectedItem = _filter.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (i.Tag as string) == keep) ?? _filter.Items[0];
         _filling = false;
         _rows = entries.Where(e => keep == null || e.Key == keep)
@@ -134,7 +134,7 @@ internal sealed class LiveTradesPanel : UserControl
         var missing = _rows.Where(r => !_ex.ContainsKey(r.Id)).Select(r => (r.Entry, r.Trade)).ToList();
         if (missing.Count == 0) return;
         int ticket = ++_computing;
-        _summary.Text += " · calculando MAE y MFE…";
+        _summary.Text += " · calculating MAE and MFE…";
         var res = await _svc.Live.ExcursionsAsync(missing);
         if (ticket != _computing) return;
         foreach (var (k, v) in res) _ex[k] = v;
@@ -161,7 +161,7 @@ internal sealed class LiveTradesPanel : UserControl
         _empty.IsVisible = rows.Count == 0;
         if (rows.Count == 0)
         {
-            _summary.Text = "Sin operaciones cerradas todavía.";
+            _summary.Text = "No closed trades yet.";
             return;
         }
 
@@ -170,11 +170,11 @@ internal sealed class LiveTradesPanel : UserControl
         int wins = rows.Count(r => r.Trade.NetPnl > 0);
         var exact = rows.Select(r => _ex.TryGetValue(r.Id, out var x) && x.Exact ? x : ((decimal, decimal, bool)?)null).Where(x => x != null).Select(x => x!.Value).ToList();
         string exText = exact.Count > 0
-            ? $" · MAE medio {Money(exact.Average(x => x.Item1))} · MFE medio {Money(exact.Average(x => x.Item2))}"
+            ? $" · average MAE {Money(exact.Average(x => x.Item1))} · average MFE {Money(exact.Average(x => x.Item2))}"
             : "";
         var durations = rows.Select(r => r.Trade.ExitTime - r.Trade.EntryTime).ToList();
-        _summary.Text = $"{rows.Count} operaciones · neto {Money(net)} · {(rows.Count > 0 ? 100.0 * wins / rows.Count : 0):0} % ganadoras · PF {(gl > 0 ? (gp / gl).ToString("0.00", Es) : gp > 0 ? "∞" : "—")}" +
-                        $" · duración media {Duration(TimeSpan.FromTicks((long)durations.Average(d => d.Ticks)))}{exText}";
+        _summary.Text = $"{rows.Count} trades · net {Money(net)} · {(rows.Count > 0 ? 100.0 * wins / rows.Count : 0):0} % winners · PF {(gl > 0 ? (gp / gl).ToString("0.00", Es) : gp > 0 ? "∞" : "—")}" +
+                        $" · average duration {Duration(TimeSpan.FromTicks((long)durations.Average(d => d.Ticks)))}{exText}";
     }
 
     private Grid BuildRow(Row r)
@@ -195,9 +195,9 @@ internal sealed class LiveTradesPanel : UserControl
         decimal points = (t.ExitPrice - t.EntryPrice) * sign;
         bool hasEx = _ex.TryGetValue(r.Id, out var ex) && ex.Exact;
         Cell(0, t.Number.ToString(Inv), Ui.Text2, true);
-        Cell(1, info.Strategy, null, false, $"{info.Strategy} · {info.Account} · {r.Entry.SourceLabel}");
+        Cell(1, info.Strategy, null, false, $"{info.Strategy} · {TradingHub.Common.EnglishText.Of(info.Account)} · {r.Entry.SourceLabel}");
         Cell(2, info.Symbol, Ui.Text1);
-        Cell(3, t.IsLong ? "Largo" : "Corto", t.IsLong ? Ui.Up : Ui.Down);
+        Cell(3, t.IsLong ? "Long" : "Short", t.IsLong ? Ui.Up : Ui.Down);
         Cell(4, t.EntryTime.ToLocalTime().ToString("dd/MM HH:mm:ss", Es));
         Cell(5, t.EntryPrice.ToString("0.#####", Inv), null, true);
         Cell(6, t.ExitTime.ToLocalTime().ToString("dd/MM HH:mm:ss", Es));
@@ -206,13 +206,13 @@ internal sealed class LiveTradesPanel : UserControl
         Cell(9, t.Quantity.ToString("0.####", Inv), null, true);
         Cell(10, points.ToString("+0.#####;-0.#####;0", Inv), points >= 0 ? Ui.Up : Ui.Down, true);
         Cell(11, Money(t.NetPnl), t.NetPnl >= 0 ? Ui.Up : Ui.Down, true);
-        Cell(12, hasEx ? Money(ex.Mae) : "—", Ui.Down, true, hasEx ? null : "Sin datos guardados de ese momento");
-        Cell(13, hasEx ? Money(ex.Mfe) : "—", Ui.Up, true, hasEx ? null : "Sin datos guardados de ese momento");
+        Cell(12, hasEx ? Money(ex.Mae) : "—", Ui.Down, true, hasEx ? null : "No saved data for that time");
+        Cell(13, hasEx ? Money(ex.Mfe) : "—", Ui.Up, true, hasEx ? null : "No saved data for that time");
         Cell(14, hasEx && ex.Mfe > 0 && t.NetPnl > 0 ? $"{Math.Min(100, t.NetPnl / ex.Mfe * 100):0} %" : "—", Ui.Text2, true);
         g.Tapped += async (_, _) =>
         {
             var err = await _svc.Live.ShowTradeAsync(r.Entry, t);
-            _status(err ?? $"Operación #{t.Number} de {info.Strategy} en el gráfico");
+            _status(err ?? $"Trade #{t.Number} of {info.Strategy} on chart");
         };
         return g;
     }
@@ -225,7 +225,7 @@ internal sealed class LiveTradesPanel : UserControl
             var t = r.Trade;
             bool hasEx = _ex.TryGetValue(r.Id, out var ex) && ex.Exact;
             decimal points = (t.ExitPrice - t.EntryPrice) * (t.IsLong ? 1 : -1);
-            sb.AppendLine(string.Join(";", r.Entry.Info.Strategy, r.Entry.Info.Symbol, r.Entry.Info.Account, r.Entry.SourceLabel, t.Number.ToString(Inv), t.IsLong ? "largo" : "corto",
+            sb.AppendLine(string.Join(";", r.Entry.Info.Strategy, r.Entry.Info.Symbol, r.Entry.Info.Account, r.Entry.SourceLabel, t.Number.ToString(Inv), t.IsLong ? "long" : "short",
                 t.EntryTime.ToString("yyyy-MM-dd HH:mm:ss", Inv), t.EntryPrice.ToString(Inv), t.ExitTime.ToString("yyyy-MM-dd HH:mm:ss", Inv), t.ExitPrice.ToString(Inv),
                 (t.ExitTime - t.EntryTime).TotalMinutes.ToString("0.##", Inv), t.Quantity.ToString(Inv), points.ToString(Inv), t.NetPnl.ToString("0.##", Inv),
                 hasEx ? ex.Mae.ToString("0.##", Inv) : "", hasEx ? ex.Mfe.ToString("0.##", Inv) : ""));
@@ -234,7 +234,7 @@ internal sealed class LiveTradesPanel : UserControl
         if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)
         {
             await cb.SetTextAsync(sb.ToString());
-            _status($"Copiadas {_rows.Count} operaciones (pegalas en una planilla)");
+            _status($"Copied {_rows.Count} trades (paste into a spreadsheet)");
         }
     }
 
@@ -249,7 +249,7 @@ internal sealed class LiveTradesWindow : Window
 {
     public LiveTradesWindow(AppServices svc, Action<string> status, string? onlyKey = null, string? title = null, IEnumerable<string>? scope = null)
     {
-        Title = title ?? "Operaciones cerradas en vivo";
+        Title = title ?? "Closed live trades";
         Width = 1320;
         Height = 760;
         MinWidth = 720;
