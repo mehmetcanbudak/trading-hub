@@ -10,25 +10,27 @@ namespace TradingHub.Tests;
 /// </summary>
 internal sealed class FakeHttpServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private readonly HttpListener _listener;
     private readonly CancellationTokenSource _cts = new();
 
-    public FakeHttpServer()
+    public FakeHttpServer(int? firstPort = null)
     {
         var rnd = new Random();
         for (int i = 0; ; i++)
         {
-            int port = rnd.Next(45000, 60000);
+            int port = i == 0 && firstPort.HasValue ? firstPort.Value : rnd.Next(45000, 60000);
+            _listener = new HttpListener(); // A failed Start disposes the listener; each retry needs a fresh one.
             try
             {
-                _listener.Prefixes.Clear();
                 _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
                 _listener.Start();
                 Port = port;
                 break;
             }
-            catch (HttpListenerException) when (i < 20)
+            catch (HttpListenerException)
             {
+                _listener.Close();
+                if (i >= 20) throw;
             }
         }
 

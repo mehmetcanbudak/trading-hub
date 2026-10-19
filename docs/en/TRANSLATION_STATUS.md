@@ -15,7 +15,7 @@ Completed coverage includes navigation, controls/tooltips, secondary windows, sa
 | Check | Result | Evidence |
 |---|---|---|
 | Release application/solution build | Passed | .NET SDK 10.0.402, Apple Silicon macOS; two pre-existing warnings noted below. |
-| Unit/regression suite | **221 passed** | Original 192 cases plus 29 localization/compatibility cases; complete Release runs passed after repairing the fixture race. |
+| Unit/regression suite | **222 passed locally** | Original 192 cases, 29 localization/compatibility cases and one forced busy-port fixture regression. Hosted follow-up verifies the new fixture fix. |
 | Fake Tradovate request-log race | Fixed in test fixture only | ConcurrentQueue replaces a concurrently read/written List; previously failing test passed **20/20** repeated runs. |
 | Source localization audit | Passed | **184 files / 11,531 text tokens**, zero unresolved candidates; **129** explicit compatibility/language-code exceptions. |
 | Non-text C# review guard | Passed | Baseline token fingerprints plus 36 reviewed display/compatibility/sample files; raw strategy/indicator template C# is recursively fingerprinted. |
@@ -40,7 +40,7 @@ Completed coverage includes navigation, controls/tooltips, secondary windows, sa
 
 The [upstream sync guide](upstream-sync.md), [checkpoint ledger](../../.github/upstream-english.json) and [daily/manual monitor](../../.github/workflows/upstream-english-tracking.yml) track the original repository separately from this English branch. The initial checkpoint is `9ee74a4c527ac43120423acd41e006ec9d7877ad`, matching current upstream main; no upstream backlog was found during setup. The historical C# audit baseline remains unchanged.
 
-Local tests cover synthetic upstream additions, history rewrites, invalid checkpoints, English doc mappings, preserved issue notes/checklists, bounded output, notification deduplication/retry and fork-only writes. The monitor never merges, auto-translates, advances the checkpoint, installs an app or touches trading data. Setup of the authorized English default branch, Issues and hosted scheduling is in progress; do not treat local tests as proof of a live notification.
+Local tests cover synthetic upstream additions, history rewrites, invalid checkpoints, English doc mappings, preserved issue notes/checklists, bounded output, notification deduplication/retry and fork-only writes. The monitor never merges, auto-translates, advances the checkpoint, installs an app or touches trading data. The authorized English default branch and Issues are enabled. The monitor is active at 06:37 UTC; push run 39237527539 and manual run 39237638444 both passed and maintained the same [tracker issue #2](https://github.com/mehmetcanbudak/trading-hub/issues/2), assigned to the owner with current status Up to date. Broader Windows CI exposed an existing fake-HTTP listener port-retry bug; its forced busy-port regression was observed red, fixed with a fresh listener per attempt and passed 20/20 repeats locally. No real broker code changed; full hosted revalidation is pending.
 
 ## Compatibility is not missing translation
 
