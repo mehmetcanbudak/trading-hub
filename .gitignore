@@ -5,6 +5,7 @@ dist/
 *.user
 .vs/
 .idea/
+__pycache__/
 
 # macOS
 .DS_Store

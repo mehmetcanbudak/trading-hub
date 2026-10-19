@@ -19,7 +19,7 @@ Completed coverage includes navigation, controls/tooltips, secondary windows, sa
 | Fake Tradovate request-log race | Fixed in test fixture only | ConcurrentQueue replaces a concurrently read/written List; previously failing test passed **20/20** repeated runs. |
 | Source localization audit | Passed | **184 files / 11,531 text tokens**, zero unresolved candidates; **129** explicit compatibility/language-code exceptions. |
 | Non-text C# review guard | Passed | Baseline token fingerprints plus 36 reviewed display/compatibility/sample files; raw strategy/indicator template C# is recursively fingerprinted. |
-| English guides and links | Passed | **21 Markdown files**, **160 local links/anchors**, **16 guide section-coverage checks**. Section counts supplement, not replace, semantic review. |
+| English guides and links | Passed | **22 Markdown files**, **173 local links/anchors**, **16 guide section-coverage checks**. Section counts supplement, not replace, semantic review. |
 | English UI scenario | **120 checks, zero failures** | Seven main pages; nine secondary windows; chart-setting tabs; technical-source badge; actual safety dialogs; reports and compiler output. |
 | Safety cancellation | Passed | Cancel real-account launch, paid Databento download, data deletion and emergency stop; no runner launched, paid data requested or history deleted. |
 | Built-in/example compilation | Passed | Five strategy templates, the initial custom indicator, the New indicator editor template and all three complete guide examples compile with English code identifiers. The New indicator regression was observed failing before its fix. |
@@ -31,9 +31,16 @@ Completed coverage includes navigation, controls/tooltips, secondary windows, sa
 | Test isolation guards | Passed | Direct production-data root and a symlink alias both refused before application startup. Sleep guard disabled; fake Keychain/providers used. |
 | Installer syntax | Passed | `zsh -n build-app.sh`; only comments/messages translated, packaging behavior unchanged. |
 | Broader scenarios / narrow-window visual review | Passed | Final **16-scenario** run exited 0 with **65 screenshots**; fresh **1100×760** run exited 0 with 120 English checks. Main pages, secondary windows and safety dialogs visually inspected. |
+| Upstream tracker unit tests | **13 passed locally** | Temporary Git histories and fake issue API cover advancement/rewrite detection, checkpoint validation, doc mappings, note preservation, retry-safe deduplication, bounded output and fork-only writes. Hosted setup is pending below. |
 | Negative audit gates | Passed | Unaccented Spanish, accented Spanish and new unreviewed English source were rejected. Temporary probes removed. |
 | Hosted GitHub workflow | Passed | [Workflow](../../.github/workflows/english-translation-validation.yml), [run 39171525478](https://github.com/mehmetcanbudak/trading-hub/actions/runs/39171525478) validates commit `bad8c5e`: Windows shared build/221 tests/source-doc audit; macOS Release build/221 tests/source-doc audit and all 16 UI scenarios, including 120 English checks. Isolated screenshots and HTML reports uploaded as `tradinghub-english-ui`. This is this fork's evidence, not older TradeDock CI. |
 | Installed English app | Passed | Updated bundle installed and strict signature verification passed. Native Backtesting shows compiled DeltaAbsorption.cs with English code, and Custom indicator editor shows compiled DeltaPercentageExample.cs with English code. All five files migrated with permission; no saved references needed rewriting. Previous bundle/source/state rollback remains outside watched folders, and real-order permissions remain disabled. |
+
+## Upstream maintenance
+
+The [upstream sync guide](upstream-sync.md), [checkpoint ledger](../../.github/upstream-english.json) and [daily/manual monitor](../../.github/workflows/upstream-english-tracking.yml) track the original repository separately from this English branch. The initial checkpoint is `9ee74a4c527ac43120423acd41e006ec9d7877ad`, matching current upstream main; no upstream backlog was found during setup. The historical C# audit baseline remains unchanged.
+
+Local tests cover synthetic upstream additions, history rewrites, invalid checkpoints, English doc mappings, preserved issue notes/checklists, bounded output, notification deduplication/retry and fork-only writes. The monitor never merges, auto-translates, advances the checkpoint, installs an app or touches trading data. Setup of the authorized English default branch, Issues and hosted scheduling is in progress; do not treat local tests as proof of a live notification.
 
 ## Compatibility is not missing translation
 

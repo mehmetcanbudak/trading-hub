@@ -6,6 +6,10 @@ Trading Hub is a free, source-available desktop trading platform for Apple Silic
 
 Before changing code, inspect [the localization validation dashboard](docs/en/TRANSLATION_STATUS.md) and identify scope, risks, dependencies, existing behavior, and release gates. Work on a branch, not directly on `main`. Never declare a feature complete without evidence from builds, tests, data checks, and relevant UI scenarios. Keep unresolved failures visible and keep the PR in draft until release criteria are met. Protect existing order routing, credentials, historical data, strategy behavior, and macOS compatibility.
 
+## Upstream monitoring and English maintenance
+
+Read [the sync guide](docs/en/upstream-sync.md) and [the upstream ledger](.github/upstream-english.json). `python3 tools/check_upstream.py` fetches/reports pending changes without merging, switching branches or advancing the checkpoint. The fork-only scheduled workflow maintains one tracker issue; its notification token cannot write code. Incorporate upstream changes through a separate sync branch and reviewed PR into **mehmetcanbudak/trading-hub:feat/english-localization**, never the original author's repository. Keep main and Rust/Swift worktrees untouched. Translate all new surfaces/examples/docs, preserve persistent identities, run the established gates and update TRANSLATION_STATUS with evidence before advancing `integrated_commit`. The historical C# audit baseline is separate: do not change it just to silence upstream differences.
+
 ## If asked to install Trading Hub
 
 Explain each step briefly; do not request personal information, broker credentials, passwords, or API secrets for installation.

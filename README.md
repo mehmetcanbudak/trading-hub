@@ -8,6 +8,8 @@ Created by [@ralphtradesz](https://x.com/ralphtradesz). English work in this for
 
 **English branch:** `feat/english-localization`. Built-in UI, safety dialogs, reports, assistant instructions and full guides are English. Stored identifiers, personal history and third-party content are not destructively rewritten. See the [validation dashboard](docs/en/TRANSLATION_STATUS.md).
 
+**Upstream updates:** [Daily monitoring and the reviewed English sync process](docs/en/upstream-sync.md) track new original-repository commits without automatic merges or deployment.
+
 **Using Windows?** See [Porting Trading Hub to Windows](docs/en/portar-a-windows.md).
 
 ![Trading Hub](docs/en/img/trading.png)

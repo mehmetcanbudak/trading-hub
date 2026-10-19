@@ -1,0 +1,39 @@
+name: Track upstream for English localization
+
+on:
+  schedule:
+    - cron: '37 6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [feat/english-localization]
+    paths:
+      - .github/upstream-english.json
+      - .github/workflows/upstream-english-tracking.yml
+      - tools/check_upstream.py
+      - tools/tests/test_check_upstream.py
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-english-tracking
+  cancel-in-progress: false
+
+jobs:
+  track:
+    if: github.repository == 'mehmetcanbudak/trading-hub'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/english-localization
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test tracker behavior without network or notifications
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
+      - name: Report upstream changes and notify only this fork
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/check_upstream.py --notify | tee "$GITHUB_STEP_SUMMARY"

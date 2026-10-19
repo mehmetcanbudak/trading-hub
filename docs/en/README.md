@@ -15,4 +15,4 @@ Full English guides for the `feat/english-localization` branch of this fork, tar
 
 ## Translation progress
 
-See the [localization validation dashboard](TRANSLATION_STATUS.md) for verified checks, compatibility exceptions and untested areas.
+See the [localization validation dashboard](TRANSLATION_STATUS.md) for verified checks, compatibility exceptions and untested areas. Use [Upstream synchronization](upstream-sync.md) for daily original-repository monitoring, the reviewed checkpoint and the safe merge/translation checklist.

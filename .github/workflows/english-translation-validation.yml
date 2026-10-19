@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - feat/english-localization
 
 permissions:
   contents: read
@@ -24,6 +25,8 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Test upstream tracker without network or notifications
+        run: python -m unittest discover -s tools/tests -p 'test_*.py' -v
       - name: Build shared solution on Windows
         run: dotnet build TradingHub.slnx --configuration Release
       - name: Run shared regression tests on Windows
@@ -42,6 +45,8 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Test upstream tracker without network or notifications
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
       - name: Build solution
         run: dotnet build TradingHub.slnx --configuration Release
       - name: Run regression tests
