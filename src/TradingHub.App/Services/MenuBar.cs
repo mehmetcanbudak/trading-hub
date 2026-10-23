@@ -82,11 +82,11 @@ internal sealed class MenuBar
         _main.Activate();
     }
 
-    /// <summary>Sale de Trading Hub del todo (detiene las estrategias; las que corrían se reanudan al abrir si así está en Ajustes).</summary>
-    public static void Quit()
-    {
-        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
-    }
+    /// <summary>
+    /// «Quit Trading Hub»: the same quit as ⌘Q (<see cref="QuitFlow"/>). While live strategies hold positions it first asks
+    /// what to do with their orders; the ones that were running resume at the next start if enabled in Settings.
+    /// </summary>
+    public static void Quit() => _ = App.Quit?.QuitAsync();
 
     /// <summary>Un renglón del menú: clave estable, texto, si se puede tocar y qué hace (null = separador).</summary>
     private sealed record MenuLine(string Key, string? Text, bool Enabled = false, Action? Click = null);
