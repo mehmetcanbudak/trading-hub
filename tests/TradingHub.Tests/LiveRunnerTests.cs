@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Market;
@@ -403,6 +404,44 @@ public class LiveRunnerTests : IDisposable
         r3.Start();
         Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
         Assert.True(r3.LogLines.Any(l => l.Contains("no additional stop", StringComparison.Ordinal)), string.Join(" | ", r3.LogLines));
+    }
+
+    [Fact]
+    public void A_fill_its_ledger_cannot_save_is_logged_and_saved_in_order_with_the_next_one()
+    {
+        var (s, _, r) = Setup();
+        string file = LiveStore.LedgerFile(r.Key);
+        Directory.CreateDirectory(file); // the ledger path cannot be written as a file
+        s.Next.Enqueue(x => x.DoBuy(1));
+        Tick(101);
+        Tick(102);
+        Assert.Equal(1m, r.Ledger.Position);
+        Assert.True(r.LogLines.Any(l => l.Contains("Could not save", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+
+        Directory.Delete(file); // writable again: the pending fill goes first, then the new one
+        s.Next.Enqueue(x => x.DoClose());
+        Tick(103);
+        Tick(104);
+        var saved = File.ReadAllLines(file).Select(l => JsonSerializer.Deserialize<LiveFill>(l)!).ToList();
+        Assert.Equal(new[] { true, false }, saved.Select(f => f.Buy));
+        Assert.Equal(0m, LiveStore.LoadLedger(r.Key, 1).Position);
+        Assert.True(r.LogLines.Any(l => l.Contains("1 pending fill", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+        Assert.Equal(0, LiveStore.PendingFills(r.Key));
+    }
+
+    [Fact]
+    public void A_runner_reports_unreadable_lines_in_its_ledger_and_keeps_the_fills_after_them()
+    {
+        var key = $"{typeof(Scripted).FullName}|test:TEST|Cuenta simulada";
+        string file = LiveStore.LedgerFile(key);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, JsonSerializer.Serialize(new LiveFill(T0.AddDays(-1), false, 2, 100)) + "\n{\"Time\":\n"
+                                + JsonSerializer.Serialize(new LiveFill(T0.AddDays(-1).AddMinutes(5), true, 2, 99)) + "\n");
+        var (_, _, r) = Setup();
+        Assert.Equal(0m, r.Ledger.Position); // the closing fill after the bad line was read
+        Assert.Equal(1, r.Ledger.SkippedLines);
+        Assert.True(r.LogLines.Any(l => l.Contains("unreadable", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+        Assert.DoesNotContain(r.LogLines, l => l.Contains("does not have", StringComparison.Ordinal)); // no position invented by a cut-off read
     }
 
     /// <summary>Limitador de prueba: deja pasar hasta cierta posición.</summary>

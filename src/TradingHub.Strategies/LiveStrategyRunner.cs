@@ -302,6 +302,8 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         StartedUtc = DateTime.UtcNow;
         Log($"Started on {TradingHub.Common.EnglishText.Of(_account.Name)} with {WarmupBars} warmup bars{(SizeMultiplier != 1 ? $" · size ×{Qty(SizeMultiplier)}" : "")}" +
             (CrossExecution ? $" · executes on {ExecInstrument.Symbol} (1 {_data.Instrument.Symbol} = {Qty(ExecRatio)} {ExecInstrument.Symbol})" : ""));
+        if (Ledger.SkippedLines > 0)
+            Log($"Its ledger has {Ledger.SkippedLines} unreadable line{(Ledger.SkippedLines == 1 ? "" : "s")}: skipped, and the fills after them were read (the file was not changed)");
         if (Ledger.Position != 0) CheckInheritedPosition(initial: true);
         Changed?.Invoke();
         Started?.Invoke(this);
@@ -370,7 +372,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         if (IsRunning) throw new InvalidOperationException("Only before starting.");
         Ledger ??= Persist ? LiveStore.LoadLedger(Key, _data.Instrument.PointValue) : new LiveLedger(Key, _data.Instrument.PointValue);
         Ledger.Apply(fill);
-        if (Persist) LiveStore.AppendFill(Key, fill);
+        SaveFill(fill);
     }
 
     /// <summary>
@@ -635,7 +637,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         decimal before = Ledger.Position;
         var fill = new LiveFill(DateTime.UtcNow, so.Side == OrderSide.Buy, quantity, LastPrice > 0 ? LastPrice : _data.LastPrice, ExecInstrument.Symbol, ExecInstrument.PointValue);
         Ledger.Apply(fill);
-        if (Persist) LiveStore.AppendFill(Key, fill);
+        SaveFill(fill);
         decimal after = Ledger.Position;
         if (after == 0) _virtual = 0;
         else if (so.IsProtective) _virtual = before != 0 && Math.Sign(before) == Math.Sign(after) ? _virtual * after / before : ToVirtual(after);
@@ -655,10 +657,24 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         decimal price = _data.LastPrice > 0 ? _data.LastPrice : Ledger.AveragePrice;
         var fill = new LiveFill(DateTime.UtcNow, signedQuantity > 0, Math.Abs(signedQuantity), price, Ledger.OpenSymbol ?? ExecInstrument.Symbol, Ledger.OpenPointValue > 0 ? Ledger.OpenPointValue : ExecInstrument.PointValue);
         Ledger.Apply(fill);
-        if (Persist) LiveStore.AppendFill(Key, fill);
+        SaveFill(fill);
         decimal after = Ledger.Position;
         _virtual = after == 0 ? 0 : before != 0 && Math.Sign(before) == Math.Sign(after) ? _virtual * after / before : ToVirtual(after);
         Log(why);
+    }
+
+    /// <summary>
+    /// Saves a fill to its ledger. If the file cannot be written it is logged, and the fill stays pending and is saved, in
+    /// order, before the next one.
+    /// </summary>
+    private void SaveFill(LiveFill fill)
+    {
+        if (!Persist) return;
+        int waiting = LiveStore.PendingFills(Key);
+        if (LiveStore.AppendFill(Key, fill) is { } error)
+            Log($"Could not save a fill to its ledger ({error.TrimEnd('.')}): it stays pending and is saved before the next fill");
+        else if (waiting > 0)
+            Log($"Saved {waiting} pending fill{(waiting == 1 ? "" : "s")} to its ledger");
     }
 
     /// <summary>Manda el cierre de la posición propia (nunca más de lo que la cuenta tiene en ese sentido).</summary>

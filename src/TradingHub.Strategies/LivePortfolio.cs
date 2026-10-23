@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace TradingHub.Strategies;
@@ -42,6 +43,12 @@ public sealed class LiveLedger
 
     /// <summary>Valor del punto de la posición abierta.</summary>
     public decimal OpenPointValue { get; private set; }
+
+    /// <summary>
+    /// Unreadable lines skipped when it was loaded (for example one cut off by a crash). The fills after them are kept and
+    /// the file is never rewritten.
+    /// </summary>
+    public int SkippedLines { get; internal set; }
 
     public decimal OpenPnL(decimal last) => Position == 0 || last <= 0 ? 0 : (last - AveragePrice) * Position * (OpenPointValue > 0 ? OpenPointValue : PointValue);
 
@@ -266,6 +273,9 @@ public static class LiveStore
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     private static readonly object Gate = new();
 
+    // fills that could not be written to their ledger yet (by ledger file), in order: they go first with the next fill
+    private static readonly Dictionary<string, List<LiveFill>> Pending = new();
+
     private static string Clean(string key) => string.Concat(key.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c is ':' or '|' ? '_' : c));
     private static string LedgerPath(string key) => Path.Combine(Root, "llenados", Clean(key) + ".jsonl");
 
@@ -277,6 +287,7 @@ public static class LiveStore
     {
         lock (Gate)
         {
+            Pending.Remove(LedgerPath(key)); // they belong to the deleted history
             try
             {
                 if (File.Exists(LedgerPath(key))) File.Delete(LedgerPath(key));
@@ -293,34 +304,104 @@ public static class LiveStore
     private static string? _lastRunnersJson;
     private static string? _lastRunnersPath;
 
-    public static void AppendFill(string key, LiveFill f)
+    /// <summary>
+    /// Adds a fill to the strategy's ledger. If the file cannot be written the fill is kept pending in memory, in order, and
+    /// written before the next one (meanwhile <see cref="LoadLedger"/> includes it in this process). Returns the error, or
+    /// null once everything pending is saved.
+    /// </summary>
+    public static string? AppendFill(string key, LiveFill f)
     {
         lock (Gate)
         {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(LedgerPath(key))!);
-                File.AppendAllText(LedgerPath(key), JsonSerializer.Serialize(f) + "\n");
-            }
-            catch
-            {
-                // se reintenta con el próximo llenado
-            }
+            string path = LedgerPath(key);
+            if (!Pending.TryGetValue(path, out var pending)) Pending[path] = pending = new List<LiveFill>();
+            pending.Add(f);
+            string? error = WritePending(path, pending);
+            if (error == null) Pending.Remove(path);
+            return error;
         }
     }
 
+    /// <summary>Fills of a strategy that could not be written to its ledger yet.</summary>
+    public static int PendingFills(string key)
+    {
+        lock (Gate) return Pending.TryGetValue(LedgerPath(key), out var pending) ? pending.Count : 0;
+    }
+
+    /// <summary>Appends the pending fills in order, all or none; returns the error, or null.</summary>
+    private static string? WritePending(string path, List<LiveFill> pending)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0);
+            long end = file.Length;
+            var text = new StringBuilder();
+            if (end > 0)
+            {
+                // a line cut off by an earlier failure stays on its own line (skipped when loading) instead of absorbing this one
+                file.Seek(-1, SeekOrigin.End);
+                if (file.ReadByte() != '\n') text.Append('\n');
+            }
+
+            foreach (var f in pending) text.Append(JsonSerializer.Serialize(f)).Append('\n');
+            file.Seek(end, SeekOrigin.Begin);
+            try
+            {
+                file.Write(Encoding.UTF8.GetBytes(text.ToString()));
+            }
+            catch
+            {
+                // nothing half-written: everything stays pending for the next attempt
+                try { file.SetLength(end); } catch (IOException) { /* the next attempt starts on a new line */ }
+                throw;
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Reads a strategy's ledger. A line that cannot be read (for example one cut off by a crash) is skipped and counted in
+    /// <see cref="LiveLedger.SkippedLines"/>, and reading goes on; the file is never rewritten. Pending fills come last.
+    /// </summary>
     public static LiveLedger LoadLedger(string key, decimal pointValue)
     {
         var l = new LiveLedger(key, pointValue);
-        try
+        lock (Gate)
         {
-            if (File.Exists(LedgerPath(key)))
-                foreach (var line in File.ReadLines(LedgerPath(key)))
-                    if (line.Length > 0 && JsonSerializer.Deserialize<LiveFill>(line) is { } f) l.Apply(f);
-        }
-        catch
-        {
-            // archivo dañado: se usa lo que se pudo leer
+            string path = LedgerPath(key);
+            try
+            {
+                if (File.Exists(path))
+                    foreach (var line in File.ReadLines(path))
+                    {
+                        if (line.Length == 0) continue;
+                        LiveFill? f;
+                        try
+                        {
+                            f = JsonSerializer.Deserialize<LiveFill>(line);
+                        }
+                        catch (JsonException)
+                        {
+                            f = null;
+                        }
+
+                        if (f != null) l.Apply(f);
+                        else l.SkippedLines++;
+                    }
+            }
+            catch
+            {
+                // archivo dañado: se usa lo que se pudo leer
+            }
+
+            if (Pending.TryGetValue(path, out var pending))
+                foreach (var f in pending) l.Apply(f);
         }
 
         return l;
@@ -388,6 +469,7 @@ public static class LiveStore
     {
         lock (Gate)
         {
+            if (deleteFills) Pending.Remove(LedgerPath(key)); // they belong to the deleted history
             try
             {
                 var all = File.Exists(RunnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new() : new();
