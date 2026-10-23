@@ -25,6 +25,9 @@ public sealed class BinanceAccountSettings
     /// <summary>Time allowed for each REST request. Not part of the saved connection; tests shorten it.</summary>
     internal TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(15);
 
+    /// <summary>Time between refreshes of the open orders and the position. Not part of the saved connection; tests shorten it.</summary>
+    internal TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(2);
+
     public string RestBase => !string.IsNullOrWhiteSpace(BaseUrl)
         ? BaseUrl!.TrimEnd('/')
         : (Futures, Testnet) switch
@@ -384,7 +387,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 Changed?.Invoke();
             }
 
-            try { await Task.Delay(2000, _cts.Token).ConfigureAwait(false); }
+            try { await Task.Delay(_settings.PollInterval, _cts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
     }

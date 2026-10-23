@@ -319,7 +319,7 @@ public class BinanceBrokerTests
         await Until(() => target.ExchangeOrderId.Length > 0);
         string first = target.ExchangeOrderId;
 
-        fake.PostDelayMs = 6000; // the replacement takes a while to be acknowledged
+        fake.PostDelayMs = 3000; // the replacement takes a while to be acknowledged
         Assert.Same(target, broker.Replace(target, 60500m, 1m));
         Assert.Equal(60500m, target.Price); // like the other brokers, the handle shows the request at once
         Assert.Equal(1m, target.Unfilled);
@@ -499,7 +499,11 @@ internal sealed class FakeBinance : IDisposable
         lock (_gate) _fillOnCancel.Add(id);
     }
 
-    public BinanceAccountSettings Settings => new() { Futures = Futures, Testnet = true, ApiKey = Key, ApiSecret = Secret, BaseUrl = _server.Http };
+    /// <summary>Settings pointing at this server, polling every 250 ms instead of every 2 s to keep the tests short.</summary>
+    public BinanceAccountSettings Settings => new()
+    {
+        Futures = Futures, Testnet = true, ApiKey = Key, ApiSecret = Secret, BaseUrl = _server.Http, PollInterval = TimeSpan.FromMilliseconds(250),
+    };
 
     public int OpenOrderPolls
     {
