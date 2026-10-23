@@ -425,7 +425,7 @@ public sealed class AccountsView : UserControl
     private void UpdateHeader(AccountSnapshot s)
     {
         var a = s.Account;
-        _accountStatus.Text = s.Status + (a.IsReal ? " · REAL ACCOUNT" + (a.CanTrade ? "" : " (read-only: real orders are disabled in Connections)") : "");
+        _accountStatus.Text = s.Status + (a.IsReal ? " · REAL ACCOUNT" + (a.CanTrade ? "" : " (new orders disabled in Connections; cancel/close allowed)") : "");
         _accountStatus.Foreground = !s.Connected ? Ui.Warn : a.IsReal ? Brushes.OrangeRed : Ui.Text2;
         int open = s.Positions.Count(p => p.Net != 0);
         int active = s.Orders.Count(o => o.Active);
@@ -494,7 +494,7 @@ public sealed class AccountsView : UserControl
             row.Open.Foreground = p.Net == 0 ? Ui.Text2 : Signed(p.OpenPnl);
             row.Closed.Text = Money(p.ClosedPnl);
             row.Closed.Foreground = Signed(p.ClosedPnl);
-            row.Close.IsVisible = p.Net != 0 && entry.CanTrade;
+            row.Close.IsVisible = p.Net != 0; // closing only reduces: available even with real orders disabled (confirmed on real accounts)
         }
 
         _positionsEmpty.IsVisible = _positionRows.Count == 0;
@@ -543,7 +543,7 @@ public sealed class AccountsView : UserControl
             row.Status.Text = o.Status;
             ToolTip.SetTip(row.Status, o.Status);
             row.Status.Foreground = o.Active ? Ui.Accent : o.Status.StartsWith("Rejected", StringComparison.Ordinal) ? Ui.Down : o.Status == "Filled" ? Ui.Text1 : Ui.Text2;
-            row.Cancel.IsVisible = o.Active && entry.CanTrade;
+            row.Cancel.IsVisible = o.Active; // a cancel never adds exposure: available even with real orders disabled (confirmed on real accounts)
         }
 
         _ordersEmpty.IsVisible = _orderRows.Count == 0;

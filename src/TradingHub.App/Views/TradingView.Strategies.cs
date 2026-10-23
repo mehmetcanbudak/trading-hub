@@ -242,6 +242,8 @@ public sealed partial class TradingView
                 ProfileId = chart.FeedId,
                 Persist = cs.Live, // las visuales no ensucian la cartera
                 ProtectOnStart = cs.Live,
+                // real-order permission at every submit (a visual one trades its own simulated account: never blocked)
+                Guard = _svc.OrderGuard,
             };
             if (cs.Live) LiveCenter.Restore(runner);
             if (cs.Live && _svc.Settings.SmartContracts)
@@ -263,6 +265,7 @@ public sealed partial class TradingView
                         ProtectOnStart = true,
                         ExecInstrument = execInst,
                         ExecRatio = ratio,
+                        Guard = _svc.OrderGuard,
                     };
                     LiveCenter.Restore(runner);
                 }

@@ -61,3 +61,36 @@ public interface ITradingAccount
         return n;
     }
 }
+
+/// <summary>
+/// Real-order permission, decided when an order is sent (never only when an account is chosen): on a real account an
+/// order that opens, adds to or reverses a position needs its connection enabled with real orders allowed. Reductions
+/// and cancels are never blocked, and neither are simulated, testnet, practice or demo accounts.
+/// </summary>
+public static class RealOrderPermission
+{
+    /// <summary>
+    /// True if an order of <paramref name="signedQuantity"/> (positive buys) opens, adds to or reverses
+    /// <paramref name="position"/>; a partial or full reduction toward flat does not.
+    /// </summary>
+    public static bool IncreasesExposure(decimal position, decimal signedQuantity)
+    {
+        decimal after = position + signedQuantity;
+        bool reduces = Math.Abs(after) < Math.Abs(position) && (after == 0 || Math.Sign(after) == Math.Sign(position));
+        return signedQuantity != 0 && !reduces;
+    }
+
+    /// <summary>
+    /// null if the order may be sent, otherwise why it is blocked. <paramref name="connection"/> is the account's
+    /// connection as configured now (null: it no longer exists); <paramref name="signedQuantity"/> is what the order adds
+    /// (positive buys, 0 for a cancel) to <paramref name="position"/>.
+    /// </summary>
+    public static string? Check(bool isReal, (string Name, bool Enabled, bool AllowRealOrders)? connection, decimal position, decimal signedQuantity)
+    {
+        if (!isReal || !IncreasesExposure(position, signedQuantity)) return null;
+        const string Rest = ": new orders are disabled; cancel/close allowed";
+        if (connection is not { } c) return "its connection no longer exists" + Rest;
+        if (!c.Enabled) return $"connection {c.Name} is disabled" + Rest;
+        return c.AllowRealOrders ? null : $"real orders are not allowed for {c.Name}" + Rest;
+    }
+}
