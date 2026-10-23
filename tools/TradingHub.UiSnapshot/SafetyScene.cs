@@ -13,6 +13,7 @@ using TradingHub.App;
 using TradingHub.App.Services;
 using TradingHub.App.Windows;
 using TradingHub.Data;
+using TradingHub.Feeds.Rithmic;
 using TradingHub.Market;
 using TradingHub.Strategies;
 using TradingHub.Tests;
@@ -469,20 +470,32 @@ internal static class SafetyScene
             string oldSystem = rp.RithmicSystem;
             bool oldAllow = rp.AllowRealOrders;
             var session = svc.RithmicSessionFor(rp);
+            // signed in again after Reconfigure: each sign-in sets a new account list, so the session still connected with the
+            // old settings for a moment never counts
+            bool SignedInAgain(object before) => session.IsConnected && !ReferenceEquals(session.Accounts, before) && session.Accounts.Count > 0;
+            Until(() => session.IsConnected && session.Accounts.Count > 0, 30);
             try
             {
                 // the same fake server under a non-practice system name: Trading Hub treats the account as REAL
                 rp.RithmicSystem = "Rithmic 01";
                 rp.AllowRealOrders = false;
+                var practiceLogin = session.Accounts;
                 session.Reconfigure(svc.Connections.RithmicSettingsOf(rp));
-                Until(() => session.IsConnected && session.Accounts.Count > 0, 30);
-                Check(session.IsConnected && !session.IsPractice, $"fake Rithmic account reports a REAL system ({session.StatusText})");
+                Until(() => SignedInAgain(practiceLogin), 30);
+                Check(SignedInAgain(practiceLogin) && !session.IsPractice, $"fake Rithmic account reports a REAL system ({session.StatusText})");
                 string acct = session.Accounts.FirstOrDefault()?.AccountId ?? "ACC1";
-                // activity from elsewhere (placed straight through the session): a filled position and a working order
-                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 2, 2, 0, 0, "safety-fill", CancellationToken.None), 15);
-                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 1, 1, 4000m, 0, "safety-work", CancellationToken.None), 15);
-                Until(() => session.PositionsOf(acct).Any(p => p.Position.Net == 2) && session.OrdersOf(acct).Any(o => !o.Done), 15);
-                Check(session.PositionsOf(acct).Any(p => p.Position.Net == 2) && session.OrdersOf(acct).Any(o => !o.Done), "fake REAL account has a position and a working order");
+                // activity from elsewhere (placed straight through the session): a filled position and a working order. Earlier
+                // scenes can leave a position or orders on the same fake account, so the checks start from the position found
+                // here and follow this scene's own working order by its tag.
+                string tag = "safety-" + Guid.NewGuid().ToString("N")[..8];
+                decimal Net() => session.PositionFor(acct, "ESZ6", "CME")?.Net ?? 0;
+                RithmicOrderState? Work() => session.OrderByTag(tag + "-work");
+                decimal startNet = Net();
+                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 2, 2, 0, 0, tag + "-fill", CancellationToken.None), 15);
+                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 1, 1, 4000m, 0, tag + "-work", CancellationToken.None), 15);
+                Until(() => Net() == startNet + 2 && Work() is { Done: false, BasketId.Length: > 0 }, 15);
+                Check(Net() == startNet + 2 && Work() is { Done: false, BasketId.Length: > 0 },
+                    $"fake REAL account has a position and a working order (net {startNet} → {Net()}, working order {Work()?.BasketId})");
                 string id = AppServices.RithmicAccountId(rp, acct);
                 var account = svc.AccountCenter.Accounts().FirstOrDefault(a => a.Id == id);
                 Check(account is { IsReal: true, CanTrade: false }, "Account lists it as REAL with real orders disabled");
@@ -501,8 +514,9 @@ internal static class SafetyScene
                 Button? RowButton(string rows, string button, Func<object?, bool> wanted) =>
                     Field<IDictionary>(page, rows).Values.Cast<object>().Where(r => wanted(r.GetType().GetField("Line")!.GetValue(r)))
                         .Select(r => r.GetType().GetField(button)!.GetValue(r) as Button).FirstOrDefault();
-                var close = RowButton("_positionRows", "Close", l => l is PositionLine { Net: not 0 });
-                var cancel = RowButton("_orderRows", "Cancel", l => l is OrderLine { Active: true });
+                // this scene's position row and its own working order (rows from earlier activity may also be listed)
+                var close = RowButton("_positionRows", "Close", l => l is PositionLine { Key: "ESZ6|CME", Net: not 0 });
+                var cancel = RowButton("_orderRows", "Cancel", l => l is OrderLine { Active: true } o && o.Key == Work()?.BasketId);
                 Check(close is { IsVisible: true, Flyout: Flyout }, "Close is available on the REAL position, behind its confirmation");
                 Check(cancel is { IsVisible: true, Flyout: Flyout }, "Cancel is available on the working REAL order, behind its confirmation");
                 Shot(window, "safety_account_real_orders_disabled");
@@ -515,17 +529,19 @@ internal static class SafetyScene
                 }
 
                 Confirm(cancel);
-                Until(() => !session.OrdersOf(acct).Any(o => !o.Done), 15);
-                Check(!session.OrdersOf(acct).Any(o => !o.Done), "confirmed Cancel cancels the working REAL order with real orders disabled");
+                Until(() => Work() is { Done: true }, 15);
+                Check(Work() is { Done: true, Cancelled: true }, "confirmed Cancel cancels the working REAL order with real orders disabled");
                 Confirm(close);
-                Until(() => session.PositionsOf(acct).All(p => p.Position.Net == 0), 15);
-                Check(session.PositionsOf(acct).All(p => p.Position.Net == 0), "confirmed Close flattens the REAL position with real orders disabled");
+                Until(() => Net() == 0, 15);
+                Check(Net() == 0, $"confirmed Close flattens the REAL position with real orders disabled (net {Net()})");
             }
             finally
             {
                 rp.RithmicSystem = oldSystem;
                 rp.AllowRealOrders = oldAllow;
+                var realLogin = session.Accounts;
                 session.Reconfigure(svc.Connections.RithmicSettingsOf(rp));
+                Until(() => SignedInAgain(realLogin), 30); // back on the practice system before anything else uses the session
                 window.Navigate("trading");
                 pump(0.3);
             }
