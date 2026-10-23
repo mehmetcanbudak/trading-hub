@@ -205,4 +205,61 @@ public class LivePortfolioTests
             Assert.Equal(new[] { JsonSerializer.Serialize(next) }, File.ReadAllLines(file));
         });
     }
+
+    [Fact]
+    public void Saved_live_state_without_protection_ids_still_loads_and_is_saved_without_them()
+    {
+        InTemporaryStore(() =>
+        {
+            Directory.CreateDirectory(LiveStore.Root);
+            string file = Path.Combine(LiveStore.Root, "estrategias.json");
+            // an entry as written before ProtectionOrderIds existed
+            File.WriteAllText(file, """
+                [
+                  {
+                    "Key": "TradingHub.Tests.Strategy|test:TEST|Cuenta simulada",
+                    "Strategy": "Strategy",
+                    "StrategyId": "TradingHub.Tests.Strategy",
+                    "FeedId": "test",
+                    "Symbol": "TEST",
+                    "Period": "M1",
+                    "Account": "Cuenta simulada",
+                    "Running": true,
+                    "StartedUtc": "2026-10-01T12:00:00Z",
+                    "Size": 1,
+                    "PointValue": 1,
+                    "ExecSymbol": null,
+                    "Position": 1,
+                    "OpenPnL": 0,
+                    "Realized": 0,
+                    "Trades": 0,
+                    "Source": "panel",
+                    "AccountId": "sim",
+                    "ProfileId": "sim",
+                    "Parameters": { "StopLossTicks": 5 },
+                    "TimeZoneId": null,
+                    "SessionStartHours": 0,
+                    "MaxDailyLoss": 0,
+                    "MaxDrawdown": 0,
+                    "CloseOnLimit": true,
+                    "PortfolioId": null,
+                    "StopReason": null,
+                    "Paused": false,
+                    "IsReal": false
+                  }
+                ]
+                """);
+            var info = Assert.Single(LiveStore.LoadRunners());
+            Assert.Equal(LedgerKey, info.Key);
+            Assert.True(info.Running);
+            Assert.Equal(1m, info.Position);
+            Assert.Null(info.ProtectionOrderIds);
+
+            LiveStore.SaveRunners(new[] { info });
+            Assert.DoesNotContain("ProtectionOrderIds", File.ReadAllText(file)); // nothing new is written while there is none
+            info.ProtectionOrderIds = new List<string> { "basket-7" };
+            LiveStore.SaveRunners(new[] { info });
+            Assert.Equal(new[] { "basket-7" }, Assert.Single(LiveStore.LoadRunners()).ProtectionOrderIds);
+        });
+    }
 }

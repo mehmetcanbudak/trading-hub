@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace TradingHub.Strategies;
 
@@ -151,6 +152,15 @@ public sealed class LiveRunnerInfo
     /// <summary>Pausada (no abre operaciones nuevas) y si opera dinero real.</summary>
     public bool Paused { get; set; }
     public bool IsReal { get; set; }
+
+    /// <summary>
+    /// Broker identities of its stop loss and take profit (<see cref="LiveStrategyRunner.ProtectionOrderIds"/>): the working
+    /// ones while it runs, or the ones left working at the broker when it stopped (for example by a keep-protection stop). A
+    /// later start can adopt them (<see cref="LiveStrategyRunner.AdoptProtectionIds"/>) instead of placing new ones. Optional:
+    /// older saved files do not have it, and it is not written while there is none.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? ProtectionOrderIds { get; set; }
 }
 
 /// <summary>Un portafolio en vivo: estrategias que corren juntas, con su capital y, si querés, un agente de riesgo.</summary>
@@ -482,6 +492,32 @@ public static class LiveStore
             catch
             {
                 // se reintenta
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records <see cref="LiveRunnerInfo.ProtectionOrderIds"/> in the saved state of that strategy without changing anything
+    /// else (whether it was running included); a strategy not saved yet is added. A saved file that cannot be read is left
+    /// untouched. Returns the error, or null.
+    /// </summary>
+    public static string? SaveProtectionOrderIds(LiveRunnerInfo info)
+    {
+        lock (Gate)
+        {
+            try
+            {
+                var all = File.Exists(RunnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new() : new();
+                if (all.FirstOrDefault(r => r.Key == info.Key) is { } saved) saved.ProtectionOrderIds = info.ProtectionOrderIds;
+                else all.Add(info);
+                Directory.CreateDirectory(Root);
+                File.WriteAllText(RunnersPath, JsonSerializer.Serialize(all, Json));
+                _lastRunnersJson = null;
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return ex.Message;
             }
         }
     }
