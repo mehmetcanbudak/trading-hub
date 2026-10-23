@@ -336,8 +336,10 @@ internal static class SafetyScene
             Check(!asked && Pos() == 2, $"revoked: Reverse is blocked (asked {asked}, position {Pos()})");
             if (entry != null)
             {
-                asked = Act(() => Move(entry, inst.RoundPrice(last * 0.71m)), confirm: false);
-                Check(!asked && entry.Price == entryPrice, $"revoked: moving a working entry order is blocked (asked {asked}, price {entry.Price})");
+                // moving an order that is already working sends nothing new: allowed, behind the REAL confirmation
+                decimal movedEntry = inst.RoundPrice(last * 0.71m);
+                asked = Act(() => Move(entry, movedEntry), confirm: true);
+                Check(asked && entry.Price == movedEntry && Pos() == 2, $"revoked: moving a working entry order is still allowed, behind the REAL confirmation (asked {asked}, price {entry.Price}, position {Pos()})");
             }
 
             asked = Act(() => tv.TradeAsync(chart, OrderTypes.Market, OrderDirections.Sell, 0, 1), confirm: true);
