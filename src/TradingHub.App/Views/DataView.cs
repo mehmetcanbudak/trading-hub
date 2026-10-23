@@ -390,9 +390,10 @@ internal sealed class DataView : UserControl, IPage
         }
 
         string cost = quote.ToString("0.00", CultureInfo.InvariantCulture);
+        // paid: Cancel is the default (Enter never spends credits) without styling the download as dangerous
         if (!await ConfirmDialog.ShowAsync(_main, "Download Databento history",
                 $"Downloads {days.Count} day(s) of {DbRoot} tick-by-tick. Databento charges ≈ US$ {cost} from your credits (any shortfall is charged to your Databento payment method).",
-                $"Download (≈ US$ {cost})")) return;
+                $"Download (≈ US$ {cost})", cancelByDefault: true)) return;
 
         var inst = CmeInstrument(DbRoot);
         _dbCts = new CancellationTokenSource();

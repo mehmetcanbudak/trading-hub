@@ -129,7 +129,7 @@ Enable the API in TWS / IB Gateway (Configure → API → Settings), then enter 
 | Rithmic / AMP | Rithmic Paper Trading / Rithmic Test submit directly. | Other systems, including prop firms, require explicit permission. |
 | Tradovate | Demo submits directly. | Requires explicit real Tradovate permission. |
 
-Without permission, real destinations are absent from Chart Trader. Rithmic/Tradovate accounts can still appear read-only in Accounts for balances, positions and history. Real accounts are visibly marked **REAL** / **REAL ACCOUNT**.
+Without permission, real destinations are absent from Chart Trader, and an order that would open, add to or reverse a position is blocked when it is sent, even from a chart or live strategy that still uses the account. Rithmic/Tradovate accounts still appear in Accounts for balances, positions and history, where Cancel and Close stay available (with confirmation) because they only reduce exposure. Real accounts are visibly marked **REAL** / **REAL ACCOUNT**.
 
 ### Enable real-money trading
 

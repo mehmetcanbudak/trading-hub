@@ -12,6 +12,7 @@ public enum AccountKind
 }
 
 /// <summary>Una cuenta para la sección Cuenta.</summary>
+/// <param name="CanTrade">New orders allowed (always on simulated, practice and demo accounts); cancel and close never need it.</param>
 public sealed record AccountEntry(string Id, string Name, AccountKind Kind, bool IsReal, bool CanTrade, ConnectionProfile? Profile = null, string RithmicAccount = "");
 
 /// <summary>Posición de un contrato (las que quedaron planas hoy también figuran).</summary>
@@ -253,10 +254,13 @@ public sealed class AccountCenter
 
     // ------------------------------------------------------------------ acciones
 
-    /// <summary>Cancela una orden activa.</summary>
+    /// <summary>
+    /// Cancels an active order. A cancel never adds exposure, so it stays available on real accounts even with real
+    /// orders disabled (the Account page confirms it first).
+    /// </summary>
     public async Task CancelAsync(AccountEntry a, OrderLine o)
     {
-        if (!o.Active || !a.CanTrade) return;
+        if (!o.Active) return;
         if (o.Ref is (SimBroker b, Order order))
         {
             b.Cancel(order);
@@ -269,10 +273,13 @@ public sealed class AccountCenter
             await _svc.TradovateSessionFor(a.Profile!).CancelAsync(tv.Id, CancellationToken.None).ConfigureAwait(false);
     }
 
-    /// <summary>Cierra la posición de un contrato a mercado (antes cancela sus órdenes, como "Cerrar posición" del Chart Trader).</summary>
+    /// <summary>
+    /// Closes a contract's position at market, canceling its orders first (like Chart Trader's Close). Closing only
+    /// reduces, so it stays available on real accounts even with real orders disabled (the Account page confirms it first).
+    /// </summary>
     public async Task CloseAsync(AccountEntry a, PositionLine p)
     {
-        if (p.Net == 0 || !a.CanTrade) return;
+        if (p.Net == 0) return;
         if (p.Ref is SimBroker b)
         {
             b.Flatten();
@@ -291,8 +298,11 @@ public sealed class AccountCenter
             var session = _svc.RithmicSessionFor(a.Profile!);
             foreach (var o in session.OrdersOf(a.RithmicAccount).Where(o => !o.Done && o.Symbol == sym && o.Exchange == ex))
                 await session.CancelAsync(a.RithmicAccount, o.BasketId, CancellationToken.None).ConfigureAwait(false);
-            int qty = (int)Math.Abs(p.Net);
-            await session.PlaceAsync(a.RithmicAccount, sym, ex, p.Net < 0, 2, qty, 0, 0, "th-cerrar-" + DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture), CancellationToken.None).ConfigureAwait(false);
+            // what is open now, after the cancels (the row can be a moment old): a close never opens the other side
+            decimal net = session.PositionFor(a.RithmicAccount, sym, ex)?.Net ?? 0;
+            if (net == 0 || Math.Sign(net) != Math.Sign(p.Net)) return;
+            int qty = (int)Math.Abs(net);
+            await session.PlaceAsync(a.RithmicAccount, sym, ex, net < 0, 2, qty, 0, 0, "th-cerrar-" + DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture), CancellationToken.None).ConfigureAwait(false);
         }
     }
 }

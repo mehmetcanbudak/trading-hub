@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Material.Icons;
@@ -33,10 +34,13 @@ internal abstract class TradingHubDialog<T> : Window
     }
 }
 
-/// <summary>Pregunta de confirmación (Sí/No).</summary>
+/// <summary>
+/// Confirmation question (yes/no). Danger and paid actions default to Cancel: Enter and Esc cancel, only a click or
+/// ⌘Enter confirms. Ordinary questions keep the action as the default button.
+/// </summary>
 internal sealed class ConfirmDialog : TradingHubDialog<bool>
 {
-    private ConfirmDialog(string title, string message, string okText, bool danger) : base(title, 420)
+    private ConfirmDialog(string title, string message, string okText, bool danger, bool cancelByDefault) : base(title, 420)
     {
         var icon = Ui.Icon(danger ? MaterialIconKind.AlertOutline : MaterialIconKind.HelpCircleOutline, 26, danger ? Ui.Warn : Ui.Accent);
         icon.VerticalAlignment = VerticalAlignment.Top;
@@ -54,15 +58,29 @@ internal sealed class ConfirmDialog : TradingHubDialog<bool>
         icon.Margin = new Thickness(0, 2, 14, 0);
         body.Children.Add(icon);
         body.Children.Add(text);
-        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        bool safe = danger || cancelByDefault;
+        var cancel = new Button { Content = "Cancel", IsCancel = true, IsDefault = safe };
         cancel.Click += (_, _) => Close(false);
-        var ok = new Button { Content = okText, IsDefault = true }.Classes(danger ? "danger" : "primary");
+        var ok = new Button { Content = okText, IsDefault = !safe }.Classes(danger ? "danger" : "primary");
         ok.Click += (_, _) => Close(true);
+        if (safe)
+        {
+            ToolTip.SetTip(ok, "Click or press ⌘Enter to confirm");
+            // in the tunnel phase, before any button sees it (a focused action button would take a plain Enter as a click)
+            AddHandler(KeyDownEvent, (_, e) =>
+            {
+                if (e.Key != Key.Enter) return;
+                e.Handled = true;
+                Close(e.KeyModifiers.HasFlag(KeyModifiers.Meta));
+            }, RoutingStrategies.Tunnel);
+        }
+
         Content = Shell(body, cancel, ok);
     }
 
-    public static Task<bool> ShowAsync(Window owner, string title, string message, string okText = "OK", bool danger = false) =>
-        new ConfirmDialog(title, message, okText, danger).ShowDialog<bool>(owner);
+    /// <param name="cancelByDefault">Cancel is the default even when the action is not danger-styled (a paid download).</param>
+    public static Task<bool> ShowAsync(Window owner, string title, string message, string okText = "OK", bool danger = false, bool cancelByDefault = false) =>
+        new ConfirmDialog(title, message, okText, danger, cancelByDefault).ShowDialog<bool>(owner);
 }
 
 /// <summary>Pide un texto (nombre de una estrategia, perfil, etc.).</summary>

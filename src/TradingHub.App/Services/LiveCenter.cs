@@ -566,6 +566,8 @@ internal sealed partial class LiveCenter
             CloseOnLimit = spec.CloseOnLimit,
             PortfolioId = spec.PortfolioId,
             ProtectOnStart = true,
+            // launch, resume, auto-resume and restarts all come through here: real-order permission at every submit
+            Guard = _svc.OrderGuard,
         };
         if (Running(runner.Key) != null) return (null, $"«{runner.StrategyName}» is already running on {spec.Instrument.Symbol} with {TradingHub.Common.EnglishText.Of(account.Name)}.");
         try

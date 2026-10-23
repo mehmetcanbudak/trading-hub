@@ -561,6 +561,30 @@ public sealed class AppServices
         return b;
     }
 
+    /// <summary>
+    /// Real-order permission when an order is sent, from the connection settings as they are now (cached brokers and
+    /// restored strategies included; <see cref="AccountFor"/> does not check it): null if the order may go out, otherwise
+    /// why not. Only an order that opens, adds to or reverses a position on a real account needs its connection enabled
+    /// with real orders allowed; reductions and cancels never do.
+    /// </summary>
+    public string? CheckRealOrder(string accountId, ITradingAccount account, decimal position, decimal signedQuantity) =>
+        RealOrderPermission.Check(account.IsReal, Connections.FindForAccount(accountId) is { } p ? (p.Name, p.Enabled, p.AllowRealOrders) : null,
+            position, signedQuantity);
+
+    private TradingHub.Strategies.ILiveOrderGuard? _orderGuard;
+
+    /// <summary>The guard every live strategy runs with: real-order permission for each order that adds exposure.</summary>
+    internal TradingHub.Strategies.ILiveOrderGuard OrderGuard => _orderGuard ??= new RealOrderGuard(this);
+
+    private sealed class RealOrderGuard(AppServices svc) : TradingHub.Strategies.ILiveOrderGuard
+    {
+        public string? Check(TradingHub.Strategies.LiveStrategyRunner runner, TradingHub.Strategies.OrderSide side, decimal quantity, decimal positionAfter)
+        {
+            decimal signed = side == TradingHub.Strategies.OrderSide.Buy ? quantity : -quantity;
+            return svc.CheckRealOrder(runner.AccountId, runner.Account, positionAfter - signed, signed);
+        }
+    }
+
     public void Shutdown()
     {
         try
