@@ -673,15 +673,41 @@ public sealed class AppServices
         }
     }
 
+    /// <summary>
+    /// The quit's stop, once: saves the live state (what was running resumes at the next start, if enabled in Settings) and
+    /// stops every live strategy the chosen way. <see cref="QuitMode.KeepStops"/> leaves their stop loss and take profit
+    /// working at the broker and records them for the next start to adopt; <see cref="QuitMode.CancelStops"/> cancels their
+    /// orders and leaves the positions open (what ⌘Q always did); <see cref="QuitMode.ClosePositions"/> closes the
+    /// positions, the only quit that liquidates. Later saves are skipped: they would mark the strategies stopped.
+    /// </summary>
+    internal void StopLiveForQuit(QuitMode mode)
+    {
+        if (_closingDown) return;
+        SaveLiveState();
+        _closingDown = true;
+        foreach (var r in Runners.Where(r => r.IsRunning).ToList())
+        {
+            try
+            {
+                r.Stop(flatten: mode == QuitMode.ClosePositions, keepProtection: mode == QuitMode.KeepStops);
+                // what is left at the broker now (nothing after a cancel or a close, unless it had not adopted them yet): the
+                // next start adopts only those (a keep-protection stop records its own)
+                if (r.Persist && mode != QuitMode.KeepStops) TradingHub.Strategies.LiveStore.SaveProtectionOrderIds(r.Info());
+            }
+            catch (Exception ex)
+            {
+                this.LogError($"Error stopping {r.StrategyName} to quit", ex);
+            }
+        }
+    }
+
     public void Shutdown()
     {
         try
         {
-            SaveLiveState();
-            _closingDown = true;
+            StopLiveForQuit(QuitMode.CancelStops); // already done when the quit asked how to stop them
             TradingHub.Strategies.LiveStrategyRunner.Started -= OnRunnerStarted;
             Sleep.Dispose();
-            foreach (var r in Runners) r.Stop(flatten: false);
             foreach (var b in _realBrokers.Values) (b as IDisposable)?.Dispose();
             foreach (var rs in _rithmicSessions.Values) rs.Dispose();
             foreach (var ts in _tradovateSessions.Values) ts.Dispose();

@@ -295,6 +295,7 @@ foreach (var page in pages)
     if (page == "safety")
     {
         exitCode += SafetyScene.Run(window, Pump, outDir);
+        exitCode += SafetyScene.RunQuit(window, Pump, outDir);
         continue;
     }
 

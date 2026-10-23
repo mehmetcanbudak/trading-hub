@@ -21,7 +21,7 @@ using TradingHub.Tests;
 using TradingHub.Trading;
 using TradingHub.Trading.Statistics;
 
-internal static class SafetyScene
+internal static partial class SafetyScene
 {
     private const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance;
     private static T Field<T>(object target, string name) => (T)target.GetType().GetField(name, Private)!.GetValue(target)!;
@@ -738,6 +738,584 @@ internal sealed class FixtureRealAccount(SimBroker inner) : ITradingAccount
     public void Cancel(Order order) => inner.Cancel(order);
     public void CancelAt(decimal price) => inner.CancelAt(price);
     public void CancelAll() => inner.CancelAll();
+    public void Modify(Order order, decimal newPrice) => inner.Modify(order, newPrice);
+    public void Flatten() => inner.Flatten();
+    public void Reverse() => inner.Reverse();
+}
+
+// ======================================================================== S1: one Quit path
+// The menu bar's «Quit Trading Hub» and ⌘Q (the platform's shutdown request) take the same path: while live strategies
+// hold positions it first asks what to do with their orders, then saves and stops them that way and exits once.
+// Independent of earlier scenes: other scenes' strategies are set aside while it runs; its own strategy (it never trades
+// by itself), its own simulated accounts on SIM-ES, ledger keys and order comments; and a desktop lifetime that records
+// the app's exit instead of ending this process.
+internal static partial class SafetyScene
+{
+    private const string QuitStrategy = "SafetyQuitFixture";
+    private const string QuitAccountId = "safety-quit";
+    private const string QuitTitle = "Quit Trading Hub";
+    private const string NotClosedTitle = "Positions not closed";
+    private const string KeepText = "Keep stops at broker and quit";
+    private const string CancelStopsText = "Cancel stops and quit";
+    private const string CloseText = "Close positions and quit";
+    private const string StayText = "Don't quit";
+
+    public static int RunQuit(MainWindow window, Action<double> pump, string outDir)
+    {
+        int failures = 0, checks = 0;
+        void Check(bool ok, string message)
+        {
+            checks++;
+            Console.WriteLine((ok ? "OK " : "FAIL ") + message);
+            if (!ok) failures++;
+        }
+
+        void Part(string name, Action body)
+        {
+            try
+            {
+                body();
+            }
+            catch (Exception ex)
+            {
+                Check(false, $"{name} ran without an exception: {ex.GetBaseException().GetType().Name}: {ex.GetBaseException().Message}");
+            }
+        }
+
+        void Wait(Task task, double seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (!task.IsCompleted && DateTime.UtcNow < until) pump(0.02);
+        }
+
+        void Until(Func<bool> done, double seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (!done() && DateTime.UtcNow < until) pump(0.05);
+        }
+
+        // a visible window owned by the main window with that title (null if none shows up in time)
+        Window? Find(string title, double seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            do
+            {
+                pump(0.02);
+                if (window.OwnedWindows.FirstOrDefault(w => w.Title == title && w.IsVisible) is { } found) return found;
+            }
+            while (DateTime.UtcNow < until);
+
+            return null;
+        }
+
+        void Shot(Window target, string name)
+        {
+            pump(0.2);
+            target.CaptureRenderedFrame()?.Save(Path.Combine(outDir, name + ".png"));
+        }
+
+        // the strategies a dialog lists, and all its text
+        List<string> Listed(Window dialog) =>
+            dialog.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text ?? "").Where(t => t.StartsWith("• ", StringComparison.Ordinal)).ToList();
+        string Text(Window dialog) => string.Join(" ", dialog.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
+
+        var svc = App.Services;
+        var tv = window.Trading;
+        var app = Avalonia.Application.Current!;
+        // what Avalonia 11.3.22 keeps as Application.ApplicationLifetime (its setter refuses changes after startup)
+        var lifetimeField = typeof(Avalonia.Application).GetField("_applicationLifetime", Private)!;
+        var previousLifetime = lifetimeField.GetValue(app);
+        bool autoResume = svc.Settings.AutoResumeLive;
+        var parked = svc.Runners.ToList();
+        svc.Runners.Clear();
+        var cache = Field<Dictionary<string, ITradingAccount>>(svc, "_realBrokers");
+        string fixturePath = Path.Combine(AppPaths.Strategies, QuitStrategy + ".cs");
+        var keys = new List<string>();
+        TradingHub.App.Views.ChartTab? chartTab = null;
+        FixtureSlowCloseAccount? slow = null;
+
+        // after a quit that only recorded the exit: the services were never shut down, only the live saves stopped
+        void Reopen() => Set(svc, "_closingDown", false);
+
+        try
+        {
+            var list = TradingHub.App.Controls.InstrumentPicker.InstrumentsAsync(svc, "sim");
+            Wait(list, 30);
+            var inst = list.Result.First(i => i.Symbol == "SIM-ES");
+            var data = svc.Open("sim", inst);
+            Until(() => !data.IsLoadingHistory && data.LastPrice > 0, 60);
+            var quitSim = new SimBroker(data, new Portfolio { AccountID = "SAFETY-QUIT", Name = "Fixture quit", BeginBalance = 100_000m, Balance = 100_000m }, new TradingStatistics()) { Name = "Fixture quit" };
+            cache[QuitAccountId + "|" + data.Instrument.Key] = quitSim; // what AccountFor returns for this account id
+            string key = $"{QuitStrategy}|{inst.FeedId}:{inst.Symbol}|{quitSim.Name}";
+            keys.Add(key);
+            LiveStore.RemoveRunner(key, deleteFills: true);
+            File.WriteAllText(fixturePath, """
+                using TradingHub.Strategies;
+
+                [Strategy("Safety quit fixture", Description = "UI fixture for the Quit checks: it never trades by itself.")]
+                public class SafetyQuitFixture : Strategy
+                {
+                }
+                """);
+            svc.Strategies.Refresh();
+            var file = svc.Strategies.Files.First(f => f.FileName == QuitStrategy);
+            // stop and target far from the market: they stay working for the whole scene
+            int ticks = (int)Math.Max(20, Math.Round(data.LastPrice * 0.1m / inst.TickSize));
+            var parameters = new Dictionary<string, object?> { ["StopLossTicks"] = ticks, ["TakeProfitTicks"] = ticks };
+
+            // a long position on the account and in the strategy's ledger: the strategy inherits it and protects it at start
+            void Hold(SimBroker account, string ledgerKey)
+            {
+                account.Market(OrderDirections.Buy, 1, "safety-quit: fixture position");
+                LiveStore.AppendFill(ledgerKey, new LiveFill(DateTime.UtcNow, true, 1, data.LastPrice, inst.Symbol, inst.PointValue));
+            }
+
+            LiveStrategyRunner? Launch(string accountId)
+            {
+                var launch = svc.Live.LaunchAsync(new LiveLaunch { File = file, ProfileId = "sim", Instrument = inst, AccountId = accountId, Period = ChartPeriod.H1, Parameters = new(parameters) });
+                Wait(launch, 120);
+                if (!launch.IsCompletedSuccessfully) return null;
+                if (launch.Result.Runner == null) Console.WriteLine("  launch: " + launch.Result.Message);
+                return launch.Result.Runner;
+            }
+
+            // its position and its working stop loss and take profit (the sell stop and sell limit placed or kept for it)
+            decimal Pos(ITradingAccount account) => account.Position.Volume;
+            List<Order> Protection(ITradingAccount account) =>
+                account.ActiveOrders.Where(o => o.Direction == OrderDirections.Sell && o.Type is OrderTypes.Stop or OrderTypes.Limit).ToList();
+
+            // the app's own quit wiring for a desktop lifetime (⌘Q's shutdown request and the exit), fresh for each case
+            FixtureDesktopLifetime Desktop()
+            {
+                var desktop = FixtureDesktopLifetime.For(window);
+                App.UseQuit(desktop.Lifetime);
+                return desktop;
+            }
+
+            // what the next start reads as running when Trading Hub closed (read before the live saves resume)
+            List<LiveRunnerInfo> RunningAtClose() => LiveStore.LoadRunners().Where(i => i.Key == key && i.Running).ToList();
+            LiveRunnerInfo? Saved() => LiveStore.InfoFor(key);
+            LiveEntry Entry() => svc.Live.Entries().First(e => e.Key == key);
+            // the ids name exactly those orders: by exchange ID or by their id in this process ("local:<session>:<id>")
+            bool Names(IReadOnlyCollection<string>? ids, List<Order> orders) => ids != null && ids.Count == orders.Count &&
+                orders.All(o => ids.Contains(o.ExchangeOrderId) || ids.Any(id => id.EndsWith(":" + o.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)));
+
+            LiveStrategyRunner? Resume()
+            {
+                var resume = svc.Live.ResumeAsync(Entry());
+                Wait(resume, 120);
+                if (resume.IsCompletedSuccessfully && resume.Result != null) Console.WriteLine("  resume: " + resume.Result);
+                return svc.Live.Running(key);
+            }
+
+            LiveStrategyRunner? runner = null;
+            var kept = new List<Order>();
+            var menuBarListed = new List<string>();
+            var atClose = new List<LiveRunnerInfo>();
+
+            Part("menu-bar Quit with a strategy holding a position (characterization)", () =>
+            {
+                Hold(quitSim, key);
+                runner = Launch(QuitAccountId);
+                Check(runner is { IsRunning: true, OwnPosition: 1 } && Pos(quitSim) == 1 && Protection(quitSim).Count == 2,
+                    $"fixture: a live strategy holds a position with its stop loss and take profit working on its own simulated account ({runner?.OwnPosition}, {Protection(quitSim).Count} protective orders)");
+                if (runner == null) return;
+                var started = runner;
+                var desktop = Desktop();
+                bool runningAtExit = false;
+                desktop.Exiting = () => runningAtExit = started.IsRunning;
+                lifetimeField.SetValue(app, desktop.Lifetime); // the lifetime the menu bar's Quit used to close directly
+                try
+                {
+                    MenuBar.Quit();
+                    var dialog = Find(QuitTitle, 3);
+                    Check(dialog != null, "menu-bar Quit asks first while a live strategy holds a position (Quit Trading Hub dialog)");
+                    if (dialog != null)
+                    {
+                        menuBarListed = Listed(dialog);
+                        Shot(dialog, "safety_quit_dialog");
+                        Press(dialog, Key.Enter);
+                    }
+
+                    Until(() => desktop.Shutdowns > 0, 5);
+                    atClose = RunningAtClose();
+                    Check(desktop.Shutdowns == 1 && !runningAtExit,
+                        $"menu-bar Quit exits only after saving and stopping the live strategies, never through a forced Shutdown() while one still runs (exits {desktop.Shutdowns}, still running at exit: {runningAtExit})");
+                }
+                finally
+                {
+                    lifetimeField.SetValue(app, previousLifetime);
+                }
+            });
+
+            Part("Keep stops at broker and quit", () =>
+            {
+                if (runner == null) return;
+                kept = Protection(quitSim);
+                var saved = Saved();
+                Check(!runner.IsRunning && kept.Count == 2 && Pos(quitSim) == 1,
+                    $"Keep (Enter, the default): the strategy stopped, its position stays open and its stop loss and take profit stay working on the simulated account ({kept.Count} working, position {Pos(quitSim)})");
+                Check(Names(runner.ProtectionOrderIds, kept) && Names(saved?.ProtectionOrderIds, kept),
+                    $"Keep: their identities are recorded in the strategy's saved state ({string.Join(", ", saved?.ProtectionOrderIds ?? new List<string>())})");
+                Check(atClose.Count == 1 && saved?.Running == true, "Keep: the saved state still says it was running, so auto-resume restarts it");
+            });
+
+            Part("auto-resume adopts the kept orders", () =>
+            {
+                Reopen();
+                svc.Settings.AutoResumeLive = true;
+                svc.RunningAtLastClose = atClose;
+                Wait(svc.Live.ResumeAtStartAsync(), 120);
+                runner = svc.Live.Running(key);
+                var now = Protection(quitSim);
+                Check(runner != null && now.Count == 2 && now.All(kept.Contains) && Names(runner.ProtectionOrderIds, now),
+                    $"auto-resume: the resumed strategy adopts the stop loss and take profit kept at the broker and places none ({now.Count} working, the kept ones: {now.All(kept.Contains)})");
+                Check(runner?.LogLines.Any(l => l.Contains("Adopted the stop loss and take profit kept at the broker", StringComparison.Ordinal)) == true,
+                    "auto-resume: its log says it adopted them");
+            });
+
+            Part("⌘Q asks the same question; Don't quit changes nothing", () =>
+            {
+                if (runner == null) return;
+                var desktop = Desktop();
+                bool allowed = desktop.RequestShutdown();
+                var dialog = Find(QuitTitle, 3);
+                Check(!allowed && dialog != null, $"⌘Q while a strategy holds a position: the first shutdown request is canceled and the Quit Trading Hub dialog asks (allowed: {allowed})");
+                if (dialog == null) return;
+                var listed = Listed(dialog);
+                Check(listed.Count == 1 && listed.SequenceEqual(menuBarListed) && listed[0].Contains("«Safety quit fixture»", StringComparison.Ordinal)
+                      && listed[0].Contains("long 1 SIM-ES", StringComparison.Ordinal) && listed[0].Contains("2 protective orders working", StringComparison.Ordinal),
+                    $"⌘Q and the menu bar reach the same question about the same strategies («{string.Join(" | ", listed)}»)");
+                Shot(dialog, "safety_quit_dialog_cmd_q");
+                var keep = ButtonOf(dialog, s => s == KeepText);
+                var cancelStops = ButtonOf(dialog, s => s == CancelStopsText);
+                var close = ButtonOf(dialog, s => s == CloseText);
+                var stay = ButtonOf(dialog, s => s == StayText);
+                Check(keep != null && cancelStops != null && close != null && stay != null,
+                    "Quit dialog: its four choices are in English (Keep stops at broker and quit, Cancel stops and quit, Close positions and quit, Don't quit)");
+                Check(keep is { IsDefault: true } && keep.Classes.Contains("primary") && cancelStops is { IsDefault: false } && stay is { IsDefault: false },
+                    "Quit dialog: Keep stops at broker and quit is the default button");
+                Check(close is { IsDefault: false } && close.Classes.Contains("danger"), "Quit dialog: Close positions and quit has danger styling and is never the default");
+                Check(stay is { IsCancel: true } && keep is { IsCancel: false } && cancelStops is { IsCancel: false } && close is { IsCancel: false },
+                    "Quit dialog: Don't quit is the Esc (cancel) button");
+                if (close != null)
+                {
+                    close.Focus();
+                    Press(close, Key.Enter);
+                    pump(0.3);
+                }
+
+                Check(dialog.IsVisible && runner.IsRunning && Pos(quitSim) == 1, "Quit dialog: Enter with Close positions and quit focused does nothing (closing the positions needs a click)");
+                Press(dialog, Key.Escape);
+                Until(() => !dialog.IsVisible, 3);
+                pump(0.5);
+                Check(!dialog.IsVisible && runner.IsRunning && Protection(quitSim).Count == 2 && desktop.Shutdowns == 0 && !Field<bool>(svc, "_closingDown"),
+                    "Don't quit (Esc): nothing changes; the strategy keeps running with its stop loss and take profit, the app does not exit and live saves continue");
+            });
+
+            Part("Cancel stops and quit", () =>
+            {
+                if (runner == null) return;
+                var desktop = Desktop();
+                var working = Protection(quitSim);
+                MenuBar.Quit();
+                var dialog = Find(QuitTitle, 3);
+                Click(dialog == null ? null : ButtonOf(dialog, s => s == CancelStopsText));
+                Until(() => desktop.Shutdowns > 0, 5);
+                atClose = RunningAtClose();
+                var saved = Saved();
+                Check(dialog != null && desktop.Shutdowns == 1 && !runner.IsRunning && working.Count == 2 && working.All(o => o.State != OrderStates.Active) && Pos(quitSim) == 1,
+                    $"Cancel stops: the stop loss and take profit are canceled, the position stays open and the app exits once (exits {desktop.Shutdowns}, working {Protection(quitSim).Count}, position {Pos(quitSim)})");
+                Check(atClose.Count == 1 && saved?.ProtectionOrderIds is not { Count: > 0 }, "Cancel stops: the saved state still says it was running and names no orders to adopt");
+            });
+
+            Part("resume after Cancel stops", () =>
+            {
+                Reopen();
+                runner = Resume();
+                var placed = Protection(quitSim);
+                Check(runner is { OwnPosition: 1 } && placed.Count == 2 && placed.Count(o => o.Type == OrderTypes.Stop) == 1 && !placed.Any(kept.Contains),
+                    $"resumed after Cancel stops: nothing to adopt, so it places one new stop loss and one new take profit ({placed.Count} working)");
+            });
+
+            Part("Close positions and quit", () =>
+            {
+                if (runner == null) return;
+                var desktop = Desktop();
+                bool allowed = desktop.RequestShutdown();
+                var dialog = Find(QuitTitle, 3);
+                Click(dialog == null ? null : ButtonOf(dialog, s => s == CloseText));
+                Until(() => desktop.Shutdowns > 0, 15);
+                Check(!allowed && dialog != null && desktop.Shutdowns == 1 && Pos(quitSim) == 0 && runner is { OwnPosition: 0, IsClosing: false } && Protection(quitSim).Count == 0 && Find(NotClosedTitle, 0.2) == null,
+                    $"Close positions (from ⌘Q): the position is closed at market on the account and in its ledger, its orders canceled, then the app exits once (position {Pos(quitSim)}, ledger {runner.OwnPosition}, exits {desktop.Shutdowns})");
+                Check(desktop.Requests == 1 && desktop.RequestShutdown() && Find(QuitTitle, 0.5) == null && desktop.Shutdowns == 1,
+                    "⌘Q: once decided, the exit raises no new shutdown request, and a later request goes through without asking again (no loop)");
+            });
+
+            Part("no positions: no question", () =>
+            {
+                Reopen();
+                var flat = runner = Resume();
+                var desktop = Desktop();
+                MenuBar.Quit();
+                var dialog = Find(QuitTitle, 1.5);
+                Until(() => desktop.Shutdowns > 0, 5);
+                Check(flat is { OwnPosition: 0 } && !flat.IsRunning && dialog == null && desktop.Shutdowns == 1,
+                    $"no positions: the menu bar's Quit asks nothing, stops the strategies and exits (dialog shown: {dialog != null}, exits {desktop.Shutdowns})");
+                Reopen();
+                flat = runner = Resume();
+                desktop = Desktop();
+                bool allowed = desktop.RequestShutdown();
+                dialog = Find(QuitTitle, 1.5);
+                Check(flat is { OwnPosition: 0 } && !flat.IsRunning && allowed && dialog == null && desktop.Shutdowns == 0,
+                    "no positions: ⌘Q is not canceled; it stops the strategies within the request and lets the app close itself, as before");
+            });
+
+            Part("restart with new parameters keeps and adopts", () =>
+            {
+                Reopen();
+                Hold(quitSim, key);
+                runner = Resume();
+                var placed = Protection(quitSim);
+                Check(runner is { OwnPosition: 1 } && Pos(quitSim) == 1 && placed.Count == 2, $"fixture: resumed with a position again, protected by a new stop loss and take profit ({placed.Count} working)");
+                if (runner == null) return;
+                var old = runner;
+                var restart = svc.Live.RestartWithParametersAsync(Entry(), old.StrategyInstance.GetParameters());
+                Wait(restart, 120);
+                runner = svc.Live.Running(key);
+                var now = Protection(quitSim);
+                Check(restart.IsCompletedSuccessfully && restart.Result == null && runner != null && !ReferenceEquals(runner, old) && now.Count == 2 && now.All(placed.Contains) && Names(runner.ProtectionOrderIds, now),
+                    $"restart with new parameters keeps the stop loss and take profit working and the restarted strategy adopts them, placing none ({now.Count} working, the same ones: {now.All(placed.Contains)})");
+                kept = now;
+            });
+
+            Part("a chart strategy restored from saved state adopts the kept orders", () =>
+            {
+                if (runner == null) return;
+                var desktop = Desktop();
+                MenuBar.Quit();
+                var dialog = Find(QuitTitle, 3);
+                Click(dialog == null ? null : ButtonOf(dialog, s => s == KeepText));
+                Until(() => desktop.Shutdowns > 0, 5);
+                atClose = RunningAtClose();
+                Check(desktop.Shutdowns == 1 && !runner.IsRunning && Protection(quitSim).Count == 2 && atClose.Count == 1,
+                    "Keep (clicked): the strategy stops, recorded as running, and its stop loss and take profit stay working");
+                Reopen();
+                // its chart as the workspace restores it at startup: set to execute on that account, waiting to be resumed
+                var open = tv.NewTabAsync("sim", inst.Symbol, ChartPeriod.M5, activate: false);
+                Wait(open, 60);
+                var tab = chartTab = open.Result;
+                Until(() => tab.Model is { Data.IsLoadingHistory: false }, 60);
+                Wait(tv.AddStrategyAsync(tab, file, parameters, openSettings: false), 120);
+                var cs = tab.Strategies.Last();
+                cs.Live = true;
+                cs.Paused = true;
+                cs.AccountId = QuitAccountId;
+                Wait(tv.RunStrategyAsync(tab, cs), 120);
+                Check(cs.Runner == null && svc.Live.Entries().Any(e => e.Key == key && e.WaitingResume), "fixture: a chart strategy on that account waits to be resumed, as restored from the saved workspace");
+                svc.RunningAtLastClose = atClose;
+                Wait(svc.Live.ResumeAtStartAsync(), 120);
+                var now = Protection(quitSim);
+                Check(cs.Runner is { IsRunning: true, Source: "chart" } chartRunner && now.Count == 2 && now.All(kept.Contains) && Names(chartRunner.ProtectionOrderIds, now),
+                    $"a chart strategy restored from saved state (auto-resumed on its chart) adopts the kept stop loss and take profit and places none ({now.Count} working, the kept ones: {now.All(kept.Contains)})");
+                if (cs.Runner is not { } adopted) return;
+                // restart with new parameters from its chart: the same keep-and-adopt as on the panel
+                var restart = svc.Live.RestartWithParametersAsync(Entry(), adopted.StrategyInstance.GetParameters());
+                Wait(restart, 120);
+                var after = Protection(quitSim);
+                Check(restart.IsCompletedSuccessfully && restart.Result == null && cs.Runner is { IsRunning: true } restarted && !ReferenceEquals(restarted, adopted)
+                      && after.Count == 2 && after.All(kept.Contains) && Names(restarted.ProtectionOrderIds, after),
+                    $"restart with new parameters on its chart keeps the stop loss and take profit working and the restarted chart strategy adopts them ({after.Count} working, the kept ones: {after.All(kept.Contains)})");
+                tv.RemoveStrategy(tab, cs);
+            });
+
+            Part("Close positions that the broker does not confirm in time", () =>
+            {
+                Reopen();
+                var inner = new SimBroker(data, new Portfolio { AccountID = "SAFETY-SLOW", Name = "Fixture slow close", BeginBalance = 100_000m, Balance = 100_000m }, new TradingStatistics()) { Name = "Fixture slow close" };
+                slow = new FixtureSlowCloseAccount(inner);
+                cache[QuitAccountId + "-slow|" + data.Instrument.Key] = slow;
+                string slowKey = $"{QuitStrategy}|{inst.FeedId}:{inst.Symbol}|{slow.Name}";
+                keys.Add(slowKey);
+                LiveStore.RemoveRunner(slowKey, deleteFills: true);
+                Hold(inner, slowKey);
+                var slowRunner = Launch(QuitAccountId + "-slow");
+                Check(slowRunner is { IsRunning: true, OwnPosition: 1 } && Protection(slow).Count == 2, "fixture: a strategy holds a protected position on an account whose market orders the broker never confirms");
+                if (slowRunner == null) return;
+                var desktop = Desktop();
+                App.Quit!.CloseWait = TimeSpan.FromSeconds(2);
+                MenuBar.Quit();
+                var dialog = Find(QuitTitle, 3);
+                Click(dialog == null ? null : ButtonOf(dialog, s => s == CloseText));
+                var notice = Find(NotClosedTitle, 8);
+                string text = notice == null ? "" : Text(notice);
+                Check(notice != null && desktop.Shutdowns == 0 && text.Contains("did not confirm them within 2 seconds", StringComparison.Ordinal)
+                      && text.Contains("«Safety quit fixture»", StringComparison.Ordinal) && text.Contains("Check them at the broker", StringComparison.Ordinal),
+                    $"Close positions: when the broker does not confirm a close in time, an English message names the strategy before the app exits («{text}»)");
+                if (notice != null)
+                {
+                    Shot(notice, "safety_quit_not_closed");
+                    Click(ButtonOf(notice, s => s == "Quit"));
+                }
+
+                Until(() => desktop.Shutdowns > 0, 5);
+                Check(desktop.Shutdowns == 1, "Close positions: after that message the app exits once");
+            });
+        }
+        finally
+        {
+            Reopen();
+            lifetimeField.SetValue(app, previousLifetime);
+            svc.Settings.AutoResumeLive = autoResume;
+            svc.RunningAtLastClose = new();
+            slow?.CancelHeld();
+            if (chartTab != null)
+            {
+                foreach (var cs in chartTab.Strategies.ToList()) tv.RemoveStrategy(chartTab, cs);
+                tv.CloseChart(chartTab);
+            }
+
+            foreach (var r in svc.Runners.ToList()) r.Stop(flatten: false);
+            svc.Runners.Clear();
+            svc.Runners.AddRange(parked);
+            foreach (var k in keys) LiveStore.RemoveRunner(k, deleteFills: true);
+            foreach (var k in cache.Keys.Where(k => k.StartsWith(QuitAccountId, StringComparison.Ordinal)).ToList()) cache.Remove(k);
+            if (File.Exists(fixturePath)) File.Delete(fixturePath);
+            svc.Strategies.Refresh();
+        }
+
+        Console.WriteLine($"Safety quit scenario: {checks} checks, {failures} failures.");
+        return failures;
+    }
+}
+
+/// <summary>
+/// A desktop lifetime that records how the app asks to exit instead of ending this process. Avalonia's lifetime
+/// interfaces cannot be implemented in source (its reference assemblies forbid it), so <see cref="Lifetime"/> is generated
+/// at run time. Its Shutdown() is Avalonia's forced exit (in 11.3.22 it raises no ShutdownRequested);
+/// <see cref="RequestShutdown"/> is the platform's request on ⌘Q. Its Exit is never raised: the app's services stay up.
+/// </summary>
+public class FixtureDesktopLifetime : DispatchProxy
+{
+    private EventHandler<Avalonia.Controls.ApplicationLifetimes.ShutdownRequestedEventArgs>? _shutdownRequested;
+    private Window? _main;
+
+    public Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime Lifetime { get; private set; } = null!;
+    public int Shutdowns { get; private set; }
+    public int Requests { get; private set; }
+
+    /// <summary>Runs when the app exits (Shutdown), before it is counted.</summary>
+    public Action? Exiting { get; set; }
+
+    public static FixtureDesktopLifetime For(Window main)
+    {
+        var lifetime = Create<Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime, FixtureDesktopLifetime>();
+        var fixture = (FixtureDesktopLifetime)(object)lifetime;
+        fixture.Lifetime = lifetime;
+        fixture._main = main;
+        return fixture;
+    }
+
+    /// <summary>⌘Q: the platform asks whether the app may close; true unless a handler canceled the request.</summary>
+    public bool RequestShutdown()
+    {
+        Requests++;
+        var e = new Avalonia.Controls.ApplicationLifetimes.ShutdownRequestedEventArgs();
+        _shutdownRequested?.Invoke(Lifetime, e);
+        return !e.Cancel;
+    }
+
+    protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+    {
+        switch (targetMethod?.Name)
+        {
+            case "Shutdown":
+                Exiting?.Invoke();
+                Shutdowns++;
+                return null;
+            case "TryShutdown":
+                return RequestShutdown();
+            case "add_ShutdownRequested":
+                _shutdownRequested += (EventHandler<Avalonia.Controls.ApplicationLifetimes.ShutdownRequestedEventArgs>?)args![0];
+                return null;
+            case "remove_ShutdownRequested":
+                _shutdownRequested -= (EventHandler<Avalonia.Controls.ApplicationLifetimes.ShutdownRequestedEventArgs>?)args![0];
+                return null;
+            case "get_MainWindow":
+                return _main;
+            case "set_MainWindow":
+                _main = (Window?)args![0];
+                return null;
+            case "get_Windows":
+                return _main is { } main ? new[] { main } : Array.Empty<Window>();
+            case "get_ShutdownMode":
+                return Avalonia.Controls.ShutdownMode.OnLastWindowClose;
+            default:
+                return null; // Args, setting ShutdownMode, subscribing to Startup or Exit (never raised)
+        }
+    }
+}
+
+/// <summary>
+/// A simulated account whose market orders the broker accepts but never confirms (they stay working, unfilled): a close
+/// sent while quitting is not confirmed in time. Everything else fills in memory, as on the simulated account.
+/// </summary>
+internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
+{
+    private readonly List<Order> _held = new();
+
+    public string Name => "Fixture slow close";
+    public bool IsReal => false;
+    public Instrument Instrument => inner.Instrument;
+    public Position Position => ((ITradingAccount)inner).Position;
+    public IEnumerable<Order> ActiveOrders => inner.ActiveOrders.Concat(_held.Where(o => o.State == OrderStates.Active));
+    public string? LastError => inner.LastError;
+    public decimal LastPrice => inner.LastPrice;
+
+    public event Action? Changed
+    {
+        add => inner.Changed += value;
+        remove => inner.Changed -= value;
+    }
+
+    public Order Market(OrderDirections dir, decimal qty, string comment = "")
+    {
+        var order = new Order { Direction = dir, Type = OrderTypes.Market, QuantityToFill = qty, Unfilled = qty, Comment = comment, State = OrderStates.Active, Status = OrderStatus.Placed };
+        _held.Add(order);
+        return order;
+    }
+
+    /// <summary>Cancels the market orders it never confirmed (fixture cleanup).</summary>
+    public void CancelHeld()
+    {
+        foreach (var order in _held.Where(o => o.State == OrderStates.Active)) Cancel(order);
+    }
+
+    public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Limit(dir, qty, price, comment);
+    public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => inner.Stop(dir, qty, trigger, comment);
+    public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Exit(type, dir, qty, price, comment);
+    public Order Replace(Order order, decimal newPrice, decimal newQuantity) => inner.Replace(order, newPrice, newQuantity);
+
+    public void Cancel(Order order)
+    {
+        if (!_held.Contains(order))
+        {
+            inner.Cancel(order);
+            return;
+        }
+
+        order.State = OrderStates.Done;
+        order.Status = OrderStatus.Canceled;
+    }
+
+    public void CancelAt(decimal price) => inner.CancelAt(price);
+
+    public void CancelAll()
+    {
+        CancelHeld();
+        inner.CancelAll();
+    }
+
     public void Modify(Order order, decimal newPrice) => inner.Modify(order, newPrice);
     public void Flatten() => inner.Flatten();
     public void Reverse() => inner.Reverse();

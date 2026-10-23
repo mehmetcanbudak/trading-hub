@@ -82,6 +82,12 @@ internal sealed class LiveLaunch
     public bool CloseOnLimit { get; init; } = true;
     public string? PortfolioId { get; init; }
     public bool Paused { get; init; }
+
+    /// <summary>
+    /// Broker identities of the stop loss and take profit a previous run left working, for it to adopt instead of placing
+    /// new ones (null: the ones its saved state records).
+    /// </summary>
+    public IReadOnlyCollection<string>? AdoptProtectionIds { get; init; }
 }
 
 /// <summary>Un portafolio con sus estrategias ya resueltas.</summary>
@@ -136,7 +142,10 @@ internal sealed partial class LiveCenter
 
     // ===================================================================== registro
 
-    /// <summary>Le pone a una estrategia que vuelve a correr lo que tenía guardado (tamaño, límites, pausa y portafolio).</summary>
+    /// <summary>
+    /// Gives a strategy that runs again what it had saved: size, limits, pause and portfolio, and the stop loss and take
+    /// profit its last run left working at the broker (it adopts them at start instead of placing new ones).
+    /// </summary>
     public static void Restore(LiveStrategyRunner r)
     {
         var saved = LiveStore.InfoFor(r.Key);
@@ -146,6 +155,7 @@ internal sealed partial class LiveCenter
         r.MaxDrawdown = saved.MaxDrawdown;
         r.CloseOnLimit = saved.CloseOnLimit;
         r.PortfolioId ??= saved.PortfolioId;
+        r.AdoptProtectionIds = (IReadOnlyCollection<string>?)saved.ProtectionOrderIds ?? Array.Empty<string>();
         if (saved.Paused) r.SetPaused(true);
     }
 
@@ -453,6 +463,7 @@ internal sealed partial class LiveCenter
             CloseOnLimit = info.CloseOnLimit,
             PortfolioId = info.PortfolioId,
             Paused = info.Paused,
+            AdoptProtectionIds = info.ProtectionOrderIds,
         }, null);
     }
 
@@ -569,6 +580,8 @@ internal sealed partial class LiveCenter
             // launch, resume, auto-resume and restarts all come through here: real-order permission at every submit
             Guard = _svc.OrderGuard,
         };
+        // resume, auto-resume and restarts adopt the stop loss and take profit the previous run left working at the broker
+        runner.AdoptProtectionIds = spec.AdoptProtectionIds ?? (IReadOnlyCollection<string>?)LiveStore.InfoFor(runner.Key)?.ProtectionOrderIds ?? Array.Empty<string>();
         if (Running(runner.Key) != null) return (null, $"«{runner.StrategyName}» is already running on {spec.Instrument.Symbol} with {TradingHub.Common.EnglishText.Of(account.Name)}.");
         try
         {
@@ -719,7 +732,7 @@ internal sealed partial class LiveCenter
         {
             cs.Parameters = new Dictionary<string, object?>(parameters);
             cs.Paused = false;
-            await tv.RunStrategyAsync(chart, cs);
+            await tv.RunStrategyAsync(chart, cs, keepProtection: true);
             return cs.Overlay.Error;
         }
 
@@ -729,7 +742,8 @@ internal sealed partial class LiveCenter
         if (old is { IsRunning: true })
         {
             old.StopReason = "Restarted with new parameters";
-            old.Stop(flatten: false);
+            // its stop loss and take profit stay working at the broker: the restarted strategy adopts them (never duplicated)
+            old.Stop(flatten: false, keepProtection: true);
         }
 
         var spec = launch.Spec!;
@@ -749,6 +763,7 @@ internal sealed partial class LiveCenter
             CloseOnLimit = old?.CloseOnLimit ?? spec.CloseOnLimit,
             PortfolioId = old?.PortfolioId ?? spec.PortfolioId,
             Paused = old?.Paused ?? spec.Paused,
+            AdoptProtectionIds = old != null ? old.ProtectionOrderIds.ToList() : spec.AdoptProtectionIds,
         });
         return runner == null ? message : null;
     }

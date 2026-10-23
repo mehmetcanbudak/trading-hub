@@ -32,6 +32,31 @@ internal abstract class TradingHubDialog<T> : Window
         foreach (var b in buttons) bar.Children.Add(b);
         return new StackPanel { Margin = new Thickness(20, 18, 20, 16), Spacing = 18, Children = { body, bar } };
     }
+
+    private T _answer = default!;
+
+    /// <summary>Closes it with that answer, whether it was shown over a window or on its own.</summary>
+    protected void Answer(T answer)
+    {
+        _answer = answer;
+        Close(answer);
+    }
+
+    /// <summary>
+    /// Shows it over <paramref name="owner"/> while that window is on screen; otherwise on its own, centered and on top (the
+    /// main window can be closed to the menu bar). Esc, or closing it, answers the default.
+    /// </summary>
+    internal Task<T> ShowOverAsync(Window? owner)
+    {
+        if (owner is { IsVisible: true }) return ShowDialog<T>(owner);
+        var answered = new TaskCompletionSource<T>();
+        Closed += (_, _) => answered.TrySetResult(_answer);
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        Topmost = true;
+        Show();
+        Activate();
+        return answered.Task;
+    }
 }
 
 /// <summary>
@@ -103,4 +128,96 @@ internal sealed class PromptDialog : TradingHubDialog<string?>
 
     public static Task<string?> ShowAsync(Window owner, string title, string label, string initial = "", string okText = "OK") =>
         new PromptDialog(title, label, initial, okText).ShowDialog<string?>(owner);
+}
+
+/// <summary>
+/// Quitting while live strategies hold positions: what happens to their orders at the broker. Keep the stops (the default
+/// button), cancel them, close the positions (danger style: a click, never Enter) or don't quit (Esc).
+/// </summary>
+internal sealed class QuitDialog : TradingHubDialog<QuitMode?>
+{
+    internal QuitDialog(IReadOnlyList<string> strategies) : base("Quit Trading Hub", 500)
+    {
+        var icon = Ui.Icon(MaterialIconKind.AlertOutline, 26, Ui.Warn);
+        icon.VerticalAlignment = VerticalAlignment.Top;
+        var list = new StackPanel { Spacing = 4 };
+        foreach (var s in strategies) list.Children.Add(new TextBlock { Text = "• " + s, TextWrapping = TextWrapping.Wrap });
+        var choices = new StackPanel { Spacing = 2 };
+        foreach (var line in new[]
+                 {
+                     "Keep stops: their stop loss and take profit stay working at the broker while Trading Hub is closed; each strategy takes them over when it resumes.",
+                     "Cancel stops: the positions stay open without them.",
+                     "Close positions: market orders close them now.",
+                 })
+            choices.Children.Add(new TextBlock { Text = line, TextWrapping = TextWrapping.Wrap, Classes = { "muted", "small" } });
+        var text = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                new TextBlock { Text = "Quit Trading Hub", Classes = { "h2" } },
+                new TextBlock { Text = strategies.Count == 1 ? "This live strategy holds an open position:" : "These live strategies hold open positions:", TextWrapping = TextWrapping.Wrap, Classes = { "muted" } },
+                list,
+                choices,
+            },
+        };
+        var body = new DockPanel();
+        DockPanel.SetDock(icon, Dock.Left);
+        icon.Margin = new Thickness(0, 2, 14, 0);
+        body.Children.Add(icon);
+        body.Children.Add(text);
+
+        var keep = Choice("Keep stops at broker and quit", QuitMode.KeepStops, "primary");
+        keep.IsDefault = true;
+        var cancelStops = Choice("Cancel stops and quit", QuitMode.CancelStops, null);
+        var close = Choice("Close positions and quit", QuitMode.ClosePositions, "danger");
+        ToolTip.SetTip(close, "Click to close the positions at market (Enter never chooses this)");
+        var stay = Choice("Don't quit", null, null);
+        stay.IsCancel = true;
+        // in the tunnel phase, before a focused button sees it: a plain Enter never closes the positions
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Enter && (ReferenceEquals(e.Source, close) || close.IsFocused)) e.Handled = true;
+        }, RoutingStrategies.Tunnel);
+        Content = new StackPanel { Margin = new Thickness(20, 18, 20, 16), Spacing = 18, Children = { body, new StackPanel { Spacing = 8, Children = { keep, cancelStops, close, stay } } } };
+    }
+
+    private Button Choice(string text, QuitMode? mode, string? style)
+    {
+        var button = new Button { Content = text, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
+        if (style != null) button.Classes.Add(style);
+        button.Click += (_, _) => Answer(mode);
+        return button;
+    }
+}
+
+/// <summary>A message with one button: it only informs.</summary>
+internal sealed class NoticeDialog : TradingHubDialog<bool>
+{
+    private NoticeDialog(string title, string message, string okText) : base(title, 460)
+    {
+        var icon = Ui.Icon(MaterialIconKind.AlertOutline, 26, Ui.Warn);
+        icon.VerticalAlignment = VerticalAlignment.Top;
+        var text = new StackPanel
+        {
+            Spacing = 6,
+            Children =
+            {
+                new TextBlock { Text = title, Classes = { "h2" } },
+                new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Classes = { "muted" } },
+            },
+        };
+        var body = new DockPanel();
+        DockPanel.SetDock(icon, Dock.Left);
+        icon.Margin = new Thickness(0, 2, 14, 0);
+        body.Children.Add(icon);
+        body.Children.Add(text);
+        var ok = new Button { Content = okText, IsDefault = true, IsCancel = true }.Classes("primary");
+        ok.Click += (_, _) => Answer(true);
+        Content = Shell(body, ok);
+    }
+
+    /// <summary>Over <paramref name="owner"/> while it is on screen, otherwise on its own (see <see cref="TradingHubDialog{T}.ShowOverAsync"/>).</summary>
+    public static Task ShowAsync(Window? owner, string title, string message, string okText = "OK") =>
+        new NoticeDialog(title, message, okText).ShowOverAsync(owner);
 }

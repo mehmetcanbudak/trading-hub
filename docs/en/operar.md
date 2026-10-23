@@ -124,6 +124,7 @@ For simulation, change **Initial balance** or **Reset simulated account**. Reset
 - **Dangerous confirmations default to Cancel.** Dialogs for real-money execution, Stop all and close, deletions, closing positions and the paid Databento download preselect **Cancel**: Enter and Esc cancel, and only a click or ⌘Enter confirms. Ordinary confirmations keep their action as the default.
 - **Maximum order size.** Real orders larger than the configured connection limit are blocked with an **Order blocked** message.
 - **Strategy limits.** Automatic strategies have daily-loss and drawdown limits; **0 means no limit**. **Live → Stop all** stops strategies, cancels their orders and requests closure of their positions. Confirm resulting broker positions; network failures can prevent closure.
+- **Quitting asks first.** While live strategies hold positions, ⌘Q and **Quit Trading Hub** show the same **Quit Trading Hub** dialog: keep their stop loss and take profit working at the broker (the default), cancel them, close the positions (never by Enter) or don't quit (Esc). Quitting never closes positions unless you choose that. Details are in Live strategies, under Closing the window and reopening.
 - **Visible real-account warnings.** Real destinations are marked orange with **REAL** / **REAL ACCOUNT**.
 
 A launch confirmation authorizes an automatic strategy to trade without an individual dialog for every generated order. Start with simulation; a translated interface is not a guarantee of trading safety.
