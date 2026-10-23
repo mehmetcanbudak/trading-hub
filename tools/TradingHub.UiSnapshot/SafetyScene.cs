@@ -546,9 +546,28 @@ internal static class SafetyScene
                 Confirm(cancel);
                 Until(() => Work() is { Done: true }, 15);
                 Check(Work() is { Done: true, Cancelled: true }, "confirmed Cancel cancels the working REAL order with real orders disabled");
+                var positionRow = Field<IDictionary>(page, "_positionRows")["ESZ6|CME"];
+                var openLine = positionRow?.GetType().GetField("Line")!.GetValue(positionRow);
                 Confirm(close);
                 Until(() => Net() == 0, 15);
                 Check(Net() == 0, $"confirmed Close flattens the REAL position with real orders disabled (net {Net()})");
+
+                // the same Close confirmed on its row as it was a moment before (the position is already flat): nothing is sent,
+                // and the status says so instead of staying on «Closing position at market…». The close order's own completion
+                // may arrive after the flat position: wait for it, or that Close would try to cancel it.
+                Until(() => !session.OrdersOf(acct).Any(o => !o.Done), 15);
+                bool sentNothing = false;
+                if (positionRow != null && openLine is PositionLine { Net: not 0 })
+                {
+                    positionRow.GetType().GetField("Line")!.SetValue(positionRow, openLine);
+                    int orders = session.OrdersOf(acct).Count;
+                    Confirm(close);
+                    Until(() => Status().Contains("nothing needed closing", StringComparison.Ordinal), 10);
+                    sentNothing = session.OrdersOf(acct).Count == orders && Net() == 0;
+                }
+
+                Check(sentNothing && Status().Contains("nothing needed closing", StringComparison.Ordinal),
+                    $"Close on a position that is already flat sends nothing and says so («{Status()}»)");
             }
             finally
             {
