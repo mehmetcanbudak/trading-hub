@@ -1,3 +1,4 @@
+using System.Globalization;
 using TradingHub.Data;
 using TradingHub.Market;
 using TradingHub.Trading;
@@ -16,9 +17,47 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
     private readonly string _account;
     private readonly object _gate = new();
     private readonly Dictionary<string, Order> _byTag = new();
+    private readonly Dictionary<Order, string> _tagOf = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, Order> _byBasket = new();
     private (string Symbol, string Exchange)? _resolved;
     private List<Order> _active = new();
+
+    /// <summary>
+    /// The part of every order tag that identifies this process (<c>th-{SessionTag}-{order id}</c>). Order ids restart at 1
+    /// in every process, so without it a later process could reuse an earlier one's same-day tags and take that process's
+    /// orders for its own.
+    /// </summary>
+    public static string SessionTag { get; } = SessionTagFor(ProcessStartUtc());
+
+    /// <summary>Session part of the tags for a process started at <paramref name="startUtc"/>: its Unix milliseconds in base 36 (8 ASCII characters).</summary>
+    public static string SessionTagFor(DateTime startUtc)
+    {
+        const string digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+        var utc = startUtc.Kind == DateTimeKind.Local ? startUtc.ToUniversalTime() : DateTime.SpecifyKind(startUtc, DateTimeKind.Utc);
+        long ms = Math.Max(0, new DateTimeOffset(utc).ToUnixTimeMilliseconds());
+        Span<char> text = stackalloc char[13];
+        int i = text.Length;
+        do
+        {
+            text[--i] = digits[(int)(ms % 36)];
+            ms /= 36;
+        }
+        while (ms > 0);
+        return new string(text[i..]);
+    }
+
+    private static DateTime ProcessStartUtc()
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetCurrentProcess();
+            return process.StartTime.ToUniversalTime();
+        }
+        catch (Exception)
+        {
+            return DateTime.UtcNow; // start time unavailable: the first use in this process is just as distinct
+        }
+    }
 
     public RithmicBroker(InstrumentData data, RithmicTradingSession session, string accountId, string name,
         Func<CancellationToken, Task<(string Symbol, string Exchange)>> contract)
@@ -147,8 +186,13 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
             return order;
         }
 
-        string tag = "th-" + order.Id;
-        lock (_gate) _byTag[tag] = order;
+        string tag = "th-" + SessionTag + "-" + order.Id.ToString(CultureInfo.InvariantCulture);
+        lock (_gate)
+        {
+            _byTag[tag] = order;
+            _tagOf[order] = tag;
+        }
+
         Sync();
         _ = Task.Run(async () =>
         {
@@ -189,10 +233,15 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
     public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
         Send(dir, type == OrderTypes.Stop ? OrderTypes.Stop : OrderTypes.Limit, qty, price, comment, reduceOnly: true);
 
-    private RithmicOrderState? StateOf(Order order) =>
-        _resolved is { } c
-            ? _session.OrdersFor(_account, c.Symbol, c.Exchange).FirstOrDefault(s => (order.ExchangeOrderId.Length > 0 && s.BasketId == order.ExchangeOrderId) || s.UserTag == "th-" + order.Id)
-            : null;
+    /// <summary>Rithmic's state of an order, found by basket id or by the tag this broker gave it (restored orders: basket id only).</summary>
+    private RithmicOrderState? StateOf(Order order)
+    {
+        if (_resolved is not { } c) return null;
+        string? tag;
+        lock (_gate) _tagOf.TryGetValue(order, out tag);
+        return _session.OrdersFor(_account, c.Symbol, c.Exchange)
+            .FirstOrDefault(s => (order.ExchangeOrderId.Length > 0 && s.BasketId == order.ExchangeOrderId) || (tag != null && s.UserTag == tag));
+    }
 
     public void Cancel(Order order)
     {

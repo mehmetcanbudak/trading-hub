@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Feeds.Rithmic;
@@ -118,6 +120,115 @@ public class RithmicTests
         broker.Flatten();
         await Until(() => broker.Position.Volume == 0);
         Assert.Equal(0m, broker.Position.Volume);
+    }
+
+    [Fact]
+    public async Task Order_tags_carry_a_per_process_session_component()
+    {
+        // Order ids restart at 1 in every process: the tag also needs a part that tells this process from earlier ones
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        using var feed = new RithmicFeed(Settings(server));
+        using var session = new RithmicTradingSession(Settings(server));
+        session.Start();
+        await Until(() => session.IsConnected);
+        Assert.True(session.IsConnected, session.StatusText);
+        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
+
+        var limit = broker.Limit(OrderDirections.Sell, 1, 5010);
+        var market = broker.Market(OrderDirections.Buy, 1);
+        await Until(() => limit.ExchangeOrderId.Length > 0 && market.ExchangeOrderId.Length > 0);
+        string[] tags;
+        lock (server.Tags) tags = server.Tags.ToArray();
+
+        Assert.Equal(2, tags.Length);
+        foreach (var tag in tags) Assert.Matches("^th-[0-9a-z]{4,12}-[0-9]+$", tag);
+        var parts = tags.Select(t => Regex.Match(t, "^th-([0-9a-z]+)-([0-9]+)$")).ToArray();
+        Assert.Single(parts.Select(m => m.Groups[1].Value).Distinct()); // one session component for the whole process
+        Assert.Equal(new[] { limit.Id, market.Id }.Order(), parts.Select(m => long.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture)).Order());
+
+        // the session matches each order by the tag stored for it
+        string limitTag = tags.Single(t => t.EndsWith("-" + limit.Id.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal));
+        Assert.Equal(limit.ExchangeOrderId, session.OrderByTag(limitTag)?.BasketId);
+    }
+
+    [Fact]
+    public async Task An_earlier_process_order_with_the_same_counter_stays_separate()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        using var feed = new RithmicFeed(Settings(server));
+        using var session = new RithmicTradingSession(Settings(server));
+        session.Start();
+        await Until(() => session.IsConnected);
+        Assert.True(session.IsConnected, session.StatusText);
+        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
+
+        var ours = broker.Limit(OrderDirections.Sell, 1, 5010);
+        await Until(() => ours.ExchangeOrderId.Length > 0 && server.Open.ContainsKey(ours.ExchangeOrderId));
+        string basket = ours.ExchangeOrderId;
+
+        // Earlier processes also numbered their orders from 1 and left working orders today with this order's number:
+        // one from a version whose tags had no session part, one from another session.
+        string n = ours.Id.ToString(CultureInfo.InvariantCulture);
+        await server.PushOrder("B900", "th-" + n, buy: true, qty: 3, price: 4990);
+        await server.PushOrder("B901", "th-0a1b2c3d-" + n, buy: true, qty: 2, price: 4985);
+        await Until(() => broker.ActiveOrders.Count() == 3);
+
+        Assert.Equal(3, broker.ActiveOrders.Count());
+        Assert.Equal(basket, ours.ExchangeOrderId);
+        Assert.Equal(OrderDirections.Sell, ours.Direction);
+        Assert.Equal(5010m, ours.Price);
+        Assert.Equal(1m, ours.QuantityToFill);
+        var earlier = Assert.Single(broker.ActiveOrders, o => o.ExchangeOrderId == "B900");
+        Assert.NotSame(ours, earlier);
+        Assert.Equal("Rithmic", earlier.Comment);
+        Assert.Equal(4990m, earlier.Price);
+
+        // restored orders keep matching by basket id
+        broker.Modify(earlier, 4995);
+        await Until(() => server.Open["B900"].Price == 4995);
+        Assert.Equal(4995.0, server.Open["B900"].Price);
+        Assert.Equal(5010.0, server.Open[basket].Price);
+
+        broker.Cancel(ours);
+        await Until(() => ours.Status == OrderStatus.Canceled);
+        Assert.Equal(OrderStatus.Canceled, ours.Status);
+        Assert.False(server.Open.ContainsKey(basket));
+        Assert.True(server.Open.ContainsKey("B900"));
+        Assert.True(server.Open.ContainsKey("B901"));
+    }
+
+    [Fact]
+    public async Task Session_tag_comes_from_the_process_start_and_differs_between_processes()
+    {
+        var start = new DateTime(2026, 10, 23, 9, 30, 0, DateTimeKind.Utc);
+        string a = RithmicBroker.SessionTagFor(start);
+        Assert.Matches("^[0-9a-z]{8}$", a); // short ASCII
+        Assert.Equal(a, RithmicBroker.SessionTagFor(start)); // stable for one process
+        Assert.Equal(a, RithmicBroker.SessionTagFor(start.ToLocalTime())); // the same instant in local time
+        Assert.NotEqual(a, RithmicBroker.SessionTagFor(start.AddMilliseconds(1))); // a process started 1 ms later
+        Assert.NotEqual(a, RithmicBroker.SessionTagFor(start.AddHours(-2))); // an earlier process the same day
+
+        // this process's component is its start time (base 36 Unix milliseconds)
+        long ms = 0;
+        foreach (char ch in RithmicBroker.SessionTag) ms = ms * 36 + (char.IsAsciiDigit(ch) ? ch - '0' : ch - 'a' + 10);
+        using (var process = System.Diagnostics.Process.GetCurrentProcess())
+        {
+            var started = process.StartTime.ToUniversalTime();
+            Assert.InRange(DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime, started.AddSeconds(-1), started.AddSeconds(1));
+        }
+
+        // and it is the component this process puts in its tags
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        using var feed = new RithmicFeed(Settings(server));
+        using var session = new RithmicTradingSession(Settings(server));
+        session.Start();
+        await Until(() => session.IsConnected);
+        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
+        var limit = broker.Limit(OrderDirections.Buy, 1, 4990);
+        await Until(() => limit.ExchangeOrderId.Length > 0);
+        string tag;
+        lock (server.Tags) tag = Assert.Single(server.Tags);
+        Assert.Equal("th-" + RithmicBroker.SessionTag + "-" + limit.Id.ToString(CultureInfo.InvariantCulture), tag);
     }
 
     private sealed class Sink : IMarketDataSink
