@@ -831,7 +831,7 @@ internal static partial class SafetyScene
         var cache = Field<Dictionary<string, ITradingAccount>>(svc, "_realBrokers");
         string fixturePath = Path.Combine(AppPaths.Strategies, QuitStrategy + ".cs");
         var keys = new List<string>();
-        TradingHub.App.Views.ChartTab? chartTab = null;
+        TradingHub.App.Views.ChartTab? chartTab = null, windowTab = null;
         FixtureSlowCloseAccount? slow = null;
 
         // after a quit that only recorded the exit: the services were never shut down, only the live saves stopped
@@ -1161,6 +1161,79 @@ internal static partial class SafetyScene
                 Until(() => desktop.Shutdowns > 0, 5);
                 Check(desktop.Shutdowns == 1, "Close positions: after that message the app exits once");
             });
+
+            Part("closing the main window quits through the same path (Keep in menu bar off)", () =>
+            {
+                Reopen();
+                bool keepInMenuBar = svc.Settings.KeepInMenuBar;
+                svc.Settings.KeepInMenuBar = false;
+                // the scene's safety net runs after the window's own handler: it records what that handler decided, then
+                // keeps the window open whatever it decided, so this process never loses its main window
+                bool? appCanceled = null;
+                void Net(object? sender, WindowClosingEventArgs e)
+                {
+                    appCanceled = e.Cancel;
+                    e.Cancel = true;
+                }
+
+                window.Closing += Net;
+                try
+                {
+                    // a live chart strategy in a floating chart window, holding a position with its stop loss and take profit
+                    if (Pos(quitSim) == 0) Hold(quitSim, key);
+                    var open = tv.NewTabAsync("sim", inst.Symbol, ChartPeriod.M5, activate: false);
+                    Wait(open, 60);
+                    var tab = windowTab = open.Result;
+                    Until(() => tab.Model is { Data.IsLoadingHistory: false }, 60);
+                    Wait(tv.AddStrategyAsync(tab, file, parameters, openSettings: false), 120);
+                    var cs = tab.Strategies.Last();
+                    cs.Live = true;
+                    cs.AccountId = QuitAccountId;
+                    Wait(tv.RunStrategyAsync(tab, cs), 120);
+                    var floating = tv.Detach(tab);
+                    pump(0.3);
+                    var working = Protection(quitSim);
+                    Check(cs.Runner is { IsRunning: true, OwnPosition: 1 } && working.Count == 2 && floating != null && tv.FloatingWindows.Contains(floating),
+                        $"fixture: a live chart strategy in a floating chart window holds a position with its stop loss and take profit working ({working.Count} working)");
+                    if (cs.Runner is not { } chartRunner || floating is not { } chartWindow) return;
+                    bool Untouched() => chartRunner.IsRunning && working.All(o => o.State == OrderStates.Active) && Protection(quitSim).Count == 2 && tv.FloatingWindows.Contains(chartWindow);
+
+                    var desktop = Desktop();
+                    window.Close(); // what the red close button does: a WindowClosing close
+                    var dialog = Find(QuitTitle, 3);
+                    Check(dialog != null && appCanceled == true,
+                        $"closing the main window with Keep in menu bar off cancels the close and asks first (Quit Trading Hub dialog shown: {dialog != null}, close canceled by the window: {appCanceled})");
+                    Check(Untouched(), "closing the main window stops nothing before the decision: the floating chart's strategy keeps running with its stop loss and take profit working");
+                    if (dialog == null) return;
+                    Press(dialog, Key.Escape);
+                    Until(() => !dialog.IsVisible, 3);
+                    pump(0.5);
+                    Check(window.IsVisible && Untouched() && desktop.Shutdowns == 0, "Don't quit after closing the main window: the window stays open and everything keeps running");
+
+                    window.Close();
+                    dialog = Find(QuitTitle, 3);
+                    if (dialog != null) Press(dialog, Key.Enter); // Keep, the default
+                    Until(() => desktop.Shutdowns > 0, 5);
+                    var saved = Saved();
+                    Check(dialog != null && desktop.Shutdowns == 1 && !chartRunner.IsRunning && working.All(o => o.State == OrderStates.Active)
+                          && Names(chartRunner.ProtectionOrderIds, working) && Names(saved?.ProtectionOrderIds, working) && saved?.Running == true,
+                        "Keep after closing the main window works as from ⌘Q: the strategy stops, its stop loss and take profit stay working and are recorded, and the app exits once");
+
+                    // the quit's own exit then closes the windows (Avalonia closes them for an application shutdown)
+                    appCanceled = null;
+                    typeof(Window).GetMethod("CloseCore", Private)!.Invoke(window, new object[] { WindowCloseReason.ApplicationShutdown, true, false });
+                    Check(appCanceled == false && Find(QuitTitle, 0.5) == null && !tv.FloatingWindows.Contains(chartWindow),
+                        "the quit's own exit closes the windows normally: an application-shutdown close is not intercepted and asks nothing (the floating chart window closes)");
+                    appCanceled = null;
+                    window.Close();
+                    Check(appCanceled == false && Find(QuitTitle, 0.5) == null && desktop.Shutdowns == 1, "once decided, closing the main window again is not intercepted either (no second question)");
+                }
+                finally
+                {
+                    window.Closing -= Net;
+                    svc.Settings.KeepInMenuBar = keepInMenuBar;
+                }
+            });
         }
         finally
         {
@@ -1173,6 +1246,12 @@ internal static partial class SafetyScene
             {
                 foreach (var cs in chartTab.Strategies.ToList()) tv.RemoveStrategy(chartTab, cs);
                 tv.CloseChart(chartTab);
+            }
+
+            if (windowTab != null)
+            {
+                foreach (var cs in windowTab.Strategies.ToList()) tv.RemoveStrategy(windowTab, cs);
+                tv.CloseChart(windowTab);
             }
 
             foreach (var r in svc.Runners.ToList()) r.Stop(flatten: false);

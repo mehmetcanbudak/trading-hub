@@ -78,10 +78,11 @@ internal enum QuitMode
 }
 
 /// <summary>
-/// Quitting Trading Hub, the same from ⌘Q (the platform's shutdown request, also on a Dock or logout quit) and from the menu
-/// bar's «Quit Trading Hub». While live strategies hold positions it first asks what to do with their orders (keep the
-/// stops at the broker, cancel them, close the positions, or don't quit); without positions it quits as ⌘Q always did.
-/// Then it saves the live state, stops the strategies that way and exits, once.
+/// Quitting Trading Hub, the same from ⌘Q (the platform's shutdown request, also on a Dock or logout quit), from the menu
+/// bar's «Quit Trading Hub» and from closing the main window when it is not kept in the menu bar. While live strategies
+/// hold positions it first asks what to do with their orders (keep the stops at the broker, cancel them, close the
+/// positions, or don't quit); without positions it quits as ⌘Q always did. Then it saves the live state, stops the
+/// strategies that way and exits, once.
 /// </summary>
 internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit)
 {
@@ -91,6 +92,9 @@ internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit
 
     /// <summary>How long «Close positions and quit» waits for the broker to confirm the closes.</summary>
     internal TimeSpan CloseWait { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Decided: it is stopping the strategies and exiting, so a further close or shutdown request goes through.</summary>
+    internal bool IsQuitting => _quitting;
 
     /// <summary>Live strategies holding a position: what the question is about.</summary>
     private List<LiveStrategyRunner> Holding() =>

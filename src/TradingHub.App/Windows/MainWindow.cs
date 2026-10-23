@@ -138,6 +138,16 @@ public sealed class MainWindow : Window
                 return;
             }
 
+            // otherwise the red button ends Trading Hub: it quits like ⌘Q and the menu bar's Quit (asking first while live
+            // strategies hold positions) and nothing stops before that decision; the quit's own exit then closes the
+            // windows as an application shutdown, which comes through here
+            if (e.CloseReason == WindowCloseReason.WindowClosing && App.Quit is { IsQuitting: false } quit)
+            {
+                e.Cancel = true;
+                Dispatcher.UIThread.Post(() => _ = quit.QuitAsync());
+                return;
+            }
+
             Trading.CloseFloating();
         };
     }
