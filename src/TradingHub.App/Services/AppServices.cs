@@ -276,6 +276,13 @@ public sealed class AppServices
 {
     private readonly Dictionary<string, SimBroker> _simBrokers = new();
     private readonly Dictionary<string, ITradingAccount> _realBrokers = new();
+
+    // how each real broker AccountFor built was made, for as long as anything holds the broker (see BrokerOrigin)
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ITradingAccount, BrokerOrigin> _brokerOrigins = new();
+
+    // replaced brokers something still works through (a live strategy, a position or working orders): disposed once idle
+    private readonly List<ITradingAccount> _replacedBrokers = new();
+
     private readonly Dictionary<string, TradingHub.Feeds.Rithmic.RithmicTradingSession> _rithmicSessions = new();
     private readonly Dictionary<string, TradingHub.Feeds.Tradovate.TradovateTradingSession> _tradovateSessions = new();
 
@@ -346,6 +353,8 @@ public sealed class AppServices
                     _realBrokers.Remove(key);
                 }
             }
+
+            ReplaceStaleBrokers(p);
         };
         Directory.CreateDirectory(AppPaths.Root);
         Directory.CreateDirectory(AppPaths.UserIndicators);
@@ -529,6 +538,7 @@ public sealed class AppServices
     public ITradingAccount AccountFor(InstrumentData data, string accountId)
     {
         if (accountId == "sim") return SimBrokerFor(data);
+        DisposeIdleReplacedBrokers();
         string key = accountId + "|" + data.Instrument.Key;
         if (_realBrokers.TryGetValue(key, out var b)) return b;
         if (accountId.StartsWith("tradovate|", StringComparison.Ordinal))
@@ -538,9 +548,7 @@ public sealed class AppServices
             var session = TradovateSessionFor(tp);
             long id = long.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
             var acc = session.Accounts.FirstOrDefault(a => a.Id == id) ?? new TradingHub.Feeds.Tradovate.TradovateAccount(id, parts[2], true);
-            var tb = new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc, $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}");
-            _realBrokers[key] = tb;
-            return tb;
+            return Cache(key, tp, new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc, $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}"));
         }
 
         if (accountId.StartsWith("rithmic|", StringComparison.Ordinal))
@@ -549,27 +557,107 @@ public sealed class AppServices
             var rp = Connections.Find(parts[1]) ?? throw new KeyNotFoundException(accountId);
             var session = RithmicSessionFor(rp);
             var feed = (TradingHub.Feeds.Rithmic.RithmicFeed)Connections.GetFeed(rp.Id);
-            var rb = new TradingHub.Feeds.Rithmic.RithmicBroker(data, session, parts[2], $"{parts[2]} · Rithmic{(session.IsPractice ? " (practice)" : " — REAL")}",
-                ct => feed.ContractAsync(data.Instrument, ct));
-            _realBrokers[key] = rb;
-            return rb;
+            return Cache(key, rp, new TradingHub.Feeds.Rithmic.RithmicBroker(data, session, parts[2], $"{parts[2]} · Rithmic{(session.IsPractice ? " (practice)" : " — REAL")}",
+                ct => feed.ContractAsync(data.Instrument, ct)));
         }
 
         var p = Connections.Find(accountId) ?? throw new KeyNotFoundException(accountId);
-        b = new BinanceBroker(data, Connections.BinanceSettingsOf(p), p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL");
-        _realBrokers[key] = b;
-        return b;
+        return Cache(key, p, new BinanceBroker(data, Connections.BinanceSettingsOf(p), p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL"));
+    }
+
+    /// <summary>
+    /// How a real broker was built: from which connection, whether it traded real money then, and the connection settings
+    /// that decide where its orders go (Binance: market, testnet or REAL, and API key, which also decide its REST server;
+    /// Rithmic: system and user, as its shared session follows a new server by itself).
+    /// </summary>
+    private sealed class BrokerOrigin(string profileId, bool real, object? settings)
+    {
+        public string ProfileId { get; } = profileId;
+        public bool Real { get; } = real;
+        public object? Settings { get; } = settings;
+
+        private volatile bool _replaced;
+
+        /// <summary>The connection changed those settings after it was built: <see cref="AccountFor"/> no longer returns it.</summary>
+        public bool Replaced { get => _replaced; set => _replaced = value; }
+    }
+
+    /// <summary>The settings a <see cref="BrokerOrigin"/> keeps, as the connection has them now (none for Tradovate, whose brokers every change rebuilds).</summary>
+    private static object? BrokerSettingsOf(ConnectionProfile p) => p switch
+    {
+        { IsRithmic: true } => (p.RithmicSystem, p.RithmicUser),
+        { Kind: ConnectionKind.Tradovate } => null,
+        _ => (p.Kind, p.Testnet, p.ApiKey),
+    };
+
+    private ITradingAccount Cache(string key, ConnectionProfile p, ITradingAccount broker)
+    {
+        _realBrokers[key] = broker;
+        _brokerOrigins.AddOrUpdate(broker, new BrokerOrigin(p.Id, broker.IsReal, BrokerSettingsOf(p)));
+        return broker;
+    }
+
+    /// <summary>Cached real brokers were replaced after their connection changed: what shows them switches to <see cref="AccountFor"/>.</summary>
+    public event Action<IReadOnlyCollection<ITradingAccount>>? BrokersReplaced;
+
+    /// <summary>
+    /// A connection was saved: the cached brokers built from it whose mode, credentials or server it no longer has are
+    /// dropped, so the next <see cref="AccountFor"/> builds ones that match, and <see cref="BrokersReplaced"/> tells the views.
+    /// A dropped broker keeps working while a live strategy runs on it or it still has a position or working orders, so what
+    /// it opened stays managed, but it can no longer add exposure (<see cref="CheckRealOrder"/>); otherwise it is disposed.
+    /// </summary>
+    private void ReplaceStaleBrokers(ConnectionProfile p)
+    {
+        var now = BrokerSettingsOf(p);
+        var replaced = new List<ITradingAccount>();
+        foreach (var (key, broker) in _realBrokers.ToList())
+        {
+            if (!_brokerOrigins.TryGetValue(broker, out var origin) || origin.ProfileId != p.Id || Equals(origin.Settings, now)) continue;
+            origin.Replaced = true;
+            _realBrokers.Remove(key);
+            _replacedBrokers.Add(broker);
+            replaced.Add(broker);
+        }
+
+        if (replaced.Count == 0) return;
+        DisposeIdleReplacedBrokers();
+        BrokersReplaced?.Invoke(replaced);
+    }
+
+    /// <summary>Disposes the replaced brokers nothing works through anymore: no live strategy, position or working order.</summary>
+    private void DisposeIdleReplacedBrokers()
+    {
+        if (_replacedBrokers.Count == 0) return;
+        _replacedBrokers.RemoveAll(b =>
+        {
+            if (b.Position.Volume != 0 || b.ActiveOrders.Any() || Runners.Any(r => (r.IsRunning || r.IsClosing) && ReferenceEquals(r.Account, b))) return false;
+            (b as IDisposable)?.Dispose();
+            return true;
+        });
     }
 
     /// <summary>
     /// Real-order permission when an order is sent, from the connection settings as they are now (cached brokers and
     /// restored strategies included; <see cref="AccountFor"/> does not check it): null if the order may go out, otherwise
-    /// why not. Only an order that opens, adds to or reverses a position on a real account needs its connection enabled
-    /// with real orders allowed; reductions and cancels never do.
+    /// why not. Only an order that opens, adds to or reverses a position needs permission: on a real account its connection
+    /// enabled with real orders allowed, and on a broker <see cref="AccountFor"/> built, a connection that still has the
+    /// mode (REAL or not), credentials and server it was built with. Reductions and cancels never need it.
     /// </summary>
-    public string? CheckRealOrder(string accountId, ITradingAccount account, decimal position, decimal signedQuantity) =>
-        RealOrderPermission.Check(account.IsReal, Connections.FindForAccount(accountId) is { } p ? (p.Name, p.Enabled, p.AllowRealOrders) : null,
-            position, signedQuantity);
+    public string? CheckRealOrder(string accountId, ITradingAccount account, decimal position, decimal signedQuantity)
+    {
+        var p = Connections.FindForAccount(accountId);
+        if (p != null && _brokerOrigins.TryGetValue(account, out var origin) && RealOrderPermission.IncreasesExposure(position, signedQuantity))
+        {
+            // Rithmic brokers follow their session's mode; the others keep the one they were built with
+            bool realNow = p.IsRithmic ? account.IsReal : !p.Testnet;
+            string Mode(bool real) => real ? "REAL" : p.IsRithmic ? "practice" : p.Kind == ConnectionKind.Tradovate ? "demo" : "testnet";
+            const string Rest = ": new orders are disabled; cancel/close allowed";
+            if (origin.Real != realNow) return $"{p.Name} is now {Mode(realNow)} but this account was opened as {Mode(origin.Real)}" + Rest;
+            if (origin.Replaced) return $"the connection {p.Name} changed its keys, system or login after this account was opened" + Rest;
+        }
+
+        return RealOrderPermission.Check(account.IsReal, p is { } c ? (c.Name, c.Enabled, c.AllowRealOrders) : null, position, signedQuantity);
+    }
 
     private TradingHub.Strategies.ILiveOrderGuard? _orderGuard;
 

@@ -392,6 +392,8 @@ public sealed class ConnectionManager
         Testnet = p.Testnet,
         ApiKey = p.ApiKey,
         ApiSecret = GetSecret(p),
+        // tests point the account (orders, positions) at a local fake server, as with the other brokers' variables
+        BaseUrl = Environment.GetEnvironmentVariable("TRADINGHUB_BINANCE_REST") is { Length: > 0 } u ? u : null,
     };
 
     /// <summary>Prueba una conexión y devuelve un mensaje para mostrar.</summary>

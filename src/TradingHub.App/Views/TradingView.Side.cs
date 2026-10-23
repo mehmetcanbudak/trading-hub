@@ -68,6 +68,8 @@ public sealed partial class TradingView
         _ticketSection = BuildTicket();
         _domSection = BuildDomSection();
         _tapeSection = BuildTapeSection();
+        // a connection saved with another mode, keys or login replaced brokers some charts show: they follow
+        _svc.BrokersReplaced += OnBrokersReplaced;
 
         _sideSplitter.DragCompleted += (_, _) =>
         {
@@ -658,6 +660,23 @@ public sealed partial class TradingView
         chart.Model.Account = acc;
         chart.Model.Brackets = _svc.BracketsFor(acc);
         chart.Model.Invalidate();
+    }
+
+    /// <summary>
+    /// Brokers were replaced after their connection changed (<see cref="AppServices.AccountFor"/> builds new ones): the charts,
+    /// the DOM and the Chart Traders that showed them now show the account their orders go to.
+    /// </summary>
+    private void OnBrokersReplaced(IReadOnlyCollection<ITradingAccount> replaced)
+    {
+        var old = new HashSet<ITradingAccount>(replaced, ReferenceEqualityComparer.Instance);
+        var charts = AllCharts.Where(c => c.Model?.Account is { } a && old.Contains(a)).ToList();
+        foreach (var chart in charts)
+        {
+            ApplyTradingTarget(chart);
+            chart.Trader?.Rebind();
+        }
+
+        if (_active != null && (charts.Contains(_active) || _dom.Dom?.Broker is { } shown && old.Contains(shown))) BindSidePanel(_active, force: true);
     }
 
     /// <summary>Cross trading: las órdenes de este gráfico van a otro instrumento (null = el del gráfico).</summary>
