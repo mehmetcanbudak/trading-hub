@@ -130,7 +130,7 @@ internal sealed class ChartTraderPanel : UserControl
             (Trade("Cancel buys", null, "", "Cancel buy orders", () => CancelSide(OrderDirections.Buy)),
              Trade("Cancel sells", null, "", "Cancel sell orders", () => CancelSide(OrderDirections.Sell))),
             (Trade("Cancel all", null, "", "Cancel all orders", () => _ = _host.AccountActionAsync(_chart, a => a.CancelAll(), "Orders canceled")),
-             Trade("Reverse", null, "", "Reverse position", () => _ = _host.AccountActionAsync(_chart, a => a.Reverse(), "Position reversed"))));
+             Trade("Reverse", null, "", "Reverse position", () => _ = _host.ReverseAsync(_chart))));
         var be = Trade("Breakeven", null, "", "Moves stop to entry price", () => _ = _host.BracketActionAsync(_chart, b => b.MoveStopToBreakeven(), "Move stop to breakeven"));
         // parciales: cierran una parte a mercado; el stop y los objetivos se ajustan solos
         var partials = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,4,*,4,*") };

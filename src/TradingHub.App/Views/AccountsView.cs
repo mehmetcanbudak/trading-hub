@@ -310,9 +310,10 @@ public sealed class AccountsView : UserControl
             var accounts = _svc.AccountCenter.Accounts();
             var entry = accounts.FirstOrDefault(a => a.Id == _selected) ?? accounts[0];
             UpdateChips(accounts, entry.Id);
-            if (_entry?.Id != entry.Id)
+            if (_entry is not { } shown || shown.Id != entry.Id || shown.IsReal != entry.IsReal)
             {
-                // otra cuenta: filas nuevas
+                // another account, or the same one turned REAL or practice (its connection changed): new rows, so Close and
+                // Cancel ask for the REAL confirmation exactly when the account is REAL
                 _positionRows.Clear();
                 _positions.Children.Clear();
                 _orderRows.Clear();
@@ -425,7 +426,7 @@ public sealed class AccountsView : UserControl
     private void UpdateHeader(AccountSnapshot s)
     {
         var a = s.Account;
-        _accountStatus.Text = s.Status + (a.IsReal ? " · REAL ACCOUNT" + (a.CanTrade ? "" : " (read-only: real orders are disabled in Connections)") : "");
+        _accountStatus.Text = s.Status + (a.IsReal ? " · REAL ACCOUNT" + (a.CanTrade ? "" : " (new orders disabled in Connections; cancel/close allowed)") : "");
         _accountStatus.Foreground = !s.Connected ? Ui.Warn : a.IsReal ? Brushes.OrangeRed : Ui.Text2;
         int open = s.Positions.Count(p => p.Net != 0);
         int active = s.Orders.Count(o => o.Active);
@@ -474,7 +475,11 @@ public sealed class AccountsView : UserControl
             {
                 var g = new Grid { ColumnDefinitions = new ColumnDefinitions(PositionColumns) };
                 PositionRow? self = null;
-                var close = ActionButton("Close", "", "Close at market", () => _svc.AccountCenter.CloseAsync(entry, self!.Line!), "Closing position at market…", entry.IsReal);
+                // nothing sent (the position was already flat, or turned around): the status says why instead of «Closing…»
+                var close = ActionButton("Close", "", "Close at market", async () =>
+                {
+                    if (await _svc.AccountCenter.CloseAsync(entry, self!.Line!) is { } nothingSent) _status(nothingSent);
+                }, "Closing position at market…", entry.IsReal);
                 if (entry.IsReal && close.Flyout is Flyout f)
                     f.Opening += (_, _) => ((TextBlock)((StackPanel)f.Content!).Children[0]).Text = $"Close {Qty(Math.Abs(self!.Line!.Net))} {self.Line.Symbol} at market in the REAL account?";
                 Grid.SetColumn(close, 6);
@@ -494,7 +499,7 @@ public sealed class AccountsView : UserControl
             row.Open.Foreground = p.Net == 0 ? Ui.Text2 : Signed(p.OpenPnl);
             row.Closed.Text = Money(p.ClosedPnl);
             row.Closed.Foreground = Signed(p.ClosedPnl);
-            row.Close.IsVisible = p.Net != 0 && entry.CanTrade;
+            row.Close.IsVisible = p.Net != 0; // closing only reduces: available even with real orders disabled (confirmed on real accounts)
         }
 
         _positionsEmpty.IsVisible = _positionRows.Count == 0;
@@ -543,7 +548,7 @@ public sealed class AccountsView : UserControl
             row.Status.Text = o.Status;
             ToolTip.SetTip(row.Status, o.Status);
             row.Status.Foreground = o.Active ? Ui.Accent : o.Status.StartsWith("Rejected", StringComparison.Ordinal) ? Ui.Down : o.Status == "Filled" ? Ui.Text1 : Ui.Text2;
-            row.Cancel.IsVisible = o.Active && entry.CanTrade;
+            row.Cancel.IsVisible = o.Active; // a cancel never adds exposure: available even with real orders disabled (confirmed on real accounts)
         }
 
         _ordersEmpty.IsVisible = _orderRows.Count == 0;

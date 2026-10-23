@@ -96,7 +96,7 @@ Add a Databento API key in [Connections](conexiones.md#databento), or use the ca
    - Off: skip complete Rithmic days and fill missing history, reducing cost.
    - On: download the entire requested Databento range.
 4. **Calculate cost** shows pending days, range and estimated US-dollar usage.
-5. **Download** opens a paid-download confirmation. **Usage beyond available credits can be charged to the payment method on your Databento account.**
+5. **Download** opens a paid-download confirmation whose default is **Cancel**: Enter cancels; confirm with a click or ⌘Enter. **Usage beyond available credits can be charged to the payment method on your Databento account.**
 
 Download is enabled only after estimating cost. Changing market, dates or the checkbox invalidates the estimate. Existing complete Databento days are skipped rather than charged again; Saturdays and today are excluded. Empty days are counted separately. Cancel retains completed files; provider charges already incurred are not undone.
 

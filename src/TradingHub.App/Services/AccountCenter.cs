@@ -12,6 +12,7 @@ public enum AccountKind
 }
 
 /// <summary>Una cuenta para la sección Cuenta.</summary>
+/// <param name="CanTrade">New orders allowed (always on simulated, practice and demo accounts); cancel and close never need it.</param>
 public sealed record AccountEntry(string Id, string Name, AccountKind Kind, bool IsReal, bool CanTrade, ConnectionProfile? Profile = null, string RithmicAccount = "");
 
 /// <summary>Posición de un contrato (las que quedaron planas hoy también figuran).</summary>
@@ -253,10 +254,13 @@ public sealed class AccountCenter
 
     // ------------------------------------------------------------------ acciones
 
-    /// <summary>Cancela una orden activa.</summary>
+    /// <summary>
+    /// Cancels an active order. A cancel never adds exposure, so it stays available on real accounts even with real
+    /// orders disabled (the Account page confirms it first).
+    /// </summary>
     public async Task CancelAsync(AccountEntry a, OrderLine o)
     {
-        if (!o.Active || !a.CanTrade) return;
+        if (!o.Active) return;
         if (o.Ref is (SimBroker b, Order order))
         {
             b.Cancel(order);
@@ -269,30 +273,49 @@ public sealed class AccountCenter
             await _svc.TradovateSessionFor(a.Profile!).CancelAsync(tv.Id, CancellationToken.None).ConfigureAwait(false);
     }
 
-    /// <summary>Cierra la posición de un contrato a mercado (antes cancela sus órdenes, como "Cerrar posición" del Chart Trader).</summary>
-    public async Task CloseAsync(AccountEntry a, PositionLine p)
+    /// <summary>
+    /// Closes a contract's position at market, canceling its orders first (like Chart Trader's Close). Closing only
+    /// reduces, so it stays available on real accounts even with real orders disabled (the Account page confirms it first).
+    /// </summary>
+    /// <returns>null once the close is sent; otherwise why nothing was sent, for the status bar.</returns>
+    public async Task<string?> CloseAsync(AccountEntry a, PositionLine p)
     {
-        if (p.Net == 0 || !a.CanTrade) return;
+        if (p.Net == 0) return NothingToClose(p.Symbol, 0);
         if (p.Ref is SimBroker b)
         {
             b.Flatten();
-            return;
+            return null;
         }
 
         if (a.Kind == AccountKind.Tradovate && p.Ref is TradingHub.Feeds.Tradovate.TradovatePositionState tp)
         {
             // Tradovate cancela las órdenes del contrato y cierra a mercado en un solo pedido
             await _svc.TradovateSessionFor(a.Profile!).LiquidateAsync(tp.AccountId, tp.ContractId, CancellationToken.None).ConfigureAwait(false);
-            return;
+            return null;
         }
 
         if (a.Kind == AccountKind.Rithmic && p.Ref is (string sym, string ex))
         {
             var session = _svc.RithmicSessionFor(a.Profile!);
+            int canceled = 0;
             foreach (var o in session.OrdersOf(a.RithmicAccount).Where(o => !o.Done && o.Symbol == sym && o.Exchange == ex))
+            {
                 await session.CancelAsync(a.RithmicAccount, o.BasketId, CancellationToken.None).ConfigureAwait(false);
-            int qty = (int)Math.Abs(p.Net);
-            await session.PlaceAsync(a.RithmicAccount, sym, ex, p.Net < 0, 2, qty, 0, 0, "th-cerrar-" + DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture), CancellationToken.None).ConfigureAwait(false);
+                canceled++;
+            }
+
+            // what is open now, after the cancels (the row can be a moment old): a close never opens the other side
+            decimal net = session.PositionFor(a.RithmicAccount, sym, ex)?.Net ?? 0;
+            if (net == 0) return NothingToClose(sym, canceled);
+            if (Math.Sign(net) != Math.Sign(p.Net))
+                return $"{sym} changed side before the close was sent (now {(net > 0 ? "long" : "short")} {Math.Abs(net):0.####}): nothing was sent; check the position and close it again.";
+            int qty = (int)Math.Abs(net);
+            await session.PlaceAsync(a.RithmicAccount, sym, ex, net < 0, 2, qty, 0, 0, "th-cerrar-" + DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture), CancellationToken.None).ConfigureAwait(false);
         }
+
+        return null;
     }
+
+    private static string NothingToClose(string symbol, int canceled) =>
+        $"{symbol} is already flat: nothing needed closing{(canceled > 0 ? $" ({canceled} working order{(canceled == 1 ? "" : "s")} canceled)" : "")}.";
 }

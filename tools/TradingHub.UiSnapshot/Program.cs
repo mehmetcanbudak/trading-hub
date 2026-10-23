@@ -292,6 +292,13 @@ foreach (var page in pages)
         continue;
     }
 
+    if (page == "safety")
+    {
+        exitCode += SafetyScene.Run(window, Pump, outDir);
+        exitCode += SafetyScene.RunQuit(window, Pump, outDir);
+        continue;
+    }
+
     if (page == "conexiones")
     {
         exitCode += ConnectionsScene.Run(window, Pump, outDir);

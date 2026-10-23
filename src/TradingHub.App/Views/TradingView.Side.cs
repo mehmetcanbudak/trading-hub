@@ -68,6 +68,8 @@ public sealed partial class TradingView
         _ticketSection = BuildTicket();
         _domSection = BuildDomSection();
         _tapeSection = BuildTapeSection();
+        // a connection saved with another mode, keys or login replaced brokers some charts show: they follow
+        _svc.BrokersReplaced += OnBrokersReplaced;
 
         _sideSplitter.DragCompleted += (_, _) =>
         {
@@ -228,7 +230,7 @@ public sealed partial class TradingView
                 B("S. Bid", "sell-soft", "Limit sell at bid (subject to liquidity)", () => AtBook(OrderDirections.Sell, ask: false)),
                 B("S. Ask", "sell-soft", "Limit sell at ask (joins ask queue)", () => AtBook(OrderDirections.Sell, ask: true))),
             Row(B("Cancel", "", "Cancel all orders", () => _ = AccountActionAsync(_active, a => a.CancelAll(), "Orders canceled")),
-                B("Reverse", "", "Reverse position", () => _ = AccountActionAsync(_active, a => a.Reverse(), "Position reversed")),
+                B("Reverse", "", "Reverse position", () => _ = ReverseAsync(_active)),
                 B("Close", "primary", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, a => a.Flatten(), "Position closed"))));
         panel.Margin = new Thickness(10, 8, 10, 10);
         return new Border { Child = panel, BorderBrush = Ui.Line, BorderThickness = new Thickness(0, 1, 0, 0), Background = Ui.Bg1 };
@@ -434,7 +436,7 @@ public sealed partial class TradingView
 
         var actions = Ui.Row(8,
             Small("Close", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, acc => acc.Flatten(), "Position closed")),
-            Small("Reverse", "Reverse position", () => _ = AccountActionAsync(_active, acc => acc.Reverse(), "Position reversed")),
+            Small("Reverse", "Reverse position", () => _ = ReverseAsync(_active)),
             Small("Cancel", "Cancel all orders", () => _ = AccountActionAsync(_active, acc => acc.CancelAll(), "Orders canceled")));
 
         // parciales: cierran una parte a mercado; stop y objetivos se ajustan solos
@@ -660,6 +662,23 @@ public sealed partial class TradingView
         chart.Model.Invalidate();
     }
 
+    /// <summary>
+    /// Brokers were replaced after their connection changed (<see cref="AppServices.AccountFor"/> builds new ones): the charts,
+    /// the DOM and the Chart Traders that showed them now show the account their orders go to.
+    /// </summary>
+    private void OnBrokersReplaced(IReadOnlyCollection<ITradingAccount> replaced)
+    {
+        var old = new HashSet<ITradingAccount>(replaced, ReferenceEqualityComparer.Instance);
+        var charts = AllCharts.Where(c => c.Model?.Account is { } a && old.Contains(a)).ToList();
+        foreach (var chart in charts)
+        {
+            ApplyTradingTarget(chart);
+            chart.Trader?.Rebind();
+        }
+
+        if (_active != null && (charts.Contains(_active) || _dom.Dom?.Broker is { } shown && old.Contains(shown))) BindSidePanel(_active, force: true);
+    }
+
     /// <summary>Cross trading: las órdenes de este gráfico van a otro instrumento (null = el del gráfico).</summary>
     internal async Task SetCrossTradingAsync(ChartTab chart, string? symbol, bool save = true)
     {
@@ -745,6 +764,18 @@ public sealed partial class TradingView
     private static bool IsEntry(ITradingAccount acc, OrderDirections dir) =>
         acc.Position.Volume == 0 || (dir == OrderDirections.Buy) == (acc.Position.Volume > 0);
 
+    /// <summary>
+    /// Real-order permission when the order goes out (current connection settings, also for an account the tab cached):
+    /// an order adding <paramref name="signedQuantity"/> (positive buys) that would open, add to or reverse the account
+    /// position is blocked and explained in the status bar. Reductions and cancels are never blocked.
+    /// </summary>
+    private bool Blocked(ChartTab chart, ITradingAccount acc, decimal signedQuantity)
+    {
+        if (_svc.CheckRealOrder(chart.AccountId, acc, acc.Position.Volume, signedQuantity) is not { } why) return false;
+        _status("Order blocked: " + why);
+        return true;
+    }
+
     internal async Task<Order?> TradeAsync(ChartTab? chart, OrderTypes type, OrderDirections dir, decimal price, decimal? quantity = null)
     {
         var acc = AccountOf(chart);
@@ -757,7 +788,10 @@ public sealed partial class TradingView
         }
 
         string desc = $"{(dir == OrderDirections.Buy ? "BUY" : "SELL")} {type switch { OrderTypes.Market => "at market", OrderTypes.Limit => "limit", _ => "stop" }} {qty} {acc.Instrument.Symbol}{(price > 0 ? " @ " + acc.Instrument.FormatPrice(price) : "")}";
+        decimal signed = dir == OrderDirections.Buy ? qty : -qty;
+        if (Blocked(chart, acc, signed)) return null;
         if (!await ConfirmAsync(chart, acc, desc, qty: qty)) return null;
+        if (Blocked(chart, acc, signed)) return null; // the permission or the position may have changed while confirming
         bool entry = IsEntry(acc, dir);
         var order = type switch
         {
@@ -774,6 +808,10 @@ public sealed partial class TradingView
         return order;
     }
 
+    /// <summary>
+    /// Moves a working order (entry, stop or target) to another price. Moving an order that is already working sends no
+    /// new exposure-increasing order, so it stays available after real orders are disabled, behind the REAL confirmation.
+    /// </summary>
     private async Task MoveOrderAsync(ChartTab? chart, Order order, decimal price)
     {
         var acc = AccountOf(chart);
@@ -804,14 +842,20 @@ public sealed partial class TradingView
         _dom.InvalidateVisual();
     }
 
-    internal async Task AccountActionAsync(ChartTab? chart, Action<ITradingAccount> action, string message)
+    /// <param name="adds">What the action adds to the account position (positive buys), for an action that can add exposure.</param>
+    internal async Task AccountActionAsync(ChartTab? chart, Action<ITradingAccount> action, string message, Func<ITradingAccount, decimal>? adds = null)
     {
         var acc = AccountOf(chart);
         if (acc == null || chart == null) return;
+        if (adds != null && Blocked(chart, acc, adds(acc))) return;
         if (acc.IsReal && !await ConfirmAsync(chart, acc, message + "?", checkQuantity: false)) return;
+        if (adds != null && Blocked(chart, acc, adds(acc))) return;
         action(acc);
         _status(message);
     }
+
+    /// <summary>Reverses the position: it opens the other side, so it needs real-order permission like an entry.</summary>
+    internal Task ReverseAsync(ChartTab? chart) => AccountActionAsync(chart, a => a.Reverse(), "Position reversed", a => -2 * a.Position.Volume);
 
     internal async Task BracketActionAsync(ChartTab? chart, Func<BracketManager, string> action, string description)
     {
@@ -876,7 +920,7 @@ public sealed partial class TradingView
             case "buy-bid": _ = TradeAsync(chart, OrderTypes.Limit, OrderDirections.Buy, Best(true)); break;
             case "sell-ask": _ = TradeAsync(chart, OrderTypes.Limit, OrderDirections.Sell, Best(false)); break;
             case "flatten": _ = AccountActionAsync(chart, a => a.Flatten(), "Position closed"); break;
-            case "reverse": _ = AccountActionAsync(chart, a => a.Reverse(), "Position reversed"); break;
+            case "reverse": _ = ReverseAsync(chart); break;
             case "cancel-all": _ = AccountActionAsync(chart, a => a.CancelAll(), "Orders canceled"); break;
             case "close-25": _ = BracketActionAsync(chart, b => b.ClosePartial(0.25m), "Close 25% of position"); break;
             case "close-50": _ = BracketActionAsync(chart, b => b.ClosePartial(0.5m), "Close half of position"); break;

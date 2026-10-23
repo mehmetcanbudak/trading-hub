@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Market;
@@ -403,6 +404,420 @@ public class LiveRunnerTests : IDisposable
         r3.Start();
         Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
         Assert.True(r3.LogLines.Any(l => l.Contains("no additional stop", StringComparison.Ordinal)), string.Join(" | ", r3.LogLines));
+    }
+
+    /// <summary>The account is long 1 from a previous run and the strategy's ledger remembers it (as after quitting Trading Hub).</summary>
+    private SimBroker InheritedLong()
+    {
+        _data = new InstrumentData(_inst, new SimulatedFeed());
+        for (int i = 0; i < 5; i++) _data.Trades.Add(new Trade(_id++, (_time = T0.AddSeconds(i * 30)), 100, 1, TradeSide.Buy));
+        var broker = new SimBroker(_data, new Portfolio(), new TradingStatistics());
+        broker.Market(OrderDirections.Buy, 1, "before the restart");
+        LiveStore.AppendFill($"{typeof(Scripted).FullName}|test:TEST|Cuenta simulada", new LiveFill(T0.AddDays(-1), true, 1, 100));
+        return broker;
+    }
+
+    [Theory]
+    [InlineData("Rithmic")]
+    [InlineData("Tradovate")]
+    [InlineData("")]
+    public void Restart_never_duplicates_a_stop_the_broker_restored_with_its_own_comment(string comment)
+    {
+        // after a process restart the broker reports the surviving stop with its own comment (Binance: none), not "Scripted: …"
+        var broker = InheritedLong();
+        var restored = broker.Stop(OrderDirections.Sell, 1, 95, comment);
+        restored.ExchangeOrderId = "restored-1";
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        Assert.Equal(1m, r.Ledger.Position);
+        Assert.Same(restored, Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop));
+        Assert.True(r.LogLines.Any(l => l.Contains("no additional stop", StringComparison.Ordinal) && l.Contains("Chart Trader", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+    }
+
+    [Fact]
+    public void An_order_that_would_not_close_the_inherited_position_does_not_block_its_protection()
+    {
+        var broker = InheritedLong();
+        broker.Limit(OrderDirections.Buy, 1, 90, "Rithmic"); // adds to the long position: it is not a stop or target for it
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        var stop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        Assert.Equal(OrderDirections.Sell, stop.Direction);
+        Assert.Equal(95m, stop.TriggerPrice);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Rithmic")]
+    public void Restart_places_its_stop_loss_but_no_extra_take_profit_while_a_users_closing_limit_is_working(string comment)
+    {
+        // stop first: the user's own take-profit limit (reported with the broker's comment, or none) never leaves the
+        // inherited position without a stop; a take profit next to it would close the position twice, so it is left out
+        var broker = InheritedLong();
+        var limit = broker.Limit(OrderDirections.Sell, 1, 108, comment);
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        Assert.Equal(1m, r.Ledger.Position);
+        var stop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        Assert.Equal(OrderDirections.Sell, stop.Direction);
+        Assert.Equal(95m, stop.TriggerPrice);
+        Assert.Equal(1m, stop.Unfilled);
+        Assert.Same(limit, Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Limit)); // no extra target
+        Assert.Equal(StrategyOrderType.Stop, Assert.Single(r.ActiveOrders, o => o.IsProtective).Type);
+        Assert.True(r.LogLines.Any(l => l.Contains("closing limit order", StringComparison.Ordinal) && l.Contains("no additional take profit", StringComparison.Ordinal)
+                                        && l.Contains("Chart Trader", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Restart_places_neither_stop_loss_nor_take_profit_while_a_closing_stop_is_working(bool withLimit)
+    {
+        // unchanged: a working stop that could be its stop loss (here restored by the broker, alone or with a target) means
+        // nothing is added
+        var broker = InheritedLong();
+        var working = new List<Order> { broker.Stop(OrderDirections.Sell, 1, 94, "Rithmic") };
+        if (withLimit) working.Add(broker.Limit(OrderDirections.Sell, 1, 108, "Rithmic"));
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        Assert.Equal(1m, r.Ledger.Position);
+        Assert.Equal(working, broker.ActiveOrders); // no stop and no target placed
+        Assert.Empty(r.ActiveOrders);
+        Assert.True(r.LogLines.Any(l => l.Contains("no additional stop or target", StringComparison.Ordinal) && l.Contains("Chart Trader", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+    }
+
+    [Fact]
+    public void Restart_places_both_stop_loss_and_take_profit_when_no_working_order_could_be_them()
+    {
+        var broker = InheritedLong();
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        var stop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        Assert.Equal(OrderDirections.Sell, stop.Direction);
+        Assert.Equal(95m, stop.TriggerPrice);
+        var target = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Limit);
+        Assert.Equal(OrderDirections.Sell, target.Direction);
+        Assert.Equal(110m, target.Price);
+        Assert.Equal(2, r.ActiveOrders.Count(o => o.IsProtective));
+        Assert.DoesNotContain(r.LogLines, l => l.Contains("no additional", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_fill_its_ledger_cannot_save_is_logged_and_saved_in_order_with_the_next_one()
+    {
+        var (s, _, r) = Setup();
+        string file = LiveStore.LedgerFile(r.Key);
+        Directory.CreateDirectory(file); // the ledger path cannot be written as a file
+        s.Next.Enqueue(x => x.DoBuy(1));
+        Tick(101);
+        Tick(102);
+        Assert.Equal(1m, r.Ledger.Position);
+        Assert.True(r.LogLines.Any(l => l.Contains("Could not save", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+
+        Directory.Delete(file); // writable again: the pending fill goes first, then the new one
+        s.Next.Enqueue(x => x.DoClose());
+        Tick(103);
+        Tick(104);
+        var saved = File.ReadAllLines(file).Select(l => JsonSerializer.Deserialize<LiveFill>(l)!).ToList();
+        Assert.Equal(new[] { true, false }, saved.Select(f => f.Buy));
+        Assert.Equal(0m, LiveStore.LoadLedger(r.Key, 1).Position);
+        Assert.True(r.LogLines.Any(l => l.Contains("1 pending fill", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+        Assert.Equal(0, LiveStore.PendingFills(r.Key));
+    }
+
+    [Fact]
+    public void A_kept_stop_adopted_by_its_id_keeps_trailing_and_is_replaced_when_the_position_changes()
+    {
+        var broker = InheritedLong();
+        var kept = broker.Stop(OrderDirections.Sell, 1, 96, "Rithmic"); // left working at the broker by the previous run
+        kept.ExchangeOrderId = "basket-7";
+        var s = new Scripted { TrailingStopTicks = 4 };
+        var r = new LiveStrategyRunner(s, _data, broker, ChartPeriod.M1) { ProtectOnStart = true, AdoptProtectionIds = new[] { "basket-7" } };
+        r.Start();
+        Assert.Same(kept, Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop)); // adopted: no second stop
+        Assert.Equal(new[] { "basket-7" }, r.ProtectionOrderIds);
+        Assert.Single(r.ActiveOrders, o => o.IsProtective && o.Type == StrategyOrderType.Stop);
+        Assert.True(r.LogLines.Any(l => l.Contains("Adopted", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+
+        Tick(102); // trailing continues on the adopted order: 102 − 4 ticks
+        Assert.Equal(98m, kept.TriggerPrice);
+        Assert.Same(kept, Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop));
+
+        s.Next.Enqueue(x => x.DoBuy(1)); // the position changes: the refresh replaces the adopted stop, never adds a second one
+        Tick(102);
+        Tick(102);
+        Assert.Equal(2m, broker.Position!.Volume);
+        Assert.True(kept.Canceled);
+        var stop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        Assert.Equal(2m, stop.Unfilled);
+        Assert.DoesNotContain("basket-7", r.ProtectionOrderIds);
+    }
+
+    /// <summary>
+    /// A broker account that reports its position only when told to, as a real broker can after connecting. Same name and
+    /// orders as the simulated account it wraps, but not a <see cref="SimBroker"/>: the runner waits for it to confirm.
+    /// </summary>
+    private sealed class SlowAccount : ITradingAccount
+    {
+        private readonly SimBroker _inner;
+        private readonly Position _nothingYet = new();
+        private bool _reporting;
+
+        public SlowAccount(SimBroker inner)
+        {
+            _inner = inner;
+            inner.Changed += () => Changed?.Invoke();
+        }
+
+        public string Name => _inner.Name;
+        public bool IsReal => false;
+        public Instrument Instrument => _inner.Instrument;
+        public Position Position => _reporting ? _inner.Position! : _nothingYet;
+        public IEnumerable<Order> ActiveOrders => _inner.ActiveOrders;
+        public string? LastError => _inner.LastError;
+        public event Action? Changed;
+
+        public void ReportPosition()
+        {
+            _reporting = true;
+            Changed?.Invoke();
+        }
+
+        public Order Market(OrderDirections dir, decimal qty, string comment = "") => _inner.Market(dir, qty, comment);
+        public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => _inner.Limit(dir, qty, price, comment);
+        public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => _inner.Stop(dir, qty, trigger, comment);
+        public void Cancel(Order order) => _inner.Cancel(order);
+        public void CancelAt(decimal price) => _inner.CancelAt(price);
+        public void CancelAll() => _inner.CancelAll();
+        public void Modify(Order order, decimal newPrice) => _inner.Modify(order, newPrice);
+        public void Flatten() => _inner.Flatten();
+        public void Reverse() => _inner.Reverse();
+    }
+
+    [Fact]
+    public void Kept_stop_ids_survive_a_stop_before_the_broker_confirms_and_are_adopted_once_it_does()
+    {
+        var sim = InheritedLong();
+        var kept = sim.Stop(OrderDirections.Sell, 1, 96, "Rithmic");
+        kept.ExchangeOrderId = "basket-7";
+        var account = new SlowAccount(sim);
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, account, ChartPeriod.M1) { ProtectOnStart = true, AdoptProtectionIds = new[] { "basket-7" } };
+        r.Start();
+        Assert.True(r.LogLines.Any(l => l.Contains("waiting for", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+        Assert.Equal(new[] { "basket-7" }, r.Info().ProtectionOrderIds); // a save while it waits does not lose them
+
+        r.Stop(flatten: false, keepProtection: true); // quit before the broker confirmed the position
+        Assert.Same(kept, Assert.Single(sim.ActiveOrders)); // untouched
+        Assert.Equal(new[] { "basket-7" }, r.ProtectionOrderIds);
+        Assert.Equal(new[] { "basket-7" }, LiveStore.InfoFor(r.Key)?.ProtectionOrderIds);
+
+        var r2 = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, account, ChartPeriod.M1)
+        {
+            ProtectOnStart = true,
+            AdoptProtectionIds = LiveStore.InfoFor(r.Key)!.ProtectionOrderIds!,
+        };
+        r2.Start();
+        Assert.Empty(r2.ActiveOrders); // still waiting: nothing placed, nothing adopted
+        account.ReportPosition();
+        Assert.Same(kept, Assert.Single(sim.ActiveOrders, o => o.Type == OrderTypes.Stop)); // adopted once confirmed, never duplicated
+        Assert.Single(r2.ActiveOrders, o => o.IsProtective);
+        Assert.Equal(new[] { "basket-7" }, r2.ProtectionOrderIds);
+    }
+
+    [Fact]
+    public void An_adopted_stop_larger_than_the_position_is_replaced_with_the_right_size()
+    {
+        var broker = InheritedLong();
+        var kept = broker.Stop(OrderDirections.Sell, 2, 96, "Tradovate"); // filling it would reverse the long 1 position
+        kept.ExchangeOrderId = "9001";
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true, AdoptProtectionIds = new[] { "9001" } };
+        r.Start();
+        Assert.True(kept.Canceled);
+        var stop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        Assert.Equal(1m, stop.Unfilled);
+        Assert.True(r.LogLines.Any(l => l.Contains("size", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+    }
+
+    [Fact]
+    public void An_adopted_stop_stays_its_stop_loss_and_a_users_closing_limit_still_leaves_out_the_take_profit()
+    {
+        var broker = InheritedLong();
+        var kept = broker.Stop(OrderDirections.Sell, 1, 96, "Rithmic"); // its stop loss, kept at the broker by the previous run
+        kept.ExchangeOrderId = "basket-7";
+        var limit = broker.Limit(OrderDirections.Sell, 1, 108, "Rithmic"); // the user's own take profit
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true, AdoptProtectionIds = new[] { "basket-7" } };
+        r.Start();
+        Assert.Equal(new[] { kept, limit }, broker.ActiveOrders); // the kept stop is adopted: no second stop and no extra target
+        Assert.Equal(new[] { "basket-7" }, r.ProtectionOrderIds);
+        Assert.Equal(StrategyOrderType.Stop, Assert.Single(r.ActiveOrders, o => o.IsProtective).Type);
+        Assert.True(r.LogLines.Any(l => l.Contains("Adopted the stop loss", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+        Assert.True(r.LogLines.Any(l => l.Contains("no additional take profit", StringComparison.Ordinal) && l.Contains("Chart Trader", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void After_adopting_a_kept_order_it_places_the_stop_loss_or_take_profit_it_still_lacks(bool keptStop)
+    {
+        // stop first: a kept take profit whose stop is gone (canceled at the broker) never leaves the position without a stop
+        var broker = InheritedLong();
+        var kept = keptStop ? broker.Stop(OrderDirections.Sell, 1, 96, "Rithmic") : broker.Limit(OrderDirections.Sell, 1, 108, "Rithmic");
+        kept.ExchangeOrderId = "basket-7";
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1)
+        {
+            ProtectOnStart = true,
+            AdoptProtectionIds = new[] { "basket-7", "basket-8" }, // the other order it kept is no longer working
+        };
+        r.Start();
+        var stop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        var target = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Limit);
+        Assert.Same(kept, keptStop ? stop : target); // adopted, not duplicated
+        Assert.Equal(keptStop ? 96m : 95m, stop.TriggerPrice);
+        Assert.Equal(keptStop ? 110m : 108m, target.Price);
+        Assert.Equal(2, r.ActiveOrders.Count(o => o.IsProtective));
+        Assert.Equal(2, r.ProtectionOrderIds.Count);
+    }
+
+    [Fact]
+    public void An_adopted_stop_of_the_wrong_size_is_replaced_but_no_take_profit_is_added_next_to_a_users_closing_limit()
+    {
+        var broker = InheritedLong();
+        var kept = broker.Stop(OrderDirections.Sell, 2, 96, "Tradovate"); // filling it would reverse the long 1 position
+        kept.ExchangeOrderId = "9001";
+        var limit = broker.Limit(OrderDirections.Sell, 1, 108, "Tradovate"); // the user's own take profit
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true, AdoptProtectionIds = new[] { "9001" } };
+        r.Start();
+        Assert.True(kept.Canceled);
+        var stop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        Assert.Equal(1m, stop.Unfilled);
+        Assert.Same(limit, Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Limit));
+        Assert.True(r.LogLines.Any(l => l.Contains("no additional take profit", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+    }
+
+    [Fact]
+    public void An_adopted_stop_of_the_wrong_size_is_left_for_review_while_another_closing_stop_is_working()
+    {
+        // nothing is placed next to a stop it did not adopt, not even a replacement: both are logged for review
+        var broker = InheritedLong();
+        var kept = broker.Stop(OrderDirections.Sell, 2, 96, "Tradovate");
+        kept.ExchangeOrderId = "9001";
+        var other = broker.Stop(OrderDirections.Sell, 1, 94, "Tradovate");
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true, AdoptProtectionIds = new[] { "9001" } };
+        r.Start();
+        Assert.Equal(new[] { kept, other }, broker.ActiveOrders);
+        Assert.Equal(new[] { "9001" }, r.ProtectionOrderIds);
+        Assert.True(r.LogLines.Any(l => l.Contains("no additional stop or target", StringComparison.Ordinal) && l.Contains("Chart Trader", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+        Assert.True(r.LogLines.Any(l => l.Contains("does not match the position", StringComparison.Ordinal) && l.Contains("Chart Trader", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+    }
+
+    [Fact]
+    public void Stopping_with_keep_protection_leaves_stop_and_target_working_records_their_ids_and_a_new_run_adopts_them()
+    {
+        var (s, broker, r) = Setup();
+        s.StopLossTicks = 5;
+        s.TakeProfitTicks = 10;
+        s.Next.Enqueue(x => x.DoBuy(1));
+        Tick(100);
+        Tick(100);
+        var stop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        var target = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Limit);
+        var ids = r.ProtectionOrderIds.ToList();
+        Assert.Equal(2, ids.Count);
+
+        r.Stop(flatten: false, keepProtection: true);
+        Assert.False(r.IsRunning);
+        Assert.Equal(new[] { stop, target }, broker.ActiveOrders); // both still working at the broker
+        Assert.Equal(1m, broker.Position!.Volume);
+        Assert.Equal(ids, r.ProtectionOrderIds); // exposed for the next run
+        Assert.Equal(ids, r.Info().ProtectionOrderIds);
+        Assert.Equal(ids, LiveStore.InfoFor(r.Key)?.ProtectionOrderIds); // and recorded in its saved state
+
+        var r2 = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1)
+        {
+            ProtectOnStart = true,
+            AdoptProtectionIds = LiveStore.InfoFor(r.Key)!.ProtectionOrderIds!,
+        };
+        r2.Start();
+        Assert.Equal(new[] { stop, target }, broker.ActiveOrders); // adopted: nothing new placed
+        Assert.Equal(ids, r2.ProtectionOrderIds);
+        Assert.Equal(2, r2.ActiveOrders.Count(o => o.IsProtective));
+    }
+
+    [Fact]
+    public void A_normal_stop_still_cancels_stop_and_target_and_their_old_ids_do_not_block_new_protection()
+    {
+        var (s, broker, r) = Setup();
+        s.StopLossTicks = 5;
+        s.TakeProfitTicks = 10;
+        s.Next.Enqueue(x => x.DoBuy(1));
+        Tick(100);
+        Tick(100);
+        var old = broker.ActiveOrders.ToList();
+        Assert.Equal(2, old.Count);
+        var ids = r.ProtectionOrderIds.ToList(); // what the periodic save records while it runs
+
+        r.Stop(flatten: false);
+        Assert.Empty(broker.ActiveOrders);
+        Assert.Equal(1m, broker.Position!.Volume); // no liquidation
+        Assert.Empty(r.ProtectionOrderIds);
+        Assert.Null(r.Info().ProtectionOrderIds);
+
+        // a restart with the ids saved before that stop finds nothing to adopt and protects the position again
+        var r2 = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true, AdoptProtectionIds = ids };
+        r2.Start();
+        Assert.Equal(2, broker.ActiveOrders.Count());
+        Assert.DoesNotContain(broker.ActiveOrders, old.Contains);
+    }
+
+    [Fact]
+    public void Closing_the_position_on_stop_never_keeps_its_stop_or_target()
+    {
+        var (s, broker, r) = Setup();
+        s.StopLossTicks = 5;
+        s.Next.Enqueue(x => x.DoBuy(1));
+        Tick(100);
+        Tick(100);
+        r.Stop(flatten: true, keepProtection: true); // once flat, a working stop could open a new position
+        Assert.Empty(broker.ActiveOrders);
+        Assert.Equal(0m, broker.Position!.Volume);
+        Assert.Empty(r.ProtectionOrderIds);
+    }
+
+    [Fact]
+    public void A_kept_stop_for_a_position_the_account_no_longer_has_is_reported_and_not_adopted()
+    {
+        // same process on the simulated account: the stop was kept, then the position was closed by hand
+        var (s, broker, r) = Setup();
+        s.StopLossTicks = 5;
+        s.Next.Enqueue(x => x.DoBuy(1));
+        Tick(100);
+        Tick(100);
+        r.Stop(flatten: false, keepProtection: true);
+        var kept = Assert.Single(broker.ActiveOrders);
+        broker.Market(OrderDirections.Sell, 1, "manual close");
+        Assert.Equal(0m, broker.Position!.Volume);
+
+        var r2 = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, broker, ChartPeriod.M1) { ProtectOnStart = true, AdoptProtectionIds = r.ProtectionOrderIds.ToList() };
+        r2.Start();
+        Assert.Equal(0m, r2.Ledger.Position); // closed in its ledger: the account does not have it
+        Assert.Same(kept, Assert.Single(broker.ActiveOrders)); // nothing new placed; the kept stop is left for the user to review
+        Assert.Empty(r2.ActiveOrders);
+        Assert.True(r2.LogLines.Any(l => l.Contains("no longer has the position", StringComparison.Ordinal) && l.Contains("Chart Trader", StringComparison.Ordinal)), string.Join(" | ", r2.LogLines));
+    }
+
+    [Fact]
+    public void A_runner_reports_unreadable_lines_in_its_ledger_and_keeps_the_fills_after_them()
+    {
+        var key = $"{typeof(Scripted).FullName}|test:TEST|Cuenta simulada";
+        string file = LiveStore.LedgerFile(key);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, JsonSerializer.Serialize(new LiveFill(T0.AddDays(-1), false, 2, 100)) + "\n{\"Time\":\n"
+                                + JsonSerializer.Serialize(new LiveFill(T0.AddDays(-1).AddMinutes(5), true, 2, 99)) + "\n");
+        var (_, _, r) = Setup();
+        Assert.Equal(0m, r.Ledger.Position); // the closing fill after the bad line was read
+        Assert.Equal(1, r.Ledger.SkippedLines);
+        Assert.True(r.LogLines.Any(l => l.Contains("unreadable", StringComparison.Ordinal)), string.Join(" | ", r.LogLines));
+        Assert.DoesNotContain(r.LogLines, l => l.Contains("does not have", StringComparison.Ordinal)); // no position invented by a cut-off read
     }
 
     /// <summary>Limitador de prueba: deja pasar hasta cierta posición.</summary>

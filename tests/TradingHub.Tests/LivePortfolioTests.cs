@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Market;
@@ -68,6 +69,7 @@ public class LivePortfolioTests
     public void El_tamano_de_la_cartera_multiplica_las_ordenes_y_queda_registrado()
     {
         var inst = new Instrument { Symbol = "TEST", FeedId = "test", TickSize = 1m, VolumeStep = 1m };
+        string previousRoot = LiveStore.Root;
         LiveStore.Root = Path.Combine(Path.GetTempPath(), "tradinghub_live_" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -95,6 +97,169 @@ public class LivePortfolioTests
         finally
         {
             try { Directory.Delete(LiveStore.Root, true); } catch { /* limpieza */ }
+            LiveStore.Root = previousRoot; // the folder is static: give the next test the one it had
         }
+    }
+
+    /// <summary>Runs <paramref name="test"/> with the live store in a new temporary folder, then restores the previous one.</summary>
+    private static void InTemporaryStore(Action test)
+    {
+        string previousRoot = LiveStore.Root;
+        string root = Path.Combine(Path.GetTempPath(), "tradinghub_live_" + Guid.NewGuid().ToString("N"));
+        LiveStore.Root = root;
+        try
+        {
+            test();
+        }
+        finally
+        {
+            LiveStore.Root = previousRoot;
+            try { Directory.Delete(root, true); } catch { /* cleanup */ }
+        }
+    }
+
+    private const string LedgerKey = "TradingHub.Tests.Strategy|test:TEST|Cuenta simulada";
+
+    [Fact]
+    public void A_corrupt_line_in_the_middle_of_a_ledger_only_skips_that_line()
+    {
+        InTemporaryStore(() =>
+        {
+            string file = LiveStore.LedgerFile(LedgerKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            var lines = new[]
+            {
+                JsonSerializer.Serialize(new LiveFill(T0, true, 2, 100)),
+                "{\"Time\":\"2026-10-01T12:01:00Z\",\"Buy\":fal", // cut off by a crash in the middle of the file
+                JsonSerializer.Serialize(new LiveFill(T0.AddMinutes(2), false, 1, 110)),
+                JsonSerializer.Serialize(new LiveFill(T0.AddMinutes(3), true, 1, 105)),
+            };
+            File.WriteAllText(file, string.Join("\n", lines) + "\n");
+            byte[] before = File.ReadAllBytes(file);
+
+            var ledger = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(3, ledger.Fills.Count); // the fills after the corrupt line are kept
+            Assert.Equal(2m, ledger.Position);
+            Assert.Equal(10m, ledger.Realized);
+            Assert.Equal(1, ledger.SkippedLines); // and reported
+            Assert.Equal(before, File.ReadAllBytes(file)); // loading never rewrites the file
+        });
+    }
+
+    [Fact]
+    public void A_fill_that_cannot_be_written_is_kept_and_written_first_with_the_next_one()
+    {
+        InTemporaryStore(() =>
+        {
+            string file = LiveStore.LedgerFile(LedgerKey);
+            Directory.CreateDirectory(file); // the ledger path cannot be written as a file
+            var first = new LiveFill(T0, true, 1, 100);
+            var second = new LiveFill(T0.AddMinutes(1), false, 1, 101);
+            var third = new LiveFill(T0.AddMinutes(2), true, 2, 102);
+            Assert.NotNull(LiveStore.AppendFill(LedgerKey, first)); // reported, not swallowed
+            Assert.Equal(1, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(1m, LiveStore.LoadLedger(LedgerKey, 1).Position); // still part of the ledger in this process
+
+            Directory.Delete(file); // writable again
+            Assert.Null(LiveStore.AppendFill(LedgerKey, second));
+            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+            Assert.Null(LiveStore.AppendFill(LedgerKey, third));
+            // in order and once each
+            Assert.Equal(new[] { first, second, third }.Select(f => JsonSerializer.Serialize(f)), File.ReadAllLines(file));
+            Assert.Equal(2m, LiveStore.LoadLedger(LedgerKey, 1).Position);
+        });
+    }
+
+    [Fact]
+    public void A_fill_appended_after_a_cut_off_last_line_is_not_lost()
+    {
+        InTemporaryStore(() =>
+        {
+            string file = LiveStore.LedgerFile(LedgerKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            var first = new LiveFill(T0, true, 1, 100);
+            File.WriteAllText(file, JsonSerializer.Serialize(first) + "\n{\"Time\":\"2026-10-01T12:01:00Z\",\"Bu"); // the last write was cut off
+            var next = new LiveFill(T0.AddMinutes(2), false, 1, 105);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, next));
+
+            var ledger = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { first, next }, ledger.Fills); // the new fill starts its own line
+            Assert.Equal(1, ledger.SkippedLines);
+        });
+    }
+
+    [Fact]
+    public void Deleting_a_ledger_also_drops_its_pending_fills()
+    {
+        InTemporaryStore(() =>
+        {
+            string file = LiveStore.LedgerFile(LedgerKey);
+            Directory.CreateDirectory(file);
+            Assert.NotNull(LiveStore.AppendFill(LedgerKey, new LiveFill(T0, true, 1, 100)));
+            LiveStore.DeleteFills(LedgerKey); // starting fresh: the unsaved fill belongs to the deleted history
+            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+
+            Directory.Delete(file);
+            var next = new LiveFill(T0.AddMinutes(1), false, 1, 101);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, next));
+            Assert.Equal(new[] { JsonSerializer.Serialize(next) }, File.ReadAllLines(file));
+        });
+    }
+
+    [Fact]
+    public void Saved_live_state_without_protection_ids_still_loads_and_is_saved_without_them()
+    {
+        InTemporaryStore(() =>
+        {
+            Directory.CreateDirectory(LiveStore.Root);
+            string file = Path.Combine(LiveStore.Root, "estrategias.json");
+            // an entry as written before ProtectionOrderIds existed
+            File.WriteAllText(file, """
+                [
+                  {
+                    "Key": "TradingHub.Tests.Strategy|test:TEST|Cuenta simulada",
+                    "Strategy": "Strategy",
+                    "StrategyId": "TradingHub.Tests.Strategy",
+                    "FeedId": "test",
+                    "Symbol": "TEST",
+                    "Period": "M1",
+                    "Account": "Cuenta simulada",
+                    "Running": true,
+                    "StartedUtc": "2026-10-01T12:00:00Z",
+                    "Size": 1,
+                    "PointValue": 1,
+                    "ExecSymbol": null,
+                    "Position": 1,
+                    "OpenPnL": 0,
+                    "Realized": 0,
+                    "Trades": 0,
+                    "Source": "panel",
+                    "AccountId": "sim",
+                    "ProfileId": "sim",
+                    "Parameters": { "StopLossTicks": 5 },
+                    "TimeZoneId": null,
+                    "SessionStartHours": 0,
+                    "MaxDailyLoss": 0,
+                    "MaxDrawdown": 0,
+                    "CloseOnLimit": true,
+                    "PortfolioId": null,
+                    "StopReason": null,
+                    "Paused": false,
+                    "IsReal": false
+                  }
+                ]
+                """);
+            var info = Assert.Single(LiveStore.LoadRunners());
+            Assert.Equal(LedgerKey, info.Key);
+            Assert.True(info.Running);
+            Assert.Equal(1m, info.Position);
+            Assert.Null(info.ProtectionOrderIds);
+
+            LiveStore.SaveRunners(new[] { info });
+            Assert.DoesNotContain("ProtectionOrderIds", File.ReadAllText(file)); // nothing new is written while there is none
+            info.ProtectionOrderIds = new List<string> { "basket-7" };
+            LiveStore.SaveRunners(new[] { info });
+            Assert.Equal(new[] { "basket-7" }, Assert.Single(LiveStore.LoadRunners()).ProtectionOrderIds);
+        });
     }
 }

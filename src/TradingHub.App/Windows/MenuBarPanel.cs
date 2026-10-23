@@ -54,7 +54,7 @@ internal sealed class MenuBarPanel : Window
         head.Children.Add(Ui.V(1, new TextBlock { Text = TradingHub.Common.Product.Name, FontWeight = FontWeight.SemiBold, FontSize = 14 }, _status));
 
         var quit = Ui.Button("Quit Trading Hub", MaterialIconKind.Power, MenuBar.Quit, "ghost");
-        ToolTip.SetTip(quit, "Completely quits Trading Hub, stopping live strategies and agents (previously running strategies resume on startup if enabled in Settings)");
+        ToolTip.SetTip(quit, "Quits Trading Hub completely, like ⌘Q: while live strategies hold positions it first asks what to do with their stops (previously running strategies resume on startup if enabled in Settings)");
         var foot = new DockPanel();
         DockPanel.SetDock(quit, Dock.Right);
         foot.Children.Add(quit);

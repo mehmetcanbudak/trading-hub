@@ -31,6 +31,9 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
 {
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     private static readonly HashSet<long> CanceledOrders = new();
+
+    // identifies orders without an exchange ID only within this process (a later process numbers its orders again)
+    private static readonly string LocalSession = Guid.NewGuid().ToString("N")[..8];
     private readonly Strategy _strategy;
     private readonly InstrumentData _data;
     private readonly ITradingAccount _account;
@@ -47,6 +50,14 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private long _timeTicks, _priceTicks;
     private decimal _lastPos;
     private StrategyOrder? _sl, _tp;
+
+    // identities of the stop and target left working at the broker when it stopped (see Stop with keepProtection)
+    private readonly List<string> _keptProtection = new();
+
+    // the ids it was asked to adopt (taken at start), and whether it still waits to decide on them (the account has not
+    // confirmed the inherited position yet): meanwhile they stay its protection ids, so a save or a stop does not lose them
+    private List<string> _adoptIds = new();
+    private bool _adoptionPending;
     private decimal _highWater, _lowWater;
     private DateTime _lastTrailUpdate;
     private DateOnly _sessionDay;
@@ -133,8 +144,30 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     /// <summary>Guarda sus ejecuciones en la cartera (las visuales de un gráfico no).</summary>
     public bool Persist { get; set; } = true;
 
-    /// <summary>Al arrancar con una posición heredada que la cuenta confirma, le pone de nuevo el stop y el objetivo.</summary>
+    /// <summary>
+    /// On start with an inherited position the account confirms, protects it again, stop first: it adopts the stop loss and
+    /// take profit kept at the broker (<see cref="AdoptProtectionIds"/>) and places the ones it lacks. While another working
+    /// stop could be its stop it places neither; while only another working limit could be its take profit it places just the
+    /// stop loss.
+    /// </summary>
     public bool ProtectOnStart { get; set; }
+
+    /// <summary>
+    /// Broker identities of a previous run's stop loss and take profit to adopt instead of placing new ones, usually the
+    /// saved <see cref="LiveRunnerInfo.ProtectionOrderIds"/>. Set before <see cref="Start"/>; with <see cref="ProtectOnStart"/>,
+    /// once the account confirms the inherited position, a working order that matches (by <see cref="Order.ExchangeOrderId"/>,
+    /// or by its id in this process) and would close that position becomes its stop or target: later protection refreshes
+    /// cancel and replace it, and trailing continues from its price.
+    /// </summary>
+    public IReadOnlyCollection<string> AdoptProtectionIds { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Broker identities of its stop loss and take profit. While it runs: the working ones or, until the account confirms the
+    /// inherited position, the ones it waits to adopt. Once stopped: the ones left working at the broker, kept by
+    /// <see cref="Stop(bool, bool)"/> or not adopted yet (empty after a normal stop otherwise). Each is the order's exchange
+    /// ID, or an id valid only in this process while the broker has not assigned one.
+    /// </summary>
+    public IReadOnlyList<string> ProtectionOrderIds => !IsRunning ? _keptProtection : _adoptionPending ? _adoptIds : WorkingProtectionIds();
 
     /// <summary>Pausada: no abre ni agranda posiciones; si tiene una abierta, la sigue gestionando hasta cerrarla.</summary>
     public bool Paused { get; private set; }
@@ -204,6 +237,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         StopReason = StopReason,
         Paused = Paused,
         IsReal = _account.IsReal,
+        ProtectionOrderIds = ProtectionOrderIds is { Count: > 0 } ids ? ids.ToList() : null,
     };
 
     public Strategy StrategyInstance => _strategy;
@@ -296,23 +330,52 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         _virtual = ToVirtual(Ledger.Position);
         _lastPos = Ledger.Position;
         _closing = false;
+        _keptProtection.Clear(); // running again: its protection is what it tracks from now on
+        _adoptIds = AdoptProtectionIds.Where(id => !string.IsNullOrEmpty(id)).Distinct(StringComparer.Ordinal).ToList();
+        _adoptionPending = _adoptIds.Count > 0 && Ledger.Position != 0;
         _data.TradesAppended += OnAppended;
         HookAccount(true);
         IsRunning = true;
         StartedUtc = DateTime.UtcNow;
         Log($"Started on {TradingHub.Common.EnglishText.Of(_account.Name)} with {WarmupBars} warmup bars{(SizeMultiplier != 1 ? $" · size ×{Qty(SizeMultiplier)}" : "")}" +
             (CrossExecution ? $" · executes on {ExecInstrument.Symbol} (1 {_data.Instrument.Symbol} = {Qty(ExecRatio)} {ExecInstrument.Symbol})" : ""));
+        if (Ledger.SkippedLines > 0)
+            Log($"Its ledger has {Ledger.SkippedLines} unreadable line{(Ledger.SkippedLines == 1 ? "" : "s")}: skipped, and the fills after them were read (the file was not changed)");
         if (Ledger.Position != 0) CheckInheritedPosition(initial: true);
+        else ReportOrphanedProtection();
         Changed?.Invoke();
         Started?.Invoke(this);
     }
 
     /// <summary>Detiene la estrategia; opcionalmente cierra su posición (solo la suya) y cancela sus órdenes.</summary>
-    public void Stop(bool flatten)
+    public void Stop(bool flatten) => Stop(flatten, keepProtection: false);
+
+    /// <summary>
+    /// Stops the strategy. With <paramref name="flatten"/> it closes its own position and cancels all its orders. Otherwise it
+    /// cancels its orders, except that with <paramref name="keepProtection"/> its stop loss and take profit stay working at the
+    /// broker: their identities stay in <see cref="ProtectionOrderIds"/> (and, with <see cref="Persist"/>, in its saved state)
+    /// so a later start can adopt them (<see cref="AdoptProtectionIds"/>). It no longer tracks them: a fill while it is stopped
+    /// is settled with the account at the next start. Closing the position never keeps them.
+    /// </summary>
+    public void Stop(bool flatten, bool keepProtection)
     {
         if (!IsRunning) return;
         _data.TradesAppended -= OnAppended;
-        foreach (var o in _orders.ToList()) Cancel(o);
+        _keptProtection.Clear();
+        if (_adoptionPending) _keptProtection.AddRange(_adoptIds); // not adopted yet: still at the broker as the previous run left them
+        _adoptionPending = false;
+        var kept = new List<StrategyOrder>(2);
+        if (keepProtection && !flatten)
+            foreach (var so in new[] { _sl, _tp })
+                if (so is { IsActive: true, Live: Order live })
+                {
+                    kept.Add(so);
+                    _keptProtection.Add(IdentityOf(live));
+                }
+
+        foreach (var o in _orders.ToList())
+            if (!kept.Contains(o)) Cancel(o);
+        _orders.RemoveAll(kept.Contains); // left working at the broker: no longer tracked here
         _sl = _tp = null;
         try
         {
@@ -335,7 +398,13 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         }
 
         if (!_closing) HookAccount(false);
-        Log(flatten ? "Stopped and position closed" : "Stopped");
+        if (kept.Count > 0)
+            Log($"Stopped: {(kept.Count > 1 ? "its stop loss and take profit stay" : $"its {kept[0].Name.ToLowerInvariant()} stays")} working at the broker ({string.Join(", ", kept.Select(so => DescribeLive((Order)so.Live!)))})");
+        else Log(flatten ? "Stopped and position closed" : "Stopped");
+        if (_keptProtection.Count > kept.Count)
+            Log("It stopped before adopting the orders its previous run kept at the broker: they stay working (review them in Chart Trader)");
+        if (keepProtection && !flatten && Persist && _keptProtection.Count > 0 && LiveStore.SaveProtectionOrderIds(Info()) is { } error)
+            Log($"Could not record the orders it kept at the broker in its saved state ({error.TrimEnd('.')}): review them in Chart Trader");
         Changed?.Invoke();
     }
 
@@ -370,7 +439,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         if (IsRunning) throw new InvalidOperationException("Only before starting.");
         Ledger ??= Persist ? LiveStore.LoadLedger(Key, _data.Instrument.PointValue) : new LiveLedger(Key, _data.Instrument.PointValue);
         Ledger.Apply(fill);
-        if (Persist) LiveStore.AppendFill(Key, fill);
+        SaveFill(fill);
     }
 
     /// <summary>
@@ -515,6 +584,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         if (own == 0)
         {
             _awaitingAccount = false;
+            _adoptionPending = false;
             return;
         }
 
@@ -523,6 +593,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         if (covered == Math.Abs(own))
         {
             _awaitingAccount = false;
+            _adoptionPending = false;
             Log($"Continuing with its open position: {(own > 0 ? "long" : "short")} {Qty(Math.Abs(own))} @ {_data.Instrument.FormatPrice(Ledger.AveragePrice)}");
             if (ProtectOnStart) ProtectInherited();
             return;
@@ -540,30 +611,142 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
 
         if (_awaitingAccount && DateTime.UtcNow < _awaitUntil) return;
         _awaitingAccount = false;
+        _adoptionPending = false;
         decimal excess = Math.Abs(own) - covered;
         BookSynthetic(own > 0 ? -excess : excess, $"The account does not have {(covered > 0 ? "all of " : "")}the strategy's previous position ({(own > 0 ? "long" : "short")} {Qty(Math.Abs(own))}): " +
                                                    $"closed {Qty(excess)} in its ledger at the latest price");
         _lastPos = Ledger.Position;
-        if (ProtectOnStart && Ledger.Position != 0) ProtectInherited();
+        if (Ledger.Position == 0) ReportOrphanedProtection();
+        else if (ProtectOnStart) ProtectInherited();
     }
 
     /// <summary>
-    /// Le vuelve a poner stop y objetivo a la posición heredada, salvo que en la cuenta ya haya órdenes de esta
-    /// estrategia (por ejemplo si Trading Hub se cerró de golpe y quedaron vivas en el broker): nunca se duplican.
+    /// Protects the inherited position again, stop first. It adopts the stop and target the previous run kept at the broker
+    /// (<see cref="AdoptProtectionIds"/>) and places the ones it still lacks, unless another working order could already be
+    /// them: a stop or limit that would close the position, or one of this strategy (left by a crash, placed by hand, or
+    /// restored by the broker after a restart with its own comment: "Rithmic", "Tradovate" or none). Such a stop means it
+    /// places and replaces nothing; such limits alone still let it place its stop loss, but no take profit. It logs them for
+    /// review instead: never duplicated.
     /// </summary>
     private void ProtectInherited()
     {
+        bool resize = AdoptKeptProtection();
         string prefix = StrategyName + ": ";
-        bool already;
+        var exit = Ledger.Position > 0 ? OrderDirections.Sell : OrderDirections.Buy;
+        List<Order> existing;
         lock (CanceledOrders)
-            already = _account.ActiveOrders.Any(o => o.Comment.StartsWith(prefix, StringComparison.Ordinal) && o.Type is OrderTypes.Stop or OrderTypes.Limit && !CanceledOrders.Contains(o.Id));
-        if (already)
+            existing = _account.ActiveOrders.Where(o => o.State == OrderStates.Active && (o.Type is OrderTypes.Stop or OrderTypes.StopLimit or OrderTypes.Limit)
+                                                        && (o.Direction == exit || o.Comment.StartsWith(prefix, StringComparison.Ordinal)) && !CanceledOrders.Contains(o.Id)
+                                                        && !ReferenceEquals(o, _sl?.Live) && !ReferenceEquals(o, _tp?.Live)).ToList();
+        if (existing.Any(o => o.Type is OrderTypes.Stop or OrderTypes.StopLimit))
         {
-            Log("This strategy already has orders in the account: no additional stop or target will be placed (review them in Chart Trader)");
+            if (existing.Count == 1)
+                Log($"An order that could be its stop or target is already working in the account ({DescribeLive(existing[0])}): no additional stop or target will be placed (review it in Chart Trader)");
+            else
+                Log($"{existing.Count} orders that could be its stop or target are already working in the account ({string.Join(", ", existing.Select(DescribeLive))}): no additional stop or target will be placed (review them in Chart Trader)");
+            if (resize)
+                Log($"The adopted order size does not match the position ({Qty(Math.Abs(Ledger.Position))} {ExecInstrument.Symbol}): it is not replaced while another stop is working (review it in Chart Trader)");
             return;
         }
 
-        UpdateProtection();
+        // only limits can be left: its stop loss is always placed, its take profit only when none of them could be it
+        if (existing.Count == 1)
+            Log($"A closing limit order is already working in the account ({DescribeLive(existing[0])}): no additional take profit will be placed (review it in Chart Trader)");
+        else if (existing.Count > 1)
+            Log($"{existing.Count} closing limit orders are already working in the account ({string.Join(", ", existing.Select(DescribeLive))}): no additional take profit will be placed (review them in Chart Trader)");
+        bool target = existing.Count == 0;
+        if (resize)
+        {
+            Log($"The adopted order size does not match the position ({Qty(Math.Abs(Ledger.Position))} {ExecInstrument.Symbol}): replaced");
+            UpdateProtection(target);
+        }
+        else PlaceProtection(stop: _sl == null, target: target && _tp == null);
+    }
+
+    /// <summary>
+    /// Adopts as its stop and target the working orders named in <see cref="AdoptProtectionIds"/> that would close the
+    /// inherited position. True if the size of one it adopted does not match the position, so it has to be replaced.
+    /// </summary>
+    private bool AdoptKeptProtection()
+    {
+        var exit = Ledger.Position > 0 ? OrderDirections.Sell : OrderDirections.Buy;
+        var kept = KeptOrders().Where(o => o.Direction == exit).ToList();
+        var stop = kept.FirstOrDefault(o => o.Type is OrderTypes.Stop or OrderTypes.StopLimit);
+        var target = kept.FirstOrDefault(o => o.Type == OrderTypes.Limit);
+        if (stop == null && target == null)
+        {
+            if (_adoptIds.Count > 0) Log("None of the orders kept at the broker is working for this position: nothing to adopt");
+            return false;
+        }
+
+        _highWater = _lowWater = LastPrice;
+        if (stop != null) _sl = Adopt(stop, StrategyOrderType.Stop, "Stop loss");
+        if (target != null) _tp = Adopt(target, StrategyOrderType.Limit, "Take profit");
+        Log($"Adopted {(stop != null && target != null ? "the stop loss and take profit" : stop != null ? "the stop loss" : "the take profit")} kept at the broker: " +
+            string.Join(", ", new[] { stop, target }.OfType<Order>().Select(DescribeLive)));
+        decimal size = Math.Abs(Ledger.Position);
+        return (stop != null && stop.Unfilled != size) || (target != null && target.Unfilled != size);
+    }
+
+    /// <summary>Tracks a working order kept at the broker as its stop or target (what it filled before is settled with the account).</summary>
+    private StrategyOrder Adopt(Order live, StrategyOrderType type, string name)
+    {
+        var so = new StrategyOrder
+        {
+            Id = _nextId++,
+            Side = live.Direction == OrderDirections.Buy ? OrderSide.Buy : OrderSide.Sell,
+            Type = type,
+            Quantity = live.Unfilled,
+            Price = type == StrategyOrderType.Stop && live.TriggerPrice > 0 ? live.TriggerPrice : live.Price,
+            Name = name,
+            Time = Time,
+            IsProtective = true,
+            Live = live,
+            LiveQuantity = live.QuantityToFill,
+            Booked = live.Filled,
+        };
+        _orders.Add(so);
+        return so;
+    }
+
+    /// <summary>Working orders in the account named in <see cref="AdoptProtectionIds"/> (not being canceled by a strategy).</summary>
+    private List<Order> KeptOrders()
+    {
+        if (_adoptIds.Count == 0) return new List<Order>();
+        var ids = new HashSet<string>(_adoptIds, StringComparer.Ordinal);
+        lock (CanceledOrders)
+            return _account.ActiveOrders.Where(o => o.State == OrderStates.Active && (ids.Contains(o.ExchangeOrderId) || ids.Contains(LocalIdentityOf(o))) && !CanceledOrders.Contains(o.Id)).ToList();
+    }
+
+    /// <summary>The inherited position is not in the account: orders kept at the broker for it are reported, not adopted.</summary>
+    private void ReportOrphanedProtection()
+    {
+        var kept = KeptOrders();
+        if (kept.Count > 0)
+            Log($"Orders kept at the broker for its position are still working ({string.Join(", ", kept.Select(DescribeLive))}), but the account no longer has the position: review them in Chart Trader");
+    }
+
+    /// <summary>How an order is found again at the broker: its exchange ID or, until the broker assigns one, its id in this process.</summary>
+    private static string IdentityOf(Order o) => o.ExchangeOrderId.Length > 0 ? o.ExchangeOrderId : LocalIdentityOf(o);
+
+    private static string LocalIdentityOf(Order o) => $"local:{LocalSession}:{o.Id.ToString(Inv)}";
+
+    private IReadOnlyList<string> WorkingProtectionIds()
+    {
+        var ids = new List<string>(2);
+        if (_sl is { IsActive: true, Live: Order sl }) ids.Add(IdentityOf(sl));
+        if (_tp is { IsActive: true, Live: Order tp }) ids.Add(IdentityOf(tp));
+        return ids;
+    }
+
+    /// <summary>A broker order for the log: «sell stop 1 MNQ @ 20,150.25 · Rithmic · ID 123».</summary>
+    private string DescribeLive(Order o)
+    {
+        string type = o.Type switch { OrderTypes.Limit => "limit", OrderTypes.StopLimit => "stop limit", OrderTypes.Market => "market", _ => "stop" };
+        decimal price = (o.Type is OrderTypes.Stop or OrderTypes.StopLimit) && o.TriggerPrice > 0 ? o.TriggerPrice : o.Price;
+        return $"{(o.Direction == OrderDirections.Buy ? "buy" : "sell")} {type} {Qty(o.Unfilled)} {ExecInstrument.Symbol}" +
+               (o.Type == OrderTypes.Market ? "" : " @ " + ExecInstrument.FormatPrice(price)) +
+               (o.Comment.Length > 0 ? " · " + o.Comment : "") + (o.ExchangeOrderId.Length > 0 ? " · ID " + o.ExchangeOrderId : "");
     }
 
     // ----------------------------------------------------------------- órdenes
@@ -635,7 +818,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         decimal before = Ledger.Position;
         var fill = new LiveFill(DateTime.UtcNow, so.Side == OrderSide.Buy, quantity, LastPrice > 0 ? LastPrice : _data.LastPrice, ExecInstrument.Symbol, ExecInstrument.PointValue);
         Ledger.Apply(fill);
-        if (Persist) LiveStore.AppendFill(Key, fill);
+        SaveFill(fill);
         decimal after = Ledger.Position;
         if (after == 0) _virtual = 0;
         else if (so.IsProtective) _virtual = before != 0 && Math.Sign(before) == Math.Sign(after) ? _virtual * after / before : ToVirtual(after);
@@ -655,10 +838,24 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         decimal price = _data.LastPrice > 0 ? _data.LastPrice : Ledger.AveragePrice;
         var fill = new LiveFill(DateTime.UtcNow, signedQuantity > 0, Math.Abs(signedQuantity), price, Ledger.OpenSymbol ?? ExecInstrument.Symbol, Ledger.OpenPointValue > 0 ? Ledger.OpenPointValue : ExecInstrument.PointValue);
         Ledger.Apply(fill);
-        if (Persist) LiveStore.AppendFill(Key, fill);
+        SaveFill(fill);
         decimal after = Ledger.Position;
         _virtual = after == 0 ? 0 : before != 0 && Math.Sign(before) == Math.Sign(after) ? _virtual * after / before : ToVirtual(after);
         Log(why);
+    }
+
+    /// <summary>
+    /// Saves a fill to its ledger. If the file cannot be written it is logged, and the fill stays pending and is saved, in
+    /// order, before the next one.
+    /// </summary>
+    private void SaveFill(LiveFill fill)
+    {
+        if (!Persist) return;
+        int waiting = LiveStore.PendingFills(Key);
+        if (LiveStore.AppendFill(Key, fill) is { } error)
+            Log($"Could not save a fill to its ledger ({error.TrimEnd('.')}): it stays pending and is saved before the next fill");
+        else if (waiting > 0)
+            Log($"Saved {waiting} pending fill{(waiting == 1 ? "" : "s")} to its ledger");
     }
 
     /// <summary>Manda el cierre de la posición propia (nunca más de lo que la cuenta tiene en ese sentido).</summary>
@@ -676,26 +873,33 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         Place(so, closable);
     }
 
-    private void UpdateProtection()
+    /// <summary>Replaces its stop loss and take profit with ones for the current position (without <paramref name="target"/>, only the stop loss).</summary>
+    private void UpdateProtection(bool target = true)
     {
         if (_sl is { IsActive: true }) Cancel(_sl);
         if (_tp is { IsActive: true }) Cancel(_tp);
         _sl = _tp = null;
+        PlaceProtection(stop: true, target);
+    }
+
+    /// <summary>Places the stop loss and/or the take profit the strategy uses for the current position (nothing while flat).</summary>
+    private void PlaceProtection(bool stop, bool target)
+    {
         decimal pos = Ledger.Position;
         if (pos == 0) return;
         decimal avg = Ledger.AveragePrice;
         decimal qty = Math.Abs(pos);
         var exit = pos > 0 ? OrderSide.Sell : OrderSide.Buy;
         var inst = _data.Instrument;
-        _highWater = _lowWater = LastPrice;
         int stopTicks = _strategy.StopLossTicks > 0 ? _strategy.StopLossTicks : _strategy.TrailingStopTicks;
-        if (stopTicks > 0)
+        if (stop && stopTicks > 0)
         {
+            _highWater = _lowWater = LastPrice; // trailing starts where its stop is placed
             decimal d = stopTicks * inst.TickSize;
             _sl = Protective(exit, StrategyOrderType.Stop, qty, inst.RoundPrice(pos > 0 ? avg - d : avg + d), "Stop loss");
         }
 
-        if (_strategy.TakeProfitTicks > 0)
+        if (target && _strategy.TakeProfitTicks > 0)
         {
             decimal d = _strategy.TakeProfitTicks * inst.TickSize;
             _tp = Protective(exit, StrategyOrderType.Limit, qty, inst.RoundPrice(pos > 0 ? avg + d : avg - d), "Take profit");

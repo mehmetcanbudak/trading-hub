@@ -7,6 +7,8 @@ using TradingHub.Data;
 using TradingHub.Market;
 using TradingHub.Trading;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("TradingHub.Tests")]
+
 namespace TradingHub.Feeds.Binance;
 
 /// <summary>Configuración de una cuenta de Binance (las claves se guardan en el llavero de macOS).</summary>
@@ -19,6 +21,12 @@ public sealed class BinanceAccountSettings
 
     /// <summary>URL REST propia (vacío = la estándar según mercado y testnet).</summary>
     public string? BaseUrl { get; set; }
+
+    /// <summary>Time allowed for each REST request. Not part of the saved connection; tests shorten it.</summary>
+    internal TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>Time between refreshes of the open orders and the position. Not part of the saved connection; tests shorten it.</summary>
+    internal TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(2);
 
     public string RestBase => !string.IsNullOrWhiteSpace(BaseUrl)
         ? BaseUrl!.TrimEnd('/')
@@ -37,7 +45,27 @@ public sealed record BinanceBalance(string Asset, decimal Wallet, decimal Availa
 
 public sealed record BinancePosition(string Symbol, decimal Quantity, decimal EntryPrice, decimal UnrealizedPnl, decimal Leverage);
 
+/// <summary>
+/// An order as Binance reports it: in the open-order list, when looked up, and in the answers to new and cancel requests
+/// (fields an answer leaves out are empty or 0).
+/// </summary>
 public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, string Type, decimal Price, decimal StopPrice, decimal Quantity, decimal Executed, string Status, bool ReduceOnly = false);
+
+/// <summary>
+/// A USD-M futures conditional (algo) order as Binance reports it: in the open algo-order list, when looked up, and in the
+/// answer to a new one (fields an answer leaves out are empty or 0). Once it triggers, <see cref="ActualOrderId"/> is the
+/// regular order it placed (0 before), and a lookup gives in <see cref="ActualQuantity"/> what that order executed.
+/// <see cref="ReduceOnly"/> is also set for a close-position order.
+/// </summary>
+public sealed record BinanceAlgoOrder(long AlgoId, string Symbol, string Side, string Type, decimal Price, decimal TriggerPrice, decimal Quantity, string Status, long ActualOrderId, decimal ActualQuantity, bool ReduceOnly = false);
+
+/// <summary>Binance refused a private request; <see cref="Code"/> is its error code (0 if the answer had none).</summary>
+internal sealed class BinanceRejectedException : InvalidOperationException
+{
+    public BinanceRejectedException(string message, int code) : base(message) => Code = code;
+
+    public int Code { get; }
+}
 
 /// <summary>
 /// API privada de Binance (firmada con HMAC-SHA256): saldos, posiciones y órdenes.
@@ -46,12 +74,13 @@ public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, 
 public sealed class BinanceAccountClient : IDisposable
 {
     private readonly BinanceAccountSettings _s;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private readonly HttpClient _http;
     private long _timeOffsetMs;
 
     public BinanceAccountClient(BinanceAccountSettings settings)
     {
         _s = settings;
+        _http = new HttpClient { Timeout = settings.RequestTimeout };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("TradingHub/0.2");
         if (settings.HasKeys) _http.DefaultRequestHeaders.Add("X-MBX-APIKEY", settings.ApiKey);
     }
@@ -85,9 +114,11 @@ public sealed class BinanceAccountClient : IDisposable
         if (!resp.IsSuccessStatusCode)
         {
             string msg = body;
+            int code = 0;
             try
             {
                 using var e = JsonDocument.Parse(body);
+                if (e.RootElement.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.Number && c.TryGetInt32(out var n)) code = n;
                 msg = e.RootElement.GetProperty("msg").GetString() ?? body;
             }
             catch
@@ -95,7 +126,7 @@ public sealed class BinanceAccountClient : IDisposable
                 // cuerpo no JSON
             }
 
-            throw new InvalidOperationException($"Binance rejected operation ({(int)resp.StatusCode}): {msg}");
+            throw new BinanceRejectedException($"Binance rejected operation ({(int)resp.StatusCode}): {msg}", code);
         }
 
         return JsonDocument.Parse(body);
@@ -103,6 +134,37 @@ public sealed class BinanceAccountClient : IDisposable
 
     private static decimal D(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) ? decimal.Parse(v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText(), NumberStyles.Float, CultureInfo.InvariantCulture) : 0m;
+
+    // Algo-order answers write fields that do not apply as empty strings (the documented examples: "activatePrice": "").
+    private static decimal DecimalOrZero(JsonElement e, string name)
+    {
+        if (!e.TryGetProperty(name, out var v) || v.ValueKind == JsonValueKind.Null) return 0m;
+        string s = v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText();
+        return s.Length == 0 ? 0m : decimal.Parse(s, NumberStyles.Float, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>An id Binance may write as a number or as a string; empty (none yet) or missing is 0.</summary>
+    private static long IdOrZero(JsonElement e, string name)
+    {
+        if (!e.TryGetProperty(name, out var v)) return 0;
+        if (v.ValueKind == JsonValueKind.Number) return v.GetInt64();
+        return v.ValueKind == JsonValueKind.String && long.TryParse(v.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : 0;
+    }
+
+    private static bool Flag(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+
+    private static string S(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
+
+    private static BinanceOpenOrder ParseOrder(JsonElement o, string symbol) => new(
+        o.GetProperty("orderId").GetInt64(), symbol, S(o, "side"), S(o, "type"),
+        D(o, "price"), D(o, "stopPrice"), D(o, "origQty"), D(o, "executedQty"), S(o, "status"),
+        o.TryGetProperty("reduceOnly", out var ro) && ro.ValueKind == JsonValueKind.True);
+
+    private static BinanceAlgoOrder ParseAlgoOrder(JsonElement a, string symbol) => new(
+        a.GetProperty("algoId").GetInt64(), symbol, S(a, "side"), S(a, "orderType"),
+        DecimalOrZero(a, "price"), DecimalOrZero(a, "triggerPrice"), DecimalOrZero(a, "quantity"), S(a, "algoStatus"),
+        IdOrZero(a, "actualOrderId"), DecimalOrZero(a, "actualQty"), Flag(a, "reduceOnly") || Flag(a, "closePosition"));
 
     private static string Fmt(decimal v) => v.ToString("0.############", CultureInfo.InvariantCulture);
 
@@ -148,14 +210,32 @@ public sealed class BinanceAccountClient : IDisposable
     public async Task<IReadOnlyList<BinanceOpenOrder>> GetOpenOrdersAsync(string symbol, CancellationToken ct)
     {
         using var doc = await SignedAsync(HttpMethod.Get, P("/fapi/v1/openOrders", "/api/v3/openOrders"), $"symbol={symbol}", ct).ConfigureAwait(false);
-        return doc.RootElement.EnumerateArray().Select(o => new BinanceOpenOrder(
-            o.GetProperty("orderId").GetInt64(), symbol, o.GetProperty("side").GetString()!, o.GetProperty("type").GetString()!,
-            D(o, "price"), D(o, "stopPrice"), D(o, "origQty"), D(o, "executedQty"), o.GetProperty("status").GetString()!,
-            o.TryGetProperty("reduceOnly", out var ro) && ro.ValueKind == System.Text.Json.JsonValueKind.True)).ToList();
+        return doc.RootElement.EnumerateArray().Select(o => ParseOrder(o, symbol)).ToList();
     }
 
-    /// <summary>Envía una orden. type: MARKET, LIMIT o STOP_MARKET (futuros) / STOP_LOSS (spot).</summary>
-    public async Task<long> PlaceOrderAsync(string symbol, OrderDirections dir, OrderTypes type, decimal qty, decimal price, bool reduceOnly, CancellationToken ct)
+    /// <summary>
+    /// One order in any state (open, filled, canceled, expired…), signed like the other private calls. Null if Binance
+    /// no longer has it: it drops canceled or expired orders without fills after a few days.
+    /// </summary>
+    public async Task<BinanceOpenOrder?> GetOrderAsync(string symbol, long orderId, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = await SignedAsync(HttpMethod.Get, P("/fapi/v1/order", "/api/v3/order"), $"symbol={symbol}&orderId={orderId}", ct).ConfigureAwait(false);
+            return ParseOrder(doc.RootElement, symbol);
+        }
+        catch (BinanceRejectedException ex) when (ex.Code == -2013)
+        {
+            return null; // "Order does not exist."
+        }
+    }
+
+    /// <summary>
+    /// Sends an order (type: MARKET or LIMIT, or STOP_LOSS in spot) and returns Binance's answer: always the order id;
+    /// status and quantities unless the answer is a bare acknowledgement (spot stops). USD-M futures stops are conditional
+    /// orders, sent with <see cref="PlaceAlgoOrderAsync"/>.
+    /// </summary>
+    public async Task<BinanceOpenOrder> PlaceOrderAsync(string symbol, OrderDirections dir, OrderTypes type, decimal qty, decimal price, bool reduceOnly, CancellationToken ct)
     {
         var sb = new StringBuilder($"symbol={symbol}&side={(dir == OrderDirections.Buy ? "BUY" : "SELL")}&quantity={Fmt(qty)}");
         switch (type)
@@ -166,26 +246,97 @@ public sealed class BinanceAccountClient : IDisposable
             case OrderTypes.Limit:
                 sb.Append($"&type=LIMIT&timeInForce=GTC&price={Fmt(price)}");
                 break;
-            case OrderTypes.Stop:
-                sb.Append(_s.Futures ? $"&type=STOP_MARKET&stopPrice={Fmt(price)}" : $"&type=STOP_LOSS&stopPrice={Fmt(price)}");
+            case OrderTypes.Stop when !_s.Futures:
+                sb.Append($"&type=STOP_LOSS&stopPrice={Fmt(price)}");
                 break;
+            case OrderTypes.Stop:
+                // since 2025-12-09 Binance refuses them on /fapi/v1/order (error -4120)
+                throw new NotSupportedException("USD-M futures stops are conditional orders: send them with PlaceAlgoOrderAsync");
             default:
                 throw new NotSupportedException("Unsupported order type");
         }
 
         if (reduceOnly && _s.Futures) sb.Append("&reduceOnly=true");
         using var doc = await SignedAsync(HttpMethod.Post, P("/fapi/v1/order", "/api/v3/order"), sb.ToString(), ct).ConfigureAwait(false);
-        return doc.RootElement.GetProperty("orderId").GetInt64();
+        return ParseOrder(doc.RootElement, symbol);
     }
 
-    public async Task CancelOrderAsync(string symbol, long orderId, CancellationToken ct)
+    /// <summary>Cancels an order and returns its final state as Binance answers it (status and executed quantity).</summary>
+    public async Task<BinanceOpenOrder> CancelOrderAsync(string symbol, long orderId, CancellationToken ct)
     {
-        using var _ = await SignedAsync(HttpMethod.Delete, P("/fapi/v1/order", "/api/v3/order"), $"symbol={symbol}&orderId={orderId}", ct).ConfigureAwait(false);
+        using var doc = await SignedAsync(HttpMethod.Delete, P("/fapi/v1/order", "/api/v3/order"), $"symbol={symbol}&orderId={orderId}", ct).ConfigureAwait(false);
+        return ParseOrder(doc.RootElement, symbol);
     }
 
     public async Task CancelAllAsync(string symbol, CancellationToken ct)
     {
         using var _ = await SignedAsync(HttpMethod.Delete, P("/fapi/v1/allOpenOrders", "/api/v3/openOrders"), $"symbol={symbol}", ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Working conditional (algo) orders of a USD-M futures symbol (GET /fapi/v1/openAlgoOrders).</summary>
+    public async Task<IReadOnlyList<BinanceAlgoOrder>> GetOpenAlgoOrdersAsync(string symbol, CancellationToken ct)
+    {
+        using var doc = await SignedAsync(HttpMethod.Get, "/fapi/v1/openAlgoOrders", $"symbol={symbol}", ct).ConfigureAwait(false);
+        return doc.RootElement.EnumerateArray().Select(a => ParseAlgoOrder(a, symbol)).ToList();
+    }
+
+    /// <summary>
+    /// One conditional order in any state (GET /fapi/v1/algoOrder by its algo id), with the order it placed once it
+    /// triggered. Null if Binance answers that it does not exist (-2013): canceled or expired ones without fills are
+    /// dropped after 3 days.
+    /// </summary>
+    public async Task<BinanceAlgoOrder?> GetAlgoOrderAsync(string symbol, long algoId, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = await SignedAsync(HttpMethod.Get, "/fapi/v1/algoOrder", $"algoId={algoId}", ct).ConfigureAwait(false);
+            return ParseAlgoOrder(doc.RootElement, symbol);
+        }
+        catch (BinanceRejectedException ex) when (ex.Code == -2013)
+        {
+            return null; // "Order does not exist."
+        }
+    }
+
+    /// <summary>
+    /// Sends a USD-M futures stop as a conditional order through the Algo Order API (POST /fapi/v1/algoOrder,
+    /// algoType=CONDITIONAL, type STOP_MARKET): Binance sends a market order once the price reaches
+    /// <paramref name="triggerPrice"/>, by its default working type (contract price). Returns Binance's answer.
+    /// </summary>
+    public async Task<BinanceAlgoOrder> PlaceAlgoOrderAsync(string symbol, OrderDirections dir, decimal qty, decimal triggerPrice, bool reduceOnly, CancellationToken ct)
+    {
+        if (!_s.Futures) throw new NotSupportedException("Conditional (algo) orders exist only in USD-M futures");
+        string query = $"algoType=CONDITIONAL&symbol={symbol}&side={(dir == OrderDirections.Buy ? "BUY" : "SELL")}&type=STOP_MARKET&quantity={Fmt(qty)}&triggerPrice={Fmt(triggerPrice)}";
+        if (reduceOnly) query += "&reduceOnly=true";
+        using var doc = await SignedAsync(HttpMethod.Post, "/fapi/v1/algoOrder", query, ct).ConfigureAwait(false);
+        return ParseAlgoOrder(doc.RootElement, symbol);
+    }
+
+    /// <summary>
+    /// Cancels a conditional order that has not triggered (DELETE /fapi/v1/algoOrder by its algo id). Binance's answer
+    /// carries no state; one whose code is not 200 counts as refused.
+    /// </summary>
+    public async Task CancelAlgoOrderAsync(long algoId, CancellationToken ct)
+    {
+        using var doc = await SignedAsync(HttpMethod.Delete, "/fapi/v1/algoOrder", $"algoId={algoId}", ct).ConfigureAwait(false);
+        EnsureSucceeded(doc.RootElement);
+    }
+
+    /// <summary>Cancels every conditional order of a USD-M futures symbol that has not triggered (DELETE /fapi/v1/algoOpenOrders).</summary>
+    public async Task CancelAllAlgoOrdersAsync(string symbol, CancellationToken ct)
+    {
+        using var doc = await SignedAsync(HttpMethod.Delete, "/fapi/v1/algoOpenOrders", $"symbol={symbol}", ct).ConfigureAwait(false);
+        EnsureSucceeded(doc.RootElement);
+    }
+
+    /// <summary>Refuses an answer that carries a code other than 200, which Binance writes as a number or as a string.</summary>
+    private static void EnsureSucceeded(JsonElement answer)
+    {
+        if (!answer.TryGetProperty("code", out var c)) return;
+        string text = c.ValueKind == JsonValueKind.String ? c.GetString()! : c.GetRawText();
+        if (text == "200") return;
+        int code = int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var n) ? n : 0;
+        throw new BinanceRejectedException($"Binance rejected operation (code {text}): {S(answer, "msg")}", code);
     }
 
     /// <summary>Prueba la conexión: hora del servidor y, si hay claves, el saldo.</summary>
@@ -211,17 +362,104 @@ public sealed class BinanceAccountClient : IDisposable
 }
 
 /// <summary>
-/// Cuenta de Binance como <see cref="ITradingAccount"/>: envía órdenes por REST y refresca
-/// posición y órdenes abiertas cada 2 segundos.
+/// Binance account as an <see cref="ITradingAccount"/>: sends orders over REST and refreshes the position and the open
+/// orders every 2 seconds.
 /// </summary>
+/// <remarks>
+/// Every order handle the broker returns or lists stays the same object while its order works. Each poll updates it from
+/// the open orders (partial fills included); when it leaves the open list, its final state is looked up (filled,
+/// canceled, expired or rejected, with the filled quantity). Binance cannot modify an order, so Modify and Replace cancel
+/// it and send a new one, which the same handle then follows. Operations on one handle run one after another.
+/// <para>
+/// USD-M futures stops are conditional orders, which Binance takes only through its Algo Order API since 2025-12-09: they
+/// are sent, listed, looked up and canceled there, with algo ids numbered apart from order ids (their
+/// <see cref="Order.ExchangeOrderId"/> is "algo:" and the algo id). Once one triggers, its handle follows the regular
+/// order it placed until that finishes, and shows that order's id. Spot stops stay STOP_LOSS orders.
+/// </para>
+/// </remarks>
 public sealed class BinanceBroker : ITradingAccount, IDisposable
 {
+    /// <summary>Starts the <see cref="Order.ExchangeOrderId"/> of a conditional order: an algo id is not an order id.</summary>
+    private const string AlgoPrefix = "algo:";
+
     private readonly BinanceAccountClient _client;
     private readonly BinanceAccountSettings _settings;
     private readonly InstrumentData _data;
     private readonly CancellationTokenSource _cts = new();
+    private readonly object _gate = new();
+
+    // Handles not finished yet, by object and by the exchange order each follows now: a regular order by its order id or,
+    // in USD-M futures, a conditional order by its algo id until it triggers.
+    private readonly Dictionary<Order, Tracked> _byOrder = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<long, Tracked> _byId = new();
+    private readonly Dictionary<long, Tracked> _byAlgoId = new();
+
+    // Exchange ids that finished, were replaced or triggered, and when: a list fetched around then may still show them.
+    private readonly Dictionary<long, DateTime> _finished = new();
+    private readonly Dictionary<long, DateTime> _finishedAlgo = new();
+    private static readonly TimeSpan FinishedMemory = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan CancelDoubt = TimeSpan.FromSeconds(60); // an unanswered cancel may still be carried out
+    private List<long> _listed = new();
+    private List<long> _listedAlgo = new();
+    private int _sending; // new orders waiting for Binance's answer: an unknown open order may be one of them
     private List<Order> _orders = new();
-    private readonly Dictionary<long, long> _exchangeIds = new();
+
+    /// <summary>An order handle kept up to date from Binance.</summary>
+    private sealed class Tracked
+    {
+        public Tracked(Order order, bool own)
+        {
+            Order = order;
+            Own = own;
+        }
+
+        public Order Order { get; }
+
+        /// <summary>Sent by this broker; otherwise listed from Binance (a manual order, or one from an earlier session).</summary>
+        public bool Own { get; }
+
+        /// <summary>Current exchange order id (0 until Binance answers the submission, and while it follows a conditional order).</summary>
+        public long Id;
+
+        /// <summary>
+        /// Current conditional (algo) order id in USD-M futures until it triggers; then the handle follows the order it
+        /// placed by <see cref="Id"/>. 0 otherwise.
+        /// </summary>
+        public long AlgoId;
+
+        /// <summary>The conditional order's last known algo status (empty while it is not known).</summary>
+        public string AlgoStatus = "";
+
+        /// <summary>Binance accepted the submission: the handle follows an exchange order.</summary>
+        public bool Accepted => Id != 0 || AlgoId != 0;
+
+        /// <summary>Filled by this handle's earlier exchange orders (Modify cancels and sends a new one).</summary>
+        public decimal FilledBefore;
+
+        /// <summary>Executed quantity of the current exchange order; it never goes back.</summary>
+        public decimal Executed;
+
+        /// <summary>
+        /// Cancels or replaces in flight or queued: the order missing from the open list is expected, not final, and a
+        /// queued Modify's price and quantity stay on the handle.
+        /// </summary>
+        public int Busy;
+
+        /// <summary>
+        /// Error of a Modify whose cancel had an unknown outcome and that sent no replacement, and when: if the order turns
+        /// out canceled, the handle is reported Rejected with it instead of silently Canceled. Binance may carry out such a
+        /// cancel late, so it is kept for a while even when the order is seen working.
+        /// </summary>
+        public string? ReplaceFailure;
+
+        public DateTime ReplaceFailedAt;
+
+        /// <summary>Consecutive lookups for which Binance answered that the order does not exist.</summary>
+        public int NotFound;
+
+        /// <summary>The last operation queued on this handle; the next one waits for it.</summary>
+        public Task Last = Task.CompletedTask;
+    }
 
     public BinanceBroker(InstrumentData data, BinanceAccountSettings settings, string name)
     {
@@ -238,7 +476,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     public decimal LastPrice => _data.LastPrice;
     public Instrument Instrument => _data.Instrument;
     public Position Position { get; }
-    public IEnumerable<Order> ActiveOrders => _orders;
+    public IEnumerable<Order> ActiveOrders => _orders.Where(o => o.State == OrderStates.Active);
     public string? LastError { get; private set; }
     public event Action? Changed;
 
@@ -251,27 +489,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         {
             try
             {
-                var open = await _client.GetOpenOrdersAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false);
-                var orders = open.Select(o =>
-                {
-                    var type = o.Type.Contains("STOP") ? OrderTypes.Stop : o.Type == "MARKET" ? OrderTypes.Market : OrderTypes.Limit;
-                    var ord = new Order
-                    {
-                        ExchangeOrderId = o.OrderId.ToString(CultureInfo.InvariantCulture),
-                        Direction = o.Side == "BUY" ? OrderDirections.Buy : OrderDirections.Sell,
-                        Type = type,
-                        Price = o.Price,
-                        TriggerPrice = o.StopPrice,
-                        QuantityToFill = o.Quantity,
-                        Unfilled = o.Quantity - o.Executed,
-                        State = OrderStates.Active,
-                        Status = o.Executed > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed,
-                        ReduceOnly = o.ReduceOnly,
-                    };
-                    _exchangeIds[ord.Id] = o.OrderId;
-                    return ord;
-                }).ToList();
-                _orders = orders;
+                string? lookupError = await RefreshOrdersAsync(_cts.Token).ConfigureAwait(false);
 
                 if (_settings.Futures)
                 {
@@ -281,46 +499,478 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                     Position.UnrealizedPnL = pos?.UnrealizedPnl ?? 0;
                 }
 
-                LastError = null;
+                LastError = lookupError;
                 Changed?.Invoke();
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (_cts.IsCancellationRequested)
             {
                 break;
             }
             catch (Exception ex)
             {
+                // also a request that timed out (HttpClient reports it as a cancellation): reported, and polling goes on
                 LastError = ex.Message;
                 Changed?.Invoke();
             }
 
-            try { await Task.Delay(2000, _cts.Token).ConfigureAwait(false); }
+            try { await Task.Delay(_settings.PollInterval, _cts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
+    }
+
+    /// <summary>
+    /// Brings the handles up to date with Binance's open orders and looks up the final state of those that left the list.
+    /// Returns the lookup error to report, if any (those orders are looked up again at the next poll).
+    /// </summary>
+    /// <remarks>
+    /// In USD-M futures the conditional (algo) orders are listed after the regular ones but gone through first: an order
+    /// one of them placed when it triggered then already belongs to that handle when the regular orders are gone through.
+    /// </remarks>
+    private async Task<string?> RefreshOrdersAsync(CancellationToken ct)
+    {
+        var open = await _client.GetOpenOrdersAsync(Instrument.Symbol, ct).ConfigureAwait(false);
+        string? algoError = null;
+        if (_settings.Futures)
+        {
+            try
+            {
+                algoError = await RefreshAlgoOrdersAsync(await _client.GetOpenAlgoOrdersAsync(Instrument.Symbol, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                algoError = ex.Message; // reported; the regular orders are still brought up to date
+            }
+        }
+
+        var gone = new List<(Tracked Handle, long Id)>();
+        lock (_gate)
+        {
+            var listed = new List<long>(open.Count);
+            bool triggering = Triggering();
+            foreach (var s in open)
+            {
+                if (_finished.ContainsKey(s.OrderId)) continue; // finished or replaced moments ago: a stale listing
+                if (!_byId.TryGetValue(s.OrderId, out var t))
+                {
+                    // it may be one of ours whose answer has not arrived, or the order a conditional order placed when it
+                    // triggered, not known yet: next poll
+                    if (_sending > 0 || triggering) continue;
+                    t = new Tracked(new Order(), own: false);
+                    _byOrder[t.Order] = t;
+                    Bind(t, s.OrderId);
+                }
+
+                listed.Add(s.OrderId);
+                t.NotFound = 0;
+                if (t.Busy == 0) Apply(t, s);
+            }
+
+            _listed = listed;
+            Forget(_finished);
+            var still = new HashSet<long>(listed);
+            foreach (var (id, t) in _byId)
+                if (t.Busy == 0 && !still.Contains(id)) gone.Add((t, id));
+        }
+
+        string? error = null;
+        foreach (var (t, id) in gone)
+        {
+            BinanceOpenOrder? s;
+            try
+            {
+                s = await _client.GetOrderAsync(Instrument.Symbol, id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                error = ex.Message;
+                continue;
+            }
+
+            lock (_gate)
+            {
+                if (t.Id != id || t.Busy > 0 || !_byOrder.ContainsKey(t.Order)) continue; // replaced or finished meanwhile
+                if (s != null)
+                {
+                    t.NotFound = 0;
+                    Apply(t, s);
+                }
+                else if (++t.NotFound >= 3)
+                {
+                    FinishCanceled(t); // Binance dropped it: canceled or expired without fills
+                }
+
+                if (t.Order.State == OrderStates.Failed && t.ReplaceFailure is { } why)
+                    error = "Modify failed: the order was canceled but its replacement was not sent (" + why + ")";
+            }
+        }
+
+        Publish();
+        return error is null || algoError is null ? error ?? algoError : algoError + "; " + error;
+    }
+
+    /// <summary>
+    /// Brings the handles of conditional (algo) orders up to date with Binance's open ones and looks up those that left
+    /// the list: canceled, expired or rejected, or triggered, in which case the handle follows the regular order it
+    /// placed from now on. Returns the lookup error to report, if any.
+    /// </summary>
+    private async Task<string?> RefreshAlgoOrdersAsync(IReadOnlyList<BinanceAlgoOrder> open, CancellationToken ct)
+    {
+        var gone = new List<(Tracked Handle, long AlgoId)>();
+        lock (_gate)
+        {
+            var listed = new List<long>(open.Count);
+            foreach (var a in open)
+            {
+                if (_finishedAlgo.ContainsKey(a.AlgoId)) continue; // finished, replaced or triggered moments ago
+                if (!_byAlgoId.TryGetValue(a.AlgoId, out var t))
+                {
+                    // it may be one of ours whose answer has not arrived; one that triggered is followed through the order
+                    // it placed, which the regular open orders list
+                    if (_sending > 0 || a.ActualOrderId != 0) continue;
+                    t = new Tracked(new Order(), own: false);
+                    _byOrder[t.Order] = t;
+                    BindAlgo(t, a.AlgoId);
+                }
+
+                listed.Add(a.AlgoId);
+                t.NotFound = 0;
+                if (t.Busy == 0) ApplyAlgo(t, a);
+            }
+
+            _listedAlgo = listed;
+            Forget(_finishedAlgo);
+            var still = new HashSet<long>(listed);
+            foreach (var (id, t) in _byAlgoId)
+            {
+                if (t.Busy > 0 || still.Contains(id)) continue;
+                t.AlgoStatus = ""; // not known until looked up: it may have triggered
+                gone.Add((t, id));
+            }
+        }
+
+        string? error = null;
+        foreach (var (t, id) in gone)
+        {
+            BinanceAlgoOrder? a;
+            try
+            {
+                a = await _client.GetAlgoOrderAsync(Instrument.Symbol, id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                error = ex.Message;
+                continue;
+            }
+
+            lock (_gate)
+            {
+                if (t.AlgoId != id || t.Busy > 0 || !_byOrder.ContainsKey(t.Order)) continue; // replaced or finished meanwhile
+                if (a != null)
+                {
+                    t.NotFound = 0;
+                    ApplyAlgo(t, a);
+                }
+                else if (++t.NotFound >= 3)
+                {
+                    FinishCanceled(t); // Binance dropped it: canceled or expired without fills
+                }
+
+                if (t.Order.State != OrderStates.Failed) continue;
+                if (a is { Status: "REJECTED" })
+                    error = $"Binance rejected conditional order {AlgoPrefix}{id} (algo status REJECTED, for example a failed margin check)";
+                else if (t.ReplaceFailure is { } why)
+                    error = "Modify failed: the order was canceled but its replacement was not sent (" + why + ")";
+            }
+        }
+
+        return error;
+    }
+
+    /// <summary>
+    /// Whether a conditional order may already have triggered and placed an order whose id is not known yet (its state is
+    /// not known, it is triggering, or a cancel or replacement of it is under way): an unknown regular order may be that one.
+    /// </summary>
+    private bool Triggering()
+    {
+        foreach (var t in _byAlgoId.Values)
+            if (t.Busy > 0 || t.AlgoStatus != "NEW") return true;
+        return false;
+    }
+
+    /// <summary>Forgets finished exchange ids once a list can no longer show them.</summary>
+    private static void Forget(Dictionary<long, DateTime> finished)
+    {
+        var forget = DateTime.UtcNow - FinishedMemory;
+        foreach (var (id, at) in finished)
+            if (at < forget) finished.Remove(id);
+    }
+
+    /// <summary>
+    /// Copies Binance's view of the handle's current exchange order onto it; a final state finishes the handle. While a
+    /// Modify is queued, the handle keeps showing its price and quantity until the order is final.
+    /// </summary>
+    private void Apply(Tracked t, BinanceOpenOrder s)
+    {
+        if (s.Status.Length == 0) return; // a bare acknowledgement (spot stops) adds nothing
+        var o = t.Order;
+        bool final = s.Status is "FILLED" or "CANCELED" or "EXPIRED" or "EXPIRED_IN_MATCH" or "REJECTED";
+        if (t.Busy == 0 || final)
+        {
+            if (!t.Own)
+            {
+                o.Direction = s.Side == "BUY" ? OrderDirections.Buy : OrderDirections.Sell;
+                o.Type = TypeOf(s.Type);
+                o.Price = s.Price;
+                o.TriggerPrice = s.StopPrice;
+                o.ReduceOnly = s.ReduceOnly;
+            }
+            else if (o.Type == OrderTypes.Stop)
+            {
+                if (s.StopPrice > 0) o.TriggerPrice = s.StopPrice;
+            }
+            else if (s.Price > 0)
+            {
+                o.Price = s.Price;
+            }
+
+            if (s.Quantity > 0) o.QuantityToFill = t.FilledBefore + s.Quantity;
+        }
+
+        t.Executed = Math.Max(t.Executed, s.Executed);
+        o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
+        switch (s.Status)
+        {
+            case "FILLED":
+                o.Unfilled = 0;
+                Finish(t, OrderStates.Done, OrderStatus.Filled);
+                break;
+            case "CANCELED" or "EXPIRED" or "EXPIRED_IN_MATCH":
+                FinishCanceled(t); // there is no Expired status: an expiry is the exchange's cancel
+                break;
+            case "REJECTED":
+                Finish(t, OrderStates.Failed, OrderStatus.Rejected);
+                break;
+            default: // NEW, PARTIALLY_FILLED (futures also NEW_INSURANCE, NEW_ADL): still working
+                if (t.ReplaceFailure != null && DateTime.UtcNow - t.ReplaceFailedAt > CancelDoubt) t.ReplaceFailure = null; // that cancel never happened
+                o.State = OrderStates.Active;
+                o.Status = t.FilledBefore + t.Executed > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// The order type a Binance type shows as: stops (also a stop-limit, a trailing stop) at their trigger price, market
+    /// orders, and everything else, take profits included, as limits.
+    /// </summary>
+    private static OrderTypes TypeOf(string type) => type.Contains("STOP") ? OrderTypes.Stop : type == "MARKET" ? OrderTypes.Market : OrderTypes.Limit;
+
+    /// <summary>
+    /// Copies Binance's view of the handle's conditional order onto it. Once it triggered, the handle follows the regular
+    /// order it placed, which tells how it ends; a final state before that finishes the handle. While a Modify is queued,
+    /// the handle keeps showing its price and quantity until the order is final.
+    /// </summary>
+    private void ApplyAlgo(Tracked t, BinanceAlgoOrder a)
+    {
+        if (a.Status.Length == 0) return; // an answer without a state adds nothing
+        var o = t.Order;
+        t.AlgoStatus = a.Status;
+        bool final = a.ActualOrderId != 0 || a.Status is "CANCELED" or "EXPIRED" or "REJECTED" or "FINISHED";
+        if (t.Busy == 0 || final)
+        {
+            if (!t.Own)
+            {
+                o.Direction = a.Side == "BUY" ? OrderDirections.Buy : OrderDirections.Sell;
+                o.Type = TypeOf(a.Type);
+                o.Price = o.Type == OrderTypes.Limit && a.Price == 0 ? a.TriggerPrice : a.Price; // a take profit at market works at its trigger
+                o.TriggerPrice = a.TriggerPrice;
+                o.ReduceOnly = a.ReduceOnly;
+            }
+            else if (a.TriggerPrice > 0)
+            {
+                o.TriggerPrice = a.TriggerPrice;
+            }
+
+            if (a.Quantity > 0) o.QuantityToFill = t.FilledBefore + a.Quantity;
+        }
+
+        o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
+        if (a.ActualOrderId != 0)
+        {
+            Follow(t, a.ActualOrderId); // triggered: the regular orders tell how the order it placed ends
+            return;
+        }
+
+        switch (a.Status)
+        {
+            case "CANCELED" or "EXPIRED": // EXPIRED: canceled by the system
+                FinishCanceled(t);
+                break;
+            case "REJECTED": // refused by the matching engine when it triggered
+                Finish(t, OrderStates.Failed, OrderStatus.Rejected);
+                break;
+            case "FINISHED":
+                // filled or canceled in the matching engine, but the answer does not say which order it placed: the
+                // quantity that order executed decides
+                t.Executed = Math.Max(t.Executed, a.ActualQuantity);
+                o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
+                if (a.ActualQuantity > 0 && o.Unfilled == 0) Finish(t, OrderStates.Done, OrderStatus.Filled);
+                else FinishCanceled(t);
+                break;
+            default: // NEW, TRIGGERING, TRIGGERED until the order it placed is known: still working
+                if (t.ReplaceFailure != null && DateTime.UtcNow - t.ReplaceFailedAt > CancelDoubt) t.ReplaceFailure = null; // that cancel never happened
+                o.State = OrderStates.Active;
+                o.Status = t.FilledBefore + t.Executed > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// The handle's conditional order triggered: from now on the handle follows the regular order it placed. If a list
+    /// already showed that order as one of unknown origin (Binance's lists may disagree for a moment), that second handle
+    /// is dropped: it was this order.
+    /// </summary>
+    private void Follow(Tracked t, long orderId)
+    {
+        _byAlgoId.Remove(t.AlgoId);
+        _finishedAlgo[t.AlgoId] = DateTime.UtcNow;
+        t.AlgoId = 0;
+        t.AlgoStatus = "";
+        t.NotFound = 0;
+        if (_byId.TryGetValue(orderId, out var shown) && shown != t)
+        {
+            _byId.Remove(orderId);
+            _byOrder.Remove(shown.Order);
+            shown.Order.State = OrderStates.Done;
+            shown.Order.Status = OrderStatus.Canceled;
+        }
+
+        _finished.Remove(orderId);
+        Bind(t, orderId);
+    }
+
+    /// <summary>The order was canceled or expired at Binance; a Modify that lost its replacement reports Rejected.</summary>
+    private void FinishCanceled(Tracked t)
+    {
+        if (t.ReplaceFailure is null) Finish(t, OrderStates.Done, OrderStatus.Canceled);
+        else Finish(t, OrderStates.Failed, OrderStatus.Rejected);
+    }
+
+    private void Bind(Tracked t, long id)
+    {
+        t.Id = id;
+        t.Order.ExchangeOrderId = id.ToString(CultureInfo.InvariantCulture);
+        _byId[id] = t;
+    }
+
+    private void BindAlgo(Tracked t, long algoId)
+    {
+        t.AlgoId = algoId;
+        t.Order.ExchangeOrderId = AlgoPrefix + algoId.ToString(CultureInfo.InvariantCulture);
+        _byAlgoId[algoId] = t;
+    }
+
+    /// <summary>Gives the handle its final state and stops following it.</summary>
+    private void Finish(Tracked t, OrderStates state, OrderStatus status)
+    {
+        t.Order.State = state;
+        t.Order.Status = status;
+        _byOrder.Remove(t.Order);
+        if (t.AlgoId != 0)
+        {
+            _byAlgoId.Remove(t.AlgoId);
+            _finishedAlgo[t.AlgoId] = DateTime.UtcNow;
+        }
+
+        if (t.Id == 0) return;
+        _byId.Remove(t.Id);
+        _finished[t.Id] = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Publishes the working handles as <see cref="ActiveOrders"/>: in Binance's listing order, regular orders first and
+    /// then conditional ones, then the rest.
+    /// </summary>
+    private void Publish()
+    {
+        lock (_gate)
+        {
+            var list = new List<Order>(_byOrder.Count);
+            foreach (var id in _listed)
+                if (_byId.TryGetValue(id, out var t) && t.Order.State == OrderStates.Active) list.Add(t.Order);
+            foreach (var id in _listedAlgo)
+                if (_byAlgoId.TryGetValue(id, out var t) && t.Order.State == OrderStates.Active && !list.Contains(t.Order)) list.Add(t.Order);
+            foreach (var t in _byOrder.Values)
+                if (t.Order.State == OrderStates.Active && !list.Contains(t.Order)) list.Add(t.Order);
+            _orders = list;
+        }
+    }
+
+    /// <summary>Runs an operation on a handle after the ones already queued on it.</summary>
+    private void Enqueue(Tracked t, Func<Task> operation)
+    {
+        lock (_gate) t.Last = t.Last.ContinueWith(_ => operation(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
     }
 
     private Order Send(OrderDirections dir, OrderTypes type, decimal qty, decimal price, string comment, bool reduceOnly = false)
     {
         var order = new Order { Direction = dir, Type = type, QuantityToFill = qty, Unfilled = qty, Price = price, TriggerPrice = price, Comment = comment, State = OrderStates.Active, Status = OrderStatus.Placed, ReduceOnly = reduceOnly };
-        _ = Task.Run(async () =>
+        var t = new Tracked(order, own: true);
+        decimal px = Instrument.RoundPrice(price);
+        lock (_gate)
         {
-            try
-            {
-                long id = await _client.PlaceOrderAsync(Instrument.Symbol, dir, type, qty, Instrument.RoundPrice(price), reduceOnly, _cts.Token).ConfigureAwait(false);
-                order.ExchangeOrderId = id.ToString(CultureInfo.InvariantCulture);
-                LastError = null;
-            }
-            catch (Exception ex)
-            {
-                order.State = OrderStates.Failed;
-                order.Status = OrderStatus.Rejected;
-                LastError = ex.Message;
-            }
+            _byOrder[order] = t;
+            _sending++;
+            t.Last = Task.Run(() => SubmitAsync(t, type, qty, px, reduceOnly));
+        }
 
-            Changed?.Invoke();
-        });
+        Publish();
         return order;
     }
+
+    private async Task SubmitAsync(Tracked t, OrderTypes type, decimal qty, decimal price, bool reduceOnly)
+    {
+        var order = t.Order;
+        BinanceOpenOrder? placed = null;
+        BinanceAlgoOrder? placedAlgo = null;
+        string? error = null;
+        try
+        {
+            if (IsConditional(type)) placedAlgo = await _client.PlaceAlgoOrderAsync(Instrument.Symbol, order.Direction, qty, price, reduceOnly, _cts.Token).ConfigureAwait(false);
+            else placed = await _client.PlaceOrderAsync(Instrument.Symbol, order.Direction, type, qty, price, reduceOnly, _cts.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+
+        lock (_gate)
+        {
+            _sending--;
+            if (placed != null)
+            {
+                Bind(t, placed.OrderId);
+                Apply(t, placed);
+            }
+            else if (placedAlgo != null)
+            {
+                BindAlgo(t, placedAlgo.AlgoId);
+                ApplyAlgo(t, placedAlgo);
+            }
+            else
+            {
+                _byOrder.Remove(order);
+                order.State = OrderStates.Failed;
+                order.Status = OrderStatus.Rejected;
+            }
+        }
+
+        LastError = error;
+        Publish();
+        Changed?.Invoke();
+    }
+
+    /// <summary>USD-M futures stops are conditional orders, which Binance takes only through its Algo Order API.</summary>
+    private bool IsConditional(OrderTypes type) => _settings.Futures && type == OrderTypes.Stop;
 
     public Order Market(OrderDirections dir, decimal qty, string comment = "") => Send(dir, OrderTypes.Market, qty, 0, comment);
     public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => Send(dir, OrderTypes.Limit, qty, price, comment);
@@ -330,33 +980,313 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
         Send(dir, type == OrderTypes.Stop ? OrderTypes.Stop : OrderTypes.Limit, qty, price, comment, reduceOnly: _settings.Futures);
 
-    /// <summary>Binance no modifica precio ni cantidad: cancela y envía una orden nueva.</summary>
+    /// <summary>
+    /// Binance does not modify price or quantity: the order is canceled and a new one sent, which the same handle (returned)
+    /// then follows. As in Rithmic, the handle's total becomes its filled part plus <paramref name="newQuantity"/>, and the
+    /// new price and quantity show on it at once. When the cancel is refused because the order is no longer open (it just
+    /// filled), nothing new is sent and the handle reports what happened. A handle that is no longer working is left as it is.
+    /// </summary>
     public Order Replace(Order order, decimal newPrice, decimal newQuantity)
     {
-        Cancel(order);
-        return Send(order.Direction, order.Type == OrderTypes.Stop ? OrderTypes.Stop : OrderTypes.Limit, newQuantity, newPrice, order.Comment, order.ReduceOnly);
+        var type = order.Type == OrderTypes.Stop ? OrderTypes.Stop : OrderTypes.Limit;
+        decimal price = Instrument.RoundPrice(newPrice);
+        Tracked? t;
+        decimal total;
+        lock (_gate)
+        {
+            if (!_byOrder.TryGetValue(order, out t)) return order;
+            total = order.Filled + newQuantity;
+            t.Busy++; // from now on polls leave the requested price and quantity on the handle
+            if (type == OrderTypes.Stop) order.TriggerPrice = price;
+            else order.Price = price;
+            order.QuantityToFill = total;
+            order.Unfilled = Math.Max(0, newQuantity);
+        }
+
+        Enqueue(t, () => ReplaceAsync(t, type, price, total));
+        return order;
+    }
+
+    private async Task ReplaceAsync(Tracked t, OrderTypes type, decimal price, decimal total)
+    {
+        var order = t.Order;
+        long oldId, oldAlgoId;
+        lock (_gate)
+        {
+            if (!_byOrder.ContainsKey(order) || !t.Accepted)
+            {
+                t.Busy--; // finished meanwhile, or never accepted
+                return;
+            }
+
+            oldId = t.Id;
+            oldAlgoId = t.AlgoId;
+        }
+
+        decimal? canceled = null; // once the old order is known to be canceled: what it had executed
+        BinanceOpenOrder? found = null;
+        BinanceAlgoOrder? foundAlgo = null;
+        Exception? cancelError = null;
+        try
+        {
+            if (oldAlgoId != 0)
+            {
+                await _client.CancelAlgoOrderAsync(oldAlgoId, _cts.Token).ConfigureAwait(false);
+                canceled = 0; // canceled before it triggered: nothing executed
+            }
+            else
+            {
+                canceled = (await _client.CancelOrderAsync(Instrument.Symbol, oldId, _cts.Token).ConfigureAwait(false)).Executed;
+            }
+        }
+        catch (Exception ex)
+        {
+            cancelError = ex;
+            LastError = ex.Message;
+        }
+
+        // Refused as unknown (-2011): the order is no longer open (filled, or canceled elsewhere) and is not replaced. Any
+        // other failure (timeout, 5xx) may still have canceled it, so Binance is asked before deciding. A conditional order
+        // is always asked about: Binance documents no error code for one that can no longer be canceled.
+        bool notOpen = oldAlgoId == 0 && cancelError is BinanceRejectedException { Code: -2011 };
+        if (cancelError != null && !notOpen && !_cts.IsCancellationRequested)
+        {
+            try
+            {
+                if (oldAlgoId != 0) foundAlgo = await _client.GetAlgoOrderAsync(Instrument.Symbol, oldAlgoId, _cts.Token).ConfigureAwait(false);
+                else found = await _client.GetOrderAsync(Instrument.Symbol, oldId, _cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // still unknown: decided below
+            }
+
+            if (found is { Status: "CANCELED" or "EXPIRED" or "EXPIRED_IN_MATCH" })
+            {
+                canceled = found.Executed;
+                found = null;
+            }
+            else if (foundAlgo is { ActualOrderId: 0, Status: "CANCELED" or "EXPIRED" })
+            {
+                canceled = 0;
+                foundAlgo = null;
+            }
+        }
+
+        // a conditional order that triggered or ended can no longer be canceled: no doubt about the cancel remains
+        bool pastCancel = notOpen || foundAlgo is { ActualOrderId: not 0 } or { Status: "TRIGGERED" or "FINISHED" or "REJECTED" };
+
+        decimal filled = 0, rest = 0;
+        lock (_gate)
+        {
+            if (canceled is { } executed)
+            {
+                t.Executed = Math.Max(t.Executed, executed);
+                filled = t.FilledBefore + t.Executed;
+                rest = total - filled;
+            }
+
+            if (canceled == null || rest <= 0)
+            {
+                t.Busy--;
+                if (canceled != null)
+                {
+                    // nothing is left to send: what the caller wants had already filled before the cancel
+                    if (filled > 0)
+                    {
+                        order.QuantityToFill = filled;
+                        order.Unfilled = 0;
+                    }
+
+                    Finish(t, OrderStates.Done, filled > 0 ? OrderStatus.Filled : OrderStatus.Canceled);
+                }
+                else if (_byOrder.ContainsKey(order) && t.Id == oldId && t.AlgoId == oldAlgoId)
+                {
+                    // not replaced. After an unknown outcome the cancel may still be carried out later: if the order then
+                    // turns out canceled, that is reported as a failed Modify
+                    if (!pastCancel)
+                    {
+                        t.ReplaceFailure = cancelError!.Message;
+                        t.ReplaceFailedAt = DateTime.UtcNow;
+                    }
+
+                    if (found != null) Apply(t, found); // still working (shown as it is at Binance again) or filled
+                    if (foundAlgo != null) ApplyAlgo(t, foundAlgo); // still working, or triggered: then the order it placed is followed
+                }
+            }
+            else
+            {
+                _sending++;
+            }
+        }
+
+        if (canceled == null || rest <= 0)
+        {
+            Publish();
+            Changed?.Invoke();
+            return;
+        }
+
+        BinanceOpenOrder? placed = null;
+        BinanceAlgoOrder? placedAlgo = null;
+        string? error = null;
+        try
+        {
+            if (IsConditional(type)) placedAlgo = await _client.PlaceAlgoOrderAsync(Instrument.Symbol, order.Direction, rest, price, order.ReduceOnly, _cts.Token).ConfigureAwait(false);
+            else placed = await _client.PlaceOrderAsync(Instrument.Symbol, order.Direction, type, rest, price, order.ReduceOnly, _cts.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+
+        lock (_gate)
+        {
+            _sending--;
+            t.Busy--;
+            if (oldAlgoId != 0)
+            {
+                _byAlgoId.Remove(oldAlgoId);
+                _finishedAlgo[oldAlgoId] = DateTime.UtcNow;
+                t.AlgoId = 0;
+            }
+            else
+            {
+                _byId.Remove(oldId);
+                _finished[oldId] = DateTime.UtcNow;
+                t.Id = 0;
+            }
+
+            t.FilledBefore = filled;
+            t.Executed = 0;
+            t.ReplaceFailure = null;
+            order.Type = type;
+            if (t.Busy == 0)
+            {
+                // no later Modify waiting (a waiting one keeps showing its own request)
+                if (type == OrderTypes.Stop) order.TriggerPrice = price;
+                else order.Price = price;
+                order.QuantityToFill = filled + rest;
+            }
+
+            order.Unfilled = Math.Max(0, order.QuantityToFill - filled);
+            if (placed != null)
+            {
+                Bind(t, placed.OrderId);
+                order.State = OrderStates.Active;
+                order.Status = filled > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
+                Apply(t, placed);
+            }
+            else if (placedAlgo != null)
+            {
+                BindAlgo(t, placedAlgo.AlgoId);
+                order.State = OrderStates.Active;
+                order.Status = filled > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
+                ApplyAlgo(t, placedAlgo);
+            }
+            else
+            {
+                Finish(t, OrderStates.Failed, OrderStatus.Rejected); // the old order is canceled and Binance refused the new one
+            }
+        }
+
+        LastError = error;
+        Publish();
+        Changed?.Invoke();
     }
 
     public void Cancel(Order order)
     {
-        if (!long.TryParse(order.ExchangeOrderId, out var id) && !_exchangeIds.TryGetValue(order.Id, out id)) return;
-        _ = Task.Run(async () =>
+        Tracked? t;
+        lock (_gate) _byOrder.TryGetValue(order, out t);
+        if (t != null)
         {
-            try { await _client.CancelOrderAsync(Instrument.Symbol, id, _cts.Token).ConfigureAwait(false); }
-            catch (Exception ex) { LastError = ex.Message; }
-            Changed?.Invoke();
-        });
+            // a market order fills at once (Binance would answer "Unknown order"): the next poll reports how it ended
+            if (t.Own && order.Type == OrderTypes.Market) return;
+            Enqueue(t, () => CancelAsync(t));
+            return;
+        }
+
+        // not followed any more (it finished): cancel by its exchange id, as before
+        if (order.ExchangeOrderId.StartsWith(AlgoPrefix, StringComparison.Ordinal))
+        {
+            if (long.TryParse(order.ExchangeOrderId.AsSpan(AlgoPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var algoId))
+                CancelUntracked(() => _client.CancelAlgoOrderAsync(algoId, _cts.Token));
+            return;
+        }
+
+        if (!long.TryParse(order.ExchangeOrderId, out var id)) return;
+        CancelUntracked(() => _client.CancelOrderAsync(Instrument.Symbol, id, _cts.Token));
+    }
+
+    private void CancelUntracked(Func<Task> cancel) => _ = Task.Run(async () =>
+    {
+        try { await cancel().ConfigureAwait(false); }
+        catch (Exception ex) { LastError = ex.Message; }
+        Changed?.Invoke();
+    });
+
+    private async Task CancelAsync(Tracked t)
+    {
+        long id, algoId;
+        lock (_gate)
+        {
+            if (!_byOrder.ContainsKey(t.Order) || !t.Accepted) return; // finished meanwhile, or never accepted
+            id = t.Id;
+            algoId = t.AlgoId;
+            t.Busy++;
+            t.ReplaceFailure = null; // canceling it is what is wanted now
+        }
+
+        BinanceOpenOrder? canceled = null;
+        bool algoCanceled = false;
+        try
+        {
+            if (algoId != 0)
+            {
+                await _client.CancelAlgoOrderAsync(algoId, _cts.Token).ConfigureAwait(false);
+                algoCanceled = true;
+            }
+            else
+            {
+                canceled = await _client.CancelOrderAsync(Instrument.Symbol, id, _cts.Token).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            LastError = ex.Message; // already finished at Binance (a conditional order: triggered), or not reached: the next poll tells
+        }
+
+        lock (_gate)
+        {
+            t.Busy--;
+            if (canceled != null && t.Id == id && _byOrder.ContainsKey(t.Order)) Apply(t, canceled);
+            else if (algoCanceled && t.AlgoId == algoId && _byOrder.ContainsKey(t.Order)) FinishCanceled(t); // before it triggered: nothing more filled
+        }
+
+        Publish();
+        Changed?.Invoke();
     }
 
     public void CancelAt(decimal price)
     {
-        foreach (var o in _orders.Where(o => (o.Type == OrderTypes.Stop ? o.TriggerPrice : o.Price) == price).ToList()) Cancel(o);
+        foreach (var o in ActiveOrders.Where(o => (o.Type == OrderTypes.Stop ? o.TriggerPrice : o.Price) == price).ToList()) Cancel(o);
     }
 
     public void CancelAll() => _ = Task.Run(async () =>
     {
+        var errors = new List<string>();
         try { await _client.CancelAllAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false); }
-        catch (Exception ex) { LastError = ex.Message; }
+        catch (Exception ex) { errors.Add(ex.Message); }
+
+        // USD-M futures cancel conditional (algo) orders on their own route, also when canceling the others failed
+        if (_settings.Futures)
+        {
+            try { await _client.CancelAllAlgoOrdersAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false); }
+            catch (Exception ex) { errors.Add(ex.Message); }
+        }
+
+        if (errors.Count > 0) LastError = string.Join("; ", errors);
         Changed?.Invoke();
     });
 

@@ -118,30 +118,40 @@ public sealed partial class TradingView
         return values;
     }
 
-    /// <summary>Detiene lo que esté corriendo de la estrategia (no toca la posición abierta).</summary>
-    private void StopStrategy(ChartStrategy cs)
+    /// <summary>
+    /// Stops what is running of the strategy (its open position stays as it is). With <paramref name="keepProtection"/> its
+    /// stop loss and take profit stay working at the broker; returns the identities of what it left there.
+    /// </summary>
+    private IReadOnlyList<string> StopStrategy(ChartStrategy cs, bool keepProtection = false)
     {
+        IReadOnlyList<string> kept = Array.Empty<string>();
         cs.Cts?.Cancel();
-        if (cs.Runner != null)
+        if (cs.Runner is { } runner)
         {
-            cs.Runner.Stop(flatten: false);
-            _svc.Runners.Remove(cs.Runner);
+            runner.Stop(flatten: false, keepProtection);
+            kept = runner.ProtectionOrderIds.ToList();
+            // after a normal stop its saved state no longer names orders to adopt (a keep-protection stop records its own)
+            if (!keepProtection && runner.Persist) LiveStore.SaveProtectionOrderIds(runner.Info());
+            _svc.Runners.Remove(runner);
             cs.Runner = null;
             _svc.SaveLiveState();
         }
 
         cs.Shadow?.Dispose();
         cs.Shadow = null;
+        return kept;
     }
 
     /// <summary>
     /// Corre la estrategia: primero sobre la historia del gráfico (marcas históricas) y después en vivo. Con
-    /// <paramref name="historyOnly"/> solo rehace las marcas históricas (por ejemplo si se cargó más historia).
+    /// <paramref name="historyOnly"/> solo rehace las marcas históricas (por ejemplo si se cargó más historia). With
+    /// <paramref name="keepProtection"/> (a restart with new parameters) the stop loss and take profit of the run it replaces
+    /// stay working at the broker and the new run adopts them.
     /// </summary>
-    internal async Task RunStrategyAsync(ChartTab chart, ChartStrategy cs, bool historyOnly = false)
+    internal async Task RunStrategyAsync(ChartTab chart, ChartStrategy cs, bool historyOnly = false, bool keepProtection = false)
     {
         if (chart.Model is not { } model) return;
-        if (!historyOnly) StopStrategy(cs);
+        IReadOnlyList<string> kept = historyOnly ? Array.Empty<string>() : StopStrategy(cs, keepProtection);
         cs.Cts?.Cancel();
         var cts = cs.Cts = new CancellationTokenSource();
         cs.Busy = true;
@@ -235,6 +245,13 @@ public sealed partial class TradingView
                 account = cs.Shadow = NewShadow(data);
             }
 
+            // what it had saved (size, limits, pause, portfolio and the protection left at the broker); a restart passes what it kept
+            void Restore(LiveStrategyRunner r)
+            {
+                LiveCenter.Restore(r);
+                if (kept.Count > 0) r.AdoptProtectionIds = kept;
+            }
+
             var runner = new LiveStrategyRunner(strategy, data, account, period, _svc.Settings.TimeZoneId)
             {
                 Source = "chart",
@@ -242,8 +259,10 @@ public sealed partial class TradingView
                 ProfileId = chart.FeedId,
                 Persist = cs.Live, // las visuales no ensucian la cartera
                 ProtectOnStart = cs.Live,
+                // real-order permission at every submit (a visual one trades its own simulated account: never blocked)
+                Guard = _svc.OrderGuard,
             };
-            if (cs.Live) LiveCenter.Restore(runner);
+            if (cs.Live) Restore(runner);
             if (cs.Live && _svc.Settings.SmartContracts)
             {
                 // contrato inteligente, igual que en el panel: con el tamaño guardado, si el tamaño pide fracciones del mini
@@ -263,8 +282,9 @@ public sealed partial class TradingView
                         ProtectOnStart = true,
                         ExecInstrument = execInst,
                         ExecRatio = ratio,
+                        Guard = _svc.OrderGuard,
                     };
-                    LiveCenter.Restore(runner);
+                    Restore(runner);
                 }
             }
             else if (cs.HistoryOpen is { } open && account is SimBroker shadow)

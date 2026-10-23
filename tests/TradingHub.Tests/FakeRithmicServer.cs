@@ -34,6 +34,9 @@ internal sealed class FakeRithmicServer : IDisposable
     public double AvgPrice { get; private set; }
     public List<string> Received { get; } = new();
 
+    /// <summary>User tag of every new-order request, in arrival order (lock the list to read it).</summary>
+    public List<string> Tags { get; } = new();
+
     /// <summary>Inicios de sesión por planta (1 cotizaciones, 2 órdenes, 3 historia, 4 PnL).</summary>
     public Dictionary<int, int> Logins { get; } = new();
 
@@ -286,6 +289,7 @@ internal sealed class FakeRithmicServer : IDisposable
     {
         string basket = "B" + Interlocked.Increment(ref _basket);
         var o = (Buy: m.Int(112003) == 1, Qty: (int)m.Int(112004), Price: m.Double(110306), Type: (int)m.Int(112008), Tag: m.String(154119) ?? "");
+        lock (Tags) Tags.Add(o.Tag);
         if (m.String(112016) != "simulator")
         {
             await Send(ws, Msg(313, m).String(132766, "1").String(132766, "invalid trade route"));
@@ -393,6 +397,23 @@ internal sealed class FakeRithmicServer : IDisposable
             {
             }
         }
+    }
+
+    /// <summary>
+    /// Reports a working order that this Trading Hub process did not send (another session's, for example) on the order
+    /// plant, as Rithmic reports the account's orders. It can then be modified or canceled by basket id.
+    /// </summary>
+    public async Task PushOrder(string basket, string tag, bool buy, int qty, double price, int type = 1)
+    {
+        var o = (Buy: buy, Qty: qty, Price: price, Type: type, Tag: tag);
+        WebSocket? ws;
+        lock (_gate)
+        {
+            Open[basket] = o;
+            _sessions.TryGetValue(2, out ws);
+        }
+
+        if (ws is { State: WebSocketState.Open }) await Send(ws, Notify(351, 13, basket, o).Int(154112, qty).Int(154111, 0));
     }
 
     public void Dispose()
