@@ -277,32 +277,45 @@ public sealed class AccountCenter
     /// Closes a contract's position at market, canceling its orders first (like Chart Trader's Close). Closing only
     /// reduces, so it stays available on real accounts even with real orders disabled (the Account page confirms it first).
     /// </summary>
-    public async Task CloseAsync(AccountEntry a, PositionLine p)
+    /// <returns>null once the close is sent; otherwise why nothing was sent, for the status bar.</returns>
+    public async Task<string?> CloseAsync(AccountEntry a, PositionLine p)
     {
-        if (p.Net == 0) return;
+        if (p.Net == 0) return NothingToClose(p.Symbol, 0);
         if (p.Ref is SimBroker b)
         {
             b.Flatten();
-            return;
+            return null;
         }
 
         if (a.Kind == AccountKind.Tradovate && p.Ref is TradingHub.Feeds.Tradovate.TradovatePositionState tp)
         {
             // Tradovate cancela las órdenes del contrato y cierra a mercado en un solo pedido
             await _svc.TradovateSessionFor(a.Profile!).LiquidateAsync(tp.AccountId, tp.ContractId, CancellationToken.None).ConfigureAwait(false);
-            return;
+            return null;
         }
 
         if (a.Kind == AccountKind.Rithmic && p.Ref is (string sym, string ex))
         {
             var session = _svc.RithmicSessionFor(a.Profile!);
+            int canceled = 0;
             foreach (var o in session.OrdersOf(a.RithmicAccount).Where(o => !o.Done && o.Symbol == sym && o.Exchange == ex))
+            {
                 await session.CancelAsync(a.RithmicAccount, o.BasketId, CancellationToken.None).ConfigureAwait(false);
+                canceled++;
+            }
+
             // what is open now, after the cancels (the row can be a moment old): a close never opens the other side
             decimal net = session.PositionFor(a.RithmicAccount, sym, ex)?.Net ?? 0;
-            if (net == 0 || Math.Sign(net) != Math.Sign(p.Net)) return;
+            if (net == 0) return NothingToClose(sym, canceled);
+            if (Math.Sign(net) != Math.Sign(p.Net))
+                return $"{sym} changed side before the close was sent (now {(net > 0 ? "long" : "short")} {Math.Abs(net):0.####}): nothing was sent; check the position and close it again.";
             int qty = (int)Math.Abs(net);
             await session.PlaceAsync(a.RithmicAccount, sym, ex, net < 0, 2, qty, 0, 0, "th-cerrar-" + DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture), CancellationToken.None).ConfigureAwait(false);
         }
+
+        return null;
     }
+
+    private static string NothingToClose(string symbol, int canceled) =>
+        $"{symbol} is already flat: nothing needed closing{(canceled > 0 ? $" ({canceled} working order{(canceled == 1 ? "" : "s")} canceled)" : "")}.";
 }

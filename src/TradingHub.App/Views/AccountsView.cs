@@ -310,9 +310,10 @@ public sealed class AccountsView : UserControl
             var accounts = _svc.AccountCenter.Accounts();
             var entry = accounts.FirstOrDefault(a => a.Id == _selected) ?? accounts[0];
             UpdateChips(accounts, entry.Id);
-            if (_entry?.Id != entry.Id)
+            if (_entry is not { } shown || shown.Id != entry.Id || shown.IsReal != entry.IsReal)
             {
-                // otra cuenta: filas nuevas
+                // another account, or the same one turned REAL or practice (its connection changed): new rows, so Close and
+                // Cancel ask for the REAL confirmation exactly when the account is REAL
                 _positionRows.Clear();
                 _positions.Children.Clear();
                 _orderRows.Clear();
@@ -474,7 +475,11 @@ public sealed class AccountsView : UserControl
             {
                 var g = new Grid { ColumnDefinitions = new ColumnDefinitions(PositionColumns) };
                 PositionRow? self = null;
-                var close = ActionButton("Close", "", "Close at market", () => _svc.AccountCenter.CloseAsync(entry, self!.Line!), "Closing position at market…", entry.IsReal);
+                // nothing sent (the position was already flat, or turned around): the status says why instead of «Closing…»
+                var close = ActionButton("Close", "", "Close at market", async () =>
+                {
+                    if (await _svc.AccountCenter.CloseAsync(entry, self!.Line!) is { } nothingSent) _status(nothingSent);
+                }, "Closing position at market…", entry.IsReal);
                 if (entry.IsReal && close.Flyout is Flyout f)
                     f.Opening += (_, _) => ((TextBlock)((StackPanel)f.Content!).Children[0]).Text = $"Close {Qty(Math.Abs(self!.Line!.Net))} {self.Line.Symbol} at market in the REAL account?";
                 Grid.SetColumn(close, 6);

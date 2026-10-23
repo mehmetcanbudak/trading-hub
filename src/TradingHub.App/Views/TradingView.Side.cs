@@ -68,6 +68,8 @@ public sealed partial class TradingView
         _ticketSection = BuildTicket();
         _domSection = BuildDomSection();
         _tapeSection = BuildTapeSection();
+        // a connection saved with another mode, keys or login replaced brokers some charts show: they follow
+        _svc.BrokersReplaced += OnBrokersReplaced;
 
         _sideSplitter.DragCompleted += (_, _) =>
         {
@@ -660,6 +662,23 @@ public sealed partial class TradingView
         chart.Model.Invalidate();
     }
 
+    /// <summary>
+    /// Brokers were replaced after their connection changed (<see cref="AppServices.AccountFor"/> builds new ones): the charts,
+    /// the DOM and the Chart Traders that showed them now show the account their orders go to.
+    /// </summary>
+    private void OnBrokersReplaced(IReadOnlyCollection<ITradingAccount> replaced)
+    {
+        var old = new HashSet<ITradingAccount>(replaced, ReferenceEqualityComparer.Instance);
+        var charts = AllCharts.Where(c => c.Model?.Account is { } a && old.Contains(a)).ToList();
+        foreach (var chart in charts)
+        {
+            ApplyTradingTarget(chart);
+            chart.Trader?.Rebind();
+        }
+
+        if (_active != null && (charts.Contains(_active) || _dom.Dom?.Broker is { } shown && old.Contains(shown))) BindSidePanel(_active, force: true);
+    }
+
     /// <summary>Cross trading: las órdenes de este gráfico van a otro instrumento (null = el del gráfico).</summary>
     internal async Task SetCrossTradingAsync(ChartTab chart, string? symbol, bool save = true)
     {
@@ -789,17 +808,16 @@ public sealed partial class TradingView
         return order;
     }
 
+    /// <summary>
+    /// Moves a working order (entry, stop or target) to another price. Moving an order that is already working sends no
+    /// new exposure-increasing order, so it stays available after real orders are disabled, behind the REAL confirmation.
+    /// </summary>
     private async Task MoveOrderAsync(ChartTab? chart, Order order, decimal price)
     {
         var acc = AccountOf(chart);
         if (acc == null || chart == null) return;
         string desc = $"Move {(order.Direction == OrderDirections.Buy ? "buy order" : "sell order")} to {acc.Instrument.FormatPrice(price)}";
-        // a working order that adds exposure when it fills needs permission to be moved too (a stop or target never does)
-        decimal open = order.Unfilled > 0 ? order.Unfilled : order.QuantityToFill;
-        decimal adds = order.ReduceOnly ? 0 : order.Direction == OrderDirections.Buy ? open : -open;
-        if (Blocked(chart, acc, adds)) return;
         if (!await ConfirmAsync(chart, acc, desc, checkQuantity: false)) return;
-        if (Blocked(chart, acc, adds)) return;
         _status(_svc.BracketsFor(acc).Move(order, price));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();

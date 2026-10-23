@@ -13,6 +13,8 @@ using TradingHub.App;
 using TradingHub.App.Services;
 using TradingHub.App.Windows;
 using TradingHub.Data;
+using TradingHub.Feeds.Binance;
+using TradingHub.Feeds.Rithmic;
 using TradingHub.Market;
 using TradingHub.Strategies;
 using TradingHub.Tests;
@@ -336,8 +338,10 @@ internal static class SafetyScene
             Check(!asked && Pos() == 2, $"revoked: Reverse is blocked (asked {asked}, position {Pos()})");
             if (entry != null)
             {
-                asked = Act(() => Move(entry, inst.RoundPrice(last * 0.71m)), confirm: false);
-                Check(!asked && entry.Price == entryPrice, $"revoked: moving a working entry order is blocked (asked {asked}, price {entry.Price})");
+                // moving an order that is already working sends nothing new: allowed, behind the REAL confirmation
+                decimal movedEntry = inst.RoundPrice(last * 0.71m);
+                asked = Act(() => Move(entry, movedEntry), confirm: true);
+                Check(asked && entry.Price == movedEntry && Pos() == 2, $"revoked: moving a working entry order is still allowed, behind the REAL confirmation (asked {asked}, price {entry.Price}, position {Pos()})");
             }
 
             asked = Act(() => tv.TradeAsync(chart, OrderTypes.Market, OrderDirections.Sell, 0, 1), confirm: true);
@@ -459,6 +463,110 @@ internal static class SafetyScene
             pump(0.2);
         });
 
+        Part("cached real brokers follow connection changes", () =>
+        {
+            // a fake Binance REST server for an idle account (no position, no open orders) that refuses anything else, such
+            // as an order, so nothing can fill; TRADINGHUB_BINANCE_REST points the account there, never at Binance
+            using var binance = new FakeHttpServer();
+            binance.OnHttp = r => r.Route switch
+            {
+                "/fapi/v1/time" => (200, $"{{\"serverTime\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}}}"),
+                "/fapi/v1/openOrders" or "/fapi/v2/positionRisk" => (200, "[]"),
+                _ => (400, "{\"code\":-1000,\"msg\":\"safety fixture: orders are refused\"}"),
+            };
+            string? previousRest = Environment.GetEnvironmentVariable("TRADINGHUB_BINANCE_REST");
+            Environment.SetEnvironmentVariable("TRADINGHUB_BINANCE_REST", binance.Http);
+            var bp = new ConnectionProfile { Id = "safety-binance", Kind = ConnectionKind.BinanceFutures, Name = "Fixture Binance", Testnet = false, AllowRealOrders = true, ApiKey = "fixture-key-1" };
+            svc.Connections.Profiles.Add(bp);
+            svc.Connections.SetSecret(bp, "fixture-secret");
+            LiveStrategyRunner? runner = null;
+            async Task DeleteRunner(LiveStrategyRunner r)
+            {
+                if (svc.Live.Entries().FirstOrDefault(e => e.Key == r.Key) is { } e) await svc.Live.DeleteAsync(e, history: true);
+            }
+
+            try
+            {
+                bool fake = svc.Connections.BinanceSettingsOf(bp).RestBase == binance.Http;
+                Check(fake, "the Binance fixture account points at the local fake server");
+                if (!fake) return;
+                int Polls(string key)
+                {
+                    lock (binance.Requests) return binance.Requests.Count(r => r.Headers.GetValueOrDefault("X-MBX-APIKEY") == key);
+                }
+
+                static bool Disposed(ITradingAccount broker) => broker is BinanceBroker && Field<CancellationTokenSource>(broker, "_cts").IsCancellationRequested;
+
+                tv.SetChartAccount(chart, bp.Id);
+                pump(0.3);
+                var first = tv.AccountOf(chart)!;
+                Until(() => Polls("fixture-key-1") > 0, 10);
+                Check(first is BinanceBroker { IsReal: true } && ReferenceEquals(chart.Model!.Account, first) && Polls("fixture-key-1") > 0,
+                    $"the chart trades the fake REAL Binance account, which polls the fake server ({first.Name})");
+
+                // a live strategy runs on the same account (paused: it opens nothing)
+                if (svc.Strategies.Files.Count == 0) svc.Strategies.Refresh();
+                var launch = svc.Live.LaunchAsync(new LiveLaunch { File = svc.Strategies.Files.First(), ProfileId = "sim", Instrument = inst, AccountId = bp.Id, Period = ChartPeriod.H1, Paused = true });
+                Wait(launch, 120);
+                runner = launch.IsCompletedSuccessfully ? launch.Result.Runner : null;
+                Check(runner != null && ReferenceEquals(runner.Account, first),
+                    $"a paused live strategy runs on the same broker ({(launch.IsCompletedSuccessfully ? launch.Result.Message : launch.Exception?.GetBaseException().Message)})");
+
+                // the connection is saved as testnet (the Connections page saves, then invalidates the connection)
+                bp.Testnet = true;
+                svc.Connections.Invalidate(bp);
+                pump(0.3);
+                var second = svc.AccountFor(model.Data, bp.Id);
+                Check(!ReferenceEquals(second, first) && !second.IsReal && second.Name.Contains("testnet", StringComparison.Ordinal),
+                    $"switching the connection to testnet replaces the cached REAL broker ({second.Name}, REAL {second.IsReal})");
+                Check(ReferenceEquals(chart.Model!.Account, second) && ReferenceEquals(tv.AccountOf(chart), second), "the chart now shows and routes to the testnet account");
+                string? why = svc.CheckRealOrder(bp.Id, first, 0, 1);
+                Check(why?.Contains("opened as REAL", StringComparison.Ordinal) == true, $"the replaced REAL broker can no longer add exposure («{why}»)");
+                Check(svc.CheckRealOrder(bp.Id, first, 1, -1) == null && svc.CheckRealOrder(bp.Id, first, 1, 0) == null, "the replaced REAL broker can still reduce and cancel");
+                if (runner != null)
+                {
+                    why = runner.Guard?.Check(runner, OrderSide.Buy, 1, 1);
+                    Check(why?.Contains("opened as REAL", StringComparison.Ordinal) == true && runner.Guard!.Check(runner, OrderSide.Sell, 1, 0) == null,
+                        $"its strategy keeps the REAL broker but can only reduce or cancel through it («{why}»)");
+                    Check(!Disposed(first), "the replaced broker keeps working while the strategy runs on it");
+                    Wait(DeleteRunner(runner), 10);
+                    runner = null;
+                    svc.AccountFor(model.Data, bp.Id); // the next use disposes the replaced brokers nothing works through
+                    Check(Disposed(first), "once the strategy is gone, the replaced REAL broker is disposed");
+                }
+
+                bp.MaxOrderQuantity = 5;
+                svc.Connections.Invalidate(bp);
+                Check(ReferenceEquals(svc.AccountFor(model.Data, bp.Id), second), "a change that keeps mode, key and server keeps the cached broker");
+
+                bp.ApiKey = "fixture-key-2";
+                svc.Connections.Invalidate(bp);
+                var third = svc.AccountFor(model.Data, bp.Id);
+                Until(() => Polls("fixture-key-2") > 0, 10);
+                Check(!ReferenceEquals(third, second) && Polls("fixture-key-2") > 0 && Disposed(second),
+                    "a new API key replaces the broker: the new one signs with the new key and the old, unused one is disposed");
+                why = svc.CheckRealOrder(bp.Id, second, 0, 1);
+                Check(why?.Contains("changed its keys", StringComparison.Ordinal) == true, $"a broker replaced for another API key can no longer add exposure («{why}»)");
+            }
+            finally
+            {
+                if (runner != null) Wait(DeleteRunner(runner), 10);
+                tv.SetChartAccount(chart, "sim");
+                foreach (var key in cache.Keys.Where(k => k.StartsWith(bp.Id + "|", StringComparison.Ordinal)).ToList())
+                {
+                    (cache[key] as IDisposable)?.Dispose();
+                    cache.Remove(key);
+                }
+
+                svc.Connections.SetSecret(bp, null);
+                svc.Connections.Profiles.Remove(bp);
+                Environment.SetEnvironmentVariable("TRADINGHUB_BINANCE_REST", previousRest);
+                lock (binance.Requests)
+                    Console.WriteLine("  fake Binance requests: " + string.Join(", ", binance.Requests.GroupBy(r => r.Method + " " + r.Route).Select(g => $"{g.Key} ×{g.Count()}")));
+                pump(0.2);
+            }
+        });
+
         Part("Account page on a REAL account with real orders disabled", () =>
         {
             var rp = svc.Connections.Profiles.FirstOrDefault(p => p.IsRithmic && p.Enabled && p.RithmicUser == "demo");
@@ -467,40 +575,87 @@ internal static class SafetyScene
             string oldSystem = rp.RithmicSystem;
             bool oldAllow = rp.AllowRealOrders;
             var session = svc.RithmicSessionFor(rp);
+            // signed in again after Reconfigure: each sign-in sets a new account list, so the session still connected with the
+            // old settings for a moment never counts
+            bool SignedInAgain(object before) => session.IsConnected && !ReferenceEquals(session.Accounts, before) && session.Accounts.Count > 0;
+            Until(() => session.IsConnected && session.Accounts.Count > 0, 30);
+            string? brokerKey = null; // the cache entry of the broker this part builds
             try
             {
-                // the same fake server under a non-practice system name: Trading Hub treats the account as REAL
-                rp.RithmicSystem = "Rithmic 01";
-                rp.AllowRealOrders = false;
-                session.Reconfigure(svc.Connections.RithmicSettingsOf(rp));
-                Until(() => session.IsConnected && session.Accounts.Count > 0, 30);
-                Check(session.IsConnected && !session.IsPractice, $"fake Rithmic account reports a REAL system ({session.StatusText})");
                 string acct = session.Accounts.FirstOrDefault()?.AccountId ?? "ACC1";
-                // activity from elsewhere (placed straight through the session): a filled position and a working order
-                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 2, 2, 0, 0, "safety-fill", CancellationToken.None), 15);
-                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 1, 1, 4000m, 0, "safety-work", CancellationToken.None), 15);
-                Until(() => session.PositionsOf(acct).Any(p => p.Position.Net == 2) && session.OrdersOf(acct).Any(o => !o.Done), 15);
-                Check(session.PositionsOf(acct).Any(p => p.Position.Net == 2) && session.OrdersOf(acct).Any(o => !o.Done), "fake REAL account has a position and a working order");
                 string id = AppServices.RithmicAccountId(rp, acct);
-                var account = svc.AccountCenter.Accounts().FirstOrDefault(a => a.Id == id);
-                Check(account is { IsReal: true, CanTrade: false }, "Account lists it as REAL with real orders disabled");
+                // activity from elsewhere (placed straight through the session) while the account is still practice: a filled
+                // position and a working order. Earlier scenes can leave a position or orders on the same fake account, so the
+                // checks start from the position found here and follow this scene's own working order by its tag.
+                string tag = "safety-" + Guid.NewGuid().ToString("N")[..8];
+                decimal Net() => session.PositionFor(acct, "ESZ6", "CME")?.Net ?? 0;
+                RithmicOrderState? Work() => session.OrderByTag(tag + "-work");
+                decimal startNet = Net();
+                bool Placed() => Net() == startNet + 2 && Work() is { Done: false, BasketId.Length: > 0 };
+                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 2, 2, 0, 0, tag + "-fill", CancellationToken.None), 15);
+                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 1, 1, 4000m, 0, tag + "-work", CancellationToken.None), 15);
+                Until(Placed, 15);
 
                 window.Navigate("accounts");
                 pump(0.5);
                 var page = window.Page("accounts")!;
-                Set(page, "_selected", id);
-                Call(page, "Refresh");
-                pump(1);
-                Call(page, "Refresh");
-                pump(0.3);
-                string status = Field<TextBlock>(page, "_accountStatus").Text ?? "";
-                Check(status.Contains("REAL ACCOUNT", StringComparison.Ordinal) && status.Contains("cancel/close allowed", StringComparison.Ordinal),
-                    $"Account status says new orders are disabled but cancel/close are allowed («{status}»)");
+                void Show()
+                {
+                    Set(page, "_selected", id);
+                    Call(page, "Refresh");
+                    pump(1);
+                    Call(page, "Refresh");
+                    pump(0.3);
+                }
+
                 Button? RowButton(string rows, string button, Func<object?, bool> wanted) =>
                     Field<IDictionary>(page, rows).Values.Cast<object>().Where(r => wanted(r.GetType().GetField("Line")!.GetValue(r)))
                         .Select(r => r.GetType().GetField(button)!.GetValue(r) as Button).FirstOrDefault();
-                var close = RowButton("_positionRows", "Close", l => l is PositionLine { Net: not 0 });
-                var cancel = RowButton("_orderRows", "Cancel", l => l is OrderLine { Active: true });
+                // this scene's position row and its own working order (rows from earlier activity may also be listed)
+                Button? CloseButton() => RowButton("_positionRows", "Close", l => l is PositionLine { Key: "ESZ6|CME", Net: not 0 });
+                Button? CancelButton() => RowButton("_orderRows", "Cancel", l => l is OrderLine { Active: true } o && o.Key == Work()?.BasketId);
+                // the Account page shows the account while it is practice: its Close and Cancel need no REAL confirmation
+                Show();
+                Check(CloseButton() is { IsVisible: true, Flyout: null } && CancelButton() is { IsVisible: true, Flyout: null },
+                    "while the account is practice, Account shows its Close and Cancel without the REAL confirmation");
+
+                // a cached broker for the account while it is practice (as Chart Trader builds one)
+                var esData = new InstrumentData(new Instrument { FeedId = rp.MarketDataId, Symbol = "ESZ6", TickSize = 0.25m, PointValue = 50 }, svc.Connections.GetFeed(rp.Id));
+                brokerKey = id + "|" + esData.Instrument.Key;
+                var practiceBroker = svc.AccountFor(esData, id);
+                Check(!practiceBroker.IsReal, $"the account's cached broker is practice ({practiceBroker.Name})");
+
+                // then its connection is saved with a REAL system (the Connections page saves, then invalidates the connection):
+                // the same fake server under a non-practice system name
+                rp.RithmicSystem = "Rithmic 01";
+                rp.AllowRealOrders = false;
+                var practiceLogin = session.Accounts;
+                svc.Connections.Invalidate(rp);
+                Until(() => SignedInAgain(practiceLogin), 30);
+                Check(SignedInAgain(practiceLogin) && !session.IsPractice, $"fake Rithmic account reports a REAL system ({session.StatusText})");
+                Until(Placed, 15);
+                Check(Placed(), $"fake REAL account has a position and a working order (net {startNet} → {Net()}, working order {Work()?.BasketId})");
+                var account = svc.AccountCenter.Accounts().FirstOrDefault(a => a.Id == id);
+                Check(account is { IsReal: true, CanTrade: false }, "Account lists it as REAL with real orders disabled");
+                var realBroker = svc.AccountFor(esData, id);
+                Check(!ReferenceEquals(realBroker, practiceBroker) && realBroker.IsReal && realBroker.Name.Contains("REAL", StringComparison.Ordinal),
+                    $"the system change replaces the cached practice broker with a REAL one ({realBroker.Name})");
+                // the replaced broker was built for practice (nothing that uses it confirmed REAL): even with real orders allowed it
+                // adds no exposure, while reductions and cancels still pass
+                rp.AllowRealOrders = true;
+                string? why = svc.CheckRealOrder(id, practiceBroker, 0, 1);
+                bool reducesAndCancels = svc.CheckRealOrder(id, practiceBroker, 1, -1) == null && svc.CheckRealOrder(id, practiceBroker, 1, 0) == null;
+                rp.AllowRealOrders = false;
+                Check(why?.Contains("opened as practice", StringComparison.Ordinal) == true && reducesAndCancels,
+                    $"the replaced practice broker cannot add REAL exposure, even with real orders allowed («{why}»)");
+
+                // the page still shows the same account, now REAL: its rows must ask for the REAL confirmation
+                Show();
+                string status = Field<TextBlock>(page, "_accountStatus").Text ?? "";
+                Check(status.Contains("REAL ACCOUNT", StringComparison.Ordinal) && status.Contains("cancel/close allowed", StringComparison.Ordinal),
+                    $"Account status says new orders are disabled but cancel/close are allowed («{status}»)");
+                var close = CloseButton();
+                var cancel = CancelButton();
                 Check(close is { IsVisible: true, Flyout: Flyout }, "Close is available on the REAL position, behind its confirmation");
                 Check(cancel is { IsVisible: true, Flyout: Flyout }, "Cancel is available on the working REAL order, behind its confirmation");
                 Shot(window, "safety_account_real_orders_disabled");
@@ -513,17 +668,39 @@ internal static class SafetyScene
                 }
 
                 Confirm(cancel);
-                Until(() => !session.OrdersOf(acct).Any(o => !o.Done), 15);
-                Check(!session.OrdersOf(acct).Any(o => !o.Done), "confirmed Cancel cancels the working REAL order with real orders disabled");
+                Until(() => Work() is { Done: true }, 15);
+                Check(Work() is { Done: true, Cancelled: true }, "confirmed Cancel cancels the working REAL order with real orders disabled");
+                var positionRow = Field<IDictionary>(page, "_positionRows")["ESZ6|CME"];
+                var openLine = positionRow?.GetType().GetField("Line")!.GetValue(positionRow);
                 Confirm(close);
-                Until(() => session.PositionsOf(acct).All(p => p.Position.Net == 0), 15);
-                Check(session.PositionsOf(acct).All(p => p.Position.Net == 0), "confirmed Close flattens the REAL position with real orders disabled");
+                Until(() => Net() == 0, 15);
+                Check(Net() == 0, $"confirmed Close flattens the REAL position with real orders disabled (net {Net()})");
+
+                // the same Close confirmed on its row as it was a moment before (the position is already flat): nothing is sent,
+                // and the status says so instead of staying on «Closing position at market…». The close order's own completion
+                // may arrive after the flat position: wait for it, or that Close would try to cancel it.
+                Until(() => !session.OrdersOf(acct).Any(o => !o.Done), 15);
+                bool sentNothing = false;
+                if (positionRow != null && openLine is PositionLine { Net: not 0 })
+                {
+                    positionRow.GetType().GetField("Line")!.SetValue(positionRow, openLine);
+                    int orders = session.OrdersOf(acct).Count;
+                    Confirm(close);
+                    Until(() => Status().Contains("nothing needed closing", StringComparison.Ordinal), 10);
+                    sentNothing = session.OrdersOf(acct).Count == orders && Net() == 0;
+                }
+
+                Check(sentNothing && Status().Contains("nothing needed closing", StringComparison.Ordinal),
+                    $"Close on a position that is already flat sends nothing and says so («{Status()}»)");
             }
             finally
             {
                 rp.RithmicSystem = oldSystem;
                 rp.AllowRealOrders = oldAllow;
-                session.Reconfigure(svc.Connections.RithmicSettingsOf(rp));
+                var realLogin = session.Accounts;
+                svc.Connections.Invalidate(rp);
+                Until(() => SignedInAgain(realLogin), 30); // back on the practice system before anything else uses the session
+                if (brokerKey != null && cache.Remove(brokerKey, out var leftover)) (leftover as IDisposable)?.Dispose();
                 window.Navigate("trading");
                 pump(0.3);
             }
