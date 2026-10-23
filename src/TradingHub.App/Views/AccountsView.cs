@@ -310,9 +310,10 @@ public sealed class AccountsView : UserControl
             var accounts = _svc.AccountCenter.Accounts();
             var entry = accounts.FirstOrDefault(a => a.Id == _selected) ?? accounts[0];
             UpdateChips(accounts, entry.Id);
-            if (_entry?.Id != entry.Id)
+            if (_entry is not { } shown || shown.Id != entry.Id || shown.IsReal != entry.IsReal)
             {
-                // otra cuenta: filas nuevas
+                // another account, or the same one turned REAL or practice (its connection changed): new rows, so Close and
+                // Cancel ask for the REAL confirmation exactly when the account is REAL
                 _positionRows.Clear();
                 _positions.Children.Clear();
                 _orderRows.Clear();
