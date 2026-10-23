@@ -668,12 +668,15 @@ internal static partial class SafetyScene
                 }
 
                 Confirm(cancel);
-                Until(() => Work() is { Done: true }, 15);
-                Check(Work() is { Done: true, Cancelled: true }, "confirmed Cancel cancels the working REAL order with real orders disabled");
+                // the fake server acknowledges over its order plant; under heavy machine load that has taken longer than 15 s
+                Until(() => Work() is { Done: true }, 45);
+                var worked = Work();
+                Check(worked is { Done: true, Cancelled: true },
+                    $"confirmed Cancel cancels the working REAL order with real orders disabled (done {worked?.Done}, cancelled {worked?.Cancelled})");
                 var positionRow = Field<IDictionary>(page, "_positionRows")["ESZ6|CME"];
                 var openLine = positionRow?.GetType().GetField("Line")!.GetValue(positionRow);
                 Confirm(close);
-                Until(() => Net() == 0, 15);
+                Until(() => Net() == 0, 45);
                 Check(Net() == 0, $"confirmed Close flattens the REAL position with real orders disabled (net {Net()})");
 
                 // the same Close confirmed on its row as it was a moment before (the position is already flat): nothing is sent,

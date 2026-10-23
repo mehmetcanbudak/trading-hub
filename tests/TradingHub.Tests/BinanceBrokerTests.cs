@@ -641,7 +641,8 @@ public class BinanceBrokerTests
         string id = stop.ExchangeOrderId;
 
         fake.RejectAtTrigger(Assert.Single(fake.PlacedAlgo).AlgoId); // e.g. its margin check failed: the position stays open
-        await Until(() => stop.State == OrderStates.Failed);
+        // the handle turns Failed during the poll and the error is published (with Changed) at its end: wait for both
+        await Until(() => stop.State == OrderStates.Failed && errors.Any(e => e.Contains("rejected conditional order " + id, StringComparison.Ordinal)));
         Assert.Equal(OrderStates.Failed, stop.State);
         Assert.Equal(OrderStatus.Rejected, stop.Status);
         Assert.Contains(errors, e => e.Contains("rejected conditional order " + id, StringComparison.Ordinal));
