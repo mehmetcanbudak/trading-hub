@@ -78,9 +78,13 @@ public sealed class SimBroker : TradingManager, ITradingAccount, IDisposable
         Submit(new Order { Direction = dir, Type = OrderTypes.Stop, QuantityToFill = qty, TriggerPrice = Instrument.RoundPrice(trigger), Comment = comment });
 
     public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
-        Submit(type == OrderTypes.Stop
-            ? new Order { Direction = dir, Type = OrderTypes.Stop, QuantityToFill = qty, TriggerPrice = Instrument.RoundPrice(price), Comment = comment, ReduceOnly = true }
-            : new Order { Direction = dir, Type = OrderTypes.Limit, QuantityToFill = qty, Price = Instrument.RoundPrice(price), Comment = comment, ReduceOnly = true });
+        Submit(new Order
+        {
+            Direction = dir, Type = type is OrderTypes.Market or OrderTypes.Stop ? type : OrderTypes.Limit, QuantityToFill = qty,
+            TriggerPrice = type == OrderTypes.Stop ? Instrument.RoundPrice(price) : 0,
+            Price = type is not (OrderTypes.Market or OrderTypes.Stop) ? Instrument.RoundPrice(price) : 0,
+            Comment = comment, ReduceOnly = true,
+        });
 
     /// <summary>Cambia precio y cantidad en el lugar (la orden conserva su identidad).</summary>
     public Order Replace(Order o, decimal newPrice, decimal newQuantity)

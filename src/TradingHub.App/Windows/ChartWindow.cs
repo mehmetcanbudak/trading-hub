@@ -55,9 +55,9 @@ internal sealed class ChartWindow : Window
 
             if (TradingHub.App.Services.Hotkeys.Match(App.Services.Settings, e, this) is { } action && _host.ExecuteHotkey(action, Chart)) e.Handled = true;
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.W, KeyModifiers.Meta), Command = new Relay(Close) });
-        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.I, KeyModifiers.Meta), Command = new Relay(() => _host.OpenIndicators(Chart)) });
-        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.K, KeyModifiers.Meta), Command = new Relay(() => Toolbar.Picker.Open()) });
+        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.W, Keys.Command), Command = new Relay(Close) });
+        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.I, Keys.Command), Command = new Relay(() => _host.OpenIndicators(Chart)) });
+        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.K, Keys.Command), Command = new Relay(() => Toolbar.Picker.Open()) });
     }
 
     public ChartTab Chart { get; }
@@ -74,14 +74,14 @@ internal sealed class ChartWindow : Window
         Released = true;
         _content.Children.Remove(Chart.Frame);
     }
+}
 
-    /// <summary>Comando simple para atajos de teclado.</summary>
-    private sealed class Relay : System.Windows.Input.ICommand
-    {
-        private readonly Action _run;
-        public Relay(Action run) => _run = run;
-        public event EventHandler? CanExecuteChanged { add { } remove { } }
-        public bool CanExecute(object? parameter) => true;
-        public void Execute(object? parameter) => _run();
-    }
+/// <summary>Comando simple para atajos de teclado.</summary>
+internal sealed class Relay : System.Windows.Input.ICommand
+{
+    private readonly Action _run;
+    public Relay(Action run) => _run = run;
+    public event EventHandler? CanExecuteChanged { add { } remove { } }
+    public bool CanExecute(object? parameter) => true;
+    public void Execute(object? parameter) => _run();
 }

@@ -42,37 +42,34 @@ public static class Hotkeys
         new("tool-hline", "Chart", "Draw horizontal line", "Alt+H"),
         new("tool-cursor", "Chart", "Cursor (release tool)"),
 
-        new("layout-1", "Windows", "Single-chart layout"),
-        new("layout-4", "Windows", "Four-chart layout"),
-        new("next-tab", "Windows", "Next tab", "Ctrl+Tab"),
-        new("prev-tab", "Windows", "Previous tab", "Ctrl+Shift+Tab"),
-        new("detach", "Windows", "Detach chart into a window"),
-        new("toggle-dom", "Windows", "Show or hide DOM"),
-        new("toggle-trader", "Windows", "Show or hide chart's Chart Trader", "Alt+T"),
-        new("toggle-panel", "Windows", "Show or hide right panel"),
+        new("layout-1", "Chart windows", "Single-chart layout"),
+        new("layout-4", "Chart windows", "Four-chart layout"),
+        new("next-tab", "Chart windows", "Next tab", "Ctrl+Tab"),
+        new("prev-tab", "Chart windows", "Previous tab", "Ctrl+Shift+Tab"),
+        new("detach", "Chart windows", "Detach chart into a window"),
+        new("toggle-dom", "Chart windows", "Show or hide DOM"),
+        new("toggle-trader", "Chart windows", "Show or hide chart's Chart Trader", "Alt+T"),
+        new("toggle-panel", "Chart windows", "Show or hide right panel"),
     };
 
     public static string? GestureOf(AppSettings s, string id) =>
         s.Hotkeys.TryGetValue(id, out var g) ? (string.IsNullOrEmpty(g) ? null : g) : All.FirstOrDefault(h => h.Id == id)?.DefaultGesture;
 
-    /// <summary>Texto lindo para mostrar un atajo (⌥1, ⇧B, F5…).</summary>
-    public static string Pretty(string? gesture)
+    /// <summary>Formats shortcuts using macOS symbols or Windows modifier names.</summary>
+    public static string Pretty(string? gesture) => Pretty(gesture, mac: !Os.IsWindows);
+
+    internal static string Pretty(string? gesture, bool mac)
     {
         if (string.IsNullOrEmpty(gesture)) return "—";
         try
         {
             var g = KeyGesture.Parse(gesture);
-            var parts = new List<string>();
-            if (g.KeyModifiers.HasFlag(KeyModifiers.Control)) parts.Add("⌃");
-            if (g.KeyModifiers.HasFlag(KeyModifiers.Alt)) parts.Add("⌥");
-            if (g.KeyModifiers.HasFlag(KeyModifiers.Shift)) parts.Add("⇧");
-            if (g.KeyModifiers.HasFlag(KeyModifiers.Meta)) parts.Add("⌘");
             string key = g.Key switch
             {
                 >= Key.D0 and <= Key.D9 => ((int)(g.Key - Key.D0)).ToString(),
                 >= Key.NumPad0 and <= Key.NumPad9 => "Num " + (int)(g.Key - Key.NumPad0),
-                Key.Space => "Spacer",
-                Key.Return => "↩",
+                Key.Space => "Space",
+                Key.Return => mac ? "↩" : "Enter",
                 Key.Tab => "Tab",
                 Key.Up => "↑",
                 Key.Down => "↓",
@@ -80,7 +77,7 @@ public static class Hotkeys
                 Key.Right => "→",
                 _ => g.Key.ToString(),
             };
-            return string.Concat(parts) + key;
+            return Keys.Format(g.KeyModifiers, key, mac);
         }
         catch
         {

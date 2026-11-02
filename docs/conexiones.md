@@ -100,6 +100,19 @@ Tus cuentas de Rithmic aparecen en el Chart Trader de los gráficos de Rithmic y
 activa y la sesión de órdenes termina de conectarse. Rithmic deja una sola sesión por usuario: si entrás con el mismo
 usuario desde otro programa, una de las dos sesiones se corta.
 
+### Si Rithmic no conecta o no te deja operar
+
+- **«Rithmic rechazó el usuario… (permission denied)»**: el **Servidor** tiene que decir el mismo sistema que te dio
+  tu broker o tu prop firm (en ATAS, «Rithmic paper trading» es «Rithmic Paper Trading»; las prop firms tienen el suyo:
+  buscalo por el nombre). Revisá la contraseña con el botón del ojo. Si todo coincide, tu usuario puede no tener
+  habilitado el acceso por API (R|Protocol): eso lo habilita Rithmic o tu broker, y algunos sistemas piden además un
+  **Nombre de la aplicación** aprobado (en **Avanzado**).
+- **Conecta, ves los datos, pero no podés operar tu cuenta** (no aparece en el Chart Trader o en Cuenta dice «solo
+  lectura»): las cuentas de Rithmic 01 y de las prop firms son reales. Tildá **«Permitir órdenes en cuentas reales»**
+  en la conexión y guardá (ver [Cuentas reales y cuentas de prueba](#cuentas-reales-y-cuentas-de-prueba)).
+- **Se desconecta sola**: Rithmic deja una sola sesión por usuario. Cerrá R|Trader Pro, ATAS, NinjaTrader o cualquier
+  otro programa conectado con el mismo usuario.
+
 ## AMP Futures
 
 AMP opera sobre Rithmic: te manda un usuario y una contraseña de Rithmic. La conexión se crea desactivada, con el

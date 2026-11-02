@@ -72,6 +72,9 @@ Positive StopLossTicks/TakeProfitTicks create protective orders at those distanc
 
 ClosePosition/CancelAll do not directly manage those automatic protective orders; protection is cleared when the position becomes flat. Live protective orders are submitted to the account, but **Trading Hub manages their OCO relationship**. Live trailing updates are throttled to at most once per second. Loss of app/connectivity can therefore affect protection management.
 
+Before live deployment, test partial fills and cancellation paths with fake-provider fixtures or simulation/demo accounts. Starting flat, if an entry for five units fills three and its remainder is canceled, verify that the position and protective-order quantities reflect the confirmed fills, without duplicate or reversing exits. Also test a fill arriving while cancellation is pending: sending a cancel request does not confirm cancellation. Reconcile uncertain order/position state with the broker before retrying.
+
+
 ## Indicators
 
 Create indicators in OnInit and retain them in fields; the app updates them before OnBar.

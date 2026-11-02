@@ -45,6 +45,9 @@ internal static class Ui
     public static IBrush Warn => Brush("WarnBrush");
     public static IBrush Focus => Brush("FocusBrush");
 
+    /// <summary>The UI monospace font: Menlo on macOS, Cascadia Mono or Consolas on Windows.</summary>
+    public static FontFamily MonoFont { get; } = new(TradingHub.Common.PlatformFonts.Mono);
+
     /// <summary>Aplica una acción y devuelve el mismo objeto (para armar vistas en una expresión).</summary>
     public static T Also<T>(this T c, Action<T> a)
     {

@@ -12,6 +12,7 @@ using TradingHub.App.Windows;
 using TradingHub.Strategies;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("TradingHub.UiSnapshot")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("TradingHub.Tests")]
 
 namespace TradingHub.App;
 
@@ -24,8 +25,6 @@ public sealed class App : Application
 
     public override void Initialize()
     {
-        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
-        System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
         Name = TradingHub.Common.Product.Name;
         RequestedThemeVariant = ThemeVariant.Dark;
         Styles.Add(new FluentTheme());
@@ -42,10 +41,22 @@ public sealed class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var main = new MainWindow(Services);
+            // Main-window closing is intercepted by QuitFlow before this lifetime can exit.
+            if (OperatingSystem.IsWindows()) desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
             desktop.MainWindow = main;
             UseQuit(desktop);
-            // el ícono en la barra de menú de la Mac (cerrar la ventana deja a Trading Hub corriendo ahí)
-            TradingHub.App.Services.MenuBar.Install(this, Services, main);
+            // Closing a window can keep Trading Hub available in the macOS menu bar or Windows system tray.
+            var menuBar = TradingHub.App.Services.MenuBar.Install(this, Services, main);
+            SingleInstance.OnShowRequested(() => Dispatcher.UIThread.Post(() =>
+            {
+                if (menuBar != null) menuBar.ShowMain();
+                else
+                {
+                    if (!main.IsVisible) main.Show();
+                    if (main.WindowState == WindowState.Minimized) main.WindowState = WindowState.Normal;
+                    main.Activate();
+                }
+            }));
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -86,11 +97,11 @@ internal enum QuitMode
 /// </summary>
 internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit)
 {
-    private static readonly CultureInfo En = CultureInfo.GetCultureInfo("en-US");
+    private static CultureInfo En => TradingHub.Common.UiCulture.Current;
     private QuitDialog? _asking;
     private bool _quitting;
 
-    /// <summary>How long «Close positions and quit» waits for the broker to confirm the closes.</summary>
+    /// <summary>Bounded wait for broker acknowledgment of quit-time closes and cancellations.</summary>
     internal TimeSpan CloseWait { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>Decided: it is stopping the strategies and exiting, so a further close or shutdown request goes through.</summary>
@@ -101,14 +112,13 @@ internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit
         svc.Runners.Where(r => r is { IsRunning: true, Persist: true } && r.OwnPosition != 0).ToList();
 
     /// <summary>
-    /// ⌘Q (and a Dock or logout quit). Without positions the strategies stop right away, canceling their orders, and the app
-    /// closes as before. Otherwise this request is canceled and it asks; once decided it exits by itself, without a new
-    /// request (so it never asks twice).
+    /// A platform shutdown request proceeds directly only when there is no position decision or outstanding order
+    /// acknowledgment. Otherwise the async quit path asks if needed and waits without blocking the UI thread.
     /// </summary>
     public void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs e)
     {
         if (_quitting) return;
-        if (_asking == null && Holding().Count == 0)
+        if (_asking == null && Holding().Count == 0 && !svc.Runners.Any(r => r.IsClosing || r.HasWorkingOrders))
         {
             _quitting = true;
             svc.StopLiveForQuit(QuitMode.CancelStops);
@@ -120,7 +130,7 @@ internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit
     }
 
     /// <summary>The menu bar's «Quit Trading Hub» (and a ⌘Q that has to ask first).</summary>
-    public async Task QuitAsync()
+    public async Task QuitAsync(Action? beforeExit = null)
     {
         if (_quitting) return;
         if (_asking != null)
@@ -157,6 +167,7 @@ internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit
         try
         {
             await StopAsync(mode);
+            beforeExit?.Invoke();
         }
         catch (Exception ex)
         {
@@ -168,22 +179,22 @@ internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit
         }
     }
 
-    /// <summary>Saves and stops the live strategies that way; with closing, waits for the closes and says if some did not.</summary>
+    /// <summary>Saves and stops once, then waits for requested order changes or warns before disconnecting.</summary>
     private async Task StopAsync(QuitMode mode)
     {
-        var positioned = Holding();
+        var stopping = svc.Runners.Where(r => r.IsRunning || r.IsClosing || r.HasWorkingOrders).ToList();
         svc.StopLiveForQuit(mode);
-        if (mode != QuitMode.ClosePositions || positioned.Count == 0) return;
+        bool Unconfirmed(LiveStrategyRunner r) => r.HasWorkingOrders || r.IsClosing || (mode == QuitMode.ClosePositions && r.OwnPosition != 0);
         var until = DateTime.UtcNow + CloseWait;
-        if (positioned.Any(Open)) svc.Live.Notify("Closing positions before quitting…");
-        while (positioned.Any(Open) && DateTime.UtcNow < until) await Task.Delay(100);
-        var open = positioned.Where(Open).ToList();
+        if (stopping.Any(Unconfirmed)) svc.Live.Notify("Waiting for broker confirmation before quitting…");
+        while (stopping.Any(Unconfirmed) && DateTime.UtcNow < until) await Task.Delay(100);
+        var open = stopping.Where(Unconfirmed).ToList();
         if (open.Count == 0) return;
-        await NoticeDialog.ShowAsync(owner(), "Positions not closed",
-            $"Trading Hub sent market orders to close these positions, but the broker did not confirm them within {CloseWait.TotalSeconds.ToString("0", En)} seconds. " +
-            "They may still be open, and their stops were canceled. Check them at the broker.\n\n" + string.Join("\n", open.Select(r => "• " + Describe(r))), "Quit");
-
-        static bool Open(LiveStrategyRunner r) => r.IsClosing || r.OwnPosition != 0;
+        string title = mode == QuitMode.ClosePositions || open.Any(r => r.IsClosing) ? "Positions not closed" : "Orders not confirmed";
+        await NoticeDialog.ShowAsync(owner(), title,
+            $"Trading Hub could not confirm the requested closes or cancellations within {CloseWait.TotalSeconds.ToString("0", En)} seconds. " +
+            "Requests may still be awaiting account data or broker acknowledgment. Positions and orders may still be working. Check them at the broker.\n\n" +
+            string.Join("\n", open.Select(r => "• " + Describe(r))), "Quit");
     }
 
     /// <summary>«MA Cross» · long 1 MNQ · Simulated account · 2 protective orders working.</summary>

@@ -10,6 +10,9 @@ Trading opens with a five-minute `SIM-BTC` footprint chart, Big Trades and Delta
 
 Orders initially use the **simulated account**. No real money is involved until you explicitly enable it for an appropriate profile in [Connections](conexiones.md).
 
+The interface supports English, Spanish and Simplified Chinese. New installations follow the OS (Spanish/Chinese, otherwise English); existing English-fork settings without a language remain English. Set **Settings → General → Language** and reopen, or use **Restart now**, which first follows the same protection-aware quit flow. Reports and Claude prose follow the choice; generated C# and stable identifiers stay English.
+
+
 | Built-in connection | Initially | Provides |
 |---|---|---|
 | Simulator | Enabled | Simulated SIM-BTC, SIM-ETH, SIM-ES and SIM-NQ. |
@@ -22,7 +25,7 @@ Orders initially use the **simulated account**. No real money is involved until 
 
 ### Sections in the title bar
 
-Navigation is integrated into the macOS title bar next to the window controls.
+Navigation is integrated into the title bar, with platform-specific window controls. Shortcuts below use macOS notation: **⌘ maps to Ctrl on Windows** and **⌥ to Alt**. Quit is ⌘Q on macOS and Alt+F4 on Windows.
 
 | Section | Shortcut | Purpose |
 |---|---|---|
@@ -109,7 +112,10 @@ The macOS menu-bar icon offers:
 
 The live panel updates strategies and positions in real time and offers the same open/quit actions.
 
-**Closing is not quitting.** By default the red window button hides the window while strategies keep running. This is controlled by **Settings → Live strategies → Keep running in menu bar when window closes**. Disabling it removes the icon and makes window closure quit the application. Use **⌘Q** or **Quit Trading Hub** to exit completely. Clicking the Dock icon reopens a hidden window.
+On Windows the equivalent icon is in the **system tray beside the clock**, possibly under the hidden-icons arrow. Clicking opens the live panel; right-click opens its menu. The background setting is named **Keep running in system tray after closing window**. Use Alt+F4 or **Quit Trading Hub** to exit rather than assuming the X button stopped strategies. A second launch requests the existing window for that data root rather than a second writer.
+
+
+**Closing is not quitting.** By default the window close button hides the window while strategies keep running. This is controlled by **Settings → Live strategies → Keep running in menu bar/system tray after closing window**. Disabling it makes window closure use explicit quit. Use **⌘Q** on macOS, **Alt+F4** on Windows, or **Quit Trading Hub** to exit completely. Clicking the Dock icon reopens a hidden Mac window. With live positions, quit asks whether to retain broker stops, cancel them while leaving positions open, close at market, or not quit. Outstanding close/cancel acknowledgments can time out with a warning: check broker state, not just local status. See [Live quit/restart](en-vivo.md#closing-the-window-and-reopening).
 
 ## Keyboard shortcuts
 
@@ -134,10 +140,10 @@ Order actions—buy, sell, close, reverse, cancel, partial exits, breakeven and 
 
 ## Settings worth reviewing
 
-- **General:** theme, chart time zone and alert sounds.
+- **General:** language, theme, chart time zone and alert sounds.
 - **Trading:** confirm real orders; see [Safety](operar.md#safety).
-- **Live strategies:** menu-bar behavior, startup resumption and automatic mini/micro contract selection.
-- **Keep awake:** prevent sleep while strategies run; optional closed-lid behavior.
+- **Live strategies:** menu-bar/system-tray behavior, startup resumption and automatic mini/micro contract selection.
+- **Keep awake:** prevent idle sleep while strategies run; macOS optionally supports a privileged closed-lid helper, while Windows follows its own lid power settings.
 - **Data:** record incoming live data and open local folders.
 
 ## Next steps

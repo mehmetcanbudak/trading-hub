@@ -1,75 +1,83 @@
 [← Documentation index](README.md)
 
-# Port Trading Hub to Windows with Claude
+# Windows installation and platform integration
 
-.NET 10, Avalonia and SkiaSharp are cross-platform. Most data/feed/chart/backtest/strategy/indicator logic is OS-independent, but the current distribution targets Apple Silicon macOS. The English branch now passes a shared Windows build, all 222 regression tests and English source/documentation auditing in CI, plus win-x64 cross-publishing. Native Windows startup, secure credentials, power/tray/shell integration and packaging remain unverified. **This is still an implementation plan, not a tested Windows desktop release.**
+Windows support introduced upstream in v1.1 and the v1.2 runtime languages are implemented in this source integration. The platform code is no longer just a porting plan. **Implementation and cross-platform builds do not certify native desktop behavior or brokerage execution.** Consult the [validation dashboard](TRANSLATION_STATUS.md) for actual evidence, not a release promise.
 
-On the target PC, install 64-bit Windows 10/11 (x64 or ARM64), [Git](https://git-scm.com), [.NET SDK 10](https://dotnet.microsoft.com/download) and a supported [Claude Code](https://claude.com/claude-code) distribution, then sign in. Use the provider's current Windows installation instructions.
+## Install or build
 
-## macOS-specific inventory
+Target systems are **64-bit Windows 10/11**, either Intel/AMD **x64** or Windows on ARM **ARM64**. Installers are self-contained: end users do not need a separate .NET runtime. Claude Code is optional and uses your own signed-in CLI/session.
 
-| Location | Current behavior | Windows adaptation |
-|---|---|---|
-| build-app.sh | osx-arm64 publish, .app bundle, codesign, ditto. | build-windows.ps1 for self-contained win-x64/win-arm64, ICO and optional Inno Setup/MSIX. |
-| Connections.cs / Keychain | /usr/bin/security and Keychain. | Credential Manager via advapi32 CredWrite/CredRead/CredDelete, or user-bound DPAPI encrypted storage. Preserve Get/Set interface; never plaintext secrets. |
-| SleepGuard.cs | IOKit power assertions and privileged pmset closed-lid helper through osascript. | SetThreadExecutionState with ES_CONTINUOUS and ES_SYSTEM_REQUIRED. Hide unsupported closed-lid controls or explain Windows power settings. |
-| Program.cs | CGGetActiveDisplayList startup display wait. | Guard with OperatingSystem.IsMacOS; skip on Windows. |
-| MenuBar.cs | Avalonia TrayIcon and objc_msgSend pointer position. | Windows tray icon, GetCursorPos and taskbar-aware popup placement. |
-| MainWindow Shell / StrategiesView.Reports | macOS open for URLs/folders/reports. | ProcessStartInfo with UseShellExecute; explorer.exe /select for revealing a file. |
-| TradingView.cs | afplay sounds. | Supported WAV/SoundPlayer or Avalonia audio mechanism; retain sound assets. |
-| ClaudeCode.cs | macOS CLI paths/PATH and osascript Terminal login. | Discover claude.exe/claude.cmd in USERPROFILE/.local/bin, APPDATA/npm, LOCALAPPDATA/Programs and PATH; launch login with cmd or Windows Terminal. |
-| MainWindow title bar | Left-side macOS traffic lights and extended client decorations. | Reserve right-side Windows caption-button space; test dragging/maximize. |
-| KeyModifiers.Meta and shortcut hints | Command key. | Shared platform command modifier, Control on Windows; show Ctrl in labels. |
-| Menlo font usages | macOS monospace. | Cascadia Mono, Consolas, monospace through the existing shared UI font convention. |
-| Product paths | SpecialFolder-based application data/Documents. | Verify APPDATA/Trading Hub and Documents/Trading Hub; no arbitrary data relocation. |
-| Platform wording | Mac, Keychain, menu bar, ⌘Q. | Platform-appropriate PC, Credential Manager, system tray and Windows quit/close shortcuts. |
+The original author's [upstream releases](https://github.com/ralphtradesz/trading-hub/releases) offer `TradingHub-Setup-x64.exe` and `TradingHub-Setup-arm64.exe`. Those are upstream artifacts, **not fork releases**, and must not be assumed to include this fork's safety work. No published fork installer is claimed here. Verify publisher/source and signatures; an unsigned installer may trigger SmartScreen. Do not bypass warnings for an untrusted download.
 
-Feeds/protocols, backtests, walk-forward, Skia rendering, Roslyn and MCP are broadly portable, but must still be tested on each target architecture.
+To package this checkout on Windows, install Git, .NET SDK 10 and [NSIS](https://nsis.sourceforge.io), then run from the repository root:
 
-## Staged plan
-
-1. **Build/start:** build the solution and run tests on Windows. Guard native calls with OS checks; use small platform seams only where necessary. Keep macOS working.
-2. **Secure credentials:** implement Windows storage behind the same contract, with fake stores for tests that never read/write personal credentials.
-3. **System integration:** power, tray, URL/folder opening, audio and CLI discovery/login.
-4. **Interface:** title bar, Ctrl bindings, fonts and platform-specific English text. Run relevant headless scenes.
-5. **Packaging:** self-contained PowerShell build/icon, optional installer.
-6. **Verification:** unit/UI tests and manual simulation/public-data checks before any real-money consideration.
-
-## Prompt for Claude Code
-
-Clone this fork's English branch on Windows, start Claude in the repository and paste:
-
-```text
-Port Trading Hub to Windows without breaking macOS. It is a C#/.NET 10 desktop app using
-Avalonia and SkiaSharp, solution TradingHub.slnx. First read CLAUDE.md, README.md,
-docs/en/desarrollo.md and docs/en/portar-a-windows.md.
-
-Rules:
-- Preserve the macOS build and behavior. Guard native operations with OS checks or small,
-  necessary platform implementations; do not duplicate complete source files.
-- Never store credentials in plaintext. Use Windows Credential Manager or user-bound DPAPI.
-  Tests must use fake stores and temporary roots, never personal credentials/data.
-- Preserve existing account permissions, confirmations, order routing and risk limits.
-  Do not add/remove order-control actions as incidental porting work.
-- Keep new interface text English. Preserve stable storage/JSON/CSV/strategy identifiers.
-- Read current official API documentation before implementing platform integrations.
-
-Work in stages, building TradingHub.slnx and running tests/TradingHub.Tests after each:
-1. Windows startup/build: remove unconditional macOS display waiting; check paths/fonts.
-2. Windows secret storage behind the existing credential interface.
-3. Power assertions, tray/popup placement, shell open/reveal, sound and Claude discovery/login.
-4. Windows title bar, Ctrl shortcuts and platform-aware wording.
-5. build-windows.ps1 for self-contained win-x64/win-arm64 with icon, dist output and,
-   only if needed, an optional installer.
-6. Relevant headless scenes (trading, conexiones, panel, footprint, mercado, english),
-   all regression tests, and a concrete manual simulation checklist.
-
-Hide unsupported features such as macOS closed-lid behavior and explain alternatives.
-Show actual errors and unresolved gaps; never claim an untested platform works.
+```powershell
+winget install NSIS.NSIS
+.\build-windows.ps1
+# Optional explicit package version:
+# .\build-windows.ps1 -Version 1.2.0
 ```
 
-## Afterward
+From macOS with .NET SDK 10:
 
-- Share a staged PR if desired, with separate evidence for both platforms.
-- Keep cross-platform tests green; one platform's change must not silently break another.
-- Linux follows similar seams: Secret Service/libsecret, an appropriate sleep inhibitor such as systemd-inhibit, and xdg-open. It also requires implementation and verification.
+```bash
+brew install makensis
+./build-windows.sh
+# Optional explicit package version: ./build-windows.sh 1.2.0
+```
+
+Both scripts publish `src/TradingHub.App/TradingHub.App.csproj` in Release with `--self-contained true` for `win-x64` and `win-arm64`, replacing their respective staging directories `dist/win-x64` and `dist/win-arm64`. NSIS consumes `installer/TradingHub.nsi` and writes `dist/TradingHub-Setup-x64.exe` and `dist/TradingHub-Setup-arm64.exe`. Without an override the version comes from project metadata. A publish-only build is not an installer validation.
+
+## Per-user installation, updates and uninstall
+
+- Default application directory: `%LOCALAPPDATA%\Programs\Trading Hub`; no administrator elevation. Start-menu/Desktop shortcuts and an HKCU uninstall entry are created.
+- The installer supports English, Spanish and Simplified Chinese, following Windows with English fallback. Runtime language is selected separately in [Settings](ajustes.md#language-and-regional-display).
+- Fully quit Trading Hub before update/uninstall, using **Quit Trading Hub** in the tray or **Alt+F4**. A normal window close can merely hide it. Resolve the protection-aware quit dialog first; never force-kill a process managing orders to satisfy an installer.
+- The installer waits for `TradingHub.exe` to stop and offers Retry/Cancel rather than forcibly terminating it. Updates replace application files only. Uninstall through Windows Settings → Apps → Trading Hub; user data and stored credentials are intentionally retained.
+- First startup provides a simulated account; do not enable real-order permissions to test installation.
+
+| Persistent location | Contents |
+|---|---|
+| `%APPDATA%\Trading Hub` | `settings.json`, nonsecret `connections.json`, workspace, history, accounts and live/backtest state. |
+| Windows Documents known folder → `Trading Hub\Estrategias` | Strategies and `Reportes` reports. The known folder may be redirected; do not assume a hard-coded `C:\Users` path. |
+| Windows Documents known folder → `Trading Hub\Indicadores` | Custom C# indicators. |
+| Windows Credential Manager | Native generic credentials with stable targets `Trading Hub/<account>`, scoped to the current user on this computer. |
+
+The product identity `Trading Hub`, Spanish subdirectory names, saved JSON/CSV fields, broker payload keys, order IDs and strategy parameter names do not change with display language. `TRADINGHUB_KEYCHAIN_FILE` selects a plaintext **test-only** fake store, never a production credential fallback.
+
+## Implemented platform seams
+
+| Area | Windows implementation | macOS preserved behavior |
+|---|---|---|
+| Startup/single instance | Windows startup skips native Mac display waiting; a second launch requests the existing window instead of another writer for the same data root. | Mac display readiness and platform lifecycle remain separate. |
+| Secrets | Native `CredRead`/`CredWrite`/`CredDelete` via Credential Manager; actual failures are reported. | Keychain service `Trading Hub`. |
+| Power | `SetThreadExecutionState` inhibits idle system sleep while live strategies/agent work runs; display may sleep. Windows lid closure follows OS power settings, not the Mac helper. | IOKit assertions and optional privileged closed-lid helper. |
+| Tray | Tray icon, cursor/taskbar-aware panel placement and right-click menu. | Menu-bar icon/panel. |
+| Shell/audio | Windows shell open/reveal for links, files and reports; platform sound handling. | Native open/reveal and Mac sounds. |
+| Claude | Discovers native `claude.exe` and supported npm/pnpm/Yarn `.cmd` shims through user install locations/PATH; resolves shims to Node or a native executable rather than sending prompts through `cmd.exe`. Unrecognized shims fail visibly. Login opens a terminal. `TRADINGHUB_CLAUDE_CLI` overrides discovery. | Supported Mac CLI/desktop locations and Terminal login. |
+| Input/window | Ctrl-based command shortcuts, native caption area, platform wording and DPI-aware tray placement. | Command shortcuts and Mac title bar. |
+| Text | Windows monospace fallbacks Cascadia Mono/Consolas; Segoe UI chart/report text and multilingual glyph fallback/shaping. | Menlo/SF Mono and Helvetica Neue with fallback/shaping. |
+
+Windows cannot override a laptop's lid-close policy. If choosing “Do nothing” in Windows Power Options, understand ventilation/battery risks; never put a running closed-lid laptop in a bag. See [Settings](ajustes.md#keep-awake).
+
+## Validation and release gates
+
+Shared-runtime tests, headless scenes and cross-publishing are distinct from native integration. **Native Windows on both architectures, real/demo brokerage execution, and physical macOS sleep/lid/logout/quit behavior are not certified by this documentation.** Before a release, record actual results for:
+
+1. Fresh install, launch, second launch, update and uninstall on x64 and ARM64; multilingual installer text and retained data/credentials.
+2. Credential Manager round-trip/delete/failure reporting under isolated test identities, without using personal secrets.
+3. Claude native executable and `.cmd` shim discovery, version/login paths, spaces in paths and proper argument quoting.
+4. Tray/window hide/show/quit, taskbars and multiple monitors at differing DPI, title-bar dragging/maximize and Ctrl shortcuts.
+5. English/Spanish/Simplified Chinese controls, charts and reports; numeric culture, CJK glyphs/shaping, keyboard text entry and migration of old English settings.
+6. Idle sleep/release, display sleep, laptop lid behavior and application lifecycle on real hardware; separately retain macOS lifecycle/power checks.
+7. Simulated/fake-provider partial fills, pending cancels, reconnect/replay, inherited protection and quit/restart acknowledgment paths; then separately authorized demo-provider scenarios. A demo session is not evidence of real-money certification.
+
+Build/test/UI commands and temporary-root rules are in [Development](desarrollo.md). Never use real history, credentials, orders or paid calls as test fixtures. A cancel/close request is not confirmation; reconcile uncertain exposure and working orders in the broker's own tools before retrying.
+
+## Maintaining platform parity
+
+Use a new isolated worktree for platform updates and preserve the existing protection-aware order/quit behavior; [the sync guide](upstream-sync.md) records the integration sequence. Keep native APIs behind their existing platform seams, report credential/startup failures, and retain unresolved order contexts rather than inferring a flat account. New UI source, generators and C# examples stay English; runtime catalogs supply Spanish/Chinese display text without renaming persistent identities.
+
+Rust/Swift references require a separate reviewed decision; a C# merge or successful package build does not advance their pinned source. Linux still needs native secret/power/shell implementations and validation. Do not describe a Windows source integration as a Linux release or a native-hardware certification.
+

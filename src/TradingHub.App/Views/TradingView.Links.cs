@@ -56,7 +56,7 @@ public sealed partial class TradingView
                 1 => synced[0],
                 _ => string.Join(", ", synced.Take(synced.Count - 1)) + " and " + synced[^1],
             };
-            _status($"Linked to group {name}: {what} synchronized{(synced.Count > 1 ? "n" : "")} across charts");
+            _status($"Linked to group {name}: {what} synchronized across charts");
         }
         catch (Exception ex)
         {

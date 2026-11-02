@@ -42,7 +42,7 @@ internal sealed class SettingsView : UserControl, IPage
         // zona horaria: las habituales primero
         var tz = new ComboBox { MinWidth = 320 };
         var common = new[] { "America/Argentina/Buenos_Aires", "America/New_York", "America/Chicago", "Europe/London", "Europe/Madrid", "UTC" };
-        tz.Items.Add(new ComboBoxItem { Content = $"This Mac's time ({TimeZoneInfo.Local.Id})", Tag = "" });
+        tz.Items.Add(new ComboBoxItem { Content = $"This {Os.Device}'s time ({TimeZoneInfo.Local.Id})", Tag = "" });
         foreach (var id in common)
             if (TimeZoneInfo.TryFindSystemTimeZoneById(id, out var z)) tz.Items.Add(new ComboBoxItem { Content = Label(z), Tag = z.Id });
         tz.Items.Add(new Separator());
@@ -83,7 +83,29 @@ internal sealed class SettingsView : UserControl, IPage
             s.Save();
             AppTheme.Apply(mode);
         };
+        var language = new ComboBox { MinWidth = 200 };
+        foreach (var (code, name) in Localization.Lang.Available)
+            language.Items.Add(new ComboBoxItem { Content = name, Tag = code });
+        language.SelectedItem = language.Items.OfType<ComboBoxItem>()
+            .FirstOrDefault(i => (string)i.Tag! == (s.Language ?? Localization.Lang.Current));
+        var restart = Ui.Button("Restart now", MaterialIconKind.Restart, Localization.Lang.Restart);
+        var languageNote = new TextBlock
+        {
+            Text = "Applies when you reopen Trading Hub.",
+            Classes = { "muted", "small" },
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        restart.IsVisible = languageNote.IsVisible = s.Language != null && s.Language != Localization.Lang.Current;
+        language.SelectionChanged += (_, _) =>
+        {
+            if (language.SelectedItem is not ComboBoxItem { Tag: string code }) return;
+            s.Language = code;
+            s.Save();
+            restart.IsVisible = languageNote.IsVisible = code != Localization.Lang.Current;
+        };
+
         var general = Section("General", MaterialIconKind.TuneVariant,
+            Setting("Language", "English, Spanish or Simplified Chinese. Claude replies in the selected language; generated code stays English.", Ui.V(6, language, Ui.H(8, languageNote, restart))),
             Setting("Appearance", "Use dark or light appearance throughout the platform. Individual chart colors remain unchanged.", appearance),
             Setting("Chart time zone", "Time on chart axes, tape, and sessions.", tz),
             Setting("Alert sounds", "Price alerts, large trades, and indicator notices.", sounds)
@@ -134,8 +156,11 @@ internal sealed class SettingsView : UserControl, IPage
             s.KeepInMenuBar = v;
             Services.MenuBar.Current?.Refresh();
         });
+        var stay = Os.IsWindows
+            ? Setting("Keep running in system tray after closing window", "Closing the window leaves Trading Hub running in the system tray beside the clock, with active strategies. Click its icon to view live positions, or right-click for its menu. Use Alt+F4 or Quit Trading Hub to quit completely.", menuBar)
+            : Setting("Keep running in menu bar after closing window", "Closing the window leaves Trading Hub running in the menu bar with active strategies. Use its icon to view live positions. To quit completely, use Command-Q or Quit Trading Hub.", menuBar);
         return Section("Live strategies", MaterialIconKind.PlayCircleOutline,
-            Setting("Keep running in menu bar after closing window", "Closing the window leaves Trading Hub running in the menu bar with active strategies. Use its icon to view live positions. To quit completely, use Command-Q or Quit Trading Hub.", menuBar),
+            stay,
             Setting("Resume automatically on startup", "Strategies that were running before shutdown resume at startup with their previous parameters, sizing and limits. Paused strategies stay paused. When disabled, resume manually from Live.", auto),
             Setting("Include real accounts", "Off (recommended): real-money strategies require manual resumption. On: they resume automatically.", real),
             Setting("Auto-select mini or micro contract", "For fractional mini-futures exposure (for example 0.5 NQ), use the equivalent micro-contract quantity (5 MNQ). Whole mini quantities stay on the mini. Open positions retain their contract until flat.", smart));
@@ -165,6 +190,16 @@ internal sealed class SettingsView : UserControl, IPage
     {
         var s = _svc.Settings;
         var awake = Switch(s.KeepAwake, v => s.KeepAwake = v);
+        if (!SleepGuard.SupportsLidClosed)
+        {
+            var powerOptions = Ui.Button("Power Options", MaterialIconKind.Power, Shell.OpenWindowsPowerOptions);
+            RefreshSleep();
+            return Section("Prevent sleep", MaterialIconKind.SleepOff,
+                Setting("Keep PC awake", "Prevent idle sleep while live strategies or Claude agents run (display may still sleep). No password required.", awake),
+                Setting("With the lid closed", "Windows follows its power settings when a laptop lid closes; Trading Hub cannot override them. To keep working with the lid closed: Power Options → Choose what closing the lid does → Do nothing, preferably only when plugged in. Closed-lid ventilation is limited: never store a running laptop in a bag.", powerOptions),
+                _sleepState);
+        }
+
         var power = Switch(s.LidClosedOnlyOnPower, v => s.LidClosedOnlyOnPower = v);
         var lid = Switch(s.KeepAwakeLidClosed, v =>
         {
@@ -186,7 +221,7 @@ internal sealed class SettingsView : UserControl, IPage
         var g = _svc.Sleep;
         string reason = _svc.AwakeReason() ?? "nothing running";
         _sleepState.Text = (g.Awake ? $"Now: awake ({g.Reason})." : $"Now: may sleep ({reason}).") +
-                           (g.LidHelperRunning ? " Closed lid: active." : _svc.Settings.KeepAwakeLidClosed ? " Closed lid: activates while work is running." : "") +
+                           (!SleepGuard.SupportsLidClosed ? "" : g.LidHelperRunning ? " Closed lid: active." : _svc.Settings.KeepAwakeLidClosed ? " Closed lid: activates while work is running." : "") +
                            (g.LidError != null ? " " + g.LidError : "");
     }
 

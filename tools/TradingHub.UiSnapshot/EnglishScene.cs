@@ -133,18 +133,21 @@ internal static class EnglishScene
         File.WriteAllText(newIndicatorFile, newIndicatorCode);
         Check(compiler.Compile(new[] { newIndicatorFile }, "EnglishNewIndicator").Success, "New indicator editor template compiles");
         Check(!Regex.IsMatch(newIndicatorCode, @"\b(?:Periodo|_serie|suma)\b"), "New indicator editor template uses English parameter/private/local identifiers");
-        string? adminScript = null;
-        string guardFolder = Path.Combine(examples, "PowerGuard");
-        using (var guard = new SleepGuard { FlagDirectory = guardFolder, RunAdminScript = script => { adminScript = script; return null; } })
+        if (OperatingSystem.IsMacOS())
         {
-            guard.Update(true, true, true, "Fixture strategies running");
-            Check(guard.Awake && guard.LidHelperRunning, "fake power helper enters the requested state without privileges");
-            string prompt = Regex.Match(adminScript ?? "", "with prompt \\\"(.*?)\\\" with administrator privileges").Groups[1].Value;
-            Check(prompt.Contains("needs permission", StringComparison.Ordinal) && prompt.Contains("restored", StringComparison.Ordinal) && !EnglishLocalizationAudit.LooksSpanish(prompt), "closed-lid administrator explanation is English");
-            guard.Update(false, false, false, null);
-            Check(!guard.Awake && !guard.LidHelperRunning, "fake power helper releases its assertion and flag");
+            string? adminScript = null;
+            string guardFolder = Path.Combine(examples, "PowerGuard");
+            using (var guard = new SleepGuard { FlagDirectory = guardFolder, RunAdminScript = script => { adminScript = script; return null; } })
+            {
+                guard.Update(true, true, true, "Fixture strategies running");
+                Check(guard.Awake && guard.LidHelperRunning, "fake power helper enters the requested state without privileges");
+                string prompt = Regex.Match(adminScript ?? "", "with prompt \\\"(.*?)\\\" with administrator privileges").Groups[1].Value;
+                Check(prompt.Contains("needs permission", StringComparison.Ordinal) && prompt.Contains("restored", StringComparison.Ordinal) && !EnglishLocalizationAudit.LooksSpanish(prompt), "closed-lid administrator explanation is English");
+                guard.Update(false, false, false, null);
+                Check(!guard.Awake && !guard.LidHelperRunning, "fake power helper releases its assertion and flag");
+            }
+            Check(!Directory.EnumerateFiles(guardFolder).Any(), "fake power test leaves no active flags");
         }
-        Check(!Directory.EnumerateFiles(guardFolder).Any(), "fake power test leaves no active flags");
 
         if (!OperatingSystem.IsWindows())
         {

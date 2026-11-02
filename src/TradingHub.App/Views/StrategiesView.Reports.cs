@@ -34,8 +34,8 @@ internal sealed partial class StrategiesView
         try
         {
             var html = ReportExport.Export(_report);
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("open", $"\"{html}\"") { UseShellExecute = false });
-            _status($"Report exported: {System.IO.Path.GetFileName(html)} (in your browser: File → Export as PDF)");
+            Windows.Shell.Open(html);
+            _status($"Report exported: {System.IO.Path.GetFileName(html)} (in your browser: {(Os.IsWindows ? "Ctrl+P → Save as PDF" : "File → Export as PDF")})");
         }
         catch (Exception ex)
         {
@@ -104,10 +104,12 @@ internal sealed partial class StrategiesView
             BoxShadow = BoxShadows.Parse("0 6 28 0 #66000000"),
         };
         var export = Ui.Button("Export PDF / HTML", MaterialIconKind.FileExportOutline, ExportReport, "primary");
-        ToolTip.SetTip(export, "Save an HTML report with embedded charts and open it in your browser (then use File → Export as PDF or Print)");
-        var finder = Ui.Button("Show in Finder", MaterialIconKind.FolderOutline, () =>
+        ToolTip.SetTip(export, Os.IsWindows
+            ? "Save an HTML report with embedded charts and open it in your browser (then use Ctrl+P → Save as PDF or Print)"
+            : "Save an HTML report with embedded charts and open it in your browser (then use File → Export as PDF or Print)");
+        var finder = Ui.Button(Os.IsWindows ? "Show in File Explorer" : "Show in Finder", MaterialIconKind.FolderOutline, () =>
         {
-            if (_report != null) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("open", $"-R \"{_report.Path}\"") { UseShellExecute = false });
+            if (_report != null) Windows.Shell.Reveal(_report.Path);
         });
         var bar = Ui.H(8, finder, export);
         bar.HorizontalAlignment = HorizontalAlignment.Right;

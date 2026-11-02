@@ -23,6 +23,8 @@
     <ProjectReference Include="..\..\src\TradingHub.Strategies\TradingHub.Strategies.csproj" />
     <ProjectReference Include="..\..\src\TradingHub.Sdk\TradingHub.Sdk.csproj" />
     <ProjectReference Include="..\..\src\TradingHub.Charting\TradingHub.Charting.csproj" />
+    <!-- lo propio de cada sistema (atajos, claves, Claude Code, bandeja): ver PlatformTests -->
+    <ProjectReference Include="..\..\src\TradingHub.App\TradingHub.App.csproj" />
   </ItemGroup>
 
 </Project>

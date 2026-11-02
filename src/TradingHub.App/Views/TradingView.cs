@@ -141,8 +141,8 @@ public sealed partial class TradingView : UserControl
         _layoutChoice = new ChoiceButton<PaneLayout>(MaterialIconKind.ViewGridOutline, Layouts.Select(l => (l.Layout, l.Label)),
             "Layout: charts visible simultaneously in this tab", l => Layouts.First(x => x.Layout == l).Short);
         _layoutChoice.Changed += l => _ = SetLayoutAsync(l);
-        var popOut = Ui.IconButton(MaterialIconKind.OpenInNew, "Detach chart into a window (⇧⌘D)", () => DetachActive());
-        var newTab = Ui.IconButton(MaterialIconKind.Plus, "New tab (⌘T)", () => _ = NewChartAsync());
+        var popOut = Ui.IconButton(MaterialIconKind.OpenInNew, $"Detach chart into a window ({Keys.Label("D", shift: true)})", () => DetachActive());
+        var newTab = Ui.IconButton(MaterialIconKind.Plus, $"New tab ({Keys.Label("T")})", () => _ = NewChartAsync());
         _toolbar = new ChartToolbar(this, false, Ui.Divider(true), _layoutChoice, BuildPanelsButton(), popOut, newTab);
         _svc.BracketsCreated += HookBrackets;
         Content = BuildLayout();
@@ -959,7 +959,7 @@ public sealed partial class TradingView : UserControl
         _replayPlay.Content = Ui.Icon(r.Paused || r.IsFinished ? MaterialIconKind.Play : MaterialIconKind.Pause, 18);
         _replaySpeed?.Select(r.Speed);
         var local = TimeZoneInfo.ConvertTimeFromUtc(r.Clock, _active.Model.Settings.TimeZone);
-        _replayClock.Text = r.IsFinished ? "Finished" : local.ToString("ddd dd/MM HH:mm:ss", CultureInfo.GetCultureInfo("en-US"));
+        _replayClock.Text = r.IsFinished ? "Finished" : local.ToString("ddd dd/MM HH:mm:ss", TradingHub.Common.UiCulture.Current);
         _replayProgress.Value = r.Progress;
     }
 
@@ -1432,19 +1432,42 @@ public sealed partial class TradingView : UserControl
     }
 }
 
-/// <summary>Sonido de alerta del sistema.</summary>
+/// <summary>Plays the macOS Glass alert or the user's Windows notification sound.</summary>
 internal static class Sound
 {
-    public static void Play(string file = "/System/Library/Sounds/Glass.aiff")
+    private const string MacAlert = "/System/Library/Sounds/Glass.aiff";
+
+    public static void Play(string? file = null)
     {
         if (App.Services?.Settings.SoundAlerts == false) return;
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("afplay", file) { UseShellExecute = false });
+            if (OperatingSystem.IsWindows()) PlayWindows(file);
+            else System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("afplay", file ?? MacAlert) { UseShellExecute = false });
         }
         catch
         {
-            // sin sonido
+            // Sound failure must not interrupt trading.
         }
     }
+
+    private const uint SndAsync = 0x0001;
+    private const uint SndNoDefault = 0x0002;
+    private const uint SndAlias = 0x00010000;
+    private const uint SndFilename = 0x00020000;
+
+    internal const string WindowsAlertEvent = "Notification.Default";
+
+    [System.Runtime.InteropServices.DllImport("winmm.dll", EntryPoint = "PlaySoundW", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool PlaySound(string? sound, IntPtr module, uint flags);
+
+    private static void PlayWindows(string? file)
+    {
+        if (file != null && file.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && File.Exists(file)) PlaySound(file, IntPtr.Zero, SndFilename | SndAsync | SndNoDefault);
+        else PlaySound(WindowsAlertEvent, IntPtr.Zero, SndAlias | SndAsync);
+    }
+
+    /// <summary>Exercises the Windows API without playing sound.</summary>
+    internal static bool ProbeWindows() => PlaySound("TradingHub.Probe.DoesNotExist", IntPtr.Zero, SndAlias | SndAsync | SndNoDefault);
 }

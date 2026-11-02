@@ -72,6 +72,8 @@ public sealed class TradovateTradingSession : IDisposable
     private readonly Dictionary<(long, long), TradovatePositionState> _positions = new();
     private readonly Dictionary<long, TradovateFill> _fills = new();
     private readonly ConcurrentDictionary<long, TradovateCashState> _cash = new();
+    private readonly HashSet<long> _snapshotOrderCandidates = new();
+    private readonly HashSet<(long, long)> _snapshotPositionCandidates = new();
     private readonly CancellationTokenSource _life = new();
     private bool _started;
 
@@ -82,6 +84,7 @@ public sealed class TradovateTradingSession : IDisposable
         _conn.User.StateChanged += (up, why) =>
         {
             IsConnected = up;
+            if (!up) _snapshotReady = false;
             StatusText = up ? "Connected" : "Tradovate: " + why;
             Changed?.Invoke();
             if (!up && !_life.IsCancellationRequested) _ = Task.Run(() => RunAsync(_life.Token));
@@ -102,6 +105,25 @@ public sealed class TradovateTradingSession : IDisposable
     }
 
     public event Action? Changed;
+
+    private volatile bool _snapshotReady;
+    public bool SnapshotReady => IsConnected && _snapshotReady;
+
+    /// <summary>Confirmed native activity across every account, without allocating account/order snapshots.</summary>
+    public bool HasOpenPositionsOrOrders
+    {
+        get
+        {
+            lock (_gate)
+            {
+                foreach (var position in _positions.Values)
+                    if (position.Net != 0) return true;
+                foreach (var order in _orders.Values)
+                    if (!order.Done) return true;
+                return false;
+            }
+        }
+    }
     public event Action<TradovateFill>? FillReceived;
 
     public void Start()
@@ -125,8 +147,17 @@ public sealed class TradovateTradingSession : IDisposable
                 {
                     await _conn.User.EnsureAsync(ct).ConfigureAwait(false);
                     await _conn.AccessTokenAsync(ct).ConfigureAwait(false);
+                    lock (_gate)
+                    {
+                        _snapshotOrderCandidates.Clear();
+                        foreach (var order in _orders.Values)
+                            if (!order.Done) _snapshotOrderCandidates.Add(order.Id);
+                        _snapshotPositionCandidates.Clear();
+                        foreach (var key in _positions.Keys) _snapshotPositionCandidates.Add(key);
+                    }
                     var d = await _conn.User.RequestAsync("user/syncrequest", new JsonObject { ["users"] = new JsonArray(_conn.UserId) }, ct).ConfigureAwait(false);
                     ApplySnapshot(d);
+                    _snapshotReady = true;
                     IsConnected = true;
                     StatusText = "Connected";
                     Changed?.Invoke();
@@ -197,7 +228,7 @@ public sealed class TradovateTradingSession : IDisposable
 
     private void ApplySnapshot(JsonElement d)
     {
-        if (d.ValueKind != JsonValueKind.Object) return;
+        if (d.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("Tradovate did not return an account snapshot.");
         IEnumerable<JsonElement> Arr(string key) => d.TryGetProperty(key, out var a) && a.ValueKind == JsonValueKind.Array ? a.EnumerateArray() : Enumerable.Empty<JsonElement>();
         foreach (var c in Arr("contracts")) _conn.RememberContract(Long(c, "id"), Str(c, "name"));
         foreach (var a in Arr("accounts")) Apply("account", a, false);
@@ -206,6 +237,13 @@ public sealed class TradovateTradingSession : IDisposable
         foreach (var p in Arr("positions")) Apply("position", p, false);
         foreach (var c in Arr("cashBalances")) Apply("cashBalance", c, false);
         foreach (var f in Arr("fills")) Apply("fill", f, false);
+        lock (_gate)
+        {
+            foreach (long id in _snapshotOrderCandidates) _orders[id].Status = "Canceled";
+            foreach (var key in _snapshotPositionCandidates) _positions.Remove(key);
+            _snapshotOrderCandidates.Clear();
+            _snapshotPositionCandidates.Clear();
+        }
     }
 
     private void OnEvent(string kind, JsonElement d)
@@ -246,6 +284,7 @@ public sealed class TradovateTradingSession : IDisposable
                 {
                     long id = Long(e, "id");
                     if (id == 0) break;
+                    _snapshotOrderCandidates.Remove(id);
                     if (!_orders.TryGetValue(id, out var o)) _orders[id] = o = new TradovateOrderState { Id = id };
                     o.AccountId = Long(e, "accountId");
                     o.ContractId = Long(e, "contractId");
@@ -260,6 +299,7 @@ public sealed class TradovateTradingSession : IDisposable
                 case "position":
                 {
                     var key = (Long(e, "accountId"), Long(e, "contractId"));
+                    _snapshotPositionCandidates.Remove(key);
                     if (deleted)
                     {
                         _positions.Remove(key);
@@ -433,6 +473,8 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
     public Position Position { get; }
     public IEnumerable<Order> ActiveOrders => _active;
     public string? LastError { get; private set; }
+    public bool PositionReady => _contract != null && _session.SnapshotReady;
+    public bool OrdersReady => _contract != null && _session.SnapshotReady;
     public event Action? Changed;
 
     /// <summary>Raíz del contrato (NQ) aunque el gráfico sea de otra conexión.</summary>
@@ -463,7 +505,7 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
         if (s.Price > 0) o.Price = s.Price;
         o.TriggerPrice = o.Type == OrderTypes.Stop && s.StopPrice > 0 ? s.StopPrice : o.Price;
         if (s.Quantity > 0) o.QuantityToFill = s.Quantity;
-        o.Unfilled = s.Done ? 0 : Math.Max(0, o.QuantityToFill - s.Filled);
+        o.Unfilled = s.Done && !s.Cancelled && !s.Rejected ? 0 : Math.Max(0, o.QuantityToFill - s.Filled);
         if (s.Done)
         {
             o.State = s.Rejected ? OrderStates.Failed : OrderStates.Done;
@@ -566,7 +608,7 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
     public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => Send(dir, OrderTypes.Stop, qty, trigger, comment);
 
     public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
-        Send(dir, type == OrderTypes.Stop ? OrderTypes.Stop : OrderTypes.Limit, qty, price, comment, reduceOnly: true);
+        Send(dir, type is OrderTypes.Market or OrderTypes.Stop ? type : OrderTypes.Limit, qty, price, comment, reduceOnly: true);
 
     private long IdOf(Order o) => long.TryParse(o.ExchangeOrderId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : 0;
 

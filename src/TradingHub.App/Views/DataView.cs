@@ -90,11 +90,11 @@ internal sealed class DataView : UserControl, IPage
     {
         var openFolder = Ui.Button("Open folder", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Ticks));
         var refresh = Ui.IconButton(MaterialIconKind.Refresh, "Refresh", Refresh);
-        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 18) };
         var actions = Ui.H(8, _totals, refresh, openFolder);
-        DockPanel.SetDock(actions, Dock.Right);
-        header.Children.Add(actions);
-        header.Children.Add(Ui.V(4, Ui.H1("Data"), Ui.Muted("Historical data saved on your Mac. Used for charts, replay and backtests.")));
+        var header = Ui.V(10,
+            Ui.V(4, Ui.H1("Data"), Ui.Muted($"Historical data saved on your {Os.Device}. Used for charts, replay and backtests.")),
+            actions);
+        header.Margin = new Thickness(0, 0, 0, 18);
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("340,16,*,16,360") };
 
@@ -662,7 +662,7 @@ internal sealed class DataView : UserControl, IPage
         long max = _selected.Days.Max(d => d.Bytes);
         foreach (var d in _selected.Days.OrderByDescending(d => d.Day))
         {
-            var date = new TextBlock { Text = d.Day.ToDateTime(TimeOnly.MinValue).ToString("ddd dd/MM/yyyy", CultureInfo.GetCultureInfo("en-US")), Width = 130, VerticalAlignment = VerticalAlignment.Center };
+            var date = new TextBlock { Text = d.Day.ToDateTime(TimeOnly.MinValue).ToString("ddd dd/MM/yyyy", TradingHub.Common.UiCulture.Current), Width = 130, VerticalAlignment = VerticalAlignment.Center };
             var bar = new Border { Height = 6, CornerRadius = new CornerRadius(3), Background = Ui.Accent, Opacity = 0.75, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Width = Math.Max(4, 220.0 * d.Bytes / Math.Max(1, max)) };
             ToolTip.SetTip(bar, "Relative size (approximate trade count)");
             var size = new TextBlock { Text = Size(d.Bytes), Classes = { "muted", "small" }, Width = 70, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
@@ -683,7 +683,7 @@ internal sealed class DataView : UserControl, IPage
         var days = SelectedDays();
         if (_selected == null || days.Count == 0)
         {
-            _status("Select one or more days to delete (Command or Shift for multiselect).");
+            _status(Os.IsWindows ? "Select one or more days to delete (Ctrl or Shift for multiselect)." : "Select one or more days to delete (Command or Shift for multiselect).");
             return;
         }
 
@@ -824,7 +824,7 @@ internal sealed class DataView : UserControl, IPage
                              (missing > 0 ? rithmic != null ? $", {missing} with no Rithmic trades (holidays or outside retained history)" : downloader != null ? $", {missing} with no data (holidays or weekends)" : $", {missing} not published yet" : "") + "." +
                              (lastProblem != null ? " " + lastProblem : "");
             if (rithmic?.MissingContracts is { Count: > 0 } gone)
-                _dlStatus.Text += $" Rithmic returned no data for {string.Join(", ", gone)}: expired-contract history is not retained, so downloads are available from the last expiry. Downloaded or recorded data stays on your Mac and accumulates over time.";
+                _dlStatus.Text += $" Rithmic returned no data for {string.Join(", ", gone)}: expired-contract history is not retained, so downloads are available from the last expiry. Downloaded or recorded data stays on your {Os.Device} and accumulates over time.";
             _status(_dlStatus.Text);
         }
         catch (OperationCanceledException)

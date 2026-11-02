@@ -15,6 +15,9 @@ Trading Hub runs **Claude Code** using your own logged-in session and subscripti
 
 The app searches `/usr/local/bin`, `/opt/homebrew/bin`, `~/.claude/local`, `~/.local/bin`, `~/.npm-global/bin`, PATH and supported Claude desktop CLI locations under `~/Library/Application Support/Claude/claude-code/…`. It chooses the newest discovered version. Override with `TRADINGHUB_CLAUDE_CLI`; see [Installation](instalacion.md#claude-code-optional).
 
+On Windows, discovery also supports native `claude.exe` and recognized npm/pnpm/Yarn `claude.cmd` shims in user installation locations and PATH. Supported shims are resolved to their Node entry point or native executable, so multiline and oversized prompts do not pass through `cmd.exe`; an unknown shim fails visibly. The explicit override supports these forms. Login opens a Windows terminal rather than macOS Terminal. Native discovery/login/quoting evidence is tracked in the validation dashboard.
+
+
 The panel displays CLI version/subscription or a not-found message. **Sign in to Claude Code** opens Terminal with `claude /login`; retry after signing in. Unsupported model/version errors require a compatible CLI; update through the installed distribution's normal update mechanism, such as `claude update` where supported.
 
 ## Model, effort and permissions
@@ -33,7 +36,7 @@ These are process/tool permissions, not a security sandbox for compiled C# or a 
 3. Read progress and file operations. The editor is read-only during work and reloads changed code. **Stop** interrupts the CLI.
 4. A newly created strategy opens automatically and compiles. Success offers a backtest; errors offer a repair request. Edited indicators recompile and report whether they are available in My indicators.
 
-Each request includes the active file, indicator folder and current compilation errors. System instructions document both APIs and request self-contained compiling C#, no external packages/files/network/threads, deterministic seeded randomness, short **English** comments/labels and a short explanation.
+Each request includes the active file, indicator folder and current compilation errors. System instructions document both APIs and request self-contained compiling C#, no external packages/files/network/threads, deterministic seeded randomness and short **English** code comments/labels. The selected interface language overrides reply/report prose instructions, never generated C# code, filenames or identifiers.
 
 Conversations are stored under Application Support/Trading Hub/Chats. History resumes an existing CLI session; **New conversation** starts fresh. Historical conversations remain as originally written rather than being destructively translated.
 
@@ -69,7 +72,7 @@ Runs enter History with a Claude laboratory note. Instructions prescribe reviewi
 | Unprofitable | perdedora | OOS losses or gains attributable to overfitting. |
 | Rejected | descartada | Does not compile/trade or is unsuitable for the data. |
 
-The codes remain Spanish for saved-report compatibility; UI and new explanatory text are English. These are screening heuristics, not guarantees.
+The codes remain Spanish for saved-report compatibility; UI and new explanatory text follow the selected runtime language. These are screening heuristics, not guarantees.
 
 For live exposure, tools can propose up to ×3 for stronger strategies, reductions/zero for deterioration, with evidence and no firm conclusions from tiny samples. Proposals await approval in **Live → Proposals**.
 
@@ -88,4 +91,4 @@ Old reports, user-written strategy labels and third-party text are not automatic
 
 Your prompt, files the CLI reads, tool results (metrics, trades, data summaries, chart images) and requested live-portfolio information can be sent to Anthropic through your CLI/account. Keychain credentials are not exposed by Trading Hub laboratory tools, but do not put secrets into prompts or source files. See [Privacy](privacidad.md).
 
-The English prompts request English responses; a provider outage, unsupported model, existing conversation context or explicit user request can affect output. Real paid Claude calls are not required for localization regression checks; use fake CLI fixtures.
+Prompts request replies and report prose in the selected English/Spanish/Simplified Chinese interface language while generated C# and identifiers stay English. A provider outage, unsupported model, existing conversation context or explicit user request can affect output. Real paid Claude calls are not required for localization regression checks; use fake CLI fixtures. Existing reports/conversations are not rewritten.

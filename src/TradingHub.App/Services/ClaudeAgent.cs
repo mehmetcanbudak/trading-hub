@@ -68,7 +68,7 @@ public sealed class ClaudeAgent
             "--output-format", "stream-json",
             "--verbose",
             "--model", req.Model,
-            "--append-system-prompt", req.SystemPrompt,
+            "--append-system-prompt", req.SystemPrompt + Localization.Lang.ForClaude,
             "--permission-mode", req.PermissionMode,
             "--strict-mcp-config",
         };
@@ -109,11 +109,19 @@ public sealed class ClaudeAgent
     public async Task<ClaudeAgentResult> RunAsync(ClaudeAgentRequest req, CancellationToken ct)
     {
         var cli = ClaudeCodeBridge.FindCli();
-        if (cli == null) return new ClaudeAgentResult(false, "", null, 0, 0, "Claude Code was not found on this Mac (install from claude.com/claude-code).", false, 0);
+        if (cli == null) return new ClaudeAgentResult(false, "", null, 0, 0, $"Claude Code was not found on this {Os.Device} (install from claude.com/claude-code).", false, 0);
 
         var supports = await SupportsAsync(cli);
         Directory.CreateDirectory(req.WorkDir);
-        var psi = ClaudeCodeBridge.Prepare(cli, req.WorkDir);
+        ProcessStartInfo psi;
+        try
+        {
+            psi = ClaudeCodeBridge.Prepare(cli, req.WorkDir);
+        }
+        catch (Exception ex)
+        {
+            return new ClaudeAgentResult(false, "", null, 0, 0, "Could not run Claude Code: " + ex.Message, false, 0);
+        }
         foreach (var (key, value) in req.Environment) psi.Environment[key] = value;
         string? labConfig = req.LabTools.Length > 0 ? ClaudeCodeBridge.WriteLabConfig() : null;
         foreach (var a in BuildArgs(req, labConfig, supports)) psi.ArgumentList.Add(a);
@@ -137,8 +145,9 @@ public sealed class ClaudeAgent
         Process? proc = null;
         try
         {
+            var stdinPrompt = ClaudeCodeBridge.MovePromptToStdinIfTooLong(psi);
             proc = Process.Start(psi)!;
-            proc.StandardInput.Close();
+            var feed = ClaudeCodeBridge.FeedStdinAsync(proc, stdinPrompt);
             proc.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data != null && stderr.Length < 20000) stderr.AppendLine(e.Data);
@@ -182,6 +191,7 @@ public sealed class ClaudeAgent
             }
 
             await proc.WaitForExitAsync(CancellationToken.None);
+            await feed;
         }
         catch (Exception ex)
         {

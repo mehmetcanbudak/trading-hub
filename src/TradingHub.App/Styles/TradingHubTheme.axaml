@@ -1,6 +1,7 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:mi="using:Material.Icons.Avalonia">
+        xmlns:mi="using:Material.Icons.Avalonia"
+        xmlns:app="using:TradingHub.App">
 
   <!--
     Sistema de diseño de Trading Hub.
@@ -208,7 +209,8 @@
     <Setter Property="FontSize" Value="11" />
   </Style>
   <Style Selector="TextBlock.mono">
-    <Setter Property="FontFamily" Value="Menlo, SF Mono, Consolas" />
+    <!-- Menlo on macOS; Cascadia Mono or Consolas on Windows. -->
+    <Setter Property="FontFamily" Value="{x:Static app:Ui.MonoFont}" />
   </Style>
   <Style Selector="TextBlock.up">
     <Setter Property="Foreground" Value="{StaticResource UpBrush}" />

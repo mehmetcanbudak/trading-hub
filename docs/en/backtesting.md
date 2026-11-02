@@ -154,4 +154,4 @@ Add saved runs across strategies/instruments. Choose Equal, Equal risk (inverse 
 
 ## Reports
 
-History and Portfolio **Report** actions, or Claude's laboratory, create English Markdown reports with metrics, tables and charts. Claude can add analysis and a verdict. Files live in `~/Documents/Trading Hub/Estrategias/Reportes`. The report reader's PDF/HTML export opens a browser for printing or saving PDF. See [Claude](asistente-claude.md).
+History and Portfolio **Report** actions, or Claude's laboratory, create Markdown reports with metrics, tables and charts in the selected English, Spanish or Simplified Chinese interface language. Claude can add analysis and a verdict; generated C# remains English. Files live in the Documents known folder under `Trading Hub/Estrategias/Reportes` (`~/Documents/Trading Hub/Estrategias/Reportes` on a standard Mac). The report reader's PDF/HTML export opens a browser for printing or saving PDF. Existing reports are not rewritten. See [Claude](asistente-claude.md).

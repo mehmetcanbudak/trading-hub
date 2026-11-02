@@ -136,7 +136,7 @@ internal static partial class SafetyScene
                 a?.Focus();
                 if (a != null) Press(a, Key.Enter);
             }) == false, "danger dialog: Enter with the action button focused still cancels");
-            Check(Answer(Show, title, d => Press(d, Key.Enter, KeyModifiers.Meta)) == true, "danger dialog: ⌘Enter returns true (confirms)");
+            Check(Answer(Show, title, d => Press(d, Key.Enter, Keys.Command)) == true, $"danger dialog: {Keys.Label("Enter")} returns true (confirms)");
             Check(Answer(Show, title, d => Press(d, Key.Escape)) == false, "danger dialog: Esc cancels");
             Check(Answer(Show, title, d => Click(ButtonOf(d, s => s == "Delete"))) == true, "danger dialog: clicking the action confirms");
         });
@@ -197,10 +197,10 @@ internal static partial class SafetyScene
             Select();
             task = (Task)Call(data, "DeleteSelectedAsync")!;
             dialog = Dialog("Delete data", task);
-            if (dialog != null) Press(dialog, Key.Enter, KeyModifiers.Meta);
+            if (dialog != null) Press(dialog, Key.Enter, Keys.Command);
             Wait(task, 5);
             if (!task.IsCompleted) dialog?.Close(false);
-            Check(dialog != null && !File.Exists(history), "Delete data: ⌘Enter confirms and deletes the fixture day");
+            Check(dialog != null && !File.Exists(history), $"Delete data: {Keys.Label("Enter")} confirms and deletes the fixture day");
         });
 
         Part("Databento paid download", () =>
@@ -255,10 +255,10 @@ internal static partial class SafetyScene
                 Quote();
                 task = (Task)Call(data, "DatabentoDownloadAsync")!;
                 dialog = Dialog("Download Databento history", task);
-                if (dialog != null) Press(dialog, Key.Enter, KeyModifiers.Meta);
+                if (dialog != null) Press(dialog, Key.Enter, Keys.Command);
                 Wait(task, 60);
                 if (!task.IsCompleted) dialog?.Close(false);
-                Check(dialog != null && Charges() > charges, "paid Databento download: ⌘Enter returns true (download requested from the fake server)");
+                Check(dialog != null && Charges() > charges, $"paid Databento download: {Keys.Label("Enter")} returns true (download requested from the fake server)");
             }
             finally
             {
@@ -293,7 +293,7 @@ internal static partial class SafetyScene
             var dialog = Dialog("Confirm REAL order", task, hotkey ? 1 : 3, keepLooking: hotkey);
             if (dialog != null)
             {
-                if (confirm) Press(dialog, Key.Enter, KeyModifiers.Meta);
+                if (confirm) Press(dialog, Key.Enter, Keys.Command);
                 else Click(ButtonOf(dialog, s => s == "Cancel"));
                 Wait(task, 5);
                 if (dialog.IsVisible) dialog.Close(false);
@@ -450,7 +450,7 @@ internal static partial class SafetyScene
             var run = tv.RunStrategyAsync(chart, cs);
             var dialog = Dialog("Execute on REAL account", run, 120);
             Check(dialog != null, "executing a chart strategy on a REAL account asks first");
-            if (dialog != null) Press(dialog, Key.Enter, KeyModifiers.Meta);
+            if (dialog != null) Press(dialog, Key.Enter, Keys.Command);
             Wait(run, 60);
             var runner = cs.Runner;
             Check(runner != null && ReferenceEquals(runner.Account, real) && runner.Guard != null, "the chart strategy executing on the fake REAL account has the production real-order guard");
@@ -471,7 +471,7 @@ internal static partial class SafetyScene
             binance.OnHttp = r => r.Route switch
             {
                 "/fapi/v1/time" => (200, $"{{\"serverTime\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}}}"),
-                "/fapi/v1/openOrders" or "/fapi/v2/positionRisk" => (200, "[]"),
+                "/fapi/v1/openOrders" or "/fapi/v1/openAlgoOrders" or "/fapi/v2/positionRisk" => (200, "[]"),
                 _ => (400, "{\"code\":-1000,\"msg\":\"safety fixture: orders are refused\"}"),
             };
             string? previousRest = Environment.GetEnvironmentVariable("TRADINGHUB_BINANCE_REST");
@@ -495,14 +495,12 @@ internal static partial class SafetyScene
                     lock (binance.Requests) return binance.Requests.Count(r => r.Headers.GetValueOrDefault("X-MBX-APIKEY") == key);
                 }
 
-                static bool Disposed(ITradingAccount broker) => broker is BinanceBroker && Field<CancellationTokenSource>(broker, "_cts").IsCancellationRequested;
-
                 tv.SetChartAccount(chart, bp.Id);
                 pump(0.3);
                 var first = tv.AccountOf(chart)!;
-                Until(() => Polls("fixture-key-1") > 0, 10);
-                Check(first is BinanceBroker { IsReal: true } && ReferenceEquals(chart.Model!.Account, first) && Polls("fixture-key-1") > 0,
-                    $"the chart trades the fake REAL Binance account, which polls the fake server ({first.Name})");
+                Until(() => first.PositionReady && first.OrdersReady && Polls("fixture-key-1") > 0, 10);
+                Check(first is BinanceBroker { IsReal: true, PositionReady: true, OrdersReady: true } && ReferenceEquals(chart.Model!.Account, first) && Polls("fixture-key-1") > 0,
+                    $"the chart trades the fake REAL Binance account after complete native snapshots ({first.Name})");
 
                 // a live strategy runs on the same account (paused: it opens nothing)
                 if (svc.Strategies.Files.Count == 0) svc.Strategies.Refresh();
@@ -517,6 +515,7 @@ internal static partial class SafetyScene
                 svc.Connections.Invalidate(bp);
                 pump(0.3);
                 var second = svc.AccountFor(model.Data, bp.Id);
+                Until(() => second.PositionReady && second.OrdersReady, 10);
                 Check(!ReferenceEquals(second, first) && !second.IsReal && second.Name.Contains("testnet", StringComparison.Ordinal),
                     $"switching the connection to testnet replaces the cached REAL broker ({second.Name}, REAL {second.IsReal})");
                 Check(ReferenceEquals(chart.Model!.Account, second) && ReferenceEquals(tv.AccountOf(chart), second), "the chart now shows and routes to the testnet account");
@@ -528,11 +527,10 @@ internal static partial class SafetyScene
                     why = runner.Guard?.Check(runner, OrderSide.Buy, 1, 1);
                     Check(why?.Contains("opened as REAL", StringComparison.Ordinal) == true && runner.Guard!.Check(runner, OrderSide.Sell, 1, 0) == null,
                         $"its strategy keeps the REAL broker but can only reduce or cancel through it («{why}»)");
-                    Check(!Disposed(first), "the replaced broker keeps working while the strategy runs on it");
+                    Check(first.PositionReady && first.OrdersReady && ReferenceEquals(runner.Account, first),
+                        "The replaced context continues supplying confirmed account state to its running strategy");
                     Wait(DeleteRunner(runner), 10);
                     runner = null;
-                    svc.AccountFor(model.Data, bp.Id); // the next use disposes the replaced brokers nothing works through
-                    Check(Disposed(first), "once the strategy is gone, the replaced REAL broker is disposed");
                 }
 
                 bp.MaxOrderQuantity = 5;
@@ -542,9 +540,9 @@ internal static partial class SafetyScene
                 bp.ApiKey = "fixture-key-2";
                 svc.Connections.Invalidate(bp);
                 var third = svc.AccountFor(model.Data, bp.Id);
-                Until(() => Polls("fixture-key-2") > 0, 10);
-                Check(!ReferenceEquals(third, second) && Polls("fixture-key-2") > 0 && Disposed(second),
-                    "a new API key replaces the broker: the new one signs with the new key and the old, unused one is disposed");
+                Until(() => third.PositionReady && third.OrdersReady && Polls("fixture-key-2") > 0, 10);
+                Check(!ReferenceEquals(third, second) && third.PositionReady && third.OrdersReady && Polls("fixture-key-2") > 0,
+                    "The changed API key routes the new account snapshot requests through a new confirmed context");
                 why = svc.CheckRealOrder(bp.Id, second, 0, 1);
                 Check(why?.Contains("changed its keys", StringComparison.Ordinal) == true, $"a broker replaced for another API key can no longer add exposure («{why}»)");
             }
@@ -709,10 +707,91 @@ internal static partial class SafetyScene
             }
         });
 
+        Part("Tradovate reconfiguration preserves outstanding account management", () => TradovateReconfiguration(Check));
+
         cache.Remove(cacheKey);
         svc.Connections.Profiles.Remove(realProfile);
         Console.WriteLine($"Safety scenario: {checks} checks, {failures} failures.");
         return failures;
+    }
+
+    private static void TradovateReconfiguration(Action<bool, string> check)
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE")))
+            throw new InvalidOperationException("The service fixture requires an isolated secrets file.");
+        using var fake = new FakeTradovate();
+        var endpoints = new Dictionary<string, string?>
+        {
+            ["TRADINGHUB_TRADOVATE_REST"] = fake.Server.Http + "/v1",
+            ["TRADINGHUB_TRADOVATE_WS"] = fake.Server.Ws + "/v1/websocket",
+            ["TRADINGHUB_TRADOVATE_MD"] = fake.Server.Ws + "/md/v1/websocket",
+        };
+        var previous = endpoints.ToDictionary(pair => pair.Key, pair => Environment.GetEnvironmentVariable(pair.Key));
+        string liveRoot = LiveStore.Root;
+        AppServices? services = null;
+        var profile = new ConnectionProfile
+        {
+            Id = "safety-tradovate-" + Guid.NewGuid().ToString("N"),
+            Kind = ConnectionKind.Tradovate,
+            Name = "Fixture Tradovate",
+            Enabled = true,
+            Testnet = true,
+            TradovateUser = "demo",
+            TradovateCid = "123",
+        };
+        static bool WaitFor(Func<bool> done)
+        {
+            var until = DateTime.UtcNow.AddSeconds(6);
+            while (!done() && DateTime.UtcNow < until) Thread.Sleep(10);
+            return done();
+        }
+        try
+        {
+            foreach (var (name, value) in endpoints) Environment.SetEnvironmentVariable(name, value);
+            services = new AppServices();
+            services.Connections.Profiles.Add(profile);
+            services.Connections.SetSecret(profile, "pw");
+            services.Connections.SetSecret(profile, "apisecret", "SEC");
+            var instrument = new Instrument
+            {
+                Symbol = "ES", FeedId = TradingHub.Feeds.Tradovate.TradovateFeed.FeedId,
+                Exchange = "CME", TickSize = 0.25m, VolumeStep = 1, PointValue = 50,
+            };
+            using var data = new InstrumentData(instrument, new TradingHub.Feeds.SimulatedFeed());
+            string accountId = AppServices.TradovateAccountId(profile, 101);
+            var broker = services.AccountFor(data, accountId);
+            check(WaitFor(() => broker.PositionReady && broker.OrdersReady), "Tradovate fixture confirms its initial native snapshots");
+            var entry = broker.Market(OrderDirections.Buy, 2, "Fixture entry");
+            check(WaitFor(() => entry.Status == OrderStatus.Filled && broker.Position.Volume == 2), "Tradovate fixture holds two confirmed contracts");
+            var limit = broker.Limit(OrderDirections.Buy, 1, 4990, "Fixture working limit");
+            check(WaitFor(() => limit.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(limit)), "Tradovate fixture has a confirmed working order before reconfiguration");
+
+            profile.TradovateUser = "changed-fixture-login";
+            services.Connections.Invalidate(profile);
+            check(services.CheckRealOrder(accountId, broker, 2, 1) != null
+                  && services.CheckRealOrder(accountId, broker, 2, -1) == null,
+                "A replaced Tradovate login blocks new exposure while allowing reductions");
+            broker.Cancel(limit);
+            check(WaitFor(() => limit.Canceled && !broker.ActiveOrders.Contains(limit)) && limit.Filled == 0,
+                "The original Tradovate context still receives the working order's cancellation acknowledgment");
+            var close = broker.Exit(OrderTypes.Market, OrderDirections.Sell, 2, 0, "Fixture close");
+            check(WaitFor(() => close.Status == OrderStatus.Filled && broker.Position.Volume == 0),
+                $"The original Tradovate context confirms its reduction after reconfiguration ({broker.LastError})");
+            check(!ReferenceEquals(broker, services.AccountFor(data, accountId)),
+                "The next Tradovate account uses a new context rather than the retired login");
+        }
+        finally
+        {
+            if (services != null)
+            {
+                services.Connections.ClearSecrets(profile);
+                // This service-only fixture never starts a runner and must not overwrite the scene's saved live state.
+                Set(services, "_closingDown", true);
+                services.Shutdown();
+            }
+            LiveStore.Root = liveRoot;
+            foreach (var (name, value) in previous) Environment.SetEnvironmentVariable(name, value);
+        }
     }
 }
 
@@ -1016,6 +1095,40 @@ internal static partial class SafetyScene
                     "Don't quit (Esc): nothing changes; the strategy keeps running with its stop loss and take profit, the app does not exit and live saves continue");
             });
 
+            Part("language restart canceled at the Quit question", () =>
+            {
+                if (runner == null) return;
+                var desktop = Desktop();
+                var working = Protection(quitSim);
+                int replacements = 0;
+                var restart = App.Quit!.QuitAsync(() => replacements++);
+                var dialog = Find(QuitTitle, 3);
+                if (dialog != null) Press(dialog, Key.Escape);
+                Wait(restart, 5);
+                Check(dialog != null && restart.IsCompletedSuccessfully && replacements == 0 && desktop.Shutdowns == 0
+                      && runner.IsRunning && Pos(quitSim) == 1 && Protection(quitSim).SequenceEqual(working),
+                    "Canceling a language restart launches no replacement, does not exit, and preserves the running position and its protection");
+            });
+
+            Part("accepted restart launches only after protection-aware stopping", () =>
+            {
+                if (runner == null) return;
+                var desktop = Desktop();
+                var working = Protection(quitSim);
+                int replacements = 0;
+                bool stoppedBeforeReplacement = false, replacementBeforeExit = false;
+                desktop.Exiting = () => replacementBeforeExit = replacements == 1;
+                var restart = App.Quit!.QuitAsync(() => { replacements++; stoppedBeforeReplacement = !runner.IsRunning; });
+                var dialog = Find(QuitTitle, 3);
+                Click(dialog == null ? null : ButtonOf(dialog, s => s == KeepText));
+                Wait(restart, 5);
+                Check(dialog != null && restart.IsCompletedSuccessfully && replacements == 1 && stoppedBeforeReplacement
+                      && replacementBeforeExit && desktop.Shutdowns == 1 && Pos(quitSim) == 1 && Protection(quitSim).SequenceEqual(working),
+                    "An accepted Keep-stops restart stops first, launches one replacement before exit, and leaves the original protection working");
+                Reopen();
+                runner = Resume();
+            });
+
             Part("Cancel stops and quit", () =>
             {
                 if (runner == null) return;
@@ -1152,9 +1265,11 @@ internal static partial class SafetyScene
                 Click(dialog == null ? null : ButtonOf(dialog, s => s == CloseText));
                 var notice = Find(NotClosedTitle, 8);
                 string text = notice == null ? "" : Text(notice);
-                Check(notice != null && desktop.Shutdowns == 0 && text.Contains("did not confirm them within 2 seconds", StringComparison.Ordinal)
-                      && text.Contains("«Safety quit fixture»", StringComparison.Ordinal) && text.Contains("Check them at the broker", StringComparison.Ordinal),
-                    $"Close positions: when the broker does not confirm a close in time, an English message names the strategy before the app exits («{text}»)");
+                Check(notice != null && desktop.Shutdowns == 0
+                      && text.Contains("«Safety quit fixture»", StringComparison.Ordinal)
+                      && slowRunner.IsClosing && slowRunner.OwnPosition == 1
+                      && slow.ActiveOrders.Any(o => o.Type == OrderTypes.Market && o.State == OrderStates.Active),
+                    $"An unconfirmed close stays pending and identifies the strategy before exit («{text}»)");
                 if (notice != null)
                 {
                     Shot(notice, "safety_quit_not_closed");
@@ -1163,6 +1278,12 @@ internal static partial class SafetyScene
 
                 Until(() => desktop.Shutdowns > 0, 5);
                 Check(desktop.Shutdowns == 1, "Close positions: after that message the app exits once");
+                // The real app exited after the warning. Deliver its late acknowledgment before another fixture startup.
+                slow.ConfirmHeld();
+                Until(() => !slowRunner.IsClosing && !slowRunner.HasWorkingOrders, 2);
+                Check(slowRunner.OwnPosition == 0 && slow.Position.Volume == 0
+                      && !slowRunner.IsClosing && !slowRunner.HasWorkingOrders,
+                    "A late broker close acknowledgment settles the owned ledger and pending close state");
             });
 
             Part("closing the main window quits through the same path (Keep in menu bar off)", () =>
@@ -1345,6 +1466,7 @@ public class FixtureDesktopLifetime : DispatchProxy
 internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
 {
     private readonly List<Order> _held = new();
+    private event Action? ConfirmationChanged;
 
     public string Name => "Fixture slow close";
     public bool IsReal => false;
@@ -1356,8 +1478,8 @@ internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
 
     public event Action? Changed
     {
-        add => inner.Changed += value;
-        remove => inner.Changed -= value;
+        add { inner.Changed += value; ConfirmationChanged += value; }
+        remove { inner.Changed -= value; ConfirmationChanged -= value; }
     }
 
     public Order Market(OrderDirections dir, decimal qty, string comment = "")
@@ -1373,9 +1495,30 @@ internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
         foreach (var order in _held.Where(o => o.State == OrderStates.Active)) Cancel(order);
     }
 
+    public void ConfirmHeld()
+    {
+        foreach (var order in _held)
+        {
+            if (order.State != OrderStates.Active) continue;
+            var filled = inner.Exit(OrderTypes.Market, order.Direction, order.QuantityToFill, 0, order.Comment);
+            order.QuantityToFill = filled.QuantityToFill;
+            order.Unfilled = filled.Unfilled;
+            order.Price = filled.Price;
+            order.State = filled.State;
+            order.Status = filled.Status;
+            ConfirmationChanged?.Invoke();
+        }
+    }
+
     public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Limit(dir, qty, price, comment);
     public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => inner.Stop(dir, qty, trigger, comment);
-    public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Exit(type, dir, qty, price, comment);
+    public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "")
+    {
+        if (type != OrderTypes.Market) return inner.Exit(type, dir, qty, price, comment);
+        var order = Market(dir, qty, comment);
+        order.ReduceOnly = true;
+        return order;
+    }
     public Order Replace(Order order, decimal newPrice, decimal newQuantity) => inner.Replace(order, newPrice, newQuantity);
 
     public void Cancel(Order order)

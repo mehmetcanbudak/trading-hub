@@ -36,7 +36,7 @@ TradingHub.Indicators.Technical supports locally importing the public ATAS techn
 
 ### Editor
 
-Open **Code → Indicator editor** (⇧⌘E) or the library code button. New creates a class-named template; **Save and compile** (⌘S / ⌘B) recompiles. Click diagnostics to jump to their line; the folder button opens Finder.
+Open **Code → Indicator editor** (⇧⌘E on macOS, Ctrl+Shift+E on Windows) or the library code button. New creates a class-named template; **Save and compile** (⌘S / ⌘B; Ctrl+S / Ctrl+B on Windows) recompiles. Click diagnostics to jump to their line; the folder button opens the platform file manager.
 
 ### Example
 
@@ -94,6 +94,18 @@ public class AverageRange : Indicator
 
 The [Claude assistant](asistente-claude.md) can also write indicators into this directory. **Untrusted C# executes in-process, not in a sandbox.**
 
+## Validation checklist
+
+Before relying on a new or changed indicator:
+
+- Compare its output with known results on a fixed historical dataset using the same inputs and parameters.
+- Check warmup, repeated updates to the live forming candle and several timeframes.
+- Check for look-ahead bias: a historical trading signal must not use bars that were unavailable at its decision time.
+- Verify that separate charts/instruments do not leak calculation state into one another and that a fresh recalculation reproduces the expected results.
+
+Use isolated data and simulation first; successful compilation alone does not establish calculation correctness.
+
+
 ## Extra DLLs
 
 Copy compatible indicator DLLs to Application Support/Trading Hub/Indicators or an Indicators folder beside the app executable. They load at startup under their Category, or Other, with an extra badge. Load failures are reported without preventing other DLLs from loading. Only load trusted binaries.
@@ -124,7 +136,7 @@ Both third_party and generated Atas sources are git-ignored, so they are not aut
 
 **One file at a time:** copy sources into the custom indicator folder without rebuilding the app. Include dependencies: ATAS CCI/Momentum, for example, depend on its SMA. The same approach works for other compatible public C# sources, subject to their licenses.
 
-Imported authors' labels, generated commentary or custom user overrides may use their original language; they are not rewritten destructively. The host's SDK defaults and built-in interface are English.
+Imported authors' labels, generated commentary or custom user overrides may use their original language; they are not rewritten destructively. English is the host's canonical SDK/source language; built-in display text follows the selected English, Spanish or Simplified Chinese runtime language. Generated C# and new sample identifiers stay English.
 
 ## ATAS API compatibility
 

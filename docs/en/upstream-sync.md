@@ -30,15 +30,14 @@ If upstream rewrites history or the ledger is invalid, investigate it. **Do not 
 ## Incorporate an update safely
 
 1. Read the tracker and upstream commits. Decide what changed in behavior, storage, brokerage safety, dependency/license requirements and user-facing language. Translation is not permission to alter account/order IDs or blindly rename existing user code.
-2. Start from a clean English worktree. If another task uses it, create a separate worktree rather than switching its branch or stashing its files. Fetch and create a dedicated sync branch:
+2. Use a new isolated worktree, leaving dirty English/port worktrees and their branches untouched. Fetch exact inputs and create a dedicated sync branch from a reviewed English base:
    ```bash
-   git switch feat/english-localization
-   git pull --ff-only origin feat/english-localization
+   git fetch origin feat/english-localization
    git fetch upstream main
-   git switch -c sync/upstream-SHORT_SHA
-   git merge --no-ff --no-commit FULL_UPSTREAM_SHA
+   git worktree add -b sync/upstream-SHORT_SHA ../trading-hub-sync-SHORT_SHA origin/feat/english-localization
+   git -C ../trading-hub-sync-SHORT_SHA merge --no-ff --no-commit FULL_UPSTREAM_SHA
    ```
-   Use the exact reviewed SHA from the tracker, not an unreviewed moving tip. Resolve conflicts manually. Abort with `git merge --abort` if the integration is not ready; never use a hard reset to discard unknown work.
+   Use the exact reviewed upstream SHA from the tracker, not a moving tip. If required safety work is not yet merged into English, review it first and use its exact reviewed base commit for the new worktree; preserve its acceptance requirements explicitly. Resolve conflicts manually. Abort only this worktree's merge if needed; preserve unrelated working files.
 3. Review every changed surface:
    - App labels, safety dialogs, tooltips, error/status messages, charts/DOM/footprint, reports and assistant instructions.
    - SDK/localization defaults, native indicators, **all** sample/new-code generators and English code identifiers for new samples. Keep generated SDK resources and existing custom IDs compatible.
@@ -51,12 +50,14 @@ If upstream rewrites history or the ledger is invalid, investigate it. **Do not 
    dotnet test tests/TradingHub.Tests -c Release
    python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
    python3 tools/check_english_translation.py
+   dotnet run -c Release --project tools/TradingHub.I18n -- coverage tools/TradingHub.I18n/provenance.json src/TradingHub.App/Localization/es.json
+   dotnet run -c Release --project tools/TradingHub.I18n -- coverage tools/TradingHub.I18n/provenance.json src/TradingHub.App/Localization/zh-CN.json
    git diff --check
    ```
-   Use the full UI commands in [Translation status](TRANSLATION_STATUS.md#reproduce). Review actual safety-dialog cancellation, English default generators and relevant reports. Do not use real orders, paid data/Claude calls, privileged power changes or personal data as fixtures.
+   Set all six isolated storage overrides and `TRADINGHUB_SLEEP_GUARD=off` before application/test commands; use the full commands in [Translation status](TRANSLATION_STATUS.md#reproduce). Review `english`, `safety` (including quit), both runtime-language surfaces, generators and reports. Run platform packaging/native gates separately from shared compilation. No real orders, paid data/model calls, privileged power changes or personal data are fixtures.
 5. New source-structure audit failures require review, not bypassing the check. Update only individually reviewed entries in `tools/english-localization-review.json`, then rerun all gates. The historical audit baseline in that file and `EnglishLocalizationAudit.cs` is **not** the rolling upstream checkpoint; never replace it just to make an upstream merge pass.
-6. After completing review and validation, set `.github/upstream-english.json` → `integrated_commit` to the exact upstream SHA incorporated by the merge. Keep all existing JSON fields. It must be an ancestor of the resulting English branch. Update TRANSLATION_STATUS with actual evidence, risks and exclusions. The monitor does not advance this field for you.
-7. Commit the merge/translation/checkpoint and open a PR **inside this fork**:
+6. After the required compatibility, English, safety, UI and platform gates have evidence, set `.github/upstream-english.json` → `integrated_commit` to the exact upstream SHA incorporated by the merge. Keep every other JSON field; the SHA must be an ancestor of the resulting English branch. A draft may contain all upstream code while retaining the prior checkpoint if release gates remain open. Record actual evidence/blockers in TRANSLATION_STATUS; merging source or updating a label alone is not validation. The historical C# audit baseline remains separate.
+7. Commit the reviewed integration (and the checkpoint only if its gates passed), then open a PR **inside this fork**:
    ```bash
    git add -- YOUR_REVIEWED_PATHS
    git commit
@@ -66,6 +67,8 @@ If upstream rewrites history or the ledger is invalid, investigate it. **Do not 
    ```
    Read the diff and macOS/Windows checks; finish missing translations and resolve failures. Merge only after human review. There is no automatic merge. Do not open a PR against the original upstream or include Rust/Swift work unintentionally.
 8. The next monitor run sees the advanced checkpoint and reports remaining work or **Up to date**. A successful merge does not replace the installed app: update separately using the installation guide, with a backup and a fully quit app.
+
+Port references are independent: decide which reviewed runtime/safety/UI changes are relevant, validate them in a separate port task, then deliberately update a port's pinned oracle. A C# sync does not authorize changing either port worktree or its pin.
 
 ## Tests and operational limits
 

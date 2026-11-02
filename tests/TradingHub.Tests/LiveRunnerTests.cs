@@ -1,5 +1,6 @@
 using System.Text.Json;
 using TradingHub.Data;
+using TradingHub.Feeds.Rithmic;
 using TradingHub.Feeds;
 using TradingHub.Market;
 using TradingHub.Strategies;
@@ -562,6 +563,11 @@ public class LiveRunnerTests : IDisposable
         private readonly SimBroker _inner;
         private readonly Position _nothingYet = new();
         private bool _reporting;
+        private bool _ordersReporting = true;
+        public bool DeferCancels { get; set; }
+        public List<Order> PendingCancels { get; } = new();
+        public bool PositionReady => _reporting;
+        public bool OrdersReady => _ordersReporting;
 
         public SlowAccount(SimBroker inner)
         {
@@ -573,7 +579,7 @@ public class LiveRunnerTests : IDisposable
         public bool IsReal => false;
         public Instrument Instrument => _inner.Instrument;
         public Position Position => _reporting ? _inner.Position! : _nothingYet;
-        public IEnumerable<Order> ActiveOrders => _inner.ActiveOrders;
+        public IEnumerable<Order> ActiveOrders => _ordersReporting ? _inner.ActiveOrders : Array.Empty<Order>();
         public string? LastError => _inner.LastError;
         public event Action? Changed;
 
@@ -583,10 +589,31 @@ public class LiveRunnerTests : IDisposable
             Changed?.Invoke();
         }
 
+        public void HideOrders() => _ordersReporting = false;
+
+        public void ReportOrders()
+        {
+            _ordersReporting = true;
+            Changed?.Invoke();
+        }
+
+        public void ConfirmCancels()
+        {
+            foreach (var order in PendingCancels.ToList()) _inner.Cancel(order);
+            PendingCancels.Clear();
+            Changed?.Invoke();
+        }
+
         public Order Market(OrderDirections dir, decimal qty, string comment = "") => _inner.Market(dir, qty, comment);
         public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => _inner.Limit(dir, qty, price, comment);
         public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => _inner.Stop(dir, qty, trigger, comment);
-        public void Cancel(Order order) => _inner.Cancel(order);
+        public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") => _inner.Exit(type, dir, qty, price, comment);
+        public Order Replace(Order order, decimal price, decimal quantity) => _inner.Replace(order, price, quantity);
+        public void Cancel(Order order)
+        {
+            if (DeferCancels) PendingCancels.Add(order);
+            else _inner.Cancel(order);
+        }
         public void CancelAt(decimal price) => _inner.CancelAt(price);
         public void CancelAll() => _inner.CancelAll();
         public void Modify(Order order, decimal newPrice) => _inner.Modify(order, newPrice);
@@ -622,6 +649,358 @@ public class LiveRunnerTests : IDisposable
         Assert.Same(kept, Assert.Single(sim.ActiveOrders, o => o.Type == OrderTypes.Stop)); // adopted once confirmed, never duplicated
         Assert.Single(r2.ActiveOrders, o => o.IsProtective);
         Assert.Equal(new[] { "basket-7" }, r2.ProtectionOrderIds);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Explicit_stop_cancels_saved_orders_before_position_confirmation(bool flatten)
+    {
+        var sim = InheritedLong();
+        var kept = sim.Stop(OrderDirections.Sell, 1, 96, "Rithmic");
+        kept.ExchangeOrderId = "saved-stop";
+        var account = new SlowAccount(sim) { DeferCancels = true };
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, account, ChartPeriod.M1)
+        {
+            ProtectOnStart = true, AdoptProtectionIds = new[] { "saved-stop" },
+        };
+        r.Start();
+        r.Stop(flatten, keepProtection: false);
+        Assert.Contains(kept, account.PendingCancels);
+        Assert.Empty(r.ProtectionOrderIds);
+        Assert.Equal(1m, r.OwnPosition);
+        Assert.True(r.HasWorkingOrders);
+        r.Dispose(); // releasing the stopped runner cannot discard the pending cancel/close acknowledgments
+        account.ReportPosition();
+        Assert.Equal(1m, sim.Position!.Volume); // readiness alone must not race an unconfirmed cancellation
+        Assert.Equal(1m, r.OwnPosition);
+        Assert.Equal(flatten, r.IsClosing);
+        account.ConfirmCancels();
+        Assert.True(kept.Canceled);
+        Assert.Equal(flatten ? 0m : 1m, sim.Position!.Volume);
+        Assert.Equal(flatten ? 0m : 1m, r.OwnPosition);
+        Assert.False(r.IsClosing);
+        Assert.Empty(sim.ActiveOrders);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Close_before_position_confirmation_preserves_ledger_and_waits_for_actual_close(bool stopRunner)
+    {
+        var sim = InheritedLong();
+        var account = new SlowAccount(sim);
+        var r = new LiveStrategyRunner(new Scripted(), _data, account, ChartPeriod.M1);
+        r.Start();
+        if (stopRunner) r.Stop(flatten: true);
+        else r.ClosePosition();
+        Assert.True(r.IsClosing);
+        Assert.Equal(1m, r.OwnPosition);
+        Assert.Equal(1m, LiveStore.LoadLedger(r.Key, 1).Position);
+        Assert.Equal(1m, sim.Position!.Volume);
+        account.ReportPosition();
+        Assert.Equal(0m, sim.Position.Volume);
+        Assert.Equal(0m, r.OwnPosition);
+        Assert.Equal(0m, LiveStore.LoadLedger(r.Key, 1).Position);
+        Assert.False(r.IsClosing);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Saved_protection_waits_for_order_replay_after_position_replay(bool savedOrderExists)
+    {
+        var sim = InheritedLong();
+        Order? kept = savedOrderExists ? sim.Stop(OrderDirections.Sell, 1, 96, "Rithmic") : null;
+        if (kept != null) kept.ExchangeOrderId = "saved-stop";
+        var account = new SlowAccount(sim);
+        account.HideOrders();
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, account, ChartPeriod.M1)
+        {
+            ProtectOnStart = true, AdoptProtectionIds = new[] { "saved-stop" },
+        };
+        r.Start();
+        account.ReportPosition();
+        Assert.Empty(r.ActiveOrders);
+        Assert.Equal(new[] { "saved-stop" }, r.ProtectionOrderIds);
+        account.ReportOrders();
+        var stop = Assert.Single(sim.ActiveOrders);
+        if (savedOrderExists) Assert.Same(kept, stop);
+        else Assert.Equal(95m, stop.TriggerPrice);
+        Assert.Single(r.ActiveOrders);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Stop_before_order_replay_cancels_saved_protection_when_it_arrives(bool flatten)
+    {
+        var sim = InheritedLong();
+        var kept = sim.Stop(OrderDirections.Sell, 1, 96, "Rithmic");
+        kept.ExchangeOrderId = "saved-stop";
+        var account = new SlowAccount(sim);
+        account.HideOrders();
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, account, ChartPeriod.M1)
+        {
+            ProtectOnStart = true, AdoptProtectionIds = new[] { "saved-stop" },
+        };
+        r.Start();
+        r.Stop(flatten);
+        account.ReportPosition();
+        Assert.Equal(1m, r.OwnPosition);
+        Assert.Equal(1m, sim.Position!.Volume);
+        Assert.Empty(r.ProtectionOrderIds);
+        account.ReportOrders();
+        Assert.True(kept.Canceled);
+        Assert.Equal(flatten ? 0m : 1m, r.OwnPosition);
+        Assert.Equal(flatten ? 0m : 1m, sim.Position.Volume);
+        Assert.False(r.IsClosing);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Observed_user_limit_and_runner_stop_cannot_leave_a_reversing_sibling(bool stopFirst)
+    {
+        var sim = InheritedLong();
+        var limit = sim.Limit(OrderDirections.Sell, 1, 108, "user target");
+        var unrelated = sim.Limit(OrderDirections.Buy, 1, 80, "user entry");
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, sim, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        var stop = Assert.Single(sim.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        Assert.True(stop.ReduceOnly);
+        Assert.Equal(StrategyOrderType.Stop, Assert.Single(r.ActiveOrders).Type); // the user limit is not a runner order
+        Tick(stopFirst ? 94 : 109);
+        Assert.Equal(0m, r.OwnPosition);
+        Assert.Equal(0m, sim.Position!.Volume);
+        Assert.True(stopFirst ? limit.Canceled : stop.Canceled);
+        Assert.Same(unrelated, Assert.Single(sim.ActiveOrders));
+        Tick(stopFirst ? 109 : 94);
+        Assert.Equal(0m, sim.Position.Volume);
+        Assert.Equal(0m, r.OwnPosition);
+    }
+
+    [Fact]
+    public void Partial_user_limit_fill_resizes_only_the_remaining_stop_and_preserves_user_ownership()
+    {
+        var sim = InheritedLong();
+        sim.Market(OrderDirections.Buy, 1);
+        LiveStore.AppendFill($"{typeof(Scripted).FullName}|test:TEST|Cuenta simulada", new LiveFill(T0, true, 1, 100));
+        var limit = sim.Limit(OrderDirections.Sell, 2, 108, "user target");
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, sim, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        Tick(108); // one unit at the limit, not through it: partial fill
+        Assert.Equal(1m, limit.Unfilled);
+        Assert.Equal(1m, sim.Position!.Volume);
+        Assert.Equal(1m, r.OwnPosition);
+        var stop = Assert.Single(sim.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        Assert.Equal(1m, stop.Unfilled);
+        Assert.Same(limit, Assert.Single(sim.ActiveOrders, o => o.Type == OrderTypes.Limit));
+        Assert.Equal(StrategyOrderType.Stop, Assert.Single(r.ActiveOrders).Type); // only its resized stop is owned
+        Tick(94);
+        Assert.Equal(0m, r.OwnPosition);
+        Assert.Equal(0m, sim.Position.Volume);
+        Assert.True(limit.Canceled);
+        Assert.Empty(sim.ActiveOrders);
+    }
+
+    [Fact]
+    public void Stop_fill_resizes_a_user_limit_for_the_accounts_other_position_without_claiming_it()
+    {
+        var sim = InheritedLong();
+        sim.Market(OrderDirections.Buy, 1, "user position"); // not in this strategy's ledger
+        var limit = sim.Limit(OrderDirections.Sell, 2, 108, "user target");
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, sim, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        Tick(94);
+        Assert.Equal(0m, r.OwnPosition);
+        Assert.Equal(1m, sim.Position!.Volume);
+        Assert.False(limit.Canceled);
+        Assert.Equal(1m, limit.Unfilled);
+        Assert.Same(limit, Assert.Single(sim.ActiveOrders));
+        Assert.Empty(r.ActiveOrders); // the user's remaining exit has not become a strategy order
+        Tick(109);
+        Assert.Equal(0m, sim.Position.Volume);
+        Assert.Equal(0m, r.OwnPosition);
+        Assert.Single(r.Ledger.Trades);
+    }
+
+    [Fact]
+    public void A_confirmed_flat_snapshot_can_settle_an_unresolved_close_without_sending_an_order()
+    {
+        var sim = InheritedLong();
+        sim.Flatten();
+        int orders = sim.Orders.Count;
+        var account = new SlowAccount(sim);
+        var runner = new LiveStrategyRunner(new Scripted(), _data, account, ChartPeriod.M1);
+        runner.Start();
+        runner.Stop(flatten: true);
+        Assert.Equal(1m, runner.OwnPosition);
+        Assert.True(runner.IsClosing);
+        account.ReportPosition();
+        Assert.Equal(0m, runner.OwnPosition);
+        Assert.False(runner.IsClosing);
+        Assert.Equal(orders, sim.Orders.Count);
+        Assert.Equal(0m, LiveStore.LoadLedger(runner.Key, 1).Position);
+    }
+
+    [Fact]
+    public async Task Rithmic_close_before_position_snapshot_waits_and_closes_the_confirmed_position()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var server = new FakeRithmicServer { PositionSnapshotRelease = release };
+        server.SeedPosition(true, 1, 100);
+        using var session = new RithmicTradingSession(new RithmicSettings
+        {
+            Uri = server.Uri, System = "Rithmic Paper Trading", User = "demo", Password = "demo", TimeoutMs = 5000,
+        });
+        var data = new InstrumentData(new Instrument { Symbol = "ES", FeedId = "rithmic", TickSize = 1, VolumeStep = 1, PointValue = 1 }, new SimulatedFeed());
+        using var broker = new RithmicBroker(data, session, "ACC1", "ACC1", _ => Task.FromResult(("ESZ6", "CME")));
+        using var runner = new LiveStrategyRunner(new Scripted(), data, broker, ChartPeriod.M1) { Persist = false };
+        runner.SeedPosition(new LiveFill(T0, true, 1, 100));
+        runner.Start();
+        session.Start();
+        await AwaitBroker(() => session.IsConnected);
+        runner.Stop(flatten: true);
+        Assert.True(runner.IsClosing);
+        Assert.Equal(1m, runner.OwnPosition);
+        Assert.Equal(1, server.Position);
+        lock (server.Tags) Assert.Empty(server.Tags);
+        release.SetResult();
+        await AwaitBroker(() => !runner.IsClosing && runner.OwnPosition == 0 && broker.Position.Volume == 0);
+        Assert.Equal(0, server.Position);
+        lock (server.Tags) Assert.Single(server.Tags);
+    }
+
+    [Fact]
+    public void A_stop_with_an_unconfirmed_cancel_still_blocks_duplicate_inherited_protection()
+    {
+        var sim = InheritedLong();
+        var account = new SlowAccount(sim) { DeferCancels = true };
+        account.ReportPosition();
+        var first = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, account, ChartPeriod.M1) { ProtectOnStart = true };
+        first.Start();
+        var stop = Assert.Single(sim.ActiveOrders);
+        stop.ExchangeOrderId = "cancel-pending";
+        first.Stop(flatten: false);
+        Assert.True(first.HasWorkingOrders);
+        var second = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, account, ChartPeriod.M1)
+        {
+            ProtectOnStart = true, AdoptProtectionIds = new[] { "cancel-pending" },
+        };
+        second.Start();
+        Assert.Same(stop, Assert.Single(sim.ActiveOrders));
+        Assert.Empty(second.ActiveOrders); // neither adopted while being canceled nor duplicated
+        second.Stop(flatten: false);
+        account.ConfirmCancels();
+        Assert.Empty(sim.ActiveOrders);
+        Assert.False(first.HasWorkingOrders);
+        Assert.False(second.HasWorkingOrders);
+    }
+
+    [Fact]
+    public void Explicit_stop_also_cancels_identified_orphaned_protection_after_a_confirmed_flat_snapshot()
+    {
+        var sim = InheritedLong();
+        var stop = sim.Stop(OrderDirections.Sell, 1, 96, "Rithmic");
+        stop.ExchangeOrderId = "orphan-stop";
+        sim.Market(OrderDirections.Sell, 1, "manual close");
+        var runner = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, sim, ChartPeriod.M1)
+        {
+            ProtectOnStart = true, AdoptProtectionIds = new[] { "orphan-stop" },
+        };
+        runner.Start();
+        Assert.Equal(0m, runner.OwnPosition);
+        Assert.Same(stop, Assert.Single(sim.ActiveOrders));
+        runner.Stop(flatten: false);
+        Assert.True(stop.Canceled);
+        Assert.Empty(runner.ProtectionOrderIds);
+        Assert.Empty(sim.ActiveOrders);
+    }
+
+    private static async Task AwaitBroker(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(8);
+        while (!condition() && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.True(condition(), "The fake broker did not publish the expected account/order state.");
+    }
+
+    [Fact]
+    public async Task Rithmic_position_replay_does_not_replace_a_saved_stop_before_order_replay_completes()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var server = new FakeRithmicServer { OrderReplayRelease = release };
+        server.SeedPosition(true, 1, 100);
+        await server.PushOrder("SAVED", "previous-session", false, 1, 96, type: 4);
+        using var session = new RithmicTradingSession(new RithmicSettings
+        {
+            Uri = server.Uri, System = "Rithmic Paper Trading", User = "demo", Password = "demo", TimeoutMs = 5000,
+        });
+        var data = new InstrumentData(new Instrument { Symbol = "ES", FeedId = "rithmic", TickSize = 1, VolumeStep = 1, PointValue = 1 }, new SimulatedFeed());
+        using var broker = new RithmicBroker(data, session, "ACC1", "ACC1", _ => Task.FromResult(("ESZ6", "CME")));
+        using var runner = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, data, broker, ChartPeriod.M1)
+        {
+            Persist = false, ProtectOnStart = true, AdoptProtectionIds = new[] { "SAVED" },
+        };
+        runner.SeedPosition(new LiveFill(T0, true, 1, 100));
+        runner.Start();
+        session.Start();
+        await server.OrderReplayRequested.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        await AwaitBroker(() => broker.Position.Volume == 1);
+        Assert.Empty(runner.ActiveOrders);
+        Assert.Empty(broker.ActiveOrders);
+        Assert.Equal(new[] { "SAVED" }, runner.ProtectionOrderIds);
+        release.SetResult();
+        await AwaitBroker(() => runner.ActiveOrders.Count == 1);
+        var stop = Assert.Single(broker.ActiveOrders);
+        Assert.Equal("SAVED", stop.ExchangeOrderId);
+        Assert.Equal(96m, stop.TriggerPrice);
+        var adopted = Assert.Single(runner.ActiveOrders);
+        Assert.Equal(StrategyOrderType.Stop, adopted.Type);
+        Assert.Equal(stop.TriggerPrice, adopted.Price);
+        Assert.Equal(stop.Unfilled, adopted.Quantity);
+        Assert.Equal(new[] { stop.ExchangeOrderId }, runner.ProtectionOrderIds);
+        lock (server.Tags) Assert.Empty(server.Tags);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rithmic_partial_stop_and_user_limit_fills_resize_and_cancel_siblings_without_adopting_user_orders(bool stopFirst)
+    {
+        using var server = new FakeRithmicServer();
+        server.SeedPosition(true, 2, 100);
+        await server.PushOrder("USER", "user-session", false, 2, 108);
+        using var session = new RithmicTradingSession(new RithmicSettings
+        {
+            Uri = server.Uri, System = "Rithmic Paper Trading", User = "demo", Password = "demo", TimeoutMs = 5000,
+        });
+        var data = new InstrumentData(new Instrument { Symbol = "ES", FeedId = "rithmic", TickSize = 1, VolumeStep = 1, PointValue = 1 }, new SimulatedFeed());
+        using var broker = new RithmicBroker(data, session, "ACC1", "ACC1", _ => Task.FromResult(("ESZ6", "CME")));
+        using var runner = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, data, broker, ChartPeriod.M1)
+        {
+            Persist = false, ProtectOnStart = true,
+        };
+        runner.SeedPosition(new LiveFill(T0, true, 2, 100));
+        session.Start();
+        await AwaitBroker(() => broker.Position.Volume == 2 && broker.ActiveOrders.Any(o => o.ExchangeOrderId == "USER"));
+        runner.Start();
+        await AwaitBroker(() => broker.ActiveOrders.Any(o => o.Type == OrderTypes.Stop && o.ExchangeOrderId.Length > 0));
+        var userLimit = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Limit);
+        var firstStop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        await server.FillOrder(stopFirst ? firstStop.ExchangeOrderId : "USER", 1, stopFirst ? 95 : 108);
+        await AwaitBroker(() => runner.OwnPosition == 1 && broker.Position.Volume == 1 &&
+            userLimit.Unfilled == 1 && broker.ActiveOrders.Any(o => o.Type == OrderTypes.Stop && o.Unfilled == 1 && o.ExchangeOrderId.Length > 0));
+        Assert.Equal(StrategyOrderType.Stop, Assert.Single(runner.ActiveOrders).Type); // the user limit remains unowned
+        Assert.Equal("Rithmic", userLimit.Comment);
+        Assert.Equal(1m, userLimit.Unfilled);
+        var remainingStop = Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        await server.FillOrder(stopFirst ? "USER" : remainingStop.ExchangeOrderId, 1, stopFirst ? 108 : 95);
+        await AwaitBroker(() => runner.OwnPosition == 0 && broker.Position.Volume == 0 && !broker.ActiveOrders.Any());
+        Assert.Equal(0, server.Position);
+        Assert.Equal(0m, runner.OwnPosition);
+        Assert.True(stopFirst ? remainingStop.Canceled : userLimit.Canceled);
+        Assert.Empty(broker.ActiveOrders);
     }
 
     [Fact]

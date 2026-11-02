@@ -18,15 +18,15 @@ internal static class ReportExport
         int pos = 0;
         foreach (Match m in Inline.Matches(text))
         {
-            sb.Append(WebUtility.HtmlEncode(text[pos..m.Index]));
+            sb.Append(WebUtility.HtmlEncode(Localization.Lang.T(text[pos..m.Index])));
             var v = m.Value;
-            if (v.StartsWith("**")) sb.Append("<strong>").Append(WebUtility.HtmlEncode(v[2..^2])).Append("</strong>");
+            if (v.StartsWith("**")) sb.Append("<strong>").Append(WebUtility.HtmlEncode(Localization.Lang.T(v[2..^2]))).Append("</strong>");
             else if (v.StartsWith('`')) sb.Append("<code>").Append(WebUtility.HtmlEncode(v[1..^1])).Append("</code>");
-            else sb.Append("<em>").Append(WebUtility.HtmlEncode(v[1..^1])).Append("</em>");
+            else sb.Append("<em>").Append(WebUtility.HtmlEncode(Localization.Lang.T(v[1..^1]))).Append("</em>");
             pos = m.Index + m.Length;
         }
 
-        sb.Append(WebUtility.HtmlEncode(text[pos..]));
+        sb.Append(WebUtility.HtmlEncode(Localization.Lang.T(text[pos..])));
         return sb.ToString();
     }
 
@@ -131,10 +131,10 @@ internal static class ReportExport
         CloseList();
         return $$"""
             <!doctype html>
-            <html lang="en"><head><meta charset="utf-8"><title>{{WebUtility.HtmlEncode(title)}}</title>
+            <html lang="{{Localization.Lang.Current}}"><head><meta charset="utf-8"><title>{{WebUtility.HtmlEncode(Localization.Lang.T(title))}}</title>
             <style>
             @page { size: A4; margin: 16mm 14mm; }
-            body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; color: #22262e; max-width: 980px; margin: 32px auto; padding: 0 28px; line-height: 1.5; font-size: 14px; }
+            body { font-family: -apple-system, "Helvetica Neue", "Segoe UI", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; color: #22262e; max-width: 980px; margin: 32px auto; padding: 0 28px; line-height: 1.5; font-size: 14px; }
             h1 { font-size: 28px; margin: 0 0 12px; letter-spacing: -0.3px; }
             h2 { font-size: 19px; margin: 34px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #f2b53a; page-break-after: avoid; }
             h3 { font-size: 15px; margin: 22px 0 8px; page-break-after: avoid; }
@@ -146,7 +146,7 @@ internal static class ReportExport
             td.n { text-align: right; font-variant-numeric: tabular-nums; }
             figure { margin: 10px 0 18px; page-break-inside: avoid; }
             figure img { width: 100%; border: 1px solid #e3e6ec; border-radius: 8px; }
-            code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-family: Menlo, monospace; font-size: 12px; }
+            code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-family: Menlo, Consolas, monospace; font-size: 12px; }
             hr { border: 0; border-top: 1px solid #e3e6ec; margin: 28px 0; }
             ul { padding-left: 22px; }
             </style></head><body>

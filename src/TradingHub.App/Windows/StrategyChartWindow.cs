@@ -17,7 +17,7 @@ namespace TradingHub.App.Windows;
 /// </summary>
 internal sealed class StrategyChartWindow : Window
 {
-    private static readonly CultureInfo Es = new("en-US");
+    private static CultureInfo Es => TradingHub.Common.UiCulture.Current;
     private readonly TradingView _host;
     private readonly ChartTab _chart;
     private readonly ChartStrategy _cs;

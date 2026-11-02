@@ -211,6 +211,30 @@ public class BrokerConnectionTests
         broker.Cancel(limit);
         await Until(() => limit.State == OrderStates.Done);
         Assert.Equal(OrderStatus.Canceled, limit.Status);
+        Assert.Equal(0m, limit.Filled); // a canceled order must not invent a full execution
+        Assert.DoesNotContain(limit, broker.ActiveOrders);
+    }
+
+    [Fact]
+    public async Task Tradovate_reconnect_snapshot_removes_absent_positions_and_cancels_cached_working_orders()
+    {
+        using var fake = new FakeTradovate();
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.Accounts.Count == 1);
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var entry = broker.Market(OrderDirections.Buy, 2);
+        await Until(() => broker.Position.Volume == 2 && entry.Status == OrderStatus.Filled);
+        Assert.Equal(2m, broker.Position.Volume);
+        var limit = broker.Limit(OrderDirections.Buy, 1, 4990);
+        await Until(() => limit.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(limit));
+        Assert.Contains(limit, broker.ActiveOrders);
+        await fake.DisconnectUserAndFlatten();
+        await Until(() => session.IsConnected && broker.Position.Volume == 0 && limit.Canceled);
+        Assert.True(broker.Position.Volume == 0m, $"Position: {broker.Position.Volume}; connected: {session.IsConnected}; snapshot ready: {session.SnapshotReady}; limit canceled: {limit.Canceled}; status: {session.StatusText}");
+        Assert.True(limit.Canceled);
+        Assert.Equal(0m, limit.Filled);
         Assert.DoesNotContain(limit, broker.ActiveOrders);
     }
 }

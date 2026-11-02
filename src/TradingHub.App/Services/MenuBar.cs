@@ -10,9 +10,8 @@ using TradingHub.App.Windows;
 namespace TradingHub.App.Services;
 
 /// <summary>
-/// Trading Hub en la barra de menú de la Mac (arriba a la derecha): al tocar su ícono se abre un panel con las estrategias en
-/// vivo, las posiciones y lo que están haciendo los agentes. Cerrar la ventana deja a Trading Hub corriendo ahí (si está
-/// activado en Ajustes); se sale del todo con ⌘Q o con «Salir de Trading Hub» del panel.
+/// Shows live strategies, account positions and agent activity in the macOS menu bar or Windows system tray.
+/// Closing the main window can keep Trading Hub running here; explicit Quit always uses the protection-aware flow.
 /// </summary>
 internal sealed class MenuBar
 {
@@ -29,8 +28,10 @@ internal sealed class MenuBar
     {
         _svc = svc;
         _main = main;
-        _tray = new TrayIcon { Icon = new WindowIcon(Glyph()), ToolTipText = TradingHub.Common.Product.Name, IsVisible = svc.Settings.KeepInMenuBar };
-        MacOSProperties.SetIsTemplateIcon(_tray, true); // se pinta blanco o negro según la barra, como los íconos del sistema
+        // Use the colored app icon on Windows so it remains visible on a dark taskbar.
+        var icon = OperatingSystem.IsWindows() && AppIcon.Window is { } appIcon ? appIcon : new WindowIcon(Glyph());
+        _tray = new TrayIcon { Icon = icon, ToolTipText = TradingHub.Common.Product.Name, IsVisible = svc.Settings.KeepInMenuBar };
+        if (OperatingSystem.IsMacOS()) MacOSProperties.SetIsTemplateIcon(_tray, true);
         // en macOS el clic en el ícono abre su menú (sin menú no llega ningún aviso): el menú trae lo que corre, en vivo
         _tray.Menu = _menu;
         _menu.NeedsUpdate += (_, _) => RefreshMenu();
@@ -39,10 +40,19 @@ internal sealed class MenuBar
             RefreshMenu();
             _menuTimer.Start(); // abierto: los números se actualizan solos
         };
-        _menu.Closed += (_, _) => _menuTimer.Stop();
+        _menu.Closed += (_, _) =>
+        {
+            if (!OperatingSystem.IsWindows()) _menuTimer.Stop();
+        };
         _tray.Clicked += (_, _) => TogglePanel();
         RefreshMenu();
         _menuTimer.Tick += (_, _) => RefreshMenu();
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows builds its context menu without NeedsUpdate, so keep its contents current.
+            _menuTimer.Interval = TimeSpan.FromSeconds(3);
+            _menuTimer.Start();
+        }
         TrayIcon.SetIcons(app, new TrayIcons { _tray });
 
         // tocar el ícono del Dock con la ventana cerrada la vuelve a abrir
@@ -55,10 +65,10 @@ internal sealed class MenuBar
 
     public static MenuBar? Current { get; private set; }
 
-    /// <summary>En herramientas y pruebas (datos en otra carpeta) no se pone nada en la barra de menú.</summary>
+    /// <summary>Isolated tools and tests never install a menu-bar or tray icon.</summary>
     public static MenuBar? Install(Application app, AppServices svc, MainWindow main)
     {
-        if (!OperatingSystem.IsMacOS() || Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR") is { Length: > 0 }) return null;
+        if (!(OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()) || Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR") is { Length: > 0 }) return null;
         try
         {
             Current = new MenuBar(app, svc, main);
@@ -91,7 +101,7 @@ internal sealed class MenuBar
     /// <summary>Un renglón del menú: clave estable, texto, si se puede tocar y qué hace (null = separador).</summary>
     private sealed record MenuLine(string Key, string? Text, bool Enabled = false, Action? Click = null);
 
-    private static readonly System.Globalization.CultureInfo Es = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+    private static System.Globalization.CultureInfo Es => TradingHub.Common.UiCulture.Current;
 
     private static string Money(decimal v) => v.ToString("+#,##0.00;-#,##0.00;0.00", Es);
 
@@ -183,7 +193,7 @@ internal sealed class MenuBar
         }
     }
 
-    /// <summary>El panel completo (más detalle que el menú), debajo de la barra.</summary>
+    /// <summary>Shows the detailed panel below the menu bar or above the Windows taskbar.</summary>
     public void ShowPanel()
     {
         _panel ??= CreatePanel();
@@ -219,12 +229,31 @@ internal sealed class MenuBar
             p.Hide();
             _panelHiddenAt = DateTime.UtcNow;
         };
+        if (OperatingSystem.IsWindows())
+        {
+            p.SizeChanged += (_, _) =>
+            {
+                if (p.IsVisible) PlaceOnWindows(p);
+            };
+            p.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_panel, p)) _panel = null;
+            };
+        }
+
         return p;
     }
 
     /// <summary>Debajo del ícono (donde está el mouse al tocarlo), sin salirse de la pantalla.</summary>
     private void Place(Window panel)
     {
+        if (OperatingSystem.IsWindows())
+        {
+            _trayClick = CursorPosition();
+            PlaceOnWindows(panel);
+            return;
+        }
+
         var screens = _main.Screens;
         var primary = screens.Primary ?? screens.All.FirstOrDefault();
         if (primary == null) return;
@@ -243,6 +272,56 @@ internal sealed class MenuBar
         int x = mouse is { } p0 ? p0.X - width / 2 : area.Right - width - (int)(12 * screen.Scaling);
         x = Math.Clamp(x, area.X + (int)(8 * screen.Scaling), Math.Max(area.X, area.Right - width - (int)(8 * screen.Scaling)));
         panel.Position = new PixelPoint(x, area.Y + (int)(6 * screen.Scaling));
+    }
+
+    // ===================================================================== Windows
+
+    private PixelPoint? _trayClick;
+
+    /// <summary>Positions the panel beside the tray click, within that monitor's working area.</summary>
+    private void PlaceOnWindows(Window panel)
+    {
+        var screens = _main.Screens;
+        var screen = (_trayClick is { } click ? screens.ScreenFromPoint(click) : null) ?? screens.Primary ?? screens.All.FirstOrDefault();
+        if (screen == null) return;
+        var area = screen.WorkingArea;
+        double scale = screen.Scaling;
+        double height = panel.Bounds.Height > 0 ? panel.Bounds.Height : 420;
+        var size = new PixelSize((int)Math.Ceiling(panel.Width * scale), (int)Math.Ceiling(height * scale));
+        var anchor = _trayClick ?? new PixelPoint(area.Right, area.Bottom);
+        panel.Position = TrayPanelPosition(area, anchor, size, (int)Math.Round(8 * scale));
+    }
+
+    /// <summary>Clamps a click-centered panel above the taskbar, including top and side taskbars.</summary>
+    internal static PixelPoint TrayPanelPosition(PixelRect area, PixelPoint click, PixelSize panel, int gap)
+    {
+        int x = Math.Clamp(click.X - panel.Width / 2, area.X + gap, Math.Max(area.X + gap, area.Right - panel.Width - gap));
+        int y = Math.Clamp(Math.Min(click.Y, area.Bottom) - panel.Height - gap, area.Y + gap, Math.Max(area.Y + gap, area.Bottom - panel.Height - gap));
+        return new PixelPoint(x, y);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Win32Point
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out Win32Point point);
+
+    /// <summary>Returns the cursor in per-monitor DPI-aware screen pixels, or null if unavailable.</summary>
+    internal static PixelPoint? CursorPosition()
+    {
+        try
+        {
+            return GetCursorPos(out var p) ? new PixelPoint(p.X, p.Y) : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // ===================================================================== macOS

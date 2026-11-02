@@ -283,8 +283,38 @@ public static class LiveStore
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     private static readonly object Gate = new();
 
-    // fills that could not be written to their ledger yet (by ledger file), in order: they go first with the next fill
-    private static readonly Dictionary<string, List<LiveFill>> Pending = new();
+    // Pending fills and their authoritative append boundary are process-local, not a crash-recovery journal.
+    private sealed class PendingLedger
+    {
+        public readonly List<LiveFill> Fills = new();
+        public long? CommittedEnd;
+    }
+
+    private static readonly Dictionary<string, PendingLedger> Pending = new();
+
+    // StreamReader may read ahead, so recovery must bound the bytes it can see, not just count parsed lines.
+    // The caller owns the underlying file; this view does not copy ledger history.
+    private sealed class LedgerPrefixStream(Stream file, long length) : Stream
+    {
+        private long _remaining = length;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length { get; } = length;
+        public override long Position { get => Length - _remaining; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+        public override int Read(Span<byte> buffer)
+        {
+            int read = file.Read(buffer[..(int)Math.Min(buffer.Length, _remaining)]);
+            _remaining -= read;
+            return read;
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 
     private static string Clean(string key) => string.Concat(key.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c is ':' or '|' ? '_' : c));
     private static string LedgerPath(string key) => Path.Combine(Root, "llenados", Clean(key) + ".jsonl");
@@ -315,18 +345,23 @@ public static class LiveStore
     private static string? _lastRunnersPath;
 
     /// <summary>
-    /// Adds a fill to the strategy's ledger. If the file cannot be written the fill is kept pending in memory, in order, and
-    /// written before the next one (meanwhile <see cref="LoadLedger"/> includes it in this process). Returns the error, or
-    /// null once everything pending is saved.
+    /// Adds a fill to the strategy's ledger. If writing, flushing or closing fails the fill stays pending in memory, in order,
+    /// and is retried before the next one. In this process <see cref="LoadLedger"/> reads only the committed file prefix and
+    /// then pending fills. Returns the error, or null once everything pending is saved.
+    /// Pending fills and the append boundary do not survive process exit; this is not a durable atomic batch transaction.
     /// </summary>
-    public static string? AppendFill(string key, LiveFill f)
+    public static string? AppendFill(string key, LiveFill f) =>
+        AppendFill(key, f, static path => new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0));
+
+    // Per-call I/O seam: fault injection never changes the stream factory used by another ledger or caller.
+    private static string? AppendFill(string key, LiveFill f, Func<string, Stream> openLedger)
     {
         lock (Gate)
         {
             string path = LedgerPath(key);
-            if (!Pending.TryGetValue(path, out var pending)) Pending[path] = pending = new List<LiveFill>();
-            pending.Add(f);
-            string? error = WritePending(path, pending);
+            if (!Pending.TryGetValue(path, out var pending)) Pending[path] = pending = new PendingLedger();
+            pending.Fills.Add(f);
+            string? error = WritePending(path, pending, openLedger);
             if (error == null) Pending.Remove(path);
             return error;
         }
@@ -335,38 +370,55 @@ public static class LiveStore
     /// <summary>Fills of a strategy that could not be written to its ledger yet.</summary>
     public static int PendingFills(string key)
     {
-        lock (Gate) return Pending.TryGetValue(LedgerPath(key), out var pending) ? pending.Count : 0;
+        lock (Gate) return Pending.TryGetValue(LedgerPath(key), out var pending) ? pending.Fills.Count : 0;
     }
 
-    /// <summary>Appends the pending fills in order, all or none; returns the error, or null.</summary>
-    private static string? WritePending(string path, List<LiveFill> pending)
+    /// <summary>Appends pending fills after restoring the committed boundary; returns an error until write, flush and close succeed.</summary>
+    private static string? WritePending(string path, PendingLedger pending, Func<string, Stream> openLedger)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0);
-            long end = file.Length;
-            var text = new StringBuilder();
-            if (end > 0)
+            using (var file = openLedger(path))
             {
-                // a line cut off by an earlier failure stays on its own line (skipped when loading) instead of absorbing this one
-                file.Seek(-1, SeekOrigin.End);
-                if (file.ReadByte() != '\n') text.Append('\n');
+                pending.CommittedEnd ??= file.Length;
+                long end = pending.CommittedEnd.Value;
+                if (file.Length < end) throw new IOException("The ledger is shorter than its committed append boundary.");
+                // A previous failed append may have left complete records as well as a partial line. Do not replay any
+                // pending fill until that entire uncommitted tail is removed successfully.
+                if (file.Length > end) file.SetLength(end);
+                var text = new StringBuilder();
+                if (end > 0)
+                {
+                    // Existing crash damage belongs to the committed prefix and remains a separate, skipped line.
+                    file.Seek(end - 1, SeekOrigin.Begin);
+                    if (file.ReadByte() != '\n') text.Append('\n');
+                }
+
+                foreach (var f in pending.Fills) text.Append(JsonSerializer.Serialize(f)).Append('\n');
+                file.Seek(end, SeekOrigin.Begin);
+                try
+                {
+                    file.Write(Encoding.UTF8.GetBytes(text.ToString()));
+                    file.Flush();
+                }
+                catch
+                {
+                    try
+                    {
+                        file.SetLength(end);
+                        file.Flush();
+                    }
+                    catch
+                    {
+                        // Keep the original error and boundary. Loading excludes this tail, and retry must truncate it.
+                    }
+
+                    throw;
+                }
             }
 
-            foreach (var f in pending) text.Append(JsonSerializer.Serialize(f)).Append('\n');
-            file.Seek(end, SeekOrigin.Begin);
-            try
-            {
-                file.Write(Encoding.UTF8.GetBytes(text.ToString()));
-            }
-            catch
-            {
-                // nothing half-written: everything stays pending for the next attempt
-                try { file.SetLength(end); } catch (IOException) { /* the next attempt starts on a new line */ }
-                throw;
-            }
-
+            // Disposal can also fail; only release pending fills after the stream has closed successfully.
             return null;
         }
         catch (Exception ex)
@@ -377,7 +429,8 @@ public static class LiveStore
 
     /// <summary>
     /// Reads a strategy's ledger. A line that cannot be read (for example one cut off by a crash) is skipped and counted in
-    /// <see cref="LiveLedger.SkippedLines"/>, and reading goes on; the file is never rewritten. Pending fills come last.
+    /// <see cref="LiveLedger.SkippedLines"/>, and reading goes on; the file is never rewritten. Uncommitted bytes from a failed
+    /// append are excluded while this process retains their boundary. Pending fills come last, once each.
     /// </summary>
     public static LiveLedger LoadLedger(string key, decimal pointValue)
     {
@@ -385,10 +438,16 @@ public static class LiveStore
         lock (Gate)
         {
             string path = LedgerPath(key);
+            Pending.TryGetValue(path, out var pending);
             try
             {
                 if (File.Exists(path))
-                    foreach (var line in File.ReadLines(path))
+                {
+                    using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var reader = new StreamReader(pending?.CommittedEnd is { } end
+                        ? new LedgerPrefixStream(file, Math.Min(end, file.Length))
+                        : file);
+                    while (reader.ReadLine() is { } line)
                     {
                         if (line.Length == 0) continue;
                         LiveFill? f;
@@ -404,14 +463,15 @@ public static class LiveStore
                         if (f != null) l.Apply(f);
                         else l.SkippedLines++;
                     }
+                }
             }
             catch
             {
                 // archivo dañado: se usa lo que se pudo leer
             }
 
-            if (Pending.TryGetValue(path, out var pending))
-                foreach (var f in pending) l.Apply(f);
+            if (pending != null)
+                foreach (var f in pending.Fills) l.Apply(f);
         }
 
         return l;

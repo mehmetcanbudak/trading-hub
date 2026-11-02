@@ -36,6 +36,7 @@ internal sealed partial class StrategiesView
     private readonly ToggleButton _labToggle = new();
     private readonly TextBlock _claudeHint = new() { Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
     private HashSet<string> _reportsBefore = new();
+    private Control? _workingNote;
 
     // conversación actual (se guarda en el historial) y ventana aparte del chat
     private ChatConversation _conv = new();
@@ -72,12 +73,12 @@ internal sealed partial class StrategiesView
         head.Children.Add(title);
 
         _sendButton = Ui.Button("Send", MaterialIconKind.Send, () => _ = SendToClaudeAsync(_prompt.Text ?? ""), "primary");
-        ToolTip.SetTip(_sendButton, "⌘Enter");
-        _stopButton2 = Ui.Button("Stop", MaterialIconKind.Stop, () => _claude.Cancel());
+        ToolTip.SetTip(_sendButton, Keys.Label("Enter"));
+        _stopButton2 = Ui.Button("Stop response", MaterialIconKind.Stop, () => _claude.Cancel());
         _stopButton2.IsVisible = false;
         _prompt.KeyDown += (_, e) =>
         {
-            if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Meta))
+            if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(Keys.Command))
             {
                 _ = SendToClaudeAsync(_prompt.Text ?? "");
                 e.Handled = true;
@@ -124,7 +125,7 @@ internal sealed partial class StrategiesView
         _claudeStatus.Text = v != null ? $"Claude Code {v.Replace("(Claude Code)", "").Trim()} · your subscription" : "Claude Code is not installed";
         _sendButton.IsEnabled = v != null;
         if (v == null)
-            AddNote(MaterialIconKind.AlertCircleOutline, "Claude Code was not found on this Mac. Install it from claude.com/claude-code, sign in and reopen Trading Hub.", Ui.Warn);
+            AddNote(MaterialIconKind.AlertCircleOutline, $"Claude Code was not found on this {Os.Device}. Install it from claude.com/claude-code, sign in and reopen Trading Hub.", Ui.Warn);
     }
 
     private void ShowSuggestions()
@@ -181,11 +182,12 @@ internal sealed partial class StrategiesView
         ScrollChatToEnd();
     }
 
-    private void AddNote(MaterialIconKind icon, string text, IBrush? color = null)
+    private Control AddNote(MaterialIconKind icon, string text, IBrush? color = null)
     {
         var row = Ui.H(6, Ui.Icon(icon, 14, color ?? Ui.Text2), new TextBlock { Text = text, Classes = { "small" }, Foreground = color ?? Ui.Text2, TextWrapping = TextWrapping.Wrap, MaxWidth = 330 });
         _chat.Children.Add(row);
         ScrollChatToEnd();
+        return row;
     }
 
     private void ScrollChatToEnd() => Dispatcher.UIThread.Post(() => _chatScroll.ScrollToEnd(), DispatcherPriority.Background);
@@ -227,7 +229,7 @@ internal sealed partial class StrategiesView
         _editor.IsReadOnly = true;
         bool lab = _labToggle.IsChecked == true;
         _reportsBefore = Lab.ReportStore.List().Select(r => r.Path).ToHashSet();
-        AddNote(MaterialIconKind.ProgressClock, "Claude is working…");
+        _workingNote = AddNote(MaterialIconKind.ProgressClock, "Claude is working…");
         await _claude.SendAsync(prompt, AppPaths.Strategies, ClaudeCodeBridge.StrategySystemPrompt + ClaudeCodeBridge.IndicatorSystemPrompt + (lab ? ClaudeCodeBridge.LabSystemPrompt : ""), lab,
             new[] { AppPaths.UserIndicators, Directory.CreateDirectory(Lab.LabServer.CapturesDir).FullName });
     }
@@ -340,8 +342,8 @@ internal sealed partial class StrategiesView
 
     private void RemoveWorkingNote()
     {
-        var note = _chat.Children.OfType<StackPanel>().LastOrDefault(p => p.Children.Count == 2 && p.Children[1] is TextBlock { Text: "Claude is working…" });
-        if (note != null) _chat.Children.Remove(note);
+        if (_workingNote != null) _chat.Children.Remove(_workingNote);
+        _workingNote = null;
     }
 
     /// <summary>Si Claude cambió el archivo abierto, se muestra al instante en el editor.</summary>
@@ -372,7 +374,7 @@ internal sealed partial class StrategiesView
                 var login = Ui.Button("Sign in to Claude Code", MaterialIconKind.Login, ClaudeCodeBridge.OpenLoginTerminal, "primary");
                 var card = Ui.Card(Ui.V(8,
                     new TextBlock { Text = "Claude Code requires you to sign in", FontWeight = FontWeight.SemiBold },
-                    new TextBlock { Text = "Terminal opens Claude Code: choose your Claude subscription account and follow the browser sign-in steps, then return here and retry.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap },
+                    new TextBlock { Text = (Os.IsWindows ? "A command window opens Claude Code" : "Terminal opens Claude Code") + ": choose your Claude subscription account and follow the browser sign-in steps, then return here and retry.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap },
                     login), 12);
                 _chat.Children.Add(card);
             }

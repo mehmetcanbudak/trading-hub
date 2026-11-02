@@ -5,6 +5,7 @@ using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Feeds.Binance;
 using TradingHub.Market;
+using TradingHub.Strategies;
 using TradingHub.Trading;
 
 namespace TradingHub.Tests;
@@ -59,6 +60,22 @@ public class BinanceBrokerTests
     private static decimal Level(Order o) => o.Type == OrderTypes.Stop ? o.TriggerPrice : o.Price;
 
     private static string CancelRoute(bool conditional) => conditional ? "DELETE /fapi/v1/algoOrder" : "DELETE /fapi/v1/order";
+
+    [Fact]
+    public async Task A_market_exit_is_sent_as_a_broker_enforced_reduce_only_market_order()
+    {
+        using var fake = new FakeBinance(futures: true);
+        using var broker = Broker(fake);
+        var close = broker.Exit(OrderTypes.Market, OrderDirections.Sell, 1m, 0, "Test: close");
+        await Until(() => close.Status == OrderStatus.Filled);
+        Assert.Equal(OrderStatus.Filled, close.Status);
+        Assert.Equal(OrderTypes.Market, close.Type);
+        var placed = Assert.Single(fake.Placed);
+        Assert.Equal("MARKET", placed.Type);
+        Assert.True(placed.ReduceOnly);
+        Assert.Equal(1m, placed.Qty);
+        Assert.Empty(broker.ActiveOrders);
+    }
 
     [Fact]
     public async Task Futures_market_order_handle_reaches_Filled_after_it_leaves_the_open_list()
@@ -739,6 +756,91 @@ public class BinanceBrokerTests
     }
 }
 
+[Collection("LiveStore")]
+public class BinanceSpotRecoveryTests
+{
+    private sealed class ResumedSpotStrategy : Strategy { }
+
+    private static async Task Until(Func<bool> condition)
+    {
+        var end = DateTime.UtcNow.AddSeconds(12);
+        while (!condition() && DateTime.UtcNow < end) await Task.Delay(30);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Spot_native_holdings_confirm_a_resumed_strategy_and_close_only_its_ledger_quantity(bool cachedMetadata)
+    {
+        string previousRoot = LiveStore.Root;
+        string root = Path.Combine(Path.GetTempPath(), "tradinghub_spot_" + Guid.NewGuid().ToString("N"));
+        LiveStore.Root = root;
+        try
+        {
+            using var fake = new FakeBinance(futures: false)
+            {
+                SpotSymbol = "ETHBTC", SpotBaseAsset = "ETH", FailSpotBalances = true,
+            };
+            fake.SetSpotBalance("ETH", 4.75m, 0.75m);
+            fake.SetSpotBalance("BTC", 20m, 2m); // quote currency and unrelated wallet holdings are not this position
+            var instrument = new Instrument
+            {
+                Symbol = "ETHBTC", FeedId = BinanceFeed.SpotId, BaseAsset = cachedMetadata ? "ETH" : "",
+                QuoteAsset = "BTC", TickSize = 0.00001m, VolumeStep = 0.001m,
+            };
+            var data = new InstrumentData(instrument, new SimulatedFeed());
+            var time = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
+            for (int i = 0; i < 5; i++)
+                data.Trades.Add(new Trade(i + 1, time.AddSeconds(i * 30), 0.05m, 1m, TradeSide.Buy));
+            using var broker = new BinanceBroker(data, fake.Settings, "Spot recovery fixture");
+            using var runner = new LiveStrategyRunner(new ResumedSpotStrategy(), data, broker, ChartPeriod.M1);
+            LiveStore.AppendFill(runner.Key, new LiveFill(time.AddDays(-1), true, 0.5m, 0.04m));
+            runner.Start();
+
+            await Until(() => broker.LastError != null);
+            Assert.False(broker.PositionReady);
+            Assert.Equal(0.5m, runner.Ledger.Position); // an unavailable wallet snapshot must not be booked flat
+            runner.ClosePosition();
+            Assert.Empty(fake.Placed);
+            Assert.Equal(0.5m, runner.Ledger.Position);
+
+            fake.FailSpotBalances = false;
+            await Until(() => runner.Ledger.Position == 0 && broker.PositionReady && broker.Position.Volume == 5m);
+            Assert.True(broker.PositionReady, broker.LastError);
+            Assert.Equal(0m, runner.Ledger.Position);
+            Assert.Equal(0m, LiveStore.LoadLedger(runner.Key, 1m).Position);
+            var close = Assert.Single(fake.Placed);
+            Assert.Equal(("ETHBTC", "SELL", "MARKET", 0.5m, "FILLED"), (close.Symbol, close.Side, close.Type, close.Qty, close.Status));
+            Assert.False(close.ReduceOnly); // spot has no exchange reduceOnly parameter; the runner bounds its own exit
+            Assert.Equal(5m, broker.Position.Volume); // free + locked, after closing only the strategy's 0.5
+            Assert.Equal((4.25m, 0.75m), fake.SpotBalance("ETH"));
+            Assert.Equal((20m, 2m), fake.SpotBalance("BTC"));
+            Assert.Equal(0m, broker.Position.AveragePrice); // account balances provide no aggregate cost basis
+            Assert.Equal(0m, broker.Position.UnrealizedPnL);
+
+            fake.FailSpotBalances = true;
+            await Until(() => !broker.PositionReady && broker.LastError != null);
+            Assert.False(broker.PositionReady);
+            Assert.NotNull(broker.LastError);
+            Assert.Equal(5m, broker.Position.Volume); // retain last known value, but mark it unknown
+            fake.SetSpotBalance("ETH", 0m, 0m);
+            fake.FailSpotBalances = false;
+            await Until(() => broker.PositionReady && broker.Position.Volume == 0m);
+            Assert.True(broker.PositionReady, broker.LastError);
+            Assert.Equal(0m, broker.Position.Volume); // absent base asset is flat only after a successful signed snapshot
+            Assert.Null(broker.LastError);
+            Assert.Single(fake.Placed);
+            Assert.Equal(cachedMetadata ? 0 : 1, fake.Calls.Count(c => c == "GET /api/v3/exchangeInfo"));
+            Assert.DoesNotContain(fake.Calls, c => c.Contains("/fapi/", StringComparison.Ordinal));
+        }
+        finally
+        {
+            LiveStore.Root = previousRoot;
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+}
+
 /// <summary>One regular order at the fake exchange.</summary>
 internal sealed record FakeBinanceOrder(long Id, string Symbol, string Side, string Type, decimal Qty, decimal Price, decimal StopPrice, bool ReduceOnly, bool External)
 {
@@ -800,6 +902,7 @@ internal sealed class FakeBinance : IDisposable
     private readonly object _gate = new();
     private readonly Dictionary<long, FakeBinanceOrder> _orders = new();
     private readonly Dictionary<long, FakeBinanceAlgoOrder> _algo = new();
+    private readonly Dictionary<string, (decimal Free, decimal Locked)> _spotBalances = new(StringComparer.Ordinal);
     private readonly HashSet<string> _forgotten = new();
     private readonly HashSet<string> _fillOnCancel = new();
     private readonly List<string> _calls = new();
@@ -814,6 +917,20 @@ internal sealed class FakeBinance : IDisposable
     }
 
     public bool Futures { get; }
+
+    public string SpotSymbol { get; set; } = "BTCUSDT";
+    public string SpotBaseAsset { get; set; } = "BTC";
+    public bool FailSpotBalances { get; set; }
+
+    public void SetSpotBalance(string asset, decimal free, decimal locked)
+    {
+        lock (_gate) _spotBalances[asset] = (free, locked);
+    }
+
+    public (decimal Free, decimal Locked) SpotBalance(string asset)
+    {
+        lock (_gate) return _spotBalances[asset];
+    }
 
     /// <summary>Delay before answering a new order (the order exists at the exchange meanwhile).</summary>
     public int PostDelayMs { get; set; }
@@ -1026,6 +1143,8 @@ internal sealed class FakeBinance : IDisposable
 
     private void FillLocked(FakeBinanceOrder o, decimal qty)
     {
+        if (!Futures && o.Symbol == SpotSymbol && _spotBalances.TryGetValue(SpotBaseAsset, out var balance))
+            _spotBalances[SpotBaseAsset] = (balance.Free + (o.Side == "BUY" ? qty : -qty), balance.Locked);
         o.Executed += qty;
         o.Status = o.Executed >= o.Qty ? "FILLED" : "PARTIALLY_FILLED";
         if (o.Status == "FILLED" && o.PlacedBy != 0) _algo[o.PlacedBy].Status = "FINISHED"; // filled in the matching engine
@@ -1124,6 +1243,10 @@ internal sealed class FakeBinance : IDisposable
         lock (_gate) _calls.Add(r.Method + " " + route);
         if (!route.StartsWith(Futures ? "/fapi/" : "/api/v3/", StringComparison.Ordinal)) return Error(-1, "Wrong market route.");
         if (route is "/fapi/v1/time" or "/api/v3/time") return (200, $"{{\"serverTime\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}}}");
+        if (r.Method == "GET" && route == "/api/v3/exchangeInfo")
+            return r.Query("symbol") == SpotSymbol
+                ? (200, $"{{\"symbols\":[{{\"symbol\":\"{SpotSymbol}\",\"baseAsset\":\"{SpotBaseAsset}\"}}]}}")
+                : Error(-1121, "Invalid symbol.");
         if (!Signed(r)) return (401, "{\"code\":-1022,\"msg\":\"Signature for this request is not valid.\"}");
         if (AlgoParameters.TryGetValue(r.Method + " " + route, out var documented) && Undocumented(r, documented) is { } extra)
             return Error(-1104, "Not all sent parameters were read; undocumented: " + extra);
@@ -1191,6 +1314,10 @@ internal sealed class FakeBinance : IDisposable
                 }
                 case ("GET", "/fapi/v2/positionRisk"):
                     return (200, "[]");
+                case ("GET", "/api/v3/account"):
+                    if (FailSpotBalances) return (503, "{\"code\":-1001,\"msg\":\"Wallet snapshot unavailable.\"}");
+                    return (200, "{\"canTrade\":true,\"balances\":[" + string.Join(",", _spotBalances.Where(b => b.Value.Free + b.Value.Locked != 0)
+                        .Select(b => $"{{\"asset\":\"{b.Key}\",\"free\":\"{Num(b.Value.Free)}\",\"locked\":\"{Num(b.Value.Locked)}\"}}")) + "]}");
                 case ("DELETE", "/fapi/v1/allOpenOrders" or "/api/v3/openOrders"):
                 {
                     var canceled = _orders.Values.Where(o => o.IsOpen && o.Symbol == r.Query("symbol")).ToList();
@@ -1302,8 +1429,7 @@ internal sealed class FakeBinance : IDisposable
             if (type == "MARKET")
             {
                 // the matching engine fills it at once
-                o.Executed = o.Qty;
-                o.Status = "FILLED";
+                FillLocked(o, o.Qty);
             }
 
             // futures answer ACK by default (accepted, nothing more); spot answers FULL for market and limit orders, ACK otherwise

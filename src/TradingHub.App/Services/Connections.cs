@@ -13,27 +13,36 @@ using TradingHub.Trading;
 
 namespace TradingHub.App.Services;
 
+/// <summary>Connection secrets, one entry per account. An empty result means no saved secret.</summary>
+public interface ISecretStore
+{
+    string Get(string account);
+
+    /// <summary>Save a secret; null or empty deletes it.</summary>
+    void Set(string account, string? secret);
+}
+
 /// <summary>
-/// Guarda secretos (contraseñas, API secrets) en el llavero de macOS. Las herramientas de prueba ponen
-/// TRADINGHUB_KEYCHAIN_FILE y usan un archivo propio con datos de mentira: nunca leen el llavero real.
+/// Stores connection secrets in macOS Keychain or Windows Credential Manager. Test tools select an isolated
+/// fake JSON file with TRADINGHUB_KEYCHAIN_FILE and never access the operating system's credential store.
 /// </summary>
 public static class Keychain
 {
     private const string Service = "Trading Hub";
-    private static readonly string? IsolatedFile = Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE") is { Length: > 0 } f ? f : null;
 
-    private static Dictionary<string, string> LoadIsolated()
-    {
-        try
-        {
-            return File.Exists(IsolatedFile) ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(IsolatedFile!)) ?? new() : new();
-        }
-        catch
-        {
-            return new();
-        }
-    }
+    /// <summary>The platform credential store, or the explicitly selected isolated test file.</summary>
+    internal static ISecretStore Store { get; } = Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE") is { Length: > 0 } f
+        ? new FileSecretStore(f)
+        : OperatingSystem.IsWindows() ? new WindowsCredentialStore(Service) : new MacKeychainStore(Service);
 
+    public static void Set(string account, string? secret) => Store.Set(account, secret);
+
+    public static string Get(string account) => Store.Get(account);
+}
+
+/// <summary>macOS Keychain integration through /usr/bin/security.</summary>
+internal sealed class MacKeychainStore(string service) : ISecretStore
+{
     private static string Run(params string[] args)
     {
         var psi = new ProcessStartInfo("/usr/bin/security") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
@@ -44,30 +53,44 @@ public static class Keychain
         return p.ExitCode == 0 ? output.TrimEnd('\n') : "";
     }
 
-    public static void Set(string account, string? secret)
+    public void Set(string account, string? secret)
     {
-        if (IsolatedFile != null)
-        {
-            var all = LoadIsolated();
-            if (string.IsNullOrEmpty(secret)) all.Remove(account);
-            else all[account] = secret;
-            File.WriteAllText(IsolatedFile, JsonSerializer.Serialize(all));
-            return;
-        }
-
         if (string.IsNullOrEmpty(secret))
         {
-            Run("delete-generic-password", "-s", Service, "-a", account);
+            Run("delete-generic-password", "-s", service, "-a", account);
             return;
         }
 
-        Run("add-generic-password", "-U", "-s", Service, "-a", account, "-w", secret);
+        Run("add-generic-password", "-U", "-s", service, "-a", account, "-w", secret);
     }
 
-    public static string Get(string account) =>
-        IsolatedFile != null
-            ? LoadIsolated().GetValueOrDefault(account, "")
-            : Run("find-generic-password", "-s", Service, "-a", account, "-w");
+    public string Get(string account) => Run("find-generic-password", "-s", service, "-a", account, "-w");
+}
+
+/// <summary>Fake secrets for tests and tools, isolated by TRADINGHUB_KEYCHAIN_FILE.</summary>
+internal sealed class FileSecretStore(string path) : ISecretStore
+{
+    private Dictionary<string, string> Load()
+    {
+        try
+        {
+            return File.Exists(path) ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path)) ?? new() : new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    public void Set(string account, string? secret)
+    {
+        var all = Load();
+        if (string.IsNullOrEmpty(secret)) all.Remove(account);
+        else all[account] = secret;
+        File.WriteAllText(path, JsonSerializer.Serialize(all));
+    }
+
+    public string Get(string account) => Load().GetValueOrDefault(account, "");
 }
 
 public enum ConnectionKind
@@ -190,6 +213,10 @@ public sealed class ConnectionManager
     private static readonly string FilePath = Path.Combine(AppPaths.Root, "connections.json");
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     private readonly Dictionary<string, IMarketDataFeed> _feeds = new();
+    private readonly List<IMarketDataFeed> _retiredFeeds = new();
+
+    // Tradovate shares its feed transport with account management; do not sever a live or unresolved consumer.
+    internal Func<IMarketDataFeed, bool>? FeedInUse { get; set; }
 
     public List<ConnectionProfile> Profiles { get; } = new();
     public event Action? Changed;
@@ -273,7 +300,11 @@ public sealed class ConnectionManager
 
         if (_feeds.Remove(p.Id, out var f))
         {
-            try { f.Dispose(); }
+            try
+            {
+                if (FeedInUse?.Invoke(f) == true) _retiredFeeds.Add(f);
+                else f.Dispose();
+            }
             catch { /* ignorar */ }
         }
 
@@ -460,6 +491,18 @@ public sealed class ConnectionManager
         return (false, "Unknown connection type");
     }
 
+    internal void ReleaseRetiredFeeds()
+    {
+        for (int i = _retiredFeeds.Count - 1; i >= 0; i--)
+        {
+            var feed = _retiredFeeds[i];
+            if (FeedInUse?.Invoke(feed) == true) continue;
+            _retiredFeeds.RemoveAt(i);
+            try { feed.Dispose(); }
+            catch { /* Feed disposal must not prevent releasing other idle transports. */ }
+        }
+    }
+
     public void DisposeAll()
     {
         foreach (var f in _feeds.Values)
@@ -469,5 +512,11 @@ public sealed class ConnectionManager
         }
 
         _feeds.Clear();
+        foreach (var feed in _retiredFeeds)
+        {
+            try { feed.Dispose(); }
+            catch { /* Continue closing the remaining transports. */ }
+        }
+        _retiredFeeds.Clear();
     }
 }

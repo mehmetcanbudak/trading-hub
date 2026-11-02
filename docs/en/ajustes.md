@@ -2,7 +2,7 @@
 
 # Settings
 
-**Settings** (⌘,) saves changes immediately. Provider-specific options are in [Connections](conexiones.md), chart options in [Charts](graficos.md), per-instrument brackets in [Trading](operar.md), and portfolio risk agents in [Live](en-vivo.md).
+**Settings** (⌘, on macOS; Ctrl+, on Windows) saves changes immediately. Provider-specific options are in [Connections](conexiones.md), chart options in [Charts](graficos.md), per-instrument brackets in [Trading](operar.md), and portfolio risk agents in [Live](en-vivo.md).
 
 ## General
 
@@ -11,6 +11,15 @@
 | Appearance | Dark | Dark/light across the app; also available through the title-bar sun/moon button. Per-chart color overrides remain intact. |
 | Chart time zone | This Mac's time | Time axes, tape and sessions. Common zones include Buenos Aires, New York, Chicago, London, Madrid and UTC, followed by the complete list. Chart strategies also use this setting, except the Mac-local option falls back to UTC for them. |
 | Alert sounds | On | Price alerts, Big Trades and indicator alerts. |
+
+## Language and regional display
+
+**Settings → General → Language** offers English (`en`), Spanish (`es`) and Simplified Chinese (`zh-CN`). The choice is saved immediately but applies when Trading Hub reopens; **Restart now** appears for a pending change. Existing English-fork `settings.json` without `Language` stays English. A fresh installation follows the OS: Spanish for `es`, Simplified Chinese for `zh`, English otherwise.
+
+**Restart now** uses the same protection-aware quit flow as explicit Quit, rather than launching a second process first. **Don't quit** cancels the restart without changing running strategies; the saved language choice remains for the next opening. With live positions, choose deliberately whether to retain broker stops/targets, cancel them while leaving exposure open, or request market closure. Pending close/cancel acknowledgments are waited for up to about ten seconds, then unresolved state is reported before exit. A warning is not execution confirmation: check actual broker positions/orders. See [Live](en-vivo.md#closing-the-window-and-reopening).
+
+Interface text, reports and Claude reply/report prose follow the selected language. Generated C# code, filenames, classes, parameter names, identifiers and code comments remain **English in every UI language**; existing user code is not renamed. Stored keys, provider payloads, numeric interchange formats and folder names remain stable. Display culture follows the selection (`en-US`, `es-AR`, `zh-CN`); invariant parsing/serialization contracts do not change. Platform fonts plus glyph fallback/shaping support CJK text in controls, charts and reports; native font/DPI appearance still needs platform visual validation. Arbitrary user/provider/system text and missing catalog entries may remain in their original language or English.
+
 
 ## Trading
 
@@ -23,7 +32,7 @@
 
 | Setting | Default | Effect |
 |---|---|---|
-| Keep running in menu bar when window closes | On | Hiding the window leaves runners active. The icon opens a live strategies/positions panel. Quit completely with ⌘Q or Quit Trading Hub. |
+| Keep running in menu bar/system tray when window closes | On | Hiding the window leaves runners active. The icon opens a live strategies/positions panel (right-click also opens a Windows tray menu). Quit completely with ⌘Q on macOS, Alt+F4 on Windows, or Quit Trading Hub; explicit quit uses the protection-aware flow. |
 | Resume strategies when Trading Hub opens | On | Restart previously running strategies after startup with saved parameters, size and limits; paused runners remain paused. Off means manual resume. |
 | Also resume real accounts | Off | Recommended off: real-money runners await manual action. Available only when general resumption is enabled. |
 | Automatically choose mini/micro contract | On | Fractional mini exposure can use an equivalent micro quantity, such as 1 NQ ×0.5 →5 MNQ. Whole exposure uses minis. Existing positions remain in their contract until flat. |
@@ -32,13 +41,16 @@
 
 | Setting | Default | Effect |
 |---|---|---|
-| Keep Mac awake | On | Prevent idle system sleep while strategies/risk reviews run; display can sleep. No administrator password; released when no work remains. |
+| Keep Mac/PC awake | On | Prevent idle system sleep while strategies/risk reviews run; display can sleep. No administrator password; released when no work remains. |
 | Continue with lid closed | Off | When enabled and work is active, requests administrator permission, once per launch, for a helper that keeps the Mac running with its lid closed. Helper cleanup restores normal sleep when the app exits, including monitored unexpected exit. |
 | Only when connected to power | On | Closed-lid operation stops on battery; available only with the preceding option enabled. |
 
 The status text explains current assertions and closed-lid mode. **Do not put a running closed-lid Mac into a bag; cooling is restricted.**
 
 Idle prevention uses macOS power assertions. Closed-lid support uses a privileged helper managing `pmset disablesleep` while the app and a data-directory notice exist, optionally only on AC power, returning it to 0 afterward. This changes a system power setting; review conflicts with other tools. Automated localization tests disable the sleep guard and do not validate real thermal/power behavior.
+
+On Windows, idle prevention uses `SetThreadExecutionState`. The macOS closed-lid and charger controls are not applied: **With the lid closed** explains Windows Power Options and offers opening them. Lid closure follows the OS policy; Trading Hub cannot override it. Physical Windows power behavior and macOS helper/lid/thermal/lifecycle behavior are separate, uncompleted native release gates.
+
 
 ## Keyboard shortcuts
 
@@ -57,9 +69,9 @@ Click a binding and press keys. Esc cancels; Delete clears it. Reusing a combina
 | Setting | Effect |
 |---|---|
 | Record incoming live data | On by default; stores trades for fast reopening, replay and backtests. |
-| Data folder | `~/Library/Application Support/Trading Hub`, Open button. |
-| Custom indicators (C#) | `~/Documents/Trading Hub/Indicadores`, Open button. |
-| Strategies (C#) | `~/Documents/Trading Hub/Estrategias`, Open button. |
+| Data folder | macOS: `~/Library/Application Support/Trading Hub`; Windows: `%APPDATA%\Trading Hub`. Open button. |
+| Custom indicators (C#) | Documents known folder → `Trading Hub/Indicadores`, Open button. |
+| Strategies (C#) | Documents known folder → `Trading Hub/Estrategias`, Open button. |
 
 See [Data](datos.md) and [Privacy](privacidad.md).
 

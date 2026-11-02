@@ -26,9 +26,9 @@ public enum ClusterColorScheme
 /// <summary>Trazo de la línea entre la entrada y la salida de una operación.</summary>
 public enum TradeLineStyle
 {
-    [Display(Name = "Rayas")] Dashed,
+    [Display(Name = "Dashed")] Dashed,
     [Display(Name = "Continuous")] Solid,
-    [Display(Name = "Points")] Dotted,
+    [Display(Name = "Dotted")] Dotted,
 }
 
 public sealed class ChartSettings

@@ -108,7 +108,7 @@ public sealed class MarkdownView : UserControl
                 for (i++; i < lines.Length && !lines[i].Trim().StartsWith("```"); i++) code.Add(lines[i]);
                 _root.Children.Add(new Border
                 {
-                    Child = new SelectableTextBlock { Text = string.Join('\n', code), FontFamily = new FontFamily("Menlo"), FontSize = 12, TextWrapping = TextWrapping.Wrap },
+                    Child = new SelectableTextBlock { Text = string.Join('\n', code), FontFamily = Ui.MonoFont, FontSize = 12, TextWrapping = TextWrapping.Wrap },
                     Background = _code,
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(12, 10),
@@ -187,7 +187,7 @@ public sealed class MarkdownView : UserControl
             if (m.Index > pos) tb.Inlines!.Add(new Run(text[pos..m.Index]));
             var v = m.Value;
             if (v.StartsWith("**")) tb.Inlines!.Add(new Run(v[2..^2]) { FontWeight = FontWeight.Bold });
-            else if (v.StartsWith('`')) tb.Inlines!.Add(new Run(v[1..^1]) { FontFamily = new FontFamily("Menlo"), Background = _code });
+            else if (v.StartsWith('`')) tb.Inlines!.Add(new Run(v[1..^1]) { FontFamily = Ui.MonoFont, Background = _code });
             else tb.Inlines!.Add(new Run(v[1..^1]) { FontStyle = FontStyle.Italic });
             pos = m.Index + m.Length;
         }

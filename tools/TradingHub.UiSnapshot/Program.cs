@@ -111,7 +111,8 @@ if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_INDICATO
         foreach (var f in Directory.EnumerateFiles(realIndicators, "*.cs", SearchOption.AllDirectories))
         {
             var rel = Path.GetRelativePath(realIndicators, f);
-            if (rel.Contains("/bin/") || rel.Contains("/obj/")) continue;
+            var unixRel = rel.Replace(Path.DirectorySeparatorChar, '/'); // en Windows las carpetas van con «\»
+            if (unixRel.Contains("/bin/") || unixRel.Contains("/obj/")) continue;
             var dst = Path.Combine(snapIndicators, rel);
             Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
             File.Copy(f, dst);
@@ -213,10 +214,34 @@ static void SanitizeConnections(string path, string fakeUri, string keychainFile
     File.WriteAllText(keychainFile, System.Text.Json.JsonSerializer.Serialize(secrets));
 }
 
+// Every isolated scene uses a deliberate language; the environment selects non-English parity captures.
+TradingHub.App.Localization.Lang.Load(Environment.GetEnvironmentVariable("TRADINGHUB_LANG") ?? TradingHub.App.Localization.Lang.English);
+var sceneLang = TradingHub.App.Localization.Lang.Current;
+var sceneSettings = TradingHub.App.Services.AppSettings.Load();
+sceneSettings.Language = sceneLang;
+sceneSettings.Save();
 AppBuilder.Configure<App>()
     .UseSkia()
     .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
     .SetupWithoutStarting();
+TradingHub.App.Localization.Lang.Install();
+
+// Finite diagnostics, not a natural-language proof: retain visible text and known untranslated candidates.
+void ReportUntranslated(Avalonia.Controls.Window w, string page)
+{
+    var visible = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(w).OfType<Avalonia.Controls.TextBlock>()
+        .Where(t => t.IsEffectivelyVisible && !string.IsNullOrWhiteSpace(t.Text))
+        .Select(t => t.Text!).Distinct().ToList();
+    bool NeedsTranslation(string text) => !Path.IsPathFullyQualified(text) && !TradingHub.App.Localization.Lang.Available.Any(a => a.Name == text)
+        && (sceneLang == TradingHub.App.Localization.Lang.English
+            ? TradingHub.UiSnapshot.EnglishLocalizationAudit.LooksSpanish(text)
+            : TradingHub.App.Localization.Lang.Translate(text) is { } translated && translated != text);
+    var left = visible.Where(NeedsTranslation).ToList();
+    string name = page.Replace('+', '_');
+    File.WriteAllLines(Path.Combine(outDir, $"visible-text-{name}.txt"), visible);
+    File.WriteAllLines(Path.Combine(outDir, $"untranslated-{name}.txt"), left);
+    Console.WriteLine($"Language audit {page}: {sceneLang}; {left.Count} known untranslated candidates");
+}
 
 MainWindow? window = null;
 
@@ -1163,6 +1188,7 @@ foreach (var page in pages)
     var path = Path.Combine(outDir, page.Replace('+', '_') + ".png");
     frame?.Save(path);
     Console.WriteLine(frame != null ? $"Captura: {path}" : $"No se pudo capturar {page}");
+    ReportUntranslated(window, page);
 }
 
 App.Services.Shutdown();

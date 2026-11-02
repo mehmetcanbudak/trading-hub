@@ -18,7 +18,7 @@ namespace TradingHub.App.Windows;
 /// </summary>
 internal sealed class LiveStrategyWindow : Window
 {
-    private static readonly CultureInfo Es = new("en-US");
+    private static CultureInfo Es => TradingHub.Common.UiCulture.Current;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     private readonly AppServices _svc;
     private readonly Action<string> _status;
@@ -279,7 +279,7 @@ internal sealed class LiveStrategyWindow : Window
 
         if (running)
         {
-            Add(Ui.Button("Stop", MaterialIconKind.Stop, () => _ = StopAsync(false)));
+            Add(Ui.Button("Stop strategy", MaterialIconKind.Stop, () => _ = StopAsync(false)));
             if (!locked && e.Ledger.Position != 0) Add(Ui.Button("Stop and close", MaterialIconKind.StopCircleOutline, () => _ = StopAsync(true), "danger"));
         }
         else Add(Ui.Button(e.WaitingResume ? "Resume on chart" : "Restart", MaterialIconKind.Play, () => _ = ResumeAsync(), "primary"));
@@ -333,7 +333,7 @@ internal sealed class LiveStrategyWindow : Window
         string what =
             close ? "Stop strategy and close its position at market." : "Stop strategy; any open position remains open.";
         if (_entry.ChartStrategy != null && !_entry.Locked) what += " The chart remains in visualization-only mode.";
-        if (!await ConfirmDialog.ShowAsync(this, "Stop strategy", what, close ? "Stop and close" : "Stop", danger: close)) return;
+        if (!await ConfirmDialog.ShowAsync(this, "Stop strategy", what, close ? "Stop and close" : "Stop strategy", danger: close)) return;
         await _svc.Live.StopAsync(_entry, close);
         _status($"{_entry.Info.Strategy} stopped{(close ? " and position closed" : "")}");
         _actionsKey = "";

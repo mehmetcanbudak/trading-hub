@@ -133,6 +133,7 @@ internal static class EnglishLocalizationAudit
 
         var tracked = Git(root, "diff", "--name-only", Baseline, "--", "src").Split('\n');
         var added = Git(root, "ls-files", "--others", "--exclude-standard", "--", "src").Split('\n');
+        var baselinePaths = Git(root, "ls-tree", "-r", "--name-only", Baseline, "--", "src").Split('\n').ToHashSet(StringComparer.Ordinal);
         foreach (var relative in tracked.Concat(added).Where(x => x.EndsWith(".cs", StringComparison.Ordinal)).Distinct())
         {
             string path = Path.Combine(root, relative);
@@ -143,7 +144,7 @@ internal static class EnglishLocalizationAudit
             {
                 if (current != approved) Fail(relative + ": non-text structure changed since review");
             }
-            else if (added.Contains(relative) || current != Structure(Git(root, "show", Baseline + ":" + relative), template))
+            else if (!baselinePaths.Contains(relative) || added.Contains(relative) || current != Structure(Git(root, "show", Baseline + ":" + relative), template))
                 Fail(relative + ": non-text source change needs review");
         }
         Console.WriteLine($"English source audit: {files} files, {strings} text tokens; {used.Count} documented compatibility exceptions; {failures} failures.");

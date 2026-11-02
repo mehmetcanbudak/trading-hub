@@ -16,7 +16,7 @@ namespace TradingHub.App.Views;
 
 internal sealed partial class StrategiesView
 {
-    private static readonly CultureInfo Es = CultureInfo.GetCultureInfo("en-US");
+    private static CultureInfo Es => TradingHub.Common.UiCulture.Current;
 
     // configuración
     private readonly ComboBox _dataSource = new() { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "No saved data" };
@@ -42,7 +42,7 @@ internal sealed partial class StrategiesView
     private readonly EquityChart _equity = new() { Height = 270 };
     private readonly ListBox _tradesList = new() { Background = Brushes.Transparent };
     private readonly Grid _metricsGrid = new() { ColumnDefinitions = new ColumnDefinitions("*,20,*") };
-    private readonly TextBox _logBox = new() { IsReadOnly = true, AcceptsReturn = true, FontFamily = new FontFamily("Menlo, monospace"), FontSize = 11.5, TextWrapping = TextWrapping.NoWrap };
+    private readonly TextBox _logBox = new() { IsReadOnly = true, AcceptsReturn = true, FontFamily = Ui.MonoFont, FontSize = 11.5, TextWrapping = TextWrapping.NoWrap };
     private readonly EquityChart _mcChart = new() { Height = 260, EmptyText = "Run simulation to view possible outcomes" };
     private readonly WrapPanel _mcKpis = new() { ItemSpacing = 10, LineSpacing = 10 };
     private readonly Panel _resultsPanel = new();
@@ -58,7 +58,7 @@ internal sealed partial class StrategiesView
     private Control BuildBacktestPage()
     {
         _runButton = Ui.Button("Run backtest", MaterialIconKind.Play, () => _ = RunBacktestAsync(), "primary");
-        _stopButton = Ui.Button("Stop", MaterialIconKind.Stop, () => _cts?.Cancel());
+        _stopButton = Ui.Button("Stop run", MaterialIconKind.Stop, () => _cts?.Cancel());
         _stopButton.IsEnabled = false;
         _limitMode.Items.Add(new ComboBoxItem { Content = "Only when price trades through it", Tag = LimitFillMode.TradeThrough });
         _limitMode.Items.Add(new ComboBoxItem { Content = "On touch (optimistic)", Tag = LimitFillMode.Touch });

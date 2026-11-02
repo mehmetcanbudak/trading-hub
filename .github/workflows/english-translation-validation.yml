@@ -5,18 +5,36 @@ on:
     branches:
       - feat/english-localization
       - translation/english-documentation-ui
+      - 'sync/upstream-*'
   pull_request:
     branches:
       - main
       - feat/english-localization
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: english-validation-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  TRADINGHUB_SLEEP_GUARD: 'off'
+
 jobs:
   windows-shared-runtime:
-    runs-on: windows-latest
-    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,52 +43,178 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Isolate all application stores
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP 'tradinghub-validation'
+          New-Item -ItemType Directory -Force $fixture | Out-Null
+          $paths = @{
+            TRADINGHUB_DATA_DIR = 'data'
+            TRADINGHUB_STRATEGIES_DIR = 'strategies'
+            TRADINGHUB_INDICATORS_DIR = 'indicators'
+            TRADINGHUB_BACKTESTS_DIR = 'backtests'
+            TRADINGHUB_LIVE_DIR = 'live'
+            TRADINGHUB_KEYCHAIN_FILE = 'fake-keychain.json'
+          }
+          foreach ($name in $paths.Keys) {
+            "$name=$(Join-Path $fixture $paths[$name])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
       - name: Test upstream tracker without network or notifications
         run: python -m unittest discover -s tools/tests -p 'test_*.py' -v
-      - name: Build shared solution on Windows
+      - name: Build complete solution on Windows
         run: dotnet build TradingHub.slnx --configuration Release
-      - name: Run shared regression tests on Windows
-        run: dotnet test tests/TradingHub.Tests --configuration Release --no-restore
-      - name: Verify English source and documentation on Windows
+      - name: Run compatibility, safety and native Windows regression tests
+        env:
+          # Unique test-only entries are removed by the native credential fixture.
+          TRADINGHUB_TEST_CREDMAN: '1'
+        run: dotnet test tests/TradingHub.Tests --configuration Release --no-restore --no-build --logger "trx;LogFileName=windows.trx" --results-directory "${{ runner.temp }}/tradinghub-results"
+      - name: Verify English source and documentation
         run: python tools/check_english_translation.py
-
-  macos-build-and-tests:
-    runs-on: macos-15
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install .NET SDK 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - name: Test upstream tracker without network or notifications
-        run: python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
-      - name: Build solution
-        run: dotnet build TradingHub.slnx --configuration Release
-      - name: Run regression tests
-        run: dotnet test tests/TradingHub.Tests --configuration Release --no-restore
-      - name: Verify English documentation, source and compatibility review
-        run: python3 tools/check_english_translation.py
-      - name: Render and check isolated English UI scenarios
-        shell: bash
+      - name: Verify every upstream translation and template
+        shell: pwsh
         run: |
-          fixture="$(mktemp -d "$RUNNER_TEMP/tradinghub-english.XXXXXX")"
-          export TRADINGHUB_DATA_DIR="$fixture/data"
-          export TRADINGHUB_STRATEGIES_DIR="$fixture/strategies"
-          export TRADINGHUB_INDICATORS_DIR="$fixture/indicators"
-          export TRADINGHUB_KEYCHAIN_FILE="$fixture/fake-keychain.json"
-          export TRADINGHUB_SLEEP_GUARD=off
-          dotnet run --configuration Release --project tools/TradingHub.UiSnapshot -- \
-            "$RUNNER_TEMP/tradinghub-english-ui" 2 \
-            trading settings connections data strategies accounts live english \
-            panel footprint mercado conexiones data+rithmic data+import trading+strategy theme
-      - name: Upload English UI and report evidence
+          foreach ($language in 'es', 'zh-CN') {
+            dotnet tools/TradingHub.I18n/bin/Release/net10.0/TradingHub.I18n.dll coverage tools/TradingHub.I18n/provenance.json "src/TradingHub.App/Localization/$language.json"
+            if ($LASTEXITCODE -ne 0) { throw "Translation coverage failed: $language" }
+          }
+      - name: Exercise Windows UI, safety and quit scenarios
+        shell: pwsh
+        run: |
+          $tool = 'tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll'
+          $env:TRADINGHUB_LANG = 'en'
+          dotnet $tool "$env:RUNNER_TEMP/tradinghub-ui/en" 2 trading settings connections data strategies accounts live english panel footprint mercado conexiones data+rithmic data+import trading+strategy theme safety
+          if ($LASTEXITCODE -ne 0) { throw 'English Windows UI scenarios failed' }
+          foreach ($language in 'es', 'zh-CN') {
+            $env:TRADINGHUB_LANG = $language
+            dotnet $tool "$env:RUNNER_TEMP/tradinghub-ui/$language" 2 trading settings connections data strategies accounts live
+            if ($LASTEXITCODE -ne 0) { throw "Windows language scenarios failed: $language" }
+          }
+      - name: Install NSIS compiler
+        run: choco install nsis --yes --no-progress
+      - name: Build self-contained x64 and ARM64 installers
+        shell: pwsh
+        run: |
+          & ./build-windows.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
+      - name: Install, launch, capture and uninstall the native ${{ matrix.arch }} application
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP 'tradinghub-native'
+          $install = Join-Path $fixture 'Trading Hub'
+          $report = Join-Path $env:RUNNER_TEMP 'tradinghub-ui/native'
+          New-Item -ItemType Directory -Force "$fixture/data", $report | Out-Null
+          foreach ($pair in @{
+            TRADINGHUB_DATA_DIR = 'data'; TRADINGHUB_STRATEGIES_DIR = 'strategies'
+            TRADINGHUB_INDICATORS_DIR = 'indicators'; TRADINGHUB_BACKTESTS_DIR = 'backtests'
+            TRADINGHUB_LIVE_DIR = 'live'; TRADINGHUB_KEYCHAIN_FILE = 'fake-keychain.json'
+          }.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($pair.Key, (Join-Path $fixture $pair.Value))
+          }
+          '[{"Id":"sim","Kind":"Simulator","Name":"Fixture simulator","Enabled":true}]' | Set-Content "$fixture/data/connections.json" -Encoding utf8
+          '{"Language":"en","KeepInMenuBar":false}' | Set-Content "$fixture/data/settings.json" -Encoding utf8
+          $sentinel = Join-Path $fixture 'data/preserved-user-data.txt'
+          'isolated preservation sentinel' | Set-Content $sentinel
+          $before = (Get-FileHash $sentinel).Hash
+          $setup = Start-Process (Resolve-Path 'dist/TradingHub-Setup-${{ matrix.arch }}.exe') -ArgumentList "/S /D=$install" -PassThru -Wait
+          if ($setup.ExitCode -ne 0 -or !(Test-Path "$install/TradingHub.exe")) { throw 'Native installation failed' }
+          $app = Start-Process "$install/TradingHub.exe" -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            do {
+              Start-Sleep -Milliseconds 200
+              $app.Refresh()
+            } while (!$app.HasExited -and $app.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+            if ($app.HasExited -or $app.MainWindowHandle -eq 0) { throw 'Native main window did not open' }
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            try {
+              $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $bitmap.Save((Join-Path $report 'windows-native.png'))
+            } finally {
+              $graphics.Dispose()
+              $bitmap.Dispose()
+            }
+            if (!$app.CloseMainWindow() -or !$app.WaitForExit(15000)) { throw 'Native close did not exit safely' }
+            if ($app.ExitCode -ne 0) { throw "Native application exited with $($app.ExitCode)" }
+          } finally {
+            # Only this owned, fake-data fixture process can be terminated after a failed smoke.
+            if (!$app.HasExited) { $app.Kill($true); $app.WaitForExit() }
+            $app.Dispose()
+          }
+          $uninstall = Start-Process "$install/Desinstalar Trading Hub.exe" -ArgumentList "/S _?=$install" -PassThru -Wait
+          if ($uninstall.ExitCode -ne 0 -or (Test-Path "$install/TradingHub.exe")) { throw 'Native uninstall failed' }
+          if ((Get-FileHash $sentinel).Hash -ne $before) { throw 'Installer or uninstall changed fixture data' }
+          'Native ${{ matrix.arch }} install, GUI open/capture/close, uninstall and data preservation passed.' | Set-Content (Join-Path $report 'result.txt')
+      - name: Upload Windows validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tradinghub-english-ui
-          path: ${{ runner.temp }}/tradinghub-english-ui/
+          name: tradinghub-windows-validation-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/tradinghub-ui/
+            ${{ runner.temp }}/tradinghub-results/
+            dist/TradingHub-Setup-*.exe
+          if-no-files-found: warn
+          retention-days: 7
+
+  macos-build-and-tests:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install .NET SDK 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Isolate all application stores
+        shell: bash
+        run: |
+          fixture="$(mktemp -d "$RUNNER_TEMP/tradinghub-validation.XXXXXX")"
+          for pair in DATA_DIR:data STRATEGIES_DIR:strategies INDICATORS_DIR:indicators BACKTESTS_DIR:backtests LIVE_DIR:live KEYCHAIN_FILE:fake-keychain.json; do
+            printf 'TRADINGHUB_%s=%s/%s\n' "${pair%%:*}" "$fixture" "${pair#*:}" >> "$GITHUB_ENV"
+          done
+      - name: Test upstream tracker without network or notifications
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
+      - name: Build complete solution
+        run: dotnet build TradingHub.slnx --configuration Release
+      - name: Run compatibility and safety regression tests
+        run: dotnet test tests/TradingHub.Tests --configuration Release --no-restore --no-build --logger "trx;LogFileName=macos.trx" --results-directory "${{ runner.temp }}/tradinghub-results"
+      - name: Verify English documentation, source and historical compatibility review
+        run: python3 tools/check_english_translation.py
+      - name: Verify every upstream translation and template
+        shell: bash
+        run: |
+          for language in es zh-CN; do
+            dotnet tools/TradingHub.I18n/bin/Release/net10.0/TradingHub.I18n.dll coverage tools/TradingHub.I18n/provenance.json "src/TradingHub.App/Localization/$language.json"
+          done
+      - name: Exercise English UI, safety and quit scenarios
+        shell: bash
+        env:
+          TRADINGHUB_LANG: en
+        run: |
+          dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll \
+            "$RUNNER_TEMP/tradinghub-ui/en" 2 \
+            trading settings connections data strategies accounts live english \
+            panel footprint mercado conexiones data+rithmic data+import trading+strategy theme safety
+      - name: Exercise Spanish and Simplified Chinese surfaces
+        shell: bash
+        run: |
+          for language in es zh-CN; do
+            TRADINGHUB_LANG="$language" dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll \
+              "$RUNNER_TEMP/tradinghub-ui/$language" 2 trading settings connections data strategies accounts live
+          done
+      - name: Upload macOS validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tradinghub-macos-validation
+          path: |
+            ${{ runner.temp }}/tradinghub-ui/
+            ${{ runner.temp }}/tradinghub-results/
           if-no-files-found: warn
           retention-days: 7

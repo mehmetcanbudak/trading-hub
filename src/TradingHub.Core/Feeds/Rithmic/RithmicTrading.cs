@@ -114,6 +114,14 @@ public sealed class RithmicTradingSession : IDisposable
     private readonly ConcurrentDictionary<string, decimal> _balances = new();
     private readonly ConcurrentDictionary<string, RithmicAccountSummary> _summaries = new();
     private readonly ConcurrentDictionary<string, RithmicFill> _fills = new();
+
+    private readonly ConcurrentDictionary<string, byte> _orderReplays = new();
+    private readonly ConcurrentDictionary<string, byte> _positionReports = new();
+    private readonly ConcurrentDictionary<string, RithmicOrderState> _replayCandidates = new();
+
+    public bool OrdersReadyFor(string account) => IsConnected && _orderReplays.ContainsKey(account);
+    public bool PositionReadyFor(string account, string symbol, string exchange) =>
+        IsConnected && _positionReports.ContainsKey(Key(account, symbol, exchange));
     private readonly List<(string Exchange, string Route, bool Default, bool Up)> _routes = new();
     private RithmicClient? _orderClient;
     private string _fcm = "", _ib = "";
@@ -201,6 +209,11 @@ public sealed class RithmicTradingSession : IDisposable
             var ct = conn.Token;
             try
             {
+                _orderReplays.Clear();
+                _positionReports.Clear();
+                _replayCandidates.Clear();
+                foreach (var (id, order) in _orders)
+                    if (!order.Done && order.BasketId.Length > 0) _replayCandidates[id] = order;
                 StatusText = "Connecting to order plant…";
                 orders = new RithmicClient();
                 await orders.ConnectAsync(_settings.Uri, ct, _settings.TimeoutMs).ConfigureAwait(false);
@@ -238,7 +251,7 @@ public sealed class RithmicTradingSession : IDisposable
                 foreach (var a in accounts)
                 {
                     await orders.SendAsync(Account(new ProtoWriter().Int(Rp.TemplateId, RpO.RequestSubscribeOrders).String(Rp.UserMsg, "sub"), a), ct).ConfigureAwait(false);
-                    await orders.SendAsync(Account(new ProtoWriter().Int(Rp.TemplateId, RpO.RequestShowOrders).String(Rp.UserMsg, "show"), a), ct).ConfigureAwait(false);
+                    await orders.SendAsync(Account(new ProtoWriter().Int(Rp.TemplateId, RpO.RequestShowOrders).String(Rp.UserMsg, "show:" + a.AccountId), a), ct).ConfigureAwait(false);
                 }
 
                 // posiciones y resultado
@@ -376,6 +389,26 @@ public sealed class RithmicTradingSession : IDisposable
         int tpl = (int)m.Int(Rp.TemplateId);
         switch (tpl)
         {
+            case RpO.ResponseShowOrders:
+                if (m.Has(RpO.BasketId)) OnOrder(m, exchange: false);
+                if (m.Strings(Rp.RpCode).FirstOrDefault() is "0" or "7")
+                {
+                    foreach (var tag in m.Strings(Rp.UserMsg))
+                        if (tag.StartsWith("show:", StringComparison.Ordinal))
+                        {
+                            string account = tag[5..];
+                            foreach (var (id, order) in _replayCandidates)
+                                if (order.Account == account && _replayCandidates.TryRemove(id, out _))
+                                {
+                                    // Only a completed replay can confirm a cached working order is absent.
+                                    order.Done = true;
+                                    order.Cancelled = true;
+                                }
+                            _orderReplays[account] = 0;
+                        }
+                    Changed?.Invoke();
+                }
+                return;
             case RpO.RithmicOrderNotification:
             case RpO.ExchangeOrderNotification:
                 OnOrder(m, tpl == RpO.ExchangeOrderNotification);
@@ -426,7 +459,11 @@ public sealed class RithmicTradingSession : IDisposable
         var exch = m.String(Rp.Exchange);
         if (acc == null || sym == null || exch == null) return;
         var p = _positions.GetOrAdd(Key(acc, sym, exch), _ => new RithmicPosition());
-        if (m.Number(RpO.NetQuantity) is { } net) p.Net = net;
+        if (m.Number(RpO.NetQuantity) is { } net)
+        {
+            p.Net = net;
+            _positionReports[Key(acc, sym, exch)] = 0;
+        }
         if (m.Number(RpO.AvgOpenFillPrice) is { } avg) p.AvgPrice = avg;
         if ((m.Number(RpO.OpenPositionPnl) ?? m.Number(RpO.DayOpenPnl)) is { } open) p.OpenPnl = open;
         if ((m.Number(RpO.DayClosedPnl) ?? m.Number(RpO.ClosedPositionPnl)) is { } closed) p.ClosedPnl = closed;
@@ -438,6 +475,7 @@ public sealed class RithmicTradingSession : IDisposable
     {
         var basket = m.String(RpO.BasketId);
         if (string.IsNullOrEmpty(basket)) return;
+        _replayCandidates.TryRemove(basket, out _);
         long ssboe = m.Int(RpO.Ssboe);
         var when = ssboe > 0 ? DateTimeOffset.FromUnixTimeSeconds(ssboe).UtcDateTime.AddTicks(m.Int(RpO.Usecs) * 10) : DateTime.UtcNow;
         var o = _orders.GetOrAdd(basket, b => new RithmicOrderState { BasketId = b, Time = when });

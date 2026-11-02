@@ -55,7 +55,7 @@ internal sealed class CodeEditorWindow : Window
     private Control Build()
     {
         var add = Ui.Button("New", MaterialIconKind.Plus, () => _ = NewAsync());
-        var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, "Open folder in Finder", () => Shell.OpenFolder(AppPaths.UserIndicators));
+        var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, Os.IsWindows ? "Open folder in File Explorer" : "Open folder in Finder", () => Shell.OpenFolder(AppPaths.UserIndicators));
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
         var acts = Ui.H(4, folder, add);
         DockPanel.SetDock(acts, Dock.Right);
@@ -80,7 +80,7 @@ internal sealed class CodeEditorWindow : Window
         left.Children.Add(Ui.Card(_files, 6));
 
         var save = Ui.Button("Save and compile", MaterialIconKind.Hammer, SaveAndCompile, "primary");
-        ToolTip.SetTip(save, "⌘S");
+        ToolTip.SetTip(save, Keys.Label("S"));
         var bar = new DockPanel { Margin = new Thickness(16, 10) };
         var right = Ui.H(10, new Border { Child = Ui.H(7, _dot, _state), Classes = { "pill" } }, save);
         DockPanel.SetDock(right, Dock.Right);

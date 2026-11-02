@@ -134,7 +134,7 @@ internal sealed class ChartTraderPanel : UserControl
         var be = Trade("Breakeven", null, "", "Moves stop to entry price", () => _ = _host.BracketActionAsync(_chart, b => b.MoveStopToBreakeven(), "Move stop to breakeven"));
         // parciales: cierran una parte a mercado; el stop y los objetivos se ajustan solos
         var partials = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,4,*,4,*") };
-        partials.Children.Add(new TextBlock { Text = "Close", Classes = { "muted", "small" }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+        partials.Children.Add(new TextBlock { Text = "Reduce", Classes = { "muted", "small" }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
         int col = 1;
         foreach (var pct in new[] { 25, 50, 75 })
         {

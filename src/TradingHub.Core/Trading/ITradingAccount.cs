@@ -17,6 +17,14 @@ public interface ITradingAccount
     Position Position { get; }
     IEnumerable<Order> ActiveOrders { get; }
 
+    /// <summary>True only after the account has reported this instrument's position, including an explicit flat snapshot.
+    /// A default zero before replay/refresh completes is unknown, not flat. Synchronous accounts are ready immediately.</summary>
+    bool PositionReady => true;
+
+    /// <summary>True only after the current connection's working-order replay/listing is complete.
+    /// Until then, an absent saved order ID is unknown, not evidence that the order no longer exists.</summary>
+    bool OrdersReady => true;
+
     /// <summary>Último error del broker (orden rechazada, etc.).</summary>
     string? LastError { get; }
 
@@ -35,10 +43,11 @@ public interface ITradingAccount
     /// <summary>Último precio operado del instrumento (0 si todavía no hay datos).</summary>
     decimal LastPrice => 0;
 
-    /// <summary>Orden de salida (stop loss / objetivo): solo puede reducir la posición, nunca darla vuelta.</summary>
+    /// <summary>A reducing market, stop or limit exit. Accounts with native reduce-only support must send that flag
+    /// with the request; otherwise callers must coordinate sibling exits (the local flag alone is not exchange enforcement).</summary>
     Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "")
     {
-        var o = type == OrderTypes.Stop ? Stop(dir, qty, price, comment) : Limit(dir, qty, price, comment);
+        var o = type == OrderTypes.Market ? Market(dir, qty, comment) : type == OrderTypes.Stop ? Stop(dir, qty, price, comment) : Limit(dir, qty, price, comment);
         o.ReduceOnly = true;
         return o;
     }
@@ -56,9 +65,9 @@ public interface ITradingAccount
         }
 
         Cancel(order);
-        var n = order.Type == OrderTypes.Stop ? Stop(order.Direction, newQuantity, newPrice, order.Comment) : Limit(order.Direction, newQuantity, newPrice, order.Comment);
-        n.ReduceOnly = order.ReduceOnly;
-        return n;
+        return order.ReduceOnly
+            ? Exit(order.Type, order.Direction, newQuantity, newPrice, order.Comment)
+            : order.Type == OrderTypes.Stop ? Stop(order.Direction, newQuantity, newPrice, order.Comment) : Limit(order.Direction, newQuantity, newPrice, order.Comment);
     }
 }
 

@@ -24,7 +24,7 @@ public sealed class InstrumentPicker : Button
     private readonly TextBlock _symbol = new() { FontWeight = FontWeight.SemiBold, FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _exchange = new() { FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
     // anchos mínimos: si el texto cambiara de ancho con cada tick, la barra se reacomodaría y movería todo
-    private readonly TextBlock _price = new() { FontSize = 13, FontWeight = FontWeight.Medium, VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Menlo, SF Mono"), MinWidth = 88, TextAlignment = TextAlignment.Right };
+    private readonly TextBlock _price = new() { FontSize = 13, FontWeight = FontWeight.Medium, VerticalAlignment = VerticalAlignment.Center, FontFamily = Ui.MonoFont, MinWidth = 88, TextAlignment = TextAlignment.Right };
     private readonly TextBlock _change = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, MinWidth = 54 };
 
     // menú
@@ -53,14 +53,14 @@ public sealed class InstrumentPicker : Button
         var chevron = Ui.Icon(MaterialIconKind.ChevronDown, 16, Ui.Text2);
         Content = Ui.H(10, Ui.Icon(MaterialIconKind.ChartBoxOutline, 18, Ui.Accent), Ui.V(0, _symbol, _exchange), _price, _change, chevron);
         _exchange.Foreground = Ui.Text2;
-        ToolTip.SetTip(this, "Choose instrument (⌘K)");
+        ToolTip.SetTip(this, $"Choose instrument ({Keys.Label("K")})");
 
         // al reciclar filas el contenido puede llegar vacío: se dibuja una fila vacía
         _list.ItemTemplate = new FuncDataTemplate<Row>((row, _) => row == null ? new Panel() : BuildRow(row), supportsRecycling: false);
         _list.DoubleTapped += (_, _) => PickSelected(newTab: false);
         _list.KeyDown += (_, e) =>
         {
-            if (e.Key == Key.Enter) PickSelected(e.KeyModifiers.HasFlag(KeyModifiers.Meta));
+            if (e.Key == Key.Enter) PickSelected(e.KeyModifiers.HasFlag(Keys.Command));
         };
         _search.TextChanged += (_, _) => Refill();
         _search.KeyDown += (_, e) =>
@@ -78,7 +78,7 @@ public sealed class InstrumentPicker : Button
                     e.Handled = true;
                     break;
                 case Key.Enter:
-                    PickSelected(e.KeyModifiers.HasFlag(KeyModifiers.Meta));
+                    PickSelected(e.KeyModifiers.HasFlag(Keys.Command));
                     e.Handled = true;
                     break;
             }
@@ -282,7 +282,7 @@ public sealed class InstrumentPicker : Button
             filtered = filtered.OrderByDescending(r => r.Instrument.Symbol.StartsWith(q, StringComparison.OrdinalIgnoreCase)).ThenByDescending(r => r.Stats?.QuoteVolume ?? 0).ToList();
         _list.ItemsSource = filtered;
         _list.SelectedIndex = filtered.Count > 0 ? 0 : -1;
-        _hint.Text = $"{filtered.Count} instruments · Enter opens here · ⌘Enter opens a new tab · ★ marks favorites";
+        _hint.Text = $"{filtered.Count} instruments · Enter opens here · {Keys.Label("Enter")} opens a new tab · ★ marks favorites";
     }
 
     private Control BuildRow(Row r)
@@ -308,7 +308,7 @@ public sealed class InstrumentPicker : Button
         g.Children.Add(desc);
         if (r.Stats != null)
         {
-            var price = new TextBlock { Text = r.Instrument.FormatPrice(r.Stats.LastPrice), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Menlo, SF Mono"), FontSize = 12 };
+            var price = new TextBlock { Text = r.Instrument.FormatPrice(r.Stats.LastPrice), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontFamily = Ui.MonoFont, FontSize = 12 };
             Grid.SetColumn(price, 3);
             g.Children.Add(price);
             var ch = new TextBlock

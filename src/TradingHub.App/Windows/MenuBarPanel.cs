@@ -16,7 +16,7 @@ namespace TradingHub.App.Windows;
 /// </summary>
 internal sealed class MenuBarPanel : Window
 {
-    private static readonly CultureInfo Es = CultureInfo.GetCultureInfo("en-US");
+    private static CultureInfo Es => TradingHub.Common.UiCulture.Current;
     private readonly AppServices _svc;
     private readonly MainWindow _main;
     private readonly TextBlock _status = new() { Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -54,11 +54,11 @@ internal sealed class MenuBarPanel : Window
         head.Children.Add(Ui.V(1, new TextBlock { Text = TradingHub.Common.Product.Name, FontWeight = FontWeight.SemiBold, FontSize = 14 }, _status));
 
         var quit = Ui.Button("Quit Trading Hub", MaterialIconKind.Power, MenuBar.Quit, "ghost");
-        ToolTip.SetTip(quit, "Quits Trading Hub completely, like ⌘Q: while live strategies hold positions it first asks what to do with their stops (previously running strategies resume on startup if enabled in Settings)");
+        ToolTip.SetTip(quit, $"Quits Trading Hub completely, like {(Os.IsWindows ? "Alt+F4" : "⌘Q")}: while live strategies hold positions it first asks what to do with their stops (previously running strategies resume on startup if enabled in Settings)");
         var foot = new DockPanel();
         DockPanel.SetDock(quit, Dock.Right);
         foot.Children.Add(quit);
-        foot.Children.Add(new TextBlock { Text = "Closing the window keeps Trading Hub running in the menu bar.", Classes = { "faint", "small" }, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
+        foot.Children.Add(new TextBlock { Text = Os.IsWindows ? "Closing the window keeps Trading Hub running in the system tray." : "Closing the window keeps Trading Hub running in the menu bar.", Classes = { "faint", "small" }, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
 
         var body = new StackPanel { Spacing = 14 };
         body.Children.Add(Section(_strategiesTitle, _strategies));

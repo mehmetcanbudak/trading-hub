@@ -80,7 +80,7 @@ internal sealed class ChartSettingsWindow : Window
             Toggle("Mark each session start", () => _model.Settings.ShowSessionLines, v => _model.Settings.ShowSessionLines = v));
         Tab("Footprint",
             ColorRow("Bid (sellers)", nameof(ChartTheme.Bid)),
-            ColorRow("Ask (compradores)", nameof(ChartTheme.Ask)),
+            ColorRow("Ask (buyers)", nameof(ChartTheme.Ask)),
             ColorRow("Cells", nameof(ChartTheme.ClusterBase)),
             ColorRow("Cell border", nameof(ChartTheme.CellBorder)),
             ColorRow("Cell text", nameof(ChartTheme.ClusterText)),
@@ -108,7 +108,7 @@ internal sealed class ChartSettingsWindow : Window
             Workspace.Save(_host);
         };
         var style = new ComboBox { Width = 180 };
-        foreach (var (value, label) in new[] { (TradeLineStyle.Dashed, "Rayas"), (TradeLineStyle.Solid, "Continuous"), (TradeLineStyle.Dotted, "Points") })
+        foreach (var (value, label) in new[] { (TradeLineStyle.Dashed, "Dashed"), (TradeLineStyle.Solid, "Continuous"), (TradeLineStyle.Dotted, "Dotted") })
             style.Items.Add(new ComboBoxItem { Content = label, Tag = value });
         style.SelectedItem = style.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (TradeLineStyle)i.Tag! == _model.Settings.TradeLineStyle);
         style.SelectionChanged += (_, _) =>
@@ -234,7 +234,7 @@ internal sealed class ChartSettingsWindow : Window
     private Control ColorRow(string label, string property)
     {
         var swatch = new Border { Width = 34, Height = 18, CornerRadius = new CornerRadius(4), BorderBrush = Ui.Line, BorderThickness = new Thickness(1) };
-        var code = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = Ui.Text2, FontFamily = new FontFamily("Menlo") };
+        var code = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = Ui.Text2, FontFamily = Ui.MonoFont };
         var changed = new TextBlock { Text = "•", Foreground = Ui.Accent, VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeight.Bold };
         ToolTip.SetTip(changed, "Customized for this chart");
         var hex = new TextBox { Width = 110, Watermark = "#RRGGBB or #RRGGBBAA", FontSize = 12 };

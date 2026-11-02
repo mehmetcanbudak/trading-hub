@@ -76,7 +76,7 @@ internal sealed class LiveRiskAgent
         var adjustable = p.Members.Where(m => !m.Locked && (m.Running || m.WaitingResume)).ToList();
         if (adjustable.Count == 0) return "No strategies to adjust.";
         if (!manual && RunsToday(a) >= a.MaxRunsPerDay) return "Today's review limit has been reached.";
-        if (ClaudeCodeBridge.FindCli() == null) return "Claude Code was not found on this Mac.";
+        if (ClaudeCodeBridge.FindCli() == null) return $"Claude Code was not found on this {Os.Device}.";
 
         var cts = new CancellationTokenSource();
         _running[portfolioId] = cts;

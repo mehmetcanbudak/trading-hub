@@ -1,0 +1,806 @@
+{
+  "Win rate": {
+    "es": "Acierto",
+    "zh-CN": "胜率"
+  },
+  "Right": {
+    "es": "Derecha",
+    "zh-CN": "右对齐"
+  },
+  "Left": {
+    "es": "Izquierda",
+    "zh-CN": "左对齐"
+  },
+  "Open P&L": {
+    "es": "PnL abierto",
+    "zh-CN": "浮动盈亏"
+  },
+  "Open": {
+    "es": "Abrir",
+    "zh-CN": "打开"
+  },
+  "Enabled": {
+    "es": "Activado",
+    "zh-CN": "启用"
+  },
+  "Add": {
+    "es": "Agregar",
+    "zh-CN": "添加"
+  },
+  "Alert when price touches": {
+    "es": "Alertar cuando el precio toque",
+    "zh-CN": "价格触及时提醒"
+  },
+  "High": {
+    "es": "Alto",
+    "zh-CN": "高"
+  },
+  "Width": {
+    "es": "Ancho",
+    "zh-CN": "宽度"
+  },
+  "Disabled": {
+    "es": "Desactivada",
+    "zh-CN": "已停用"
+  },
+  "Low": {
+    "es": "Bajo",
+    "zh-CN": "低"
+  },
+  "Library": {
+    "es": "Biblioteca",
+    "zh-CN": "指标库"
+  },
+  "Deleted": {
+    "es": "Borrada",
+    "zh-CN": "已删除"
+  },
+  "Delete": {
+    "es": "Eliminar",
+    "zh-CN": "删除"
+  },
+  "Buy": {
+    "es": "Compra",
+    "zh-CN": "买入"
+  },
+  "Buy Ask": {
+    "es": "Comprar Ask",
+    "zh-CN": "买入 Ask"
+  },
+  "Buy Bid": {
+    "es": "Comprar Bid",
+    "zh-CN": "买入 Bid"
+  },
+  "Cancel all orders": {
+    "es": "Cancelar todas las órdenes",
+    "zh-CN": "撤销全部订单"
+  },
+  "Canceled": {
+    "es": "Cancelada",
+    "zh-CN": "已撤单"
+  },
+  "Quantity": {
+    "es": "Cantidad",
+    "zh-CN": "数量"
+  },
+  "Zero": {
+    "es": "Cero",
+    "zh-CN": "零轴"
+  },
+  "Close": {
+    "es": "Cerrar",
+    "zh-CN": "关闭"
+  },
+  "Close position": {
+    "es": "Cerrar posición",
+    "zh-CN": "平仓"
+  },
+  "Chart": {
+    "es": "Gráfico",
+    "zh-CN": "图表"
+  },
+  "Chart Trader": {
+    "es": "Chart Trader",
+    "zh-CN": "Chart Trader"
+  },
+  "Compiled · {0} ms": {
+    "es": "Compilado · {0} ms",
+    "zh-CN": "已编译 · {0} ms"
+  },
+  "Completed": {
+    "es": "Terminada",
+    "zh-CN": "已结束"
+  },
+  "Buy stop {0} @ {1}": {
+    "es": "Comprar stop {0} @ {1}",
+    "zh-CN": "止损买入 {0} @ {1}"
+  },
+  "Buy limit {0} @ {1}": {
+    "es": "Comprar límite {0} @ {1}",
+    "zh-CN": "限价买入 {0} @ {1}"
+  },
+  "Solid": {
+    "es": "Sólida",
+    "zh-CN": "实线"
+  },
+  "Average correlation": {
+    "es": "Correlación promedio",
+    "zh-CN": "平均相关性"
+  },
+  "Short": {
+    "es": "Corto",
+    "zh-CN": "空头"
+  },
+  "Crosshair": {
+    "es": "Cursor (cruz)",
+    "zh-CN": "光标（十字线）"
+  },
+  "Tradovate account": {
+    "es": "Cuenta Tradovate",
+    "zh-CN": "Tradovate 账户"
+  },
+  "Portfolio equity curve": {
+    "es": "Curva de capital del portafolio",
+    "zh-CN": "组合资金曲线"
+  },
+  "Max DD": {
+    "es": "DD máx.",
+    "zh-CN": "最大回撤"
+  },
+  "Reverse position": {
+    "es": "Dar vuelta la posición",
+    "zh-CN": "反手"
+  },
+  "Value": {
+    "es": "Valor",
+    "zh-CN": "数值"
+  },
+  "Stop": {
+    "es": "Stop",
+    "zh-CN": "止单"
+  },
+  "Max drawdown": {
+    "es": "Drawdown máximo",
+    "zh-CN": "最大回撤"
+  },
+  "Trading days": {
+    "es": "Días operados",
+    "zh-CN": "交易天数"
+  },
+  "Edit": {
+    "es": "Editar",
+    "zh-CN": "编辑"
+  },
+  "Filled": {
+    "es": "Ejecutada",
+    "zh-CN": "已成交"
+  },
+  "Paused": {
+    "es": "Pausada",
+    "zh-CN": "已暂停"
+  },
+  "Live": {
+    "es": "En vivo",
+    "zh-CN": "实时"
+  },
+  "Line style": {
+    "es": "Estilo de línea",
+    "zh-CN": "线条样式"
+  },
+  "Recovery factor": {
+    "es": "Factor de recuperación",
+    "zh-CN": "恢复因子"
+  },
+  "Favorites": {
+    "es": "Favoritos",
+    "zh-CN": "收藏"
+  },
+  "Source": {
+    "es": "Fuente",
+    "zh-CN": "数据源"
+  },
+  "Out of sample": {
+    "es": "Fuera de muestra",
+    "zh-CN": "样本外"
+  },
+  "Average profit": {
+    "es": "Ganancia promedio",
+    "zh-CN": "平均盈利"
+  },
+  "Dashed": {
+    "es": "Guiones",
+    "zh-CN": "虚线"
+  },
+  "Time": {
+    "es": "Hora",
+    "zh-CN": "时间"
+  },
+  "Metric": {
+    "es": "Métrica",
+    "zh-CN": "指标"
+  },
+  "Indicators": {
+    "es": "Indicadores",
+    "zh-CN": "指标"
+  },
+  "Long": {
+    "es": "Largo",
+    "zh-CN": "多头"
+  },
+  "Limit": {
+    "es": "Límite",
+    "zh-CN": "限价"
+  },
+  "Line": {
+    "es": "Línea",
+    "zh-CN": "线条"
+  },
+  "Done": {
+    "es": "Listo",
+    "zh-CN": "完成"
+  },
+  "Market": {
+    "es": "Mercado",
+    "zh-CN": "市场"
+  },
+  "Average": {
+    "es": "Promedio",
+    "zh-CN": "平均"
+  },
+  "Show in Finder": {
+    "es": "Mostrar en el Finder",
+    "zh-CN": "在访达中显示"
+  },
+  "Trading": {
+    "es": "Operar",
+    "zh-CN": "交易"
+  },
+  "Trades": {
+    "es": "Operaciones",
+    "zh-CN": "交易"
+  },
+  "Parameters": {
+    "es": "Parámetros",
+    "zh-CN": "参数"
+  },
+  "Custom": {
+    "es": "Personalizado",
+    "zh-CN": "自定义"
+  },
+  "Template \"{0}\" saved": {
+    "es": "Plantilla «{0}» guardada",
+    "zh-CN": "模板“{0}”已保存"
+  },
+  "Price": {
+    "es": "Precio",
+    "zh-CN": "价格"
+  },
+  "Exit price": {
+    "es": "Precio de salida",
+    "zh-CN": "出场价格"
+  },
+  "Risk of ruin": {
+    "es": "Riesgo de ruina",
+    "zh-CN": "破产风险"
+  },
+  "Average per trade": {
+    "es": "Promedio por operación",
+    "zh-CN": "每笔平均"
+  },
+  "Test": {
+    "es": "Prueba",
+    "zh-CN": "测试"
+  },
+  "Average loss": {
+    "es": "Pérdida promedio",
+    "zh-CN": "平均亏损"
+  },
+  "Longest winning streak": {
+    "es": "Racha ganadora máxima",
+    "zh-CN": "最长连胜"
+  },
+  "Longest losing streak": {
+    "es": "Racha perdedora máxima",
+    "zh-CN": "最长连亏"
+  },
+  "Range": {
+    "es": "Rango",
+    "zh-CN": "震荡"
+  },
+  "Rejected": {
+    "es": "Rechazada",
+    "zh-CN": "已拒绝"
+  },
+  "Reset": {
+    "es": "Restablecer",
+    "zh-CN": "重置"
+  },
+  "Detach chart into a window": {
+    "es": "Sacar el gráfico a una ventana",
+    "zh-CN": "将图表弹出到独立窗口"
+  },
+  "Seconds": {
+    "es": "Segundos",
+    "zh-CN": "秒"
+  },
+  "API key secret": {
+    "es": "Secret de la API key",
+    "zh-CN": "API 密钥的 Secret"
+  },
+  "Sell": {
+    "es": "Venta",
+    "zh-CN": "卖出"
+  },
+  "Signal": {
+    "es": "Señal",
+    "zh-CN": "信号"
+  },
+  "No closed trades in this period": {
+    "es": "Sin operaciones cerradas en este período",
+    "zh-CN": "此期间没有已平仓交易"
+  },
+  "Size is zero: no new entries": {
+    "es": "Tamaño en cero: no abre operaciones nuevas",
+    "zh-CN": "规模为零：不开新仓"
+  },
+  "All": {
+    "es": "Todo",
+    "zh-CN": "全部"
+  },
+  "Sell Ask": {
+    "es": "Vender Ask",
+    "zh-CN": "卖出 Ask"
+  },
+  "Sell Bid": {
+    "es": "Vender Bid",
+    "zh-CN": "卖出 Bid"
+  },
+  "Sell limit {0} @ {1}": {
+    "es": "Vender límite {0} @ {1}",
+    "zh-CN": "限价卖出 {0} @ {1}"
+  },
+  "Sell stop {0} @ {1}": {
+    "es": "Vender stop {0} @ {1}",
+    "zh-CN": "止损卖出 {0} @ {1}"
+  },
+  "Windows": {
+    "es": "Windows",
+    "zh-CN": "Windows"
+  },
+  "Linked to group {0}: syncing {1} across its charts": {
+    "es": "Vinculado al grupo {0}: {1} se sincroniza entre sus gráficos",
+    "zh-CN": "已关联到组 {0}：{1}在组内各图表间同步"
+  },
+  "Volume": {
+    "es": "Volumen",
+    "zh-CN": "成交量"
+  },
+  "Session time zone": {
+    "es": "Zona horaria de la sesión",
+    "zh-CN": "交易时段时区"
+  },
+  "disconnected": {
+    "es": "desconectado",
+    "zh-CN": "未连接"
+  },
+  "no new entries": {
+    "es": "no abre operaciones nuevas",
+    "zh-CN": "不开新仓"
+  },
+  "no data": {
+    "es": "sin datos",
+    "zh-CN": "无数据"
+  },
+  "no context data yet": {
+    "es": "todavía sin datos de contexto",
+    "zh-CN": "尚无市场环境数据"
+  },
+  "no market context yet": {
+    "es": "todavía sin datos de contexto",
+    "zh-CN": "尚无市场环境数据"
+  },
+  "{0}% of capital": {
+    "es": "{0}% del capital",
+    "zh-CN": "占资金 {0}%"
+  },
+  "{0}% winners": {
+    "es": "{0}% ganadoras",
+    "zh-CN": "胜率 {0}%"
+  },
+  "{0} filled today": {
+    "es": "{0} ejecutadas hoy",
+    "zh-CN": "今日成交 {0} 笔"
+  },
+  "•••••••• (saved in {0})": {
+    "es": "•••••••• (guardado en {0})",
+    "zh-CN": "••••••••（已保存在{0}中）"
+  },
+  "{0} · Rithmic (practice)": {
+    "es": "{0} · Rithmic (práctica)",
+    "zh-CN": "{0} · Rithmic (模拟)"
+  },
+  "{0} · Rithmic — REAL": {
+    "es": "{0} · Rithmic — REAL",
+    "zh-CN": "{0} · Rithmic — 实盘"
+  },
+  "{0} · Tradovate (demo)": {
+    "es": "{0} · Tradovate (demo)",
+    "zh-CN": "{0} · Tradovate (模拟)"
+  },
+  "{0} · Tradovate — REAL": {
+    "es": "{0} · Tradovate — REAL",
+    "zh-CN": "{0} · Tradovate — 实盘"
+  },
+  "1 filled today": {
+    "es": "1 ejecutada hoy",
+    "zh-CN": "今日成交 1 笔"
+  },
+  "Open windows": {
+    "es": "Ventanas",
+    "zh-CN": "窗口"
+  },
+  "Windows Credential Manager": {
+    "es": "Administrador de credenciales de Windows",
+    "zh-CN": "Windows 凭据管理器"
+  },
+  "macOS Keychain": {
+    "es": "Llavero de macOS",
+    "zh-CN": "macOS 钥匙串"
+  },
+  "Keychain": {
+    "es": "Llavero",
+    "zh-CN": "钥匙串"
+  },
+  "Language": {
+    "es": "Idioma",
+    "zh-CN": "语言"
+  },
+  "Restart now": {
+    "es": "Reiniciar ahora",
+    "zh-CN": "立即重启"
+  },
+  "Applies when you reopen Trading Hub.": {
+    "es": "Se aplica al volver a abrir Trading Hub.",
+    "zh-CN": "重新打开 Trading Hub 后生效。"
+  },
+  "English, Spanish or Simplified Chinese. Claude replies in the selected language; generated code stays English.": {
+    "es": "Inglés, español o chino simplificado. Claude responde en el idioma elegido; el código generado sigue en inglés.",
+    "zh-CN": "英语、西班牙语或简体中文。Claude 使用所选语言回复；生成的代码仍使用英语。"
+  },
+  "This {0}'s time ({1})": {
+    "es": "Hora de esta {0} ({1})",
+    "zh-CN": "此 {0} 的时间（{1}）"
+  },
+  "Keep running in system tray after closing window": {
+    "es": "Seguir en la bandeja del sistema al cerrar la ventana",
+    "zh-CN": "关闭窗口后继续在系统托盘中运行"
+  },
+  "Closing the window leaves Trading Hub running in the system tray beside the clock, with active strategies. Click its icon to view live positions, or right-click for its menu. Use Alt+F4 or Quit Trading Hub to quit completely.": {
+    "es": "Cerrar la ventana deja Trading Hub funcionando en la bandeja del sistema, junto al reloj, con las estrategias activas. Pulsá su icono para ver las posiciones en vivo o hacé clic derecho para abrir el menú. Para salir por completo usá Alt+F4 o Salir de Trading Hub.",
+    "zh-CN": "关闭窗口后 Trading Hub 会留在时钟旁的系统托盘中，策略继续运行。点击图标可查看实时持仓，右键点击可打开菜单。使用 Alt+F4 或“退出 Trading Hub”可完全退出。"
+  },
+  "Keep running in menu bar after closing window": {
+    "es": "Seguir en la barra de menú al cerrar la ventana",
+    "zh-CN": "关闭窗口后继续在菜单栏中运行"
+  },
+  "Closing the window leaves Trading Hub running in the menu bar with active strategies. Use its icon to view live positions. To quit completely, use Command-Q or Quit Trading Hub.": {
+    "es": "Cerrar la ventana deja Trading Hub funcionando en la barra de menú con las estrategias activas. Usá su icono para ver las posiciones en vivo. Para salir por completo usá Command-Q o Salir de Trading Hub.",
+    "zh-CN": "关闭窗口后 Trading Hub 会留在菜单栏中，策略继续运行。点击图标可查看实时持仓。使用 Command-Q 或“退出 Trading Hub”可完全退出。"
+  },
+  "Power Options": {
+    "es": "Opciones de energía",
+    "zh-CN": "电源选项"
+  },
+  "Prevent sleep": {
+    "es": "Evitar la suspensión",
+    "zh-CN": "防止睡眠"
+  },
+  "Keep PC awake": {
+    "es": "Mantener la PC despierta",
+    "zh-CN": "保持电脑唤醒"
+  },
+  "Prevent idle sleep while live strategies or Claude agents run (display may still sleep). No password required.": {
+    "es": "Evita la suspensión por inactividad mientras trabajan estrategias en vivo o agentes de Claude (la pantalla puede apagarse). No requiere contraseña.",
+    "zh-CN": "实盘策略或 Claude 智能体运行时防止因空闲进入睡眠（屏幕仍可关闭）。无需密码。"
+  },
+  "With the lid closed": {
+    "es": "Con la tapa cerrada",
+    "zh-CN": "合上盖子时"
+  },
+  "Windows follows its power settings when a laptop lid closes; Trading Hub cannot override them. To keep working with the lid closed: Power Options → Choose what closing the lid does → Do nothing, preferably only when plugged in. Closed-lid ventilation is limited: never store a running laptop in a bag.": {
+    "es": "Al cerrar la tapa de una notebook Windows sigue su configuración de energía; Trading Hub no puede cambiarla. Para seguir trabajando con la tapa cerrada: Opciones de energía → Elegir el comportamiento del cierre de la tapa → No hacer nada, preferentemente solo con el cargador conectado. Con la tapa cerrada la ventilación es limitada: nunca guardes una notebook encendida en un bolso.",
+    "zh-CN": "合上笔记本盖子时 Windows 会遵循电源设置，Trading Hub 无法覆盖这些设置。要合盖继续运行：电源选项 → 选择关闭盖子的功能 → 不采取任何操作，最好仅在接通电源时使用。合盖会限制散热：切勿将运行中的笔记本放入包内。"
+  },
+  "Click and press the key combination. Escape cancels · Backspace unassigns.": {
+    "es": "Hacé clic y presioná la combinación. Escape cancela · Retroceso la deja sin asignar.",
+    "zh-CN": "点击后按下组合键。Escape 取消 · Backspace 取消分配。"
+  },
+  "Show in File Explorer": {
+    "es": "Mostrar en el Explorador de archivos",
+    "zh-CN": "在文件资源管理器中显示"
+  },
+  "Open folder in File Explorer": {
+    "es": "Abrir la carpeta en el Explorador de archivos",
+    "zh-CN": "在文件资源管理器中打开文件夹"
+  },
+  "Right-click or Alt+click: cancel orders at that price.": {
+    "es": "Clic derecho o Alt+clic: cancela las órdenes de ese precio.",
+    "zh-CN": "右键单击或 Alt+单击：取消该价位的订单。"
+  },
+  "Ctrl+P → Save as PDF": {
+    "es": "Ctrl+P → Guardar como PDF",
+    "zh-CN": "Ctrl+P → 另存为 PDF"
+  },
+  " (new orders disabled in Connections; cancel/close allowed)": {
+    "es": " (órdenes nuevas desactivadas en Conexiones; se permite cancelar/cerrar)",
+    "zh-CN": "（已在连接中禁用新订单；仍可取消或平仓）"
+  },
+  "Quits Trading Hub completely, like ⌘Q: while live strategies hold positions it first asks what to do with their stops (previously running strategies resume on startup if enabled in Settings)": {
+    "es": "Cierra Trading Hub por completo, como ⌘Q: si hay estrategias en vivo con posiciones primero pregunta qué hacer con sus stops (las estrategias que estaban activas se reanudan al abrir si está habilitado en Ajustes).",
+    "zh-CN": "像 ⌘Q 一样完全退出 Trading Hub：实盘策略有持仓时，会先询问如何处理保护性止损（如在设置中启用，先前运行的策略会在启动时恢复）。"
+  },
+  "US consolidated (SIP) trade history via Alpaca, available from 2016 subject to provider entitlement": {
+    "es": "Historial consolidado de operaciones de EE. UU. (SIP) mediante Alpaca, desde 2016 según los permisos del proveedor.",
+    "zh-CN": "通过 Alpaca 获取美国综合（SIP）成交历史，自 2016 年起可用，取决于提供商的数据权限。"
+  },
+  "Accounts": {
+    "es": "Cuentas",
+    "zh-CN": "账户"
+  },
+  "Chart windows": {
+    "es": "Ventanas de gráficos",
+    "zh-CN": "图表窗口"
+  },
+  "Walk-forward windows": {
+    "es": "Ventanas walk-forward",
+    "zh-CN": "滚动验证窗口"
+  },
+  "Quit Trading Hub": {
+    "es": "Salir de Trading Hub",
+    "zh-CN": "退出 Trading Hub"
+  },
+  "Keep stops: their stop loss and take profit stay working at the broker while Trading Hub is closed; each strategy takes them over when it resumes.": {
+    "es": "Conservar stops: el stop loss y el take profit siguen activos en el bróker mientras Trading Hub está cerrado; cada estrategia los adopta cuando se reanuda.",
+    "zh-CN": "保留保护单：Trading Hub 关闭期间，止损单和止盈单继续在经纪商端生效；各策略恢复时会接管这些订单。"
+  },
+  "Cancel stops: the positions stay open without them.": {
+    "es": "Cancelar stops: las posiciones siguen abiertas sin esas órdenes de protección.",
+    "zh-CN": "取消保护单：持仓保持未平仓状态，但不再受这些订单保护。"
+  },
+  "Close positions: market orders close them now.": {
+    "es": "Cerrar posiciones: se envían órdenes de mercado para cerrarlas ahora.",
+    "zh-CN": "平仓：立即发送市价单以关闭持仓。"
+  },
+  "This live strategy holds an open position:": {
+    "es": "Esta estrategia en vivo tiene una posición abierta:",
+    "zh-CN": "此实盘策略有未平仓持仓："
+  },
+  "These live strategies hold open positions:": {
+    "es": "Estas estrategias en vivo tienen posiciones abiertas:",
+    "zh-CN": "这些实盘策略有未平仓持仓："
+  },
+  "Keep stops at broker and quit": {
+    "es": "Conservar stops en el bróker y salir",
+    "zh-CN": "保留经纪商端保护单并退出"
+  },
+  "Cancel stops and quit": {
+    "es": "Cancelar stops y salir",
+    "zh-CN": "取消保护单并退出"
+  },
+  "Close positions and quit": {
+    "es": "Cerrar posiciones y salir",
+    "zh-CN": "平仓并退出"
+  },
+  "Click to close the positions at market (Enter never chooses this)": {
+    "es": "Hacé clic para cerrar las posiciones a mercado (Enter nunca elige esta opción)",
+    "zh-CN": "点击以市价平仓（Enter 键不会选择此操作）"
+  },
+  "Don't quit": {
+    "es": "No salir",
+    "zh-CN": "不退出"
+  },
+  "Quit": {
+    "es": "Salir",
+    "zh-CN": "退出"
+  },
+  "Closing positions before quitting…": {
+    "es": "Cerrando posiciones antes de salir…",
+    "zh-CN": "正在退出前平仓…"
+  },
+  "Positions not closed": {
+    "es": "Posiciones sin cerrar",
+    "zh-CN": "持仓尚未关闭"
+  },
+  "Trading Hub sent market orders to close these positions, but the broker did not confirm them within {0} seconds. They may still be open, and their stops were canceled. Check them at the broker.\n\n{1}": {
+    "es": "Trading Hub envió órdenes de mercado para cerrar estas posiciones, pero el bróker no las confirmó en {0} segundos. Pueden seguir abiertas y sus stops se cancelaron. Revisalas en el bróker.\n\n{1}",
+    "zh-CN": "Trading Hub 已发送市价平仓单，但经纪商未在 {0} 秒内确认。这些持仓可能仍未平仓，且保护单已被取消。请在经纪商端检查。\n\n{1}"
+  },
+  "Trading Hub sent market orders to close these positions, but the broker did not confirm them within {0} seconds. ": {
+    "es": "Trading Hub envió órdenes de mercado para cerrar estas posiciones, pero el bróker no las confirmó en {0} segundos. ",
+    "zh-CN": "Trading Hub 已发送市价平仓单，但经纪商未在 {0} 秒内确认。"
+  },
+  "They may still be open, and their stops were canceled. Check them at the broker.\n\n": {
+    "es": "Pueden seguir abiertas y sus stops se cancelaron. Revisalas en el bróker.\n\n",
+    "zh-CN": "这些持仓可能仍未平仓，且保护单已被取消。请在经纪商端检查。\n\n"
+  },
+  "no stop or target working": {
+    "es": "sin stop ni objetivo activos",
+    "zh-CN": "无生效中的止损单或止盈单"
+  },
+  "1 protective order working": {
+    "es": "1 orden de protección activa",
+    "zh-CN": "1 笔生效中的保护单"
+  },
+  "{0} protective orders working": {
+    "es": "{0} órdenes de protección activas",
+    "zh-CN": "{0} 笔生效中的保护单"
+  },
+  "Could not read a secret from Windows Credential Manager.": {
+    "es": "No se pudo leer un secreto del Administrador de credenciales de Windows.",
+    "zh-CN": "无法从 Windows 凭据管理器读取密钥。"
+  },
+  "Windows Credential Manager returned an oversized secret.": {
+    "es": "El Administrador de credenciales de Windows devolvió un secreto demasiado grande.",
+    "zh-CN": "Windows 凭据管理器返回的密钥过大。"
+  },
+  "Could not delete a secret from Windows Credential Manager.": {
+    "es": "No se pudo eliminar un secreto del Administrador de credenciales de Windows.",
+    "zh-CN": "无法从 Windows 凭据管理器删除密钥。"
+  },
+  "Windows Credential Manager accepts at most {0} bytes per secret. The existing secret was not changed.": {
+    "es": "El Administrador de credenciales de Windows acepta como máximo {0} bytes por secreto. El secreto existente no se modificó.",
+    "zh-CN": "Windows 凭据管理器每个密钥最多接受 {0} 字节。现有密钥未被更改。"
+  },
+  "Could not save a secret in Windows Credential Manager.": {
+    "es": "No se pudo guardar un secreto en el Administrador de credenciales de Windows.",
+    "zh-CN": "无法在 Windows 凭据管理器中保存密钥。"
+  },
+  "Cannot resolve the Claude Code command shim without altering its arguments. Reinstall Claude Code using the official Windows installer.": {
+    "es": "No se puede resolver el lanzador de Claude Code sin alterar sus argumentos. Reinstalá Claude Code con el instalador oficial para Windows.",
+    "zh-CN": "无法在不更改参数的情况下解析 Claude Code 命令启动器。请使用官方 Windows 安装程序重新安装 Claude Code。"
+  },
+  "Linked to group {0}: {1} synchronized across charts": {
+    "es": "Vinculado al grupo {0}: {1} en sincronización entre gráficos",
+    "zh-CN": "已关联到组 {0}：{1}在组内各图表间同步"
+  },
+  "long {0} {1}": {
+    "es": "largo {0} {1}",
+    "zh-CN": "多头 {0} {1}"
+  },
+  "short {0} {1}": {
+    "es": "corto {0} {1}",
+    "zh-CN": "空头 {0} {1}"
+  },
+  "Simulated account": {
+    "es": "Cuenta simulada",
+    "zh-CN": "模拟账户"
+  },
+  "Backtesting": {
+    "es": "Backtesting",
+    "zh-CN": "回测"
+  },
+  "Stop strategy": {
+    "es": "Detener estrategia",
+    "zh-CN": "停止策略"
+  },
+  "Stop replay": {
+    "es": "Detener replay",
+    "zh-CN": "停止回放"
+  },
+  "Stop recording": {
+    "es": "Detener grabación",
+    "zh-CN": "停止录制"
+  },
+  "Open price": {
+    "es": "Precio de apertura",
+    "zh-CN": "开盘价"
+  },
+  "Close price": {
+    "es": "Precio de cierre",
+    "zh-CN": "收盘价"
+  },
+  "Stop run": {
+    "es": "Detener ejecución",
+    "zh-CN": "停止运行"
+  },
+  "Stop response": {
+    "es": "Detener respuesta",
+    "zh-CN": "停止回复"
+  },
+  "Awaiting order confirmation": {
+    "es": "Esperando confirmación de la orden",
+    "zh-CN": "等待订单确认"
+  },
+  "Order cancellation or position closure is still awaiting broker confirmation. Wait and reconcile the account before restarting or removing this strategy.": {
+    "es": "La cancelación de la orden o el cierre de la posición aún espera la confirmación del bróker. Esperá y conciliá la cuenta antes de reiniciar o eliminar esta estrategia.",
+    "zh-CN": "订单取消或平仓操作仍在等待经纪商确认。请等待并核对账户状态，然后再重启或移除此策略。"
+  },
+  "A position or order request is still active; wait for confirmation before resetting history.": {
+    "es": "Todavía hay una posición o solicitud de orden activa; esperá la confirmación antes de restablecer el historial.",
+    "zh-CN": "仍有活跃持仓或订单请求；请等待确认后再重置历史记录。"
+  },
+  "Orders not confirmed": {
+    "es": "Órdenes sin confirmar",
+    "zh-CN": "订单尚未确认"
+  },
+  "Trading Hub could not confirm the requested closes or cancellations within {0} seconds. Requests may still be awaiting account data or broker acknowledgment. Positions and orders may still be working. Check them at the broker.\n\n{1}": {
+    "es": "Trading Hub no pudo confirmar los cierres o las cancelaciones solicitados en {0} segundos. Las solicitudes pueden seguir esperando datos de la cuenta o la confirmación del bróker. Las posiciones y las órdenes pueden seguir activas. Revisalas en el bróker.\n\n{1}",
+    "zh-CN": "Trading Hub 未能在 {0} 秒内确认请求的平仓或取消操作。请求可能仍在等待账户数据或经纪商确认。持仓和订单可能仍然有效。请在经纪商端检查。\n\n{1}"
+  },
+  "Waiting for broker confirmation before quitting…": {
+    "es": "Esperando la confirmación del bróker antes de salir…",
+    "zh-CN": "退出前正在等待经纪商确认…"
+  },
+  "Stop all and close": {
+    "es": "Detener todo y cerrar posiciones",
+    "zh-CN": "全部停止并平仓"
+  },
+  "Historical CME futures ticks (NQ, ES, MNQ, MES, CL, GC…) from 2010, including the true aggressor side, beyond Rithmic's retained history. Billed by usage; check current signup credits with Databento.": {
+    "es": "Historia tick a tick de los futuros de CME (NQ, ES, MNQ, MES, CL, GC…) desde 2010, con el lado agresor real, más allá de la historia que conserva Rithmic. Se cobra por uso; consultá con Databento los créditos de bienvenida vigentes.",
+    "zh-CN": "自 2010 年起的 CME 期货（NQ、ES、MNQ、MES、CL、GC…）逐笔历史数据，带有每笔成交真实的主动方向：这是 Rithmic 不保存的。按量付费；新账户赠送 125 美元的免费额度。"
+  },
+  "Historical data saved on your {0}. Used for charts, replay and backtests.": {
+    "es": "Datos históricos guardados en tu {0}. Se usan para gráficos, replay y backtests.",
+    "zh-CN": "保存在你的 {0} 上的历史数据，用于图表、回放和回测。"
+  },
+  "Price alerts, large trades, and indicator notices.": {
+    "es": "Alertas de precio, Big Trades y avisos de indicadores.",
+    "zh-CN": "价格提醒、大额成交和指标通知。"
+  },
+  "By default macOS sleeps when the lid closes. If enabled while work is running, Trading Hub asks once for administrator permission and keeps the Mac active with the lid closed. The setting reverts when the app exits. Closed-lid ventilation is limited: never store a running Mac in a bag.": {
+    "es": "Por defecto, macOS entra en suspensión al cerrar la tapa. Si activás esta opción mientras hay tareas en ejecución, Trading Hub te pide permiso de administrador una vez y mantiene la Mac activa con la tapa cerrada. El ajuste se revierte al salir de la aplicación. Con la tapa cerrada la ventilación es limitada: nunca guardes una Mac encendida en un bolso.",
+    "zh-CN": "默认情况下，macOS 会在合盖时进入睡眠。若在有任务运行时启用此项，Trading Hub 会请求一次管理员授权，让 Mac 在合盖后继续运行。应用退出时会恢复原设置。合盖时散热受限：切勿将仍在运行的 Mac 放进包里。"
+  },
+  "Years of trade-by-trade CME history (from 2010), including the true aggressor side. Databento is billed by usage; Trading Hub estimates the cost and only downloads after your confirmation.": {
+    "es": "Años de historia de CME operación por operación (desde 2010), con el lado agresor real. Databento cobra por uso; Trading Hub estima el costo y solo descarga si confirmás.",
+    "zh-CN": "多年的 CME 逐笔历史数据（自 2010 年起），包含真实的主动买卖方向。Databento 按用量收费；Trading Hub 会先估算费用，仅在你确认后才下载。"
+  },
+  "On battery, macOS may sleep when the lid is closed even if this option is enabled (recommended).": {
+    "es": "Con la batería, macOS puede entrar en suspensión al cerrar la tapa aunque esta opción esté activada (recomendado).",
+    "zh-CN": "使用电池时，即使启用了此选项，macOS 仍可能在合盖后进入睡眠（推荐）。"
+  },
+  "Initial balance {0}. Simulator orders model queue placement and recorded trade flow.": {
+    "es": "Saldo inicial {0}. Las órdenes del simulador modelan la posición en la cola del libro y el flujo de operaciones registrado.",
+    "zh-CN": "初始余额 {0}。模拟器订单模拟排队位置，并依据记录的逐笔成交撮合。"
+  },
+  "For CFDs, forex, and gold, obtain historical CSV data from Dukascopy or HistData, or export from MetaTrader or TradingView. Trading Hub imports it for charts, replay, and backtesting, detecting the supported format automatically.": {
+    "es": "Para CFDs (US100, US500, DAX), forex, oro… Bajá el CSV gratis de Dukascopy o HistData, o exportalo de MetaTrader o TradingView, y Trading Hub lo convierte en historia para gráficos, replay y backtests. El formato se reconoce solo.",
+    "zh-CN": "对于 CFD、外汇和黄金，可从 Dukascopy 或 HistData 获取历史 CSV 数据，或从 MetaTrader 或 TradingView 导出。Trading Hub 会自动识别支持的格式，将数据导入用于图表、回放和回测。"
+  },
+  "CFDs have no centralized traded volume here: each quote counts as one tick, with aggressor direction inferred from price changes. Price bars and price-based backtests are usable, but footprint and delta are approximate.": {
+    "es": "Los CFDs no tienen volumen real: cada cotización cuenta como una operación (volumen de ticks) y el lado sale de si el precio subió o bajó. Sirve para precio, velas y backtests de precio; el footprint y el delta son aproximados.",
+    "zh-CN": "此处的 CFD 数据没有集中市场的成交量：每次报价计为一个 tick，主动买卖方向根据价格变化推断。可用于价格K线和基于价格的回测，但 footprint 和 delta 仅为近似值。"
+  },
+  "Strategies that were running before shutdown resume at startup with their previous parameters, sizing and limits. Paused strategies stay paused. When disabled, resume manually from Live.": {
+    "es": "Las estrategias que estaban en ejecución antes del cierre se reanudan al abrir la aplicación con sus parámetros, tamaños y límites anteriores. Las estrategias pausadas siguen pausadas. Si desactivás esta opción, reanudalas manualmente desde En vivo.",
+    "zh-CN": "退出前正在运行的策略会在启动时按原有参数、仓位大小和风险限额恢复运行。已暂停的策略保持暂停。关闭此选项后，请在“实时”页面手动恢复。"
+  },
+  "Use dark or light appearance throughout the platform. Individual chart colors remain unchanged.": {
+    "es": "Negro o blanco en toda la plataforma (también con el botón de sol/luna arriba). Los colores propios de cada gráfico se mantienen.",
+    "zh-CN": "整个平台使用深色或浅色外观，各图表的颜色保持不变。"
+  },
+  "DOM": {
+    "es": "DOM",
+    "zh-CN": "DOM"
+  },
+  "Review the live portfolio and propose position-size adjustments based on recent results": {
+    "es": "Revisá la cartera en vivo y proponé ajustes del tamaño de las posiciones según los resultados recientes",
+    "zh-CN": "检查实时投资组合，根据近期结果提出仓位大小调整建议"
+  },
+  "For fractional mini-futures exposure (for example 0.5 NQ), use the equivalent micro-contract quantity (5 MNQ). Whole mini quantities stay on the mini. Open positions retain their contract until flat.": {
+    "es": "Si el tamaño de una estrategia de futuros pide una fracción del mini (por ejemplo 1 NQ × 0,5), las órdenes van al micro con la misma exposición (5 MNQ), mirando el mismo gráfico. Con minis enteros usa el mini. Con una posición abierta sigue en el mismo contrato y cambia cuando queda plana.",
+    "zh-CN": "迷你期货的敞口包含非整数张数时（例如 0.5 NQ），使用敞口相同的微型合约数量（5 MNQ）。整手数量仍使用迷你合约。已有持仓在平仓前保持原合约不变。"
+  },
+  "Reduce": {
+    "es": "Reducir",
+    "zh-CN": "减仓"
+  },
+  "Close time": {
+    "es": "Hora de cierre",
+    "zh-CN": "平仓时间"
+  },
+  "Total strategies: {0}": {
+    "es": "Total de estrategias: {0}",
+    "zh-CN": "策略总数：{0}"
+  }
+}

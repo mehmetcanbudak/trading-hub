@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="TradingHub.App"/>
+  <!-- Solo lo lee Windows: la app está hecha para Windows 10 y 11 (sin esto, Windows la trata como un programa viejo y
+       la transparencia de las ventanas de Avalonia, por ejemplo la del panel de la bandeja, puede andar mal) -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 y 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
 </assembly>

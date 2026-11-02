@@ -43,6 +43,7 @@ internal sealed class LiveEntry
         Running ? Runner!.DailyLimitActive ? "Stopped for today" : Paused ? "Paused" : "Running"
         : WaitingResume ? "Awaiting manual resume"
         : Runner?.IsClosing == true ? "Closing position"
+        : Runner?.HasWorkingOrders == true ? "Awaiting order confirmation"
         : "Stopped";
 
     public decimal OpenPnL => Running ? Ledger.OpenPnL(Runner!.Data.LastPrice) : 0;
@@ -52,7 +53,7 @@ internal sealed class LiveEntry
 /// <summary>La próxima orden de una estrategia: cuántos contratos, de cuál y si es el micro (con su equivalente en el mini).</summary>
 internal readonly record struct OrderPlan(decimal Units, string Symbol, string SignalSymbol, bool Micro, bool AtMinimum, decimal Equivalent)
 {
-    private static readonly System.Globalization.CultureInfo Es = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+    private static System.Globalization.CultureInfo Es => TradingHub.Common.UiCulture.Current;
 
     /// <summary>«5 MNQ», «1 NQ» o «en cero».</summary>
     public string Text => Units <= 0 ? "zero" : $"{Units.ToString("0.####", Es)} {Symbol}";
@@ -176,6 +177,11 @@ internal sealed partial class LiveCenter
         _svc.Runners.FirstOrDefault(r => r.Key == key && r.IsRunning)
         ;
 
+    internal const string PendingBrokerMessage = "Order cancellation or position closure is still awaiting broker confirmation. Wait and reconcile the account before restarting or removing this strategy.";
+
+    internal bool AwaitingBroker(string key) =>
+        _svc.Runners.Any(r => r.Key == key && !r.IsRunning && (r.IsClosing || r.HasWorkingOrders));
+
     private LiveLedger LedgerOf(string key, decimal pointValue)
     {
         long length = 0;
@@ -189,7 +195,7 @@ internal sealed partial class LiveCenter
             // sin archivo
         }
 
-        if (_ledgers.TryGetValue(key, out var c) && c.Length == length) return c.Ledger;
+        if (LiveStore.PendingFills(key) == 0 && _ledgers.TryGetValue(key, out var c) && c.Length == length) return c.Ledger;
         var l = LiveStore.LoadLedger(key, pointValue);
         _ledgers[key] = (length, l);
         return l;
@@ -242,7 +248,7 @@ internal sealed partial class LiveCenter
         // 2) las del panel (y las de gráficos que ya no están en un gráfico)
         foreach (var r in _svc.Runners.Where(r => r.Persist))
         {
-            if (!r.IsRunning && !r.IsClosing && !includeStopped) continue;
+            if (!r.IsRunning && !r.IsClosing && !r.HasWorkingOrders && !includeStopped) continue;
             if (!seen.Add(r.Key)) continue;
             list.Add(new LiveEntry { Key = r.Key, Source = r.Source == "chart" ? "panel" : r.Source, Info = r.Info(), Runner = r, Ledger = r.Ledger });
         }
@@ -583,6 +589,7 @@ internal sealed partial class LiveCenter
         // resume, auto-resume and restarts adopt the stop loss and take profit the previous run left working at the broker
         runner.AdoptProtectionIds = spec.AdoptProtectionIds ?? (IReadOnlyCollection<string>?)LiveStore.InfoFor(runner.Key)?.ProtectionOrderIds ?? Array.Empty<string>();
         if (Running(runner.Key) != null) return (null, $"«{runner.StrategyName}» is already running on {spec.Instrument.Symbol} with {TradingHub.Common.EnglishText.Of(account.Name)}.");
+        if (AwaitingBroker(runner.Key)) return (null, PendingBrokerMessage);
         try
         {
             runner.Start();
@@ -593,7 +600,7 @@ internal sealed partial class LiveCenter
         }
 
         if (spec.Paused) runner.SetPaused(true);
-        _svc.Runners.RemoveAll(r => r.Key == runner.Key && !r.IsRunning && !r.IsClosing);
+        _svc.Runners.RemoveAll(r => r.Key == runner.Key && !r.IsRunning && !r.IsClosing && !r.HasWorkingOrders);
         _svc.Runners.Add(runner);
         Watch(runner);
         _svc.SaveLiveState();
@@ -744,6 +751,7 @@ internal sealed partial class LiveCenter
             old.StopReason = "Restarted with new parameters";
             // its stop loss and take profit stay working at the broker: the restarted strategy adopts them (never duplicated)
             old.Stop(flatten: false, keepProtection: true);
+            _svc.SaveLiveState();
         }
 
         var spec = launch.Spec!;
@@ -772,6 +780,7 @@ internal sealed partial class LiveCenter
     public string? ResetHistory(LiveEntry e)
     {
         if (e.Locked) return "Locked: history cannot be deleted here.";
+        if (AwaitingBroker(e.Key)) return "A position or order request is still active; wait for confirmation before resetting history.";
         if (e.Runner is { } r && (r.IsRunning || r.IsClosing))
         {
             if (!r.ResetLedger()) return "An open position exists: close it first.";
@@ -799,9 +808,10 @@ internal sealed partial class LiveCenter
             r.StopReason = "Removed";
             r.Stop(flatten: false);
         }
+        if (AwaitingBroker(e.Key)) return PendingBrokerMessage;
 
         if (e.ChartStrategy is { } cs && e.Chart is { } chart && Trading?.Invoke() is { } tv) tv.RemoveStrategy(chart, cs);
-        _svc.Runners.RemoveAll(x => x.Key == e.Key && !x.IsClosing);
+        _svc.Runners.RemoveAll(x => x.Key == e.Key && !x.IsClosing && !x.HasWorkingOrders);
         LiveStore.RemoveRunner(e.Key, history);
         _ledgers.Remove(e.Key);
         // también de los portafolios

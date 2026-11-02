@@ -11,13 +11,13 @@
 3. **Test connection** saves first, then tests and shows the result above the form.
 4. Use **Save** after subsequent edits.
 
-The form also has a customizable name, type, Enabled switch and Delete action. Disabled profiles do not supply instruments or trading accounts. Deleting removes the profile and its Keychain secrets, **not recorded history**. The final built-in Simulator, Binance, Bybit or Rithmic profile cannot always be deleted; disable it instead.
+The form also has a customizable name, type, Enabled switch and Delete action. Disabled profiles do not supply instruments or trading accounts. Deleting removes the profile and its native credential-store secrets, **not recorded history**. The final built-in Simulator, Binance, Bybit or Rithmic profile cannot always be deleted; disable it instead.
 
 Most providers have **History when opening a chart**, from 30 minutes to seven days. Already stored/downloaded data loads locally; missing history comes from the provider.
 
 ## Where credentials are stored
 
-Passwords, API secrets, tokens and Databento keys use **macOS Keychain**, service `Trading Hub`, rather than ordinary files. Saved secret fields show a masked Keychain placeholder. Enter a new value to replace one; leaving the field blank preserves the saved value.
+Passwords, API secrets, tokens and Databento keys use **macOS Keychain** (service `Trading Hub`) or native **Windows Credential Manager** (stable generic targets `Trading Hub/<account>`), rather than ordinary files. Saved secret fields show a masked native-store placeholder. Enter a new value to replace one; leaving the field blank preserves the saved value. Native Windows credential behavior remains a separate validation gate, not proof supplied by shared-runtime tests.
 
 `connections.json` contains nonsecret metadata such as name, username, server, public API identifier (for example Binance API key ID or Alpaca Key ID) and options. Treat even nonsecret account metadata as private when sharing screenshots or diagnostics.
 
@@ -69,6 +69,13 @@ Direct official R|Protocol integration; R|Trader Pro is not required. The profil
 
 Accounts appear in Rithmic-chart tickets and Accounts once the order session connects. Rithmic generally allows one session per username; another program signing in can disconnect one session. Verify application approval with your provider before relying on it.
 
+### If Rithmic will not connect or trade
+
+- **Permission denied / username rejected:** the **Server** must select the exact system issued by your broker or prop firm. ATAS “Rithmic paper trading” corresponds to **Rithmic Paper Trading**; prop firms can use their own named systems. Check the password with the eye button without sharing it. If these match, ask the provider whether your user has R|Protocol API access and whether an approved **Application name** is required under **Advanced**.
+- **Data works but the account is missing from Chart Trader or read-only:** Rithmic 01 and prop-firm systems are treated as real destinations, even when a firm's own terminology sounds simulated. Review [Real and test accounts](#real-and-test-accounts). Enable **Allow REAL orders from Trading Hub** only deliberately after validating the correct account/environment and risk limits; it is not a harmless connection-test workaround.
+- **Unexpected disconnect:** Rithmic permits one session per username. Close R|Trader Pro, ATAS, NinjaTrader or other competing sessions as appropriate. Reconcile orders, fills and positions in the broker's tools before resuming automation; do not retry an uncertain order merely because data reconnected.
+
+
 ## AMP Futures
 
 Uses the Rithmic credentials supplied by AMP. A new profile starts disabled with Chicago and **Rithmic Paper Trading**. For a real account select the appropriate **Rithmic 01** system/region. Other settings match Rithmic.
@@ -91,7 +98,7 @@ Supports CFD indices, forex, gold and oil with tick history, including broker de
 2. **Authorize account:** choose demo or real, then **Connect with cTrader**. Complete browser authorization within five minutes. An application Playground access token can alternatively be pasted.
 3. **Account number:** when several accounts share a token, enter the desired login; 0 selects the first.
 
-Tokens are stored in Keychain and refreshed automatically. CFD bid quotes are modeled as unit-volume trades, **not exchange executions**: footprint/delta are approximations.
+Tokens are stored in the native credential store and refreshed automatically. CFD bid quotes are modeled as unit-volume trades, **not exchange executions**: footprint/delta are approximations.
 
 ## OANDA
 

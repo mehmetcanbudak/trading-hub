@@ -65,8 +65,9 @@ public sealed class ChartTheme
     public SKColor Selection { get; set; } = new(30, 83, 228);
     public SKColor DrawingDefault { get; set; } = new(30, 144, 255);
 
-    public string FontFamily { get; set; } = "Helvetica Neue";
-    public string MonoFontFamily { get; set; } = "Menlo";
+    // Helvetica Neue y Menlo en la Mac; Segoe UI y Consolas en Windows (las de la Mac no vienen ahí)
+    public string FontFamily { get; set; } = TradingHub.Common.PlatformFonts.SansSkia;
+    public string MonoFontFamily { get; set; } = TradingHub.Common.PlatformFonts.MonoSkia;
 
     public static ChartTheme Dark { get; } = new();
 

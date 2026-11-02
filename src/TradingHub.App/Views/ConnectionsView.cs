@@ -267,21 +267,31 @@ internal sealed class ConnectionsView : UserControl, IPage
         delete.IsVisible = _svc.Connections.Profiles.Count(x => x.Kind == p.Kind) > 1 || p.Kind is ConnectionKind.InteractiveBrokers or ConnectionKind.AmpFutures
             or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento;
 
-        void Save()
+        bool Save()
         {
-            p.Name = string.IsNullOrWhiteSpace(name.Text) ? Ui.EnumName(p.Kind) : name.Text.Trim();
-            p.Enabled = enabled.IsChecked == true;
-            foreach (var a in apply) a();
-            _svc.Connections.Save();
-            _svc.Connections.Invalidate(p);
-            InstrumentPicker.ClearCache(p.Id);
-            _status($"Connection \"{p.Name}\" saved");
+            try
+            {
+                p.Name = string.IsNullOrWhiteSpace(name.Text) ? Ui.EnumName(p.Kind) : name.Text.Trim();
+                p.Enabled = enabled.IsChecked == true;
+                foreach (var a in apply) a();
+                _svc.Connections.Save();
+                _svc.Connections.Invalidate(p);
+                InstrumentPicker.ClearCache(p.Id);
+                _status($"Connection \"{p.Name}\" saved");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowResult(false, "Connection could not be saved: " + ex.Message);
+                _status("Connection could not be saved: " + ex.Message);
+                return false;
+            }
         }
 
         save.Click += (_, _) => Save();
         test.Click += async (_, _) =>
         {
-            Save();
+            if (!Save()) return;
             _testCts?.Cancel();
             _testCts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
             test.IsEnabled = false;
@@ -301,13 +311,21 @@ internal sealed class ConnectionsView : UserControl, IPage
         delete.Click += async (_, _) =>
         {
             if (TopLevel.GetTopLevel(this) is not Window w) return;
-            if (!await ConfirmDialog.ShowAsync(w, "Remove connection", $"Removes \"{p.Name}\" and its Keychain secrets. Saved market data remains unchanged.", "Remove", danger: true)) return;
-            _svc.Connections.ClearSecrets(p);
-            _svc.Connections.Invalidate(p);
-            _svc.Connections.Profiles.Remove(p);
-            _svc.Connections.Save();
-            _selected = null;
-            FillList();
+            if (!await ConfirmDialog.ShowAsync(w, "Remove connection", $"Removes \"{p.Name}\" and its secrets from {Os.SecretStoreShort}. Saved market data remains unchanged.", "Remove", danger: true)) return;
+            try
+            {
+                _svc.Connections.ClearSecrets(p);
+                _svc.Connections.Invalidate(p);
+                _svc.Connections.Profiles.Remove(p);
+                _svc.Connections.Save();
+                _selected = null;
+                FillList();
+            }
+            catch (Exception ex)
+            {
+                ShowResult(false, "Connection could not be removed: " + ex.Message);
+                _status("Connection could not be removed: " + ex.Message);
+            }
         };
 
         var kindBadge = new Border { Child = Ui.H(6, Ui.Icon(IconOf(p.Kind), 14, Ui.Accent), new TextBlock { Text = Ui.EnumName(p.Kind), FontSize = 12 }), Classes = { "pill" } };
@@ -363,7 +381,7 @@ internal sealed class ConnectionsView : UserControl, IPage
     {
         var testnet = new ToggleSwitch { IsChecked = p.Testnet, OnContent = "Testnet (paper money)", OffContent = "Real account" };
         var key = new TextBox { Text = p.ApiKey, Watermark = "API key" };
-        var secret = new TextBox { PasswordChar = '•', Watermark = string.IsNullOrEmpty(_svc.Connections.GetSecret(p)) ? "API secret" : "•••••••• (saved in Keychain)" };
+        var secret = new TextBox { PasswordChar = '•', Watermark = string.IsNullOrEmpty(_svc.Connections.GetSecret(p)) ? "API secret" : $"•••••••• (saved in {Os.SecretStoreShort})" };
         var allowReal = new CheckBox { Content = "Allow REAL orders from Trading Hub", IsChecked = p.AllowRealOrders };
         var confirm = new CheckBox { Content = "Confirm each real-money order", IsChecked = p.ConfirmOrders };
         var maxQty = new NumericUpDown { Value = p.MaxOrderQuantity, Minimum = 0, Increment = 0.001m, FormatString = "0.#####", Watermark = "no limit" };
@@ -399,7 +417,7 @@ internal sealed class ConnectionsView : UserControl, IPage
 
         return Ui.V(14,
             Ui.H2("Trading account"),
-            Note(MaterialIconKind.ShieldKeyOutline, "Use API keys with trading permission only (no withdrawals). The secret is stored in macOS Keychain."),
+            Note(MaterialIconKind.ShieldKeyOutline, $"Use API keys with trading permission only (no withdrawals). The secret is stored in {Os.SecretStore}."),
             testnet,
             TwoColumns(Ui.Field("API key", key), Ui.Field("API secret", secret)),
             help,
@@ -549,7 +567,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         serverRow.Children.Add(server);
 
         var user = new TextBox { Text = p.RithmicUser, Watermark = "username (login)" };
-        var pass = new TextBox { PasswordChar = '•', RevealPassword = false, Watermark = string.IsNullOrEmpty(_svc.Connections.GetSecret(p)) ? "password" : "•••••••• (saved in Keychain)" };
+        var pass = new TextBox { PasswordChar = '•', RevealPassword = false, Watermark = string.IsNullOrEmpty(_svc.Connections.GetSecret(p)) ? "password" : $"•••••••• (saved in {Os.SecretStoreShort})" };
         var reveal = new ToggleButton { Content = Ui.Icon(MaterialIconKind.EyeOutline, 15), Padding = new Thickness(6, 2), MinHeight = 0, VerticalAlignment = VerticalAlignment.Stretch };
         ToolTip.SetTip(reveal, "Show typed password");
         reveal.IsCheckedChanged += (_, _) => pass.RevealPassword = reveal.IsChecked == true;
@@ -619,7 +637,7 @@ internal sealed class ConnectionsView : UserControl, IPage
 
     /// <summary>Campo de secreto: no muestra lo guardado, solo avisa que está en el Llavero.</summary>
     private TextBox SecretBox(ConnectionProfile p, string? name, string watermark) =>
-        new() { PasswordChar = '•', Watermark = string.IsNullOrEmpty(name == null ? _svc.Connections.GetSecret(p) : _svc.Connections.GetSecret(p, name)) ? watermark : "•••••••• (saved in Keychain)" };
+        new() { PasswordChar = '•', Watermark = string.IsNullOrEmpty(name == null ? _svc.Connections.GetSecret(p) : _svc.Connections.GetSecret(p, name)) ? watermark : $"•••••••• (saved in {Os.SecretStoreShort})" };
 
     private static Button Link(string text, string url)
     {
@@ -694,7 +712,16 @@ internal sealed class ConnectionsView : UserControl, IPage
         connect.Click += async (_, _) =>
         {
             string id = (clientId.Text ?? "").Trim();
-            string sec = !string.IsNullOrWhiteSpace(secret.Text) ? secret.Text.Trim() : _svc.Connections.GetSecret(p);
+            string sec;
+            try
+            {
+                sec = !string.IsNullOrWhiteSpace(secret.Text) ? secret.Text.Trim() : _svc.Connections.GetSecret(p);
+            }
+            catch (Exception ex)
+            {
+                oauthStatus.Text = "Authorization failed: " + ex.Message;
+                return;
+            }
             if (id.Length == 0 || sec.Length == 0)
             {
                 oauthStatus.Text = "First enter your app's Client ID and secret.";
@@ -712,7 +739,7 @@ internal sealed class ConnectionsView : UserControl, IPage
                 if (refresh.Length > 0) _svc.Connections.SetSecret(p, "refresh", refresh);
                 _svc.Connections.Save();
                 _svc.Connections.Invalidate(p);
-                token.Watermark = "•••••••• (saved in Keychain)";
+                token.Watermark = $"•••••••• (saved in {Os.SecretStoreShort})";
                 oauthStatus.Text = "Trading Hub authorized. Click Test connection.";
             }
             catch (Exception ex)
@@ -743,7 +770,7 @@ internal sealed class ConnectionsView : UserControl, IPage
             Note(MaterialIconKind.InformationOutline, "Available through a cTrader broker (IC Markets, Pepperstone, FxPro, Fusion Markets…) and a demo account: index CFDs, forex, gold and oil, with years of tick history."),
             Ui.H3("1 · Your application (one-time setup)"),
             Note(MaterialIconKind.ShieldKeyOutline, "Register an application at openapi.ctrader.com with your cTrader ID and add this redirect URL. Then copy its Client ID and Secret here."),
-            Ui.H(8, new TextBlock { Text = redirect, FontFamily = new FontFamily("Menlo, monospace"), VerticalAlignment = VerticalAlignment.Center }, copy, Link("Open openapi.ctrader.com", "https://openapi.ctrader.com/apps")),
+            Ui.H(8, new TextBlock { Text = redirect, FontFamily = Ui.MonoFont, VerticalAlignment = VerticalAlignment.Center }, copy, Link("Open openapi.ctrader.com", "https://openapi.ctrader.com/apps")),
             TwoColumns(Ui.Field("Client ID", clientId), Ui.Field("Secret", secret)),
             Ui.H3("2 · Authorize your account"),
             Ui.H(10, connect, demo),
@@ -795,7 +822,7 @@ internal sealed class ConnectionsView : UserControl, IPage
             practice,
             TwoColumns(Ui.Field("Token", token), Ui.Field("Account", account)),
             Ui.H(16, Link("Create practice account", "https://www.oanda.com/demo-account/"), Link("Generate token (Manage API Access)", "https://www.oanda.com/demo-account/tpa/personal_token")),
-            Note(MaterialIconKind.ShieldKeyOutline, "Token is stored in Keychain. Trading Hub uses it for data only (no OANDA orders)."));
+            Note(MaterialIconKind.ShieldKeyOutline, $"Token is stored in {Os.SecretStoreShort}. Trading Hub uses it for data only (no OANDA orders)."));
     }
 
     /// <summary>Alpaca: claves de la cuenta de práctica (historia SIP desde 2016 gratis).</summary>

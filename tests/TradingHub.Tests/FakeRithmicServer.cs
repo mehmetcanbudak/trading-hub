@@ -16,6 +16,13 @@ internal sealed class FakeRithmicServer : IDisposable
     private readonly object _gate = new();
     private WebSocket? _pnlSocket;
     private int _basket;
+    private readonly Dictionary<string, int> _filled = new();
+
+    public TaskCompletionSource? OrderReplayRelease { get; set; }
+    public TaskCompletionSource? PositionSnapshotRelease { get; set; }
+    public TaskCompletionSource OrderReplayRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public void SeedPosition(bool buy, int quantity, double price) => ApplyFill(buy, quantity, price);
 
     public string Uri { get; }
 
@@ -95,10 +102,18 @@ internal sealed class FakeRithmicServer : IDisposable
         }
     }
 
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SemaphoreSlim> SendLocks = new();
+
     private static async Task Send(WebSocket ws, ProtoWriter w)
     {
-        var bytes = w.ToArray();
-        await ws.SendAsync(bytes, WebSocketMessageType.Binary, true, CancellationToken.None).ConfigureAwait(false);
+        var sendLock = SendLocks.GetValue(ws, static _ => new SemaphoreSlim(1, 1));
+        await sendLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var bytes = w.ToArray();
+            await ws.SendAsync(bytes, WebSocketMessageType.Binary, true, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally { sendLock.Release(); }
     }
 
     private static ProtoWriter Msg(int template, ProtoMessage req) =>
@@ -216,12 +231,19 @@ internal sealed class FakeRithmicServer : IDisposable
                         await Send(ws, Msg(309, m).String(132766, "0"));
                         break;
                     case 320:
+                        OrderReplayRequested.TrySetResult();
+                        if (OrderReplayRelease != null) await OrderReplayRelease.Task.WaitAsync(_cts.Token);
+                        KeyValuePair<string, (bool Buy, int Qty, double Price, int Type, string Tag)>[] replay;
+                        lock (_gate) replay = Open.ToArray();
+                        foreach (var (basket, order) in replay)
+                            await Send(ws, Notify(351, 13, basket, order).Int(110121, 1).Int(154112, order.Qty).Int(154111, 0));
                         await Send(ws, Msg(321, m).String(132766, "0"));
                         break;
                     case 400:
                         await Send(ws, Msg(401, m).String(132766, "0"));
                         break;
                     case 402:
+                        if (PositionSnapshotRelease != null) await PositionSnapshotRelease.Task.WaitAsync(_cts.Token);
                         await Send(ws, Msg(403, m).String(132766, "0"));
                         await SendPnl(snapshot: true);
                         break;
@@ -283,7 +305,7 @@ internal sealed class FakeRithmicServer : IDisposable
     private ProtoWriter Notify(int template, int notify, string basket, (bool Buy, int Qty, double Price, int Type, string Tag) o) =>
         new ProtoWriter().Int(154467, template).Int(153625, notify).String(110300, basket).String(154119, o.Tag)
             .String(154008, "ACC1").String(110100, "ESZ6").String(110101, "CME").Int(112003, o.Buy ? 1 : 2)
-            .Int(112004, o.Qty).Double(110306, o.Price).Int(112008, o.Type);
+            .Int(112004, o.Qty).Double(110306, o.Price).Double(149247, o.Price).Int(112008, o.Type);
 
     private async Task NewOrder(WebSocket ws, ProtoMessage m)
     {
@@ -414,6 +436,38 @@ internal sealed class FakeRithmicServer : IDisposable
         }
 
         if (ws is { State: WebSocketState.Open }) await Send(ws, Notify(351, 13, basket, o).Int(154112, qty).Int(154111, 0));
+    }
+
+    public async Task FillOrder(string basket, int quantity, double price)
+    {
+        (bool Buy, int Qty, double Price, int Type, string Tag) order;
+        WebSocket ws;
+        int filled;
+        lock (_gate)
+        {
+            order = Open[basket];
+            filled = _filled.GetValueOrDefault(basket) + quantity;
+            if (quantity <= 0 || filled > order.Qty) throw new ArgumentOutOfRangeException(nameof(quantity));
+            _filled[basket] = filled;
+            if (filled == order.Qty) Open.Remove(basket);
+            ws = _sessions[2];
+            ApplyFill(order.Buy, quantity, price);
+        }
+        await Send(ws, Notify(352, 5, basket, order).Double(110307, price).Int(110308, quantity)
+            .Int(154111, filled).Int(154112, order.Qty - filled));
+        await SendPnl(snapshot: false);
+    }
+
+    public async Task RemoveOrderWhileDisconnected(string basket)
+    {
+        WebSocket? socket;
+        lock (_gate)
+        {
+            Open.Remove(basket);
+            _sessions.TryGetValue(2, out socket);
+        }
+        if (socket is { State: WebSocketState.Open })
+            await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture disconnect", _cts.Token);
     }
 
     public void Dispose()

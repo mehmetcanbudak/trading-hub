@@ -8,17 +8,18 @@ Trading Hub runs locally: app, market data, scripts, backtests and connection cr
 
 | Location | Contents |
 |---|---|
-| Application Support/Trading Hub | Settings, nonsecret connection metadata, workspace, ticks/bars, drawings, templates, account records, backtests, live runners and portfolios. |
+| macOS Application Support/Trading Hub; Windows `%APPDATA%\Trading Hub` | Settings, nonsecret connection metadata, workspace, ticks/bars, drawings, templates, account records, backtests, live runners and portfolios. |
 | Documents/Trading Hub | Strategies, Estrategias/Reportes reports and custom indicators. |
 | macOS Keychain | Passwords, secrets, tokens and Databento keys under service Trading Hub. |
+| Windows Credential Manager | Native generic credentials under stable targets `Trading Hub/<account>`, scoped to this user/computer. |
 
 See [Installation](instalacion.md#where-your-data-lives) for exact paths. AI-related local files include Chats, the compatibility-named `Capturas del laboratorio` screenshot folder (most recent 60), and claude-lab-mcp.json. Unexpected errors go to local crash.log; they are not automatically submitted.
 
 ## Credentials
 
-- Production secrets use macOS `security` and Keychain, not normal JSON files.
+- Production secrets use macOS `security`/Keychain or native Windows Credential Manager (`CredRead`/`CredWrite`/`CredDelete`), not normal JSON files.
 - connections.json contains name, username, server, public API identifiers and options. Public IDs/account names can still be sensitive metadata; avoid sharing them unnecessarily.
-- Deleting a connection also deletes its Keychain secrets.
+- Deleting a connection also deletes its native-store secrets. Windows uninstall intentionally retains data, scripts and credentials.
 - Laboratory tools do not expose stored credentials. Do not put credentials into source, prompts or reports, where file-reading tools could access them.
 
 ## Network access
@@ -68,9 +69,9 @@ TRADINGHUB_KEYCHAIN_FILE is a **plaintext testing override**, not encrypted prod
 
 This is optional irreversible removal, not an update step:
 
-1. Fully quit using ⌘Q / Quit Trading Hub.
-2. Back up anything required; delete Application Support/Trading Hub, and Documents/Trading Hub only if you also intend to erase scripts/reports.
-3. In Keychain Access remove the relevant Trading Hub entries.
-4. Remove the Applications bundle; see [Uninstalling](instalacion.md#uninstalling).
+1. Fully quit using ⌘Q on macOS, Alt+F4 on Windows, or Quit Trading Hub. Resolve protection choices and broker acknowledgment warnings first.
+2. Back up anything required; delete the platform's data directory, and Documents/Trading Hub only if you also intend to erase scripts/reports.
+3. In Keychain Access or Windows Credential Manager remove the relevant Trading Hub entries.
+4. Remove the Applications bundle or uninstall through Windows Settings → Apps; see [Uninstalling](instalacion.md#uninstalling) and [Windows](portar-a-windows.md).
 
 The English upgrade itself does not delete data, rename stable folders or translate personal records in place.

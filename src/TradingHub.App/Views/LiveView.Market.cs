@@ -207,7 +207,7 @@ internal sealed partial class LiveView
         if (c != null)
         {
             var price = Ui.H(8,
-                new TextBlock { Text = c.LastPrice.ToString("#,##0.##", Es), FontSize = 15, FontWeight = FontWeight.SemiBold, FontFamily = new FontFamily("Menlo, SF Mono"), VerticalAlignment = VerticalAlignment.Center },
+                new TextBlock { Text = c.LastPrice.ToString("#,##0.##", Es), FontSize = 15, FontWeight = FontWeight.SemiBold, FontFamily = Ui.MonoFont, VerticalAlignment = VerticalAlignment.Center },
                 new TextBlock
                 {
                     Text = c.Change is { } ch ? $"{ch.ToString("+0.00;-0.00;0.00", Es)} % over 24 h" : "",

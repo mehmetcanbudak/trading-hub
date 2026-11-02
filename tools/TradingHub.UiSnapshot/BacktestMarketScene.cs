@@ -80,7 +80,7 @@ internal static class BacktestMarketScene
 
     public static int Run(MainWindow window, Action<double> pump, string outDir)
     {
-        Check(!AppPaths.Strategies.Contains("/Documents/", StringComparison.Ordinal), "las estrategias son una copia temporal");
+        Check(!AppPaths.Strategies.Replace('\\', '/').Contains("/Documents/", StringComparison.Ordinal), "las estrategias son una copia temporal");
         SyntheticBtcIfMissing();
         File.WriteAllText(Path.Combine(AppPaths.Strategies, "BtMercado.cs"), Code);
         window.Navigate("strategies");

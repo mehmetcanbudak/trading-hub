@@ -30,7 +30,7 @@ internal sealed class ReportInput
 /// </summary>
 internal static class ReportBuilder
 {
-    private static readonly CultureInfo Es = CultureInfo.GetCultureInfo("en-US");
+    private static CultureInfo Es => TradingHub.Common.UiCulture.Current;
 
     private static string Money(decimal v, bool sign = false) => (sign && v > 0 ? "+" : "") + v.ToString("N2", Es);
     private static string Pct(decimal v, bool sign = false) => (sign && v > 0 ? "+" : "") + v.ToString("0.00", Es) + " %";
@@ -454,7 +454,7 @@ internal static class ReportBuilder
             var om = w.OutSampleMetrics;
             KeyValues(sb, new[]
             {
-                ("Windows", $"{w.Windows.Count} · {w.InSampleDays} optimization days and {w.OutSampleDays} test days ({(w.Anchored ? "anchored" : "rolling")})"),
+                ("Walk-forward windows", $"{w.Windows.Count} · {w.InSampleDays} optimization days and {w.OutSampleDays} test days ({(w.Anchored ? "anchored" : "rolling")})"),
                 ("Metric", w.Metric.ToString()),
                 ("Walk-forward efficiency", Num(w.WalkForwardEfficiency)),
                 ("Profitable windows", Pct(w.ProfitableWindowsPercent)),

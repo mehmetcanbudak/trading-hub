@@ -2,7 +2,7 @@
 
 # Development
 
-Trading Hub uses C#/.NET 10, Avalonia 11.3 and SkiaSharp 2.88. This fork's built-in interface, generated reports and assistant instructions are English. Original developer comments and Spanish documentation are retained where they are not user-facing.
+Trading Hub uses C#/.NET 10, Avalonia 11.3 and SkiaSharp 2.88. English is canonical source text; the runtime interface, generated report prose and assistant replies support English, Spanish and Simplified Chinese. Generated C#, filenames, class/parameter identifiers and code comments remain English in every language. Original developer comments and Spanish documentation are retained where they are not user-facing.
 
 ## Solution
 
@@ -20,6 +20,7 @@ Trading Hub uses C#/.NET 10, Avalonia 11.3 and SkiaSharp 2.88. This fork's built
 | src/TradingHub.App | Views, Windows, Controls, Services, Styles and Lab. `--mcp` starts the laboratory without windows. |
 | tests/TradingHub.Tests | xUnit regression suite. |
 | tools/TradingHub.UiSnapshot | Headless rendering and UI scenarios. |
+| tools/TradingHub.I18n | Catalog extraction/checking and complete upstream-dictionary/template coverage. |
 
 Versions/framework/product metadata are in Directory.Build.props. Product.Name defines branding; Product/AppPaths define storage. Do not rename those paths for localization.
 
@@ -35,6 +36,9 @@ dotnet test tests/TradingHub.Tests -c Release
 
 Packaging publishes self-contained osx-arm64, staging outside Desktop to avoid iCloud extended attributes interfering with signing. Git-ignored build.local.env can set BUNDLE_ID and SIGN_IDENTITY; TH_OUT and TH_STAGE override output/staging. See [Installation](instalacion.md).
 
+Windows packaging is implemented for both `win-x64` and `win-arm64`: `.\build-windows.ps1` on Windows with .NET SDK 10/NSIS, or `./build-windows.sh` on macOS with .NET SDK 10/NSIS. It produces per-user installers under `dist`; see [Windows](portar-a-windows.md). Packaging and shared tests do not certify native installer, Credential Manager, CLI/shim, tray/DPI, power or brokerage behavior.
+
+
 For isolated development:
 
 ```bash
@@ -42,6 +46,8 @@ fixture="$(mktemp -d /tmp/tradinghub-dev.XXXXXX)"
 TRADINGHUB_DATA_DIR="$fixture/data" \
 TRADINGHUB_STRATEGIES_DIR="$fixture/strategies" \
 TRADINGHUB_INDICATORS_DIR="$fixture/indicators" \
+TRADINGHUB_BACKTESTS_DIR="$fixture/backtests" \
+TRADINGHUB_LIVE_DIR="$fixture/live" \
 TRADINGHUB_KEYCHAIN_FILE="$fixture/fake-keychain.json" \
 TRADINGHUB_SLEEP_GUARD=off \
 dotnet run --project src/TradingHub.App
@@ -76,8 +82,9 @@ The number is initial loading seconds. With no scenes, Trading is captured. Asse
 |---|---|
 | trading, accounts, strategies, live, data, connections, settings | Navigate and capture the section. |
 | english | English windows/dialogs, safety copy and related localization assertions using isolated fixtures. |
+| safety | Financial-safety and protection-aware quit scenarios, including pending close/cancel acknowledgment and changed Tradovate contexts; fake providers only. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
-| panel | Right Chart Trader/DOM/tape, DOM execution controls and detached windows. |
+| panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
 | footprint | Footprint text colors and editor. |
 | mercado | Regime analysis and condition-filtered reruns. |
 | theme | Dark/light themes and chart settings. |
@@ -87,6 +94,28 @@ The number is initial loading seconds. With no scenes, Trading is captured. Asse
 | connections+rithmic, connections+amp | Profile/server selector. |
 | trading+… | layout2/layout2r/layout3/layout4/layout6; history<hours>[+period]/historyall; jitter; float; brackets; drawings; drawsettings; links; toolbar; trader; accounts; crossdemo; strategy; domfloat; domsettings. |
 | strategies+… | backtest, optimize, wfo, code, history, reports, portfolio, claudefloat, claude, claudelab; append +File to select a class/file. |
+
+
+For safety/quit coverage, use a fresh fixture with all six storage overrides and the sleep guard disabled, as in [the dashboard reproduction command](TRANSLATION_STATUS.md#reproduce). The `safety` scene includes `RunQuit`; `quit` is not a separate assertion scene.
+
+For multilingual visual captures, use separate fresh fixtures and the seven main pages:
+
+```bash
+for language in es zh-CN; do
+  fixture="$(mktemp -d /tmp/tradinghub-language.XXXXXX)"
+  TRADINGHUB_DATA_DIR="$fixture/data" \
+  TRADINGHUB_STRATEGIES_DIR="$fixture/strategies" \
+  TRADINGHUB_INDICATORS_DIR="$fixture/indicators" \
+  TRADINGHUB_BACKTESTS_DIR="$fixture/backtests" \
+  TRADINGHUB_LIVE_DIR="$fixture/live" \
+  TRADINGHUB_KEYCHAIN_FILE="$fixture/fake-keychain.json" \
+  TRADINGHUB_SLEEP_GUARD=off TRADINGHUB_LANG="$language" \
+  dotnet run --project tools/TradingHub.UiSnapshot -- \
+    "$fixture/captures" 4 trading settings connections data strategies accounts live
+done
+```
+
+These commands are reproduction instructions, not claims that the scenarios passed in this integration. Record actual results in the dashboard. CJK shaping, regional formatting and real desktop restart/quit need visual/native review in addition to assertions.
 
 Isolation behavior:
 
@@ -106,10 +135,11 @@ Diagnostics: TRADINGHUB_SNAP_INDICATORS="Name|Other" adds selected studies; TRAD
 |---|---|
 | TRADINGHUB_DATA_DIR | Data-root override. |
 | TRADINGHUB_STRATEGIES_DIR / TRADINGHUB_INDICATORS_DIR | Script-root overrides. |
-| TRADINGHUB_KEYCHAIN_FILE | JSON fake secrets instead of Keychain; plaintext, **test use only**. |
+| TRADINGHUB_KEYCHAIN_FILE | JSON fake secrets instead of macOS Keychain/Windows Credential Manager; plaintext, **test use only**. |
 | TRADINGHUB_BACKTESTS_DIR / TRADINGHUB_LIVE_DIR | Backtest/live storage overrides. |
 | TRADINGHUB_SLEEP_GUARD=off | Disable power changes. |
 | TRADINGHUB_CLAUDE_CLI | Explicit Claude executable. |
+| TRADINGHUB_LANG | UiSnapshot language selection (`en`, `es`, `zh-CN`); desktop language is persisted in Settings. |
 | TRADINGHUB_MCP_COMMAND | Laboratory executable override; default is this app. |
 | TRADINGHUB_OANDA_REST / _OANDA_STREAM | OANDA test endpoints. |
 | TRADINGHUB_ALPACA_DATA / _ALPACA_TRADING / _ALPACA_STREAM | Alpaca test endpoints, each with the full TRADINGHUB prefix. |
@@ -119,7 +149,7 @@ Diagnostics: TRADINGHUB_SNAP_INDICATORS="Name|Other" adds selected studies; TRAD
 ## Add a provider
 
 1. Implement IMarketDataFeed under Core/Feeds: GetInstrumentsAsync, batched LoadTradesAsync and Subscribe delivering trades/depth/status to IMarketDataSink. Add IKlineHistory, IDayDownloader, ISessionAwareFeed or ITickerStatsProvider where appropriate.
-2. For execution, implement ITradingAccount: market/limit/stop, cancellation/modification, flatten/reverse, position and IsReal.
+2. For execution, implement ITradingAccount: market/limit/stop/exit, cancellation/modification, flatten/reverse, position and IsReal. Native adapters must expose truthful PositionReady/OrdersReady boundaries, invalidate them on disconnect and wait for complete replay before declaring absent positions/orders. Missing data is unknown, never synthetic flat; keep pending requests tracked through acknowledgment.
 3. Add ConnectionKind without changing persisted enum values, MarketDataId, nonsecret ConnectionProfile fields, GetFeed and TestAsync. Use SetSecret/GetSecret for Keychain credentials and an endpoint override for fake tests.
 4. Add ConnectionsView UI and, for trading, AppServices.AccountsFor/AccountFor. Real orders require explicit permission.
 5. Add fake server fixtures and protocol/data tests.

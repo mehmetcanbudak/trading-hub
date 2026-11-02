@@ -122,7 +122,7 @@ public sealed partial class TradingView
                 Ui.H3("Trade with DOM"),
                 Ui.Text("Click Bid: limit buy (or stop above market price)."),
                 Ui.Text("Click Ask: limit sell (or stop below market price)."),
-                Ui.Text("Right-click or Option-click: cancel orders at that price."),
+                Ui.Text(Os.IsWindows ? "Right-click or Alt+click: cancel orders at that price." : "Right-click or Option-click: cancel orders at that price."),
                 Ui.Text("Drag your own order to change its price."),
                 Ui.Text("Scroll wheel: navigate · center button: return to price."),
                 Ui.Faint("DOM settings control columns, sizing, colors, and optional double-click trading.")).Also(v => v.Margin = new Thickness(12)),
@@ -231,7 +231,7 @@ public sealed partial class TradingView
                 B("S. Ask", "sell-soft", "Limit sell at ask (joins ask queue)", () => AtBook(OrderDirections.Sell, ask: true))),
             Row(B("Cancel", "", "Cancel all orders", () => _ = AccountActionAsync(_active, a => a.CancelAll(), "Orders canceled")),
                 B("Reverse", "", "Reverse position", () => _ = ReverseAsync(_active)),
-                B("Close", "primary", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, a => a.Flatten(), "Position closed"))));
+                B("Close position", "primary", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, a => a.Flatten(), "Position closed"))));
         panel.Margin = new Thickness(10, 8, 10, 10);
         return new Border { Child = panel, BorderBrush = Ui.Line, BorderThickness = new Thickness(0, 1, 0, 0), Background = Ui.Bg1 };
     }
@@ -435,7 +435,7 @@ public sealed partial class TradingView
         }
 
         var actions = Ui.Row(8,
-            Small("Close", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, acc => acc.Flatten(), "Position closed")),
+            Small("Close position", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, acc => acc.Flatten(), "Position closed")),
             Small("Reverse", "Reverse position", () => _ = ReverseAsync(_active)),
             Small("Cancel", "Cancel all orders", () => _ = AccountActionAsync(_active, acc => acc.CancelAll(), "Orders canceled")));
 
@@ -787,7 +787,7 @@ public sealed partial class TradingView
             return null;
         }
 
-        string desc = $"{(dir == OrderDirections.Buy ? "BUY" : "SELL")} {type switch { OrderTypes.Market => "at market", OrderTypes.Limit => "limit", _ => "stop" }} {qty} {acc.Instrument.Symbol}{(price > 0 ? " @ " + acc.Instrument.FormatPrice(price) : "")}";
+        string desc = $"{Localization.Lang.T(dir == OrderDirections.Buy ? "BUY" : "SELL")} {Localization.Lang.T(type switch { OrderTypes.Market => "at market", OrderTypes.Limit => "limit", _ => "stop" })} {qty} {acc.Instrument.Symbol}{(price > 0 ? " @ " + acc.Instrument.FormatPrice(price) : "")}";
         decimal signed = dir == OrderDirections.Buy ? qty : -qty;
         if (Blocked(chart, acc, signed)) return null;
         if (!await ConfirmAsync(chart, acc, desc, qty: qty)) return null;

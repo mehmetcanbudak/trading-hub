@@ -115,11 +115,31 @@ public class RithmicTests
         await Until(() => !broker.ActiveOrders.Contains(limit));
         Assert.DoesNotContain(limit, broker.ActiveOrders);
         Assert.Equal(OrderStatus.Canceled, limit.Status);
+        Assert.Equal(0m, limit.Filled); // a cancellation is not an execution
 
         // cerrar la posición
         broker.Flatten();
         await Until(() => broker.Position.Volume == 0);
         Assert.Equal(0m, broker.Position.Volume);
+    }
+
+    [Fact]
+    public async Task Reconnect_replay_confirms_a_cached_order_was_canceled_while_disconnected()
+    {
+        using var server = new FakeRithmicServer();
+        using var session = new RithmicTradingSession(Settings(server));
+        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => session.IsConnected);
+        var order = broker.Limit(OrderDirections.Buy, 1, 4990);
+        await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
+        Assert.Contains(order, broker.ActiveOrders);
+        await server.RemoveOrderWhileDisconnected(order.ExchangeOrderId);
+        await Until(() => order.Canceled && session.IsConnected);
+        Assert.True(order.Canceled, $"Order plant logins: {server.Logins.GetValueOrDefault(2)}; connected: {session.IsConnected}; replay ready: {broker.OrdersReady}; status: {session.StatusText}");
+        Assert.Equal(0m, order.Filled);
+        Assert.DoesNotContain(order, broker.ActiveOrders);
     }
 
     [Fact]

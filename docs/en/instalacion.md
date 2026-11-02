@@ -2,7 +2,7 @@
 
 # Installation
 
-Trading Hub is built locally from the repository. The build script assembles `Trading Hub.app`, signs it and optionally copies it to Applications. The first build takes a few minutes while NuGet dependencies download.
+This fork is built locally from the repository. On macOS, the build script assembles `Trading Hub.app`, signs it and optionally copies it to Applications. Windows x64/ARM64 self-contained builds and per-user NSIS installers are also implemented; see [Windows installation](portar-a-windows.md). The first build takes a few minutes while NuGet dependencies download. No published fork installer or completed native Windows certification is claimed.
 
 For this fork's completed English work, use branch **`feat/english-localization`**, not the Spanish `main` branch:
 
@@ -85,6 +85,13 @@ Without a developer certificate the script signs ad hoc. The locally built app n
   ```
   The identity must match `security find-identity -v -p codesigning`. If no matching identity is found, the script falls back to ad-hoc signing. A stable certificate helps macOS remember permissions across updates.
 
+## Windows installation
+
+Use 64-bit Windows 10/11 (x64 or ARM64), Git, .NET SDK 10 and NSIS. From this fork's checkout, run `.\build-windows.ps1` after installing NSIS (`winget install NSIS.NSIS`). On macOS with NSIS (`brew install makensis`), `./build-windows.sh` builds both architectures. Outputs: `dist/TradingHub-Setup-x64.exe` and `dist/TradingHub-Setup-arm64.exe`. End users of these self-contained packages do not need .NET installed.
+
+The installer defaults to `%LOCALAPPDATA%\Programs\Trading Hub`, requires no administrator elevation and adds Start/Desktop shortcuts. Fully quit before updating or uninstalling; installer Retry/Cancel waits for the process rather than force-killing it. Install over the prior app to update; uninstall through Windows Settings → Apps. Application removal intentionally retains `%APPDATA%\Trading Hub`, Documents scripts/reports and Credential Manager entries. Verify the artifact's source/signature before running it. The original author's upstream installers are not this fork's binaries and cannot be assumed to include fork-only safety corrections. See the [Windows guide](portar-a-windows.md#validation-and-release-gates) for uncompleted native gates.
+
+
 ## Claude Code (optional)
 
 Trading Hub runs your installed Claude Code CLI with your existing session, not a separate Claude API key. Usage counts against your normal Claude allowance. It is used in:
@@ -116,6 +123,9 @@ mkdir -p ~/.local/bin && ln -sf "$(command -v claude)" ~/.local/bin/claude
 | `~/Documents/Trading Hub/Estrategias` | C# strategies; `Reportes` inside contains Markdown reports. |
 | `~/Documents/Trading Hub/Indicadores` | Custom C# indicators. |
 | macOS Keychain | Connection passwords, secrets and tokens under service name `Trading Hub`. |
+| `%APPDATA%\Trading Hub` (Windows) | The same application-data identity and stable files/folders as macOS. |
+| Documents known folder → `Trading Hub\Estrategias`, `Trading Hub\Indicadores` (Windows) | Strategies/reports and indicators, including redirected Documents folders. |
+| Windows Credential Manager | Generic credentials named `Trading Hub/<account>`, current user/computer scope. |
 
 Spanish folder names are compatibility identifiers, not untranslated UI. Do not rename them during an upgrade.
 
@@ -134,11 +144,14 @@ Spanish folder names are compatibility identifiers, not untranslated UI. Do not 
 
 The first launch creates the Documents folders, including `DeltaPercentageExample.cs`. Example strategies are created when the strategy folder is empty. Existing user files are not overwritten merely to translate them.
 
+At first startup, a fresh installation chooses Spanish or Simplified Chinese for those OS languages and English otherwise. Existing English-fork settings lacking `Language` remain English. Change it in **Settings → General → Language**, then reopen or use **Restart now**. Restart uses the protection-aware quit flow; canceling quit does not spawn a replacement. Reports/assistant prose follow the UI choice; generated C# and sample identifiers stay English. See [Settings](ajustes.md#language-and-regional-display).
+
+
 Open folders using **File → Open data folder**, **Code → Open indicators folder**, **Code → Open strategies folder**, or the **Open** buttons under **Settings → Data**.
 
 ## Updating
 
-1. Fully quit with **⌘Q** or **Quit Trading Hub** from its menu-bar icon. Closing the window normally leaves the app and strategies running.
+1. Fully quit with **⌘Q** on macOS, **Alt+F4** on Windows, or **Quit Trading Hub** from the menu-bar/tray icon. Closing the window normally leaves the app and strategies running. Resolve the live-position protection dialog and reconcile any unconfirmed closes/cancels at the broker; never force-kill to update. The app may warn after an acknowledgment timeout; that does not prove flatness.
 2. Update the selected English branch:
    ```bash
    git pull --ff-only

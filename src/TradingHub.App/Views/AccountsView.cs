@@ -22,7 +22,7 @@ namespace TradingHub.App.Views;
 /// </summary>
 public sealed class AccountsView : UserControl
 {
-    private static readonly CultureInfo Es = new("en-US");
+    private static CultureInfo Es => TradingHub.Common.UiCulture.Current;
     private const string PositionColumns = "1.3*,0.7*,0.7*,1*,1*,1*,92";
     private const string OrderColumns = "64,1.1*,0.6*,0.9*,0.5*,0.9*,0.7*,0.9*,1.6*,92";
     private const string FillColumns = "130,1.2*,0.7*,0.7*,1*,0.8*";
@@ -215,7 +215,7 @@ public sealed class AccountsView : UserControl
             r.Foreground = t.NetPnl >= 0 ? Ui.Up : Ui.Down;
             return g;
         });
-        return ListCard(TradeColumns, new[] { "Close", "Contract", "Side", "Qty", "Entry", "Exit", "Duration", "PnL" }, new[] { 3, 4, 5, 6, 7 }, _trades);
+        return ListCard(TradeColumns, new[] { "Close time", "Contract", "Side", "Qty", "Entry", "Exit", "Duration", "PnL" }, new[] { 3, 4, 5, 6, 7 }, _trades);
     }
 
     private static Control ListCard(string columns, string[] titles, int[] right, ListBox list)
@@ -435,8 +435,8 @@ public sealed class AccountsView : UserControl
         Card(0, "Balance", s.Balance is { } bal ? Money(bal, false) : "—",
             a.Kind == AccountKind.Sim ? $"started with {Money(s.StartBalance ?? 0, false)}" : s.Balance == null ? $"waiting for {(a.Kind == AccountKind.Tradovate ? "Tradovate" : "Rithmic")}…" : $"reported by {(a.Kind == AccountKind.Tradovate ? "Tradovate" : "Rithmic")}");
         Card(1, "Today's PnL", Money(s.DayPnl), $"realized {Money(s.RealizedToday)} · open {Money(s.OpenPnl)}", Signed(s.DayPnl));
-        Card(2, "Open PnL", Money(s.OpenPnl), open == 0 ? "no open positions" : $"{open} open position{(open > 1 ? "s" : "")}", Signed(s.OpenPnl));
-        Card(3, "Realized today", Money(s.RealizedToday), $"{s.TradesToday} trade{(s.TradesToday == 1 ? "" : "s")} closed today", Signed(s.RealizedToday));
+        Card(2, "Open PnL", Money(s.OpenPnl), open == 0 ? "no open positions" : open == 1 ? "1 open position" : $"{open} open positions", Signed(s.OpenPnl));
+        Card(3, "Realized today", Money(s.RealizedToday), s.TradesToday == 1 ? "1 trade closed today" : $"{s.TradesToday} trades closed today", Signed(s.RealizedToday));
         if (a.Kind == AccountKind.Sim)
             Card(4, "Total PnL", Money(s.Analysis.RealizedNet), $"{s.Analysis.Trades.Count} trades since inception", Signed(s.Analysis.RealizedNet));
         else
@@ -476,7 +476,7 @@ public sealed class AccountsView : UserControl
                 var g = new Grid { ColumnDefinitions = new ColumnDefinitions(PositionColumns) };
                 PositionRow? self = null;
                 // nothing sent (the position was already flat, or turned around): the status says why instead of «Closing…»
-                var close = ActionButton("Close", "", "Close at market", async () =>
+                var close = ActionButton("Close position", "", "Close at market", async () =>
                 {
                     if (await _svc.AccountCenter.CloseAsync(entry, self!.Line!) is { } nothingSent) _status(nothingSent);
                 }, "Closing position at market…", entry.IsReal);
@@ -642,7 +642,7 @@ public sealed class AccountsView : UserControl
             var g = new Grid { ColumnDefinitions = new ColumnDefinitions("78,*,92"), Margin = new Thickness(0, 2) };
             var date = new TextBlock { Text = d.Day.ToString("ddd dd/MM", Es), FontSize = 12, Foreground = Ui.Text2, VerticalAlignment = VerticalAlignment.Center };
             var bar = new Border { Height = 8, CornerRadius = new CornerRadius(4), Background = d.Net >= 0 ? Ui.Up : Ui.Down, HorizontalAlignment = HorizontalAlignment.Left, Width = max > 0 ? Math.Max(3, (double)(Math.Abs(d.Net) / max) * 110) : 3, VerticalAlignment = VerticalAlignment.Center };
-            ToolTip.SetTip(bar, $"{d.Count} trade{(d.Count == 1 ? "" : "s")}");
+            ToolTip.SetTip(bar, d.Count == 1 ? "1 trade" : $"{d.Count} trades");
             var net = new TextBlock { Text = Money(d.Net), FontSize = 12, TextAlignment = TextAlignment.Right, Foreground = Signed(d.Net), VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(bar, 1);
             Grid.SetColumn(net, 2);

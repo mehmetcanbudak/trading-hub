@@ -331,9 +331,9 @@ internal sealed partial class StrategiesView : UserControl, IPage
     private Control BuildCodePage()
     {
         var save = Ui.Button("Save", MaterialIconKind.ContentSaveOutline, Save);
-        ToolTip.SetTip(save, "⌘S");
+        ToolTip.SetTip(save, Keys.Label("S"));
         var compile = Ui.Button("Compile", MaterialIconKind.Hammer, () => _ = CompileAsync(), "primary");
-        ToolTip.SetTip(compile, "⌘B");
+        ToolTip.SetTip(compile, Keys.Label("B"));
         var test = Ui.Button("Compile and test", MaterialIconKind.PlayOutline, async () =>
         {
             if (!await CompileAsync()) return;

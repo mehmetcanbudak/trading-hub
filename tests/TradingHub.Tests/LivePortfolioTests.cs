@@ -113,6 +113,7 @@ public class LivePortfolioTests
         }
         finally
         {
+            LiveStore.DeleteFills(LedgerKey); // also release process-local pending state if an assertion failed
             LiveStore.Root = previousRoot;
             try { Directory.Delete(root, true); } catch { /* cleanup */ }
         }
@@ -167,6 +168,147 @@ public class LivePortfolioTests
             // in order and once each
             Assert.Equal(new[] { first, second, third }.Select(f => JsonSerializer.Serialize(f)), File.ReadAllLines(file));
             Assert.Equal(2m, LiveStore.LoadLedger(LedgerKey, 1).Position);
+        });
+    }
+
+    // Per-call stream injection uses the same append implementation without a process-wide test override.
+    private static readonly Func<string, LiveFill, Func<string, Stream>, string?> AppendWithStream =
+        typeof(LiveStore).GetMethod(nameof(LiveStore.AppendFill),
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic,
+            null, new[] { typeof(string), typeof(LiveFill), typeof(Func<string, Stream>) }, null)!
+            .CreateDelegate<Func<string, LiveFill, Func<string, Stream>, string?>>();
+
+    public enum LedgerFailure { BeforeWrite, PartialWrite, Rollback, Flush, Dispose }
+
+    private sealed class FaultingLedgerStream(string path, LedgerFailure failure, bool failRollback = false)
+        : Stream
+    {
+        private readonly FileStream _file = new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0);
+
+        public override bool CanRead => _file.CanRead;
+        public override bool CanSeek => _file.CanSeek;
+        public override bool CanWrite => _file.CanWrite;
+        public override long Length => _file.Length;
+        public override long Position { get => _file.Position; set => _file.Position = value; }
+        public override int Read(byte[] buffer, int offset, int count) => _file.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => _file.Read(buffer);
+        public override int ReadByte() => _file.ReadByte();
+        public override long Seek(long offset, SeekOrigin origin) => _file.Seek(offset, origin);
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            if (failure == LedgerFailure.BeforeWrite) throw new IOException("Injected write failure");
+            if (failure == LedgerFailure.PartialWrite)
+            {
+                // Persist a complete JSONL record and only the beginning of the next one.
+                int firstLine = buffer.IndexOf((byte)'\n') + 1;
+                _file.Write(buffer[..Math.Min(buffer.Length, firstLine + 7)]);
+                throw new IOException("Injected partial write failure");
+            }
+
+            _file.Write(buffer);
+        }
+
+        public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
+
+        public override void SetLength(long value)
+        {
+            if (failRollback || failure == LedgerFailure.Rollback) throw new IOException("Injected truncation failure");
+            _file.SetLength(value);
+        }
+
+        public override void Flush()
+        {
+            if (failure == LedgerFailure.Flush) throw new IOException("Injected flush failure");
+            _file.Flush();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _file.Dispose();
+            base.Dispose(disposing);
+            if (disposing && failure == LedgerFailure.Dispose) throw new IOException("Injected dispose failure");
+        }
+    }
+
+    [Fact]
+    public void A_partial_batch_with_failed_rollback_is_excluded_until_retried_in_order()
+    {
+        InTemporaryStore(() =>
+        {
+            var opening = new LiveFill(T0, true, 2, 100);
+            var first = new LiveFill(T0.AddMinutes(1), false, 1, 110);
+            var second = new LiveFill(T0.AddMinutes(2), false, 2, 90);
+            var third = new LiveFill(T0.AddMinutes(3), true, 1, 80);
+            var fourth = new LiveFill(T0.AddMinutes(4), true, 1, 70);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, opening));
+            string file = LiveStore.LedgerFile(LedgerKey);
+            File.AppendAllText(file, "{corrupt committed line}\n");
+            Assert.NotNull(AppendWithStream(LedgerKey, first,
+                path => new FaultingLedgerStream(path, LedgerFailure.BeforeWrite)));
+            Assert.NotNull(AppendWithStream(LedgerKey, second,
+                path => new FaultingLedgerStream(path, LedgerFailure.PartialWrite, failRollback: true)));
+
+            var recovered = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { opening, first, second }, recovered.Fills);
+            Assert.Equal(-1m, recovered.Position);
+            Assert.Equal(90m, recovered.AveragePrice);
+            Assert.Equal(0m, recovered.Realized);
+            Assert.Equal(10m, recovered.OpenPnL(80));
+            Assert.Equal(1, recovered.SkippedLines);
+
+            byte[] damaged = File.ReadAllBytes(file);
+            Assert.NotNull(AppendWithStream(LedgerKey, third,
+                path => new FaultingLedgerStream(path, LedgerFailure.Rollback)));
+            Assert.Equal(damaged, File.ReadAllBytes(file)); // no replay may precede a successful truncation
+            var waiting = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { opening, first, second, third }, waiting.Fills);
+            Assert.Equal(0m, waiting.Position);
+            Assert.Equal(10m, waiting.Realized);
+            Assert.Equal(1, waiting.SkippedLines);
+
+            Assert.Null(LiveStore.AppendFill(LedgerKey, fourth));
+            var saved = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { opening, first, second, third, fourth }, saved.Fills);
+            Assert.Equal(1m, saved.Position);
+            Assert.Equal(70m, saved.AveragePrice);
+            Assert.Equal(10m, saved.Realized);
+            Assert.Equal(5m, saved.OpenPnL(75));
+            Assert.Equal(1, saved.SkippedLines);
+            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(new[]
+            {
+                JsonSerializer.Serialize(opening), "{corrupt committed line}",
+                JsonSerializer.Serialize(first), JsonSerializer.Serialize(second),
+                JsonSerializer.Serialize(third), JsonSerializer.Serialize(fourth),
+            }, File.ReadAllLines(file));
+        });
+    }
+
+    [Theory]
+    [InlineData(LedgerFailure.Flush)]
+    [InlineData(LedgerFailure.Dispose)]
+    public void A_batch_is_not_committed_until_flush_and_dispose_succeed(LedgerFailure failure)
+    {
+        InTemporaryStore(() =>
+        {
+            var opening = new LiveFill(T0, true, 2, 100);
+            var closing = new LiveFill(T0.AddMinutes(1), false, 1, 110);
+            var next = new LiveFill(T0.AddMinutes(2), false, 1, 105);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, opening));
+            Assert.NotNull(AppendWithStream(LedgerKey, closing,
+                path => new FaultingLedgerStream(path, failure, failRollback: true)));
+            var recovered = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { opening, closing }, recovered.Fills);
+            Assert.Equal(1m, recovered.Position);
+            Assert.Equal(10m, recovered.Realized);
+
+            Assert.Null(LiveStore.AppendFill(LedgerKey, next));
+            var saved = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { opening, closing, next }, saved.Fills);
+            Assert.Equal(0m, saved.Position);
+            Assert.Equal(15m, saved.Realized);
+            Assert.Equal(new[] { opening, closing, next }.Select(f => JsonSerializer.Serialize(f)), File.ReadAllLines(LiveStore.LedgerFile(LedgerKey)));
         });
     }
 

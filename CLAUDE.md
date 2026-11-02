@@ -1,6 +1,6 @@
 # Trading Hub — instructions for Claude Code
 
-Trading Hub is a free, source-available desktop trading platform for Apple Silicon macOS, built with C#/.NET 10 and Avalonia. It runs locally and was originally created by [@ralphtradesz](https://x.com/ralphtradesz). **The requested localization language for this fork is English.** The original Spanish instructions are preserved in [CLAUDE.es.md](CLAUDE.es.md).
+Trading Hub is a free, source-available desktop trading platform for Apple Silicon macOS and Windows x64/ARM64, built with C#/.NET 10 and Avalonia. It runs locally and was originally created by [@ralphtradesz](https://x.com/ralphtradesz). **English is the canonical source/documentation language for this fork.** Runtime Spanish and Simplified Chinese are supported; existing English settings without a language selection remain English. The original Spanish instructions are preserved in [CLAUDE.es.md](CLAUDE.es.md).
 
 ## Project workflow: dashboard-first validation
 
@@ -12,7 +12,7 @@ Read [the sync guide](docs/en/upstream-sync.md) and [the upstream ledger](.githu
 
 ## If asked to install Trading Hub
 
-Explain each step briefly; do not request personal information, broker credentials, passwords, or API secrets for installation.
+Explain each step briefly; do not request personal information, broker credentials, passwords, or API secrets for installation. The steps below are for macOS. For Windows installation, packaging and native validation, follow [Windows integration](docs/en/portar-a-windows.md); upstream binaries do not include fork-only changes by implication.
 
 1. **Check the Mac.** `uname -m` must return `arm64` (Apple Silicon), and `sw_vers -productVersion` must be 12 or newer. Do not attempt this macOS build on Intel (`x86_64`). For Windows, see [the Windows porting guide](docs/en/portar-a-windows.md).
 2. **Check .NET 10.** Run `~/.dotnet/dotnet --list-sdks` or `dotnet --list-sdks`; locate a `10.*` SDK. If absent, install without requiring administrator access:
@@ -33,19 +33,19 @@ Explain each step briefly; do not request personal information, broker credentia
 
 ## If asked to update
 
-Completely quit Trading Hub (**Command-Q** or the menu-bar Quit action), then run `git pull` and `./build-app.sh --install`. Data, saved connections and strategies live outside the Git checkout, under Application Support and Documents, so the source update must not reset them.
+Completely quit Trading Hub through its protection-aware Quit action before updating. On macOS, run `git pull` and `./build-app.sh --install`; on Windows, follow [the installation/update guide](docs/en/portar-a-windows.md#per-user-installation-updates-and-uninstall). Data, saved connections, credentials and strategies live outside the Git checkout and must survive an update.
 
 ## If asked to change the code
 
 - Build: `dotnet build TradingHub.slnx` (add `$HOME/.dotnet` to PATH as needed).
 - Tests: `dotnet test tests/TradingHub.Tests`.
-- UI smoke scenes: `dotnet run --project tools/TradingHub.UiSnapshot -- <output-directory> 4 <scene>`, using only temporary data and fake providers.
+- UI smoke scenes: `dotnet run --project tools/TradingHub.UiSnapshot -- <output-directory> 4 <scene>`, using only temporary data and fake providers. Include `safety` (which also exercises quit) for order/lifecycle changes; use `TRADINGHUB_LANG=es` or `zh-CN` for multilingual surface captures. [Development](docs/en/desarrollo.md) lists the full gates.
 - Key projects: **Core** (market data, feeds, orders), **Sdk** (indicator API), **Charting** (rendering), **Scripting** (Roslyn), **Strategies** (backtests, optimization, live strategies), **Indicators.Native/Technical** (studies), and **App** (Avalonia UI).
 - The display name is defined in `TradingHub.Common.Product.Name`; do not casually rename persistent identifiers or application data directories during translation.
-- User data is not a test fixture. Avoid `~/Library/Application Support/Trading Hub` during automated tests; two processes writing into the same market-history files can cause corruption. Prefer `TRADINGHUB_DATA_DIR`, `TRADINGHUB_STRATEGIES_DIR`, `TRADINGHUB_INDICATORS_DIR`, and a fake secrets store via `TRADINGHUB_KEYCHAIN_FILE`.
-- Never place passwords, tokens, or API secrets in repository files. macOS Keychain stores private connection credentials.
+- User data is not a test fixture. Avoid production Application Support/AppData and Documents roots during automated tests; concurrent writers can corrupt market history. Set `TRADINGHUB_DATA_DIR`, `TRADINGHUB_STRATEGIES_DIR`, `TRADINGHUB_INDICATORS_DIR`, `TRADINGHUB_BACKTESTS_DIR`, `TRADINGHUB_LIVE_DIR`, a fake `TRADINGHUB_KEYCHAIN_FILE`, and `TRADINGHUB_SLEEP_GUARD=off`.
+- Never place passwords, tokens, or API secrets in repository files. Production credentials use macOS Keychain or Windows Credential Manager; plaintext files are test-only.
 - Real-money orders are high risk. Test with the simulated account and do not introduce new order-control clicks or confirmations as part of language-only changes. Existing real-account risk limits must remain operational.
-- For English localization, preserve all order identifiers, broker API payload keys, strategy file formats, storage paths, C# expressions, and stable IDs. Prefer English UI labels and documentation only. Validate every change with [the English translation checker](tools/check_english_translation.py) and macOS CI.
+- For localization, preserve all order identifiers, broker API payload keys, strategy file formats, storage paths, C# expressions and stable IDs. Keep new generated C# identifiers/comments English in every runtime language. Validate with [the English checker](tools/check_english_translation.py), upstream-dictionary/template coverage in `tools/TradingHub.I18n`, and macOS/Windows gates; update the rolling checkpoint only after the required validation evidence exists.
 - The license is MIT with Commons Clause. Users may use, modify, and share subject to the license, but cannot commercially sell the app, modifications, or services based primarily on it. Do not describe it as OSI-approved open source.
 - For project structure and detailed tests, see [Development](docs/en/desarrollo.md); for privacy and provider limitations, see [Privacy](docs/en/privacidad.md).
 

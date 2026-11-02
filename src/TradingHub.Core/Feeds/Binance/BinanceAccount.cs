@@ -185,12 +185,26 @@ public sealed class BinanceAccountClient : IDisposable
             using var doc = await SignedAsync(HttpMethod.Get, "/api/v3/account", "omitZeroBalances=true", ct).ConfigureAwait(false);
             foreach (var b in doc.RootElement.GetProperty("balances").EnumerateArray())
             {
-                decimal free = D(b, "free"), locked = D(b, "locked");
+                decimal free = decimal.Parse(b.GetProperty("free").GetString()!, NumberStyles.Float, CultureInfo.InvariantCulture);
+                decimal locked = decimal.Parse(b.GetProperty("locked").GetString()!, NumberStyles.Float, CultureInfo.InvariantCulture);
                 if (free + locked > 0) list.Add(new BinanceBalance(b.GetProperty("asset").GetString()!, free + locked, free, 0));
             }
         }
 
         return list;
+    }
+
+    /// <summary>Resolves missing instrument metadata from Binance, never by splitting a symbol or guessing its quote asset.</summary>
+    internal async Task<string> GetSpotBaseAssetAsync(string symbol, CancellationToken ct)
+    {
+        string json = await _http.GetStringAsync($"{_s.RestBase}/api/v3/exchangeInfo?symbol={Uri.EscapeDataString(symbol)}", ct).ConfigureAwait(false);
+        using var doc = JsonDocument.Parse(json);
+        foreach (var s in doc.RootElement.GetProperty("symbols").EnumerateArray())
+        {
+            if (S(s, "symbol") == symbol && S(s, "baseAsset") is { Length: > 0 } asset) return asset;
+        }
+
+        throw new InvalidOperationException($"Binance did not report a base asset for {symbol}.");
     }
 
     public async Task<IReadOnlyList<BinancePosition>> GetPositionsAsync(CancellationToken ct)
@@ -376,6 +390,11 @@ public sealed class BinanceAccountClient : IDisposable
 /// <see cref="Order.ExchangeOrderId"/> is "algo:" and the algo id). Once one triggers, its handle follows the regular
 /// order it placed until that finishes, and shows that order's id. Spot stops stay STOP_LOSS orders.
 /// </para>
+/// <para>
+/// Spot's native quantity is the symbol's base-asset wallet balance (free plus locked), not a strategy's ledger or a
+/// separate position for each quote pair. Binance supplies no aggregate spot entry price or unrealized profit: both
+/// remain unavailable (0); strategy cost accounting continues to come from its own fills.
+/// </para>
 /// </remarks>
 public sealed class BinanceBroker : ITradingAccount, IDisposable
 {
@@ -387,6 +406,8 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     private readonly InstrumentData _data;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _gate = new();
+
+    private string? _spotBaseAsset; // reuse the instrument catalog metadata; resolve an older metadata-less instrument once
 
     // Handles not finished yet, by object and by the exchange order each follows now: a regular order by its order id or,
     // in USD-M futures, a conditional order by its algo id until it triggers.
@@ -466,6 +487,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         _data = data;
         _settings = settings;
         _client = new BinanceAccountClient(settings);
+        _spotBaseAsset = string.IsNullOrWhiteSpace(data.Instrument.BaseAsset) ? null : data.Instrument.BaseAsset;
         Name = name;
         Position = new Position { Security = new Security { Code = data.Instrument.Symbol, SecurityId = data.Instrument.Key } };
         _ = Task.Run(PollLoop);
@@ -478,6 +500,8 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     public Position Position { get; }
     public IEnumerable<Order> ActiveOrders => _orders.Where(o => o.State == OrderStates.Active);
     public string? LastError { get; private set; }
+    public bool PositionReady { get; private set; }
+    public bool OrdersReady { get; private set; }
     public event Action? Changed;
 
     private async Task PollLoop()
@@ -498,7 +522,26 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                     Position.AveragePrice = pos?.EntryPrice ?? 0;
                     Position.UnrealizedPnL = pos?.UnrealizedPnl ?? 0;
                 }
+                else
+                {
+                    _spotBaseAsset ??= await _client.GetSpotBaseAssetAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false);
+                    var balances = await _client.GetBalancesAsync(_cts.Token).ConfigureAwait(false);
+                    decimal quantity = 0m;
+                    for (int i = 0; i < balances.Count; i++)
+                    {
+                        if (balances[i].Asset != _spotBaseAsset) continue;
+                        quantity = balances[i].Wallet;
+                        break;
+                    }
+                    Position.Volume = quantity;
+                    Position.AveragePrice = 0m;
+                    Position.UnrealizedPnL = 0m;
+                }
 
+                _cts.Token.ThrowIfCancellationRequested();
+                PositionReady = true;
+
+                OrdersReady = lookupError == null;
                 LastError = lookupError;
                 Changed?.Invoke();
             }
@@ -509,6 +552,8 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
             catch (Exception ex)
             {
                 // also a request that timed out (HttpClient reports it as a cancellation): reported, and polling goes on
+                PositionReady = false;
+                OrdersReady = false;
                 LastError = ex.Message;
                 Changed?.Invoke();
             }
@@ -516,6 +561,9 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
             try { await Task.Delay(_settings.PollInterval, _cts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
+
+        PositionReady = false;
+        OrdersReady = false;
     }
 
     /// <summary>
@@ -978,7 +1026,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
 
     /// <summary>Stop loss / objetivo como orden solo-reducir (en futuros).</summary>
     public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
-        Send(dir, type == OrderTypes.Stop ? OrderTypes.Stop : OrderTypes.Limit, qty, price, comment, reduceOnly: _settings.Futures);
+        Send(dir, type is OrderTypes.Market or OrderTypes.Stop ? type : OrderTypes.Limit, qty, price, comment, reduceOnly: _settings.Futures);
 
     /// <summary>
     /// Binance does not modify price or quantity: the order is canceled and a new one sent, which the same handle (returned)
@@ -1310,6 +1358,9 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     public void Dispose()
     {
         _cts.Cancel();
+        PositionReady = false;
+        OrdersReady = false;
         _client.Dispose();
+        Changed?.Invoke();
     }
 }

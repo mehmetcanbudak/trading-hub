@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Avalonia.Threading;
 
 namespace TradingHub.App.Services;
@@ -9,9 +10,8 @@ namespace TradingHub.App.Services;
 public sealed record ClaudeResult(bool IsError, string Text, double CostUsd, double Seconds, bool NeedsLogin);
 
 /// <summary>
-/// Puente con Claude Code (la CLI <c>claude</c> instalada en la Mac, con la sesión de la suscripción
-/// del usuario). Corre en modo no interactivo dentro de la carpeta de estrategias, con permiso solo
-/// para leer y editar archivos de esa carpeta, y transmite la respuesta a medida que llega.
+/// Runs the user's subscription-authenticated Claude Code CLI on macOS or Windows, restricted to the
+/// requested workspace, and streams its response. No provider API credentials are required.
 /// </summary>
 public sealed class ClaudeCodeBridge
 {
@@ -21,7 +21,7 @@ public sealed class ClaudeCodeBridge
     /// <summary>¿La CLI instalada conoce esta opción? (se lee una vez su --help)</summary>
     public static async Task<Func<string, bool>> SupportsAsync(string cli)
     {
-        if (_helpText == null || _helpCli != cli)
+        if (_helpText == null || !PathComparer.Equals(_helpCli, cli))
         {
             string text = "";
             try
@@ -31,7 +31,7 @@ public sealed class ClaudeCodeBridge
                 using var p = Process.Start(psi)!;
                 p.StandardInput.Close();
                 var read = p.StandardOutput.ReadToEndAsync();
-                if (await Task.WhenAny(read, Task.Delay(15000)) == read) text = await read;
+                if (await Task.WhenAny(read, Task.Delay(15000)) == read) text = (await read).Replace("\r\n", "\n");
                 else p.Kill(true);
             }
             catch
@@ -73,7 +73,7 @@ public sealed class ClaudeCodeBridge
 
     private static string? _best;
     private static DateTime _bestAt;
-    private static readonly Dictionary<string, (DateTime Stamp, Version? Version)> Versions = new();
+    private static readonly Dictionary<string, (DateTime Stamp, Version? Version)> Versions = new(PathComparer);
 
     /// <summary>Modelo y esfuerzo con que trabaja Claude en Trading Hub (Opus 5.5 con esfuerzo extra).</summary>
     public static string Model { get; set; } = "claude-opus-5-5";
@@ -90,8 +90,10 @@ public sealed class ClaudeCodeBridge
         lock (Versions)
         {
             if (_best != null && File.Exists(_best) && (DateTime.UtcNow - _bestAt).TotalMinutes < 10) return _best;
-            var found = Candidates().Where(File.Exists).Distinct().ToList();
-            _best = found.Select(p => (Path: p, Version: VersionOf(p))).OrderByDescending(x => x.Version ?? new Version(0, 0)).Select(x => x.Path).FirstOrDefault();
+            var found = (OperatingSystem.IsWindows() ? WindowsCandidates() : Candidates()).Where(File.Exists).Distinct(PathComparer).ToList();
+            // Prefer a native executable over an npm shim when their versions match.
+            _best = found.Select(p => (Path: p, Version: VersionOf(p))).OrderByDescending(x => x.Version ?? new Version(0, 0))
+                .ThenBy(x => IsBatch(x.Path)).Select(x => x.Path).FirstOrDefault();
             _bestAt = DateTime.UtcNow;
             return _best;
         }
@@ -126,6 +128,184 @@ public sealed class ClaudeCodeBridge
 
         return list;
     }
+
+    private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    internal static bool IsBatch(string path) =>
+        path.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Official installer, npm, WinGet, current/saved PATH, and the Claude desktop application's bundled CLI.</summary>
+    private static IEnumerable<string> WindowsCandidates()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var list = WindowsCandidates(home, appData, localAppData, WindowsPath()).ToList();
+        list.AddRange(WhereClaude());
+        var bundled = Path.Combine(appData, "Claude", "claude-code");
+        try
+        {
+            if (Directory.Exists(bundled))
+                foreach (var version in Directory.GetDirectories(bundled))
+                {
+                    list.Add(Path.Combine(version, "claude.exe"));
+                    foreach (var installation in Directory.GetDirectories(version))
+                        list.Add(Path.Combine(installation, "claude.exe"));
+                }
+        }
+        catch (Exception)
+        {
+            // Other installations remain available if the bundled directory cannot be read.
+        }
+
+        return list;
+    }
+
+    internal static IEnumerable<string> WindowsCandidates(string home, string appData, string localAppData, string? path)
+    {
+        var dirs = new List<string>
+        {
+            Path.Combine(home, ".local", "bin"),
+            Path.Combine(home, ".claude", "local"),
+            Path.Combine(appData, "npm"),
+            Path.Combine(localAppData, "Microsoft", "WinGet", "Links"),
+        };
+        foreach (var dir in (path ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            dirs.Add(Environment.ExpandEnvironmentVariables(dir.Trim('"')));
+        foreach (var dir in dirs)
+        {
+            yield return Path.Combine(dir, "claude.exe");
+            yield return Path.Combine(dir, "claude.cmd");
+            yield return Path.Combine(dir, "claude.bat");
+        }
+    }
+
+    private static string WindowsPath() => string.Join(';',
+        Environment.GetEnvironmentVariable("PATH") ?? "",
+        Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? "",
+        Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? "");
+
+    private static IEnumerable<string> WhereClaude()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("where.exe")
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("claude");
+            using var process = Process.Start(psi)!;
+            var read = process.StandardOutput.ReadToEndAsync();
+            if (read.Wait(TimeSpan.FromSeconds(5))) return ParseWhere(read.Result);
+            if (!process.HasExited) process.Kill();
+        }
+        catch (Exception)
+        {
+            // Explicit installer paths and PATH discovery do not depend on where.exe.
+        }
+
+        return Array.Empty<string>();
+    }
+
+    internal static List<string> ParseWhere(string output) =>
+        output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => line.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || IsBatch(line))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static string? FindOnWindowsPath(string executable) =>
+        WindowsPath().Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(dir => Path.Combine(Environment.ExpandEnvironmentVariables(dir.Trim('"')), executable))
+            .FirstOrDefault(File.Exists);
+
+    /// <summary>
+    /// Bypass npm/pnpm/yarn batch interpreters: cmd.exe cannot preserve multiline prompts, quotes, or
+    /// metacharacters. Launch their JavaScript entry point with node, or their native executable directly.
+    /// </summary>
+    internal static (string File, string[] Prefix) WindowsCommand(string cli, Func<string, string?>? findOnPath = null)
+    {
+        string current = cli;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (IsBatch(current) && visited.Count < 16 && visited.Add(Path.GetFullPath(current)))
+        {
+            string? target = null;
+            try
+            {
+                target = CmdShimTarget(File.ReadAllText(current));
+            }
+            catch (IOException)
+            {
+                // Older npm installations have a predictable entry point next to the shim.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // The known npm entry point may still be readable.
+            }
+
+            target ??= @"node_modules\@anthropic-ai\claude-code\cli.js";
+            var dir = Path.GetDirectoryName(Path.GetFullPath(current))!;
+            var full = Path.GetFullPath(Path.Combine(dir, target.Replace('\\', Path.DirectorySeparatorChar)));
+            if (!File.Exists(full)) break;
+            if (IsBatch(full))
+            {
+                current = full;
+                continue;
+            }
+
+            if (full.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return (full, Array.Empty<string>());
+            if (!(full.EndsWith(".js", StringComparison.OrdinalIgnoreCase) || full.EndsWith(".cjs", StringComparison.OrdinalIgnoreCase) ||
+                  full.EndsWith(".mjs", StringComparison.OrdinalIgnoreCase))) break;
+            var node = Path.Combine(dir, "node.exe");
+            if (!File.Exists(node)) node = (findOnPath ?? FindOnWindowsPath)("node.exe") ?? "node.exe";
+            return (node, new[] { full });
+        }
+
+        if (!IsBatch(current)) return (current, Array.Empty<string>());
+        throw new InvalidOperationException("Cannot resolve the Claude Code command shim without altering its arguments. Reinstall Claude Code using the official Windows installer.");
+    }
+
+    internal static string? CmdShimTarget(string content)
+    {
+        string? target = null;
+        foreach (Match match in Regex.Matches(content, @"""%~?dp0%?\\?([^""%]+)"""))
+        {
+            var relative = match.Groups[1].Value.Trim();
+            if (relative.Length > 0 && !relative.EndsWith("node.exe", StringComparison.OrdinalIgnoreCase)) target = relative;
+        }
+
+        return target;
+    }
+
+    internal const int MaxWindowsCommandLine = 32000;
+
+    /// <summary>Conservative bound including Windows argument quoting and escaping.</summary>
+    internal static int WindowsCommandLineLength(string fileName, IEnumerable<string> args) =>
+        fileName.Length + 2 + args.Sum(argument => 1 + argument.Length + 2 + argument.Count(character => character is '"' or '\\'));
+
+    internal static string? MovePromptToStdinIfTooLong(ProcessStartInfo psi)
+    {
+        if (!OperatingSystem.IsWindows() || WindowsCommandLineLength(psi.FileName, psi.ArgumentList) <= MaxWindowsCommandLine) return null;
+        int index = psi.ArgumentList.IndexOf("-p");
+        if (index < 0 || index + 1 >= psi.ArgumentList.Count) return null;
+        string prompt = psi.ArgumentList[index + 1];
+        psi.ArgumentList.RemoveAt(index + 1);
+        psi.StandardInputEncoding = new UTF8Encoding(false);
+        return prompt;
+    }
+
+    /// <summary>Write the exact prompt without a BOM or an extra newline while output is read concurrently.</summary>
+    internal static async Task FeedStdinAsync(Process process, string? prompt)
+    {
+        try
+        {
+            if (prompt != null) await process.StandardInput.WriteAsync(prompt);
+        }
+        finally
+        {
+            process.StandardInput.Close();
+        }
+    }
+
+    internal static string WindowsLoginArguments(string cli, bool keepOpen = true) => $"/d /v:off /s /{(keepOpen ? "k" : "c")} \"\"{cli}\" /login\"";
 
     /// <summary>Versión de una CLI ("2.1.295 (Claude Code)" → 2.1.295), con caché por archivo.</summary>
     private static Version? VersionOf(string path)
@@ -177,9 +357,19 @@ public sealed class ClaudeCodeBridge
         var cli = FindCli() ?? "claude";
         try
         {
+            if (OperatingSystem.IsWindows())
+            {
+                // Expand the path once through an environment variable, so literal % characters in it survive.
+                var login = new ProcessStartInfo("cmd.exe", WindowsLoginArguments("%TRADINGHUB_CLAUDE_LOGIN%")) { UseShellExecute = false };
+                login.Environment["TRADINGHUB_CLAUDE_LOGIN"] = cli;
+                Process.Start(login)?.Dispose();
+                return;
+            }
+
             var psi = new ProcessStartInfo("/usr/bin/osascript") { UseShellExecute = false };
             psi.ArgumentList.Add("-e");
-            psi.ArgumentList.Add($"tell application \"Terminal\" to do script \"'{cli}' /login\"");
+            var command = "'" + cli.Replace("'", "'\\''") + "' /login";
+            psi.ArgumentList.Add("tell application \"Terminal\" to do script \"" + command.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"");
             psi.ArgumentList.Add("-e");
             psi.ArgumentList.Add("tell application \"Terminal\" to activate");
             Process.Start(psi);
@@ -192,21 +382,32 @@ public sealed class ClaudeCodeBridge
 
     internal static ProcessStartInfo Prepare(string cli, string workDir)
     {
-        var psi = new ProcessStartInfo(cli)
+        var (file, prefix) = OperatingSystem.IsWindows() ? WindowsCommand(cli) : (cli, Array.Empty<string>());
+        var psi = new ProcessStartInfo(file)
         {
             WorkingDirectory = workDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             RedirectStandardInput = true,
             UseShellExecute = false,
+            CreateNoWindow = OperatingSystem.IsWindows(),
             StandardOutputEncoding = Encoding.UTF8,
         };
+        foreach (var argument in prefix) psi.ArgumentList.Add(argument);
 
-        // entorno limpio: que no herede credenciales temporales de otra sesión de Claude
+        // Retain the subscription session, but do not inherit temporary API credentials or nested-session flags.
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var key in psi.Environment.Keys.ToList())
-            if (key.StartsWith("CLAUDE", StringComparison.Ordinal) || key.StartsWith("ANTHROPIC", StringComparison.Ordinal))
+            if ((key.StartsWith("CLAUDE", comparison) || key.StartsWith("ANTHROPIC", comparison))
+                && !(OperatingSystem.IsWindows() && key.Equals("CLAUDE_CODE_GIT_BASH_PATH", comparison)))
                 psi.Environment.Remove(key);
-        psi.Environment["PATH"] = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (Environment.GetEnvironmentVariable("PATH") ?? "");
+        if (OperatingSystem.IsWindows())
+        {
+            psi.Environment["PATH"] = WindowsPath();
+            psi.StandardErrorEncoding = Encoding.UTF8;
+            psi.StandardInputEncoding = new UTF8Encoding(false);
+        }
+        else psi.Environment["PATH"] = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (Environment.GetEnvironmentVariable("PATH") ?? "");
         psi.Environment["TERM"] = "dumb";
         return psi;
     }
@@ -245,18 +446,27 @@ public sealed class ClaudeCodeBridge
         var cli = FindCli();
         if (cli == null)
         {
-            Post(() => Finished?.Invoke(new ClaudeResult(true, "Claude Code was not found on this Mac. Install it from claude.com/claude-code and retry.", 0, 0, false)));
+            Post(() => Finished?.Invoke(new ClaudeResult(true, $"Claude Code was not found on this {Os.Device}. Install it from claude.com/claude-code and retry.", 0, 0, false)));
             return;
         }
 
-        var psi = Prepare(cli, workDir);
+        ProcessStartInfo psi;
+        try
+        {
+            psi = Prepare(cli, workDir);
+        }
+        catch (Exception ex)
+        {
+            Post(() => Finished?.Invoke(new ClaudeResult(true, "Could not run Claude Code: " + ex.Message, 0, 0, false)));
+            return;
+        }
         foreach (var a in new[]
                  {
                      "-p", prompt,
                      "--output-format", "stream-json",
                      "--verbose",
                      "--include-partial-messages",
-                     "--append-system-prompt", systemPrompt,
+                     "--append-system-prompt", systemPrompt + Localization.Lang.ForClaude,
                      "--tools", "Read,Write,Edit,MultiEdit,Glob,Grep",
                      "--permission-mode", "acceptEdits",
                      "--strict-mcp-config",
@@ -309,8 +519,9 @@ public sealed class ClaudeCodeBridge
         double cost = 0;
         try
         {
+            var stdinPrompt = MovePromptToStdinIfTooLong(psi);
             _proc = Process.Start(psi)!;
-            _proc.StandardInput.Close();
+            var feed = FeedStdinAsync(_proc, stdinPrompt);
             _proc.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data != null) stderr.AppendLine(e.Data);
@@ -352,6 +563,7 @@ public sealed class ClaudeCodeBridge
             }
 
             await _proc.WaitForExitAsync();
+            await feed;
             if (!gotResult)
             {
                 isError = true;

@@ -132,8 +132,11 @@ public sealed partial class TradingView
             kept = runner.ProtectionOrderIds.ToList();
             // after a normal stop its saved state no longer names orders to adopt (a keep-protection stop records its own)
             if (!keepProtection && runner.Persist) LiveStore.SaveProtectionOrderIds(runner.Info());
-            _svc.Runners.Remove(runner);
-            cs.Runner = null;
+            if (!runner.IsClosing && !runner.HasWorkingOrders)
+            {
+                _svc.Runners.Remove(runner);
+                cs.Runner = null;
+            }
             _svc.SaveLiveState();
         }
 
@@ -152,6 +155,14 @@ public sealed partial class TradingView
     {
         if (chart.Model is not { } model) return;
         IReadOnlyList<string> kept = historyOnly ? Array.Empty<string>() : StopStrategy(cs, keepProtection);
+        if (!historyOnly && cs.Runner is { IsRunning: false } stopping && (stopping.IsClosing || stopping.HasWorkingOrders))
+        {
+            cs.Overlay.Error = LiveCenter.PendingBrokerMessage;
+            cs.Overlay.Status = "Awaiting order confirmation";
+            _status(LiveCenter.PendingBrokerMessage);
+            model.Invalidate();
+            return;
+        }
         cs.Cts?.Cancel();
         var cts = cs.Cts = new CancellationTokenSource();
         cs.Busy = true;
@@ -296,11 +307,26 @@ public sealed partial class TradingView
                     runner.SeedPosition(new LiveFill(open.EntryTime, open.IsLong, open.Quantity, open.AveragePrice));
             }
 
+            if (cs.Live && _svc.Live.AwaitingBroker(runner.Key))
+            {
+                cs.Overlay.Error = LiveCenter.PendingBrokerMessage;
+                cs.Overlay.Status = "Awaiting order confirmation";
+                _status(LiveCenter.PendingBrokerMessage);
+                return;
+            }
+            if (cs.Live && _svc.Live.Running(runner.Key) != null)
+            {
+                cs.Overlay.Error = "This strategy is already running on the selected instrument and account.";
+                cs.Overlay.Status = cs.Overlay.Error;
+                _status(cs.Overlay.Error);
+                return;
+            }
+
             runner.Start();
             cs.Runner = runner;
             if (cs.Live)
             {
-                _svc.Runners.RemoveAll(r => !r.IsRunning && !r.IsClosing);
+                _svc.Runners.RemoveAll(r => !r.IsRunning && !r.IsClosing && !r.HasWorkingOrders);
                 _svc.Runners.Add(runner);
                 _svc.Live.Watch(runner);
                 _svc.SaveLiveState();
@@ -485,7 +511,7 @@ public sealed partial class TradingView
     private string LiveStatus(ChartStrategy cs, LiveStrategyRunner runner)
     {
         decimal units = runner.UnitsFor(LiveCenter.QuantityOf(runner.StrategyInstance.GetParameters()));
-        string each = units > 0 ? $"{units.ToString("0.####", CultureInfo.GetCultureInfo("en-US"))} {runner.ExecInstrument.Symbol} per order" : "size is zero";
+        string each = units > 0 ? $"{units.ToString("0.####", TradingHub.Common.UiCulture.Current)} {runner.ExecInstrument.Symbol} per order" : "size is zero";
         return $"live · {TradingHub.Common.EnglishText.Of(runner.Account.Name)} · {each}";
     }
 

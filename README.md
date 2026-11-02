@@ -1,22 +1,24 @@
+**English** · [Español](README.es.md) · [中文](README.zh-CN.md)
+
 # Trading Hub
 
-**Free, source-available desktop trading platform that runs locally on your Mac.**
+**Free, source-available desktop trading platform that runs locally on Apple Silicon macOS and Windows 10/11 (x64/ARM64).**
 
 Footprint charts, Depth of Market (DOM) trading, professional backtesting designed to reduce overfitting, and AI-assisted strategies. Data and credentials are stored locally; configured providers and optional Claude requests communicate over the network.
 
 Created by [@ralphtradesz](https://x.com/ralphtradesz). English work in this fork reuses [indigiti/TradeDock's community translation](https://github.com/indigiti/tradedock/tree/translation/english-documentation-ui), with additional completion, compatibility fixes and validation.
 
-**English branch:** `feat/english-localization`. Built-in UI, safety dialogs, reports, assistant instructions and full guides are English. Stored identifiers, personal history and third-party content are not destructively rewritten. See the [validation dashboard](docs/en/TRANSLATION_STATUS.md).
+**English branch:** `feat/english-localization`. English is the canonical source/documentation language; the runtime interface supports **English, Spanish and Simplified Chinese** under Settings → General → Language. Existing English-fork settings without a language remain English; fresh installs follow the OS (Spanish/Chinese, otherwise English). Reports and assistant prose follow the selected language; generated C#, filenames and sample identifiers stay English. Stored identifiers, personal history and third-party content are not destructively rewritten. See [Settings](docs/en/ajustes.md) and the [validation dashboard](docs/en/TRANSLATION_STATUS.md).
 
 **Upstream updates:** [Daily monitoring and the reviewed English sync process](docs/en/upstream-sync.md) track new original-repository commits without automatic merges or deployment.
 
-**Using Windows?** See [Porting Trading Hub to Windows](docs/en/portar-a-windows.md).
+**Using Windows?** See [Windows installation and platform integration](docs/en/portar-a-windows.md).
 
 ![Trading Hub](docs/en/img/trading.png)
 
 ## What is Trading Hub?
 
-Trading Hub is a free desktop trading platform whose source code is available to inspect and modify. The application, recorded or downloaded market data, strategies, backtests, and broker credentials are handled locally. On macOS, secrets are stored in Keychain rather than plaintext files. The application does not require a Trading Hub account or its own hosted server, and the project states that it does not collect telemetry.
+Trading Hub is a free desktop trading platform whose source code is available to inspect and modify. The application, recorded or downloaded market data, strategies, backtests, and broker credentials are handled locally. Secrets use macOS Keychain or native Windows Credential Manager rather than plaintext files. The application does not require a Trading Hub account or its own hosted server, and the project states that it does not collect telemetry.
 
 Supported market connections include:
 
@@ -68,7 +70,7 @@ Claude Code integration uses your own Claude subscription and local CLI, rather 
 - Launch strategies from backtesting or charts, with position sizing, daily loss limits, and maximum drawdown limits.
 - Compare live results against historical performance.
 - Build portfolios and use a Claude-powered risk agent to propose allocations; real-account allocations require user approval.
-- Observe real-time market conditions and strategy status through the macOS menu bar.
+- Observe real-time market conditions and strategy status through the macOS menu bar or Windows system tray.
 - Optionally resume strategies when the application opens and prevent the system from sleeping.
 
 ### Claude integration
@@ -114,17 +116,13 @@ The first build may take several minutes. The application is installed at `/Appl
 
 ## Windows support
 
-The current project targets Apple Silicon macOS. Its .NET and Avalonia foundation can also support Windows, but macOS-specific functionality must be adapted. A detailed staged plan is provided in [PORTAR_A_WINDOWS.md](docs/en/portar-a-windows.md) (English guide).
+Windows support from upstream v1.1 and runtime languages from v1.2 are implemented in this source integration; this is not merely a porting plan. The per-user NSIS installers target **x64 and ARM64**, bundle .NET, create Start/Desktop shortcuts and preserve user data and credentials on updates/uninstall.
 
-For a 64-bit Windows 10 or 11 computer:
+To build this fork on Windows, install Git, .NET SDK 10 and NSIS (`winget install NSIS.NSIS`), then run `.\build-windows.ps1` in this checkout. On macOS with .NET SDK 10 and NSIS installed (`brew install makensis`), run `./build-windows.sh`. Outputs are `dist/TradingHub-Setup-x64.exe` and `dist/TradingHub-Setup-arm64.exe`.
 
-1. Install [Git](https://git-scm.com), [.NET 10 SDK](https://dotnet.microsoft.com/download), and [Claude Code](https://claude.com/claude-code).
-2. Clone this repository and open it in a terminal.
-3. Ask Claude Code to follow the Windows porting guide, preserving macOS compatibility and executing builds and tests after each stage.
-4. Replace Keychain integration with Windows Credential Manager or DPAPI; adapt tray functionality, process launching, keyboard shortcuts, and packaging.
-5. Test with a simulated account and public Binance data before considering any real account.
+The original author's [upstream releases](https://github.com/ralphtradesz/trading-hub/releases) are separate artifacts: they must not be assumed to contain this fork's safety corrections. No published fork installer or native Windows certification is claimed here. Verify provenance/signatures before executing a downloaded installer; do not bypass a security warning for an untrusted file.
 
-**Windows builds are not claimed to work out of the box.** The port requires implementation and validation.
+Native Windows install/update/uninstall, credentials, CLI/login, tray/DPI, keyboard, power and multilingual desktop behavior still require validation on both architectures. Real/demo brokerage execution and physical macOS lifecycle/power behavior are also **not certified** by shared builds or headless scenes. Start with isolated simulation; see the [Windows guide](docs/en/portar-a-windows.md) for the release gates.
 
 ## Additional indicators
 
@@ -160,9 +158,9 @@ Full English guides are available below. Original Spanish sources remain under `
 | Settings | [Preferences](docs/en/ajustes.md) |
 | Privacy | [Local storage and network access](docs/en/privacidad.md) |
 | Development | [Builds, tests, and project structure](docs/en/desarrollo.md) |
-| Windows | [Windows porting guide](docs/en/portar-a-windows.md) |
+| Windows | [Windows installation and platform integration](docs/en/portar-a-windows.md) |
 
-The [original Spanish README](README.es.md) is retained for reference.
+The [latest upstream Spanish README](README.es.md) is retained for reference; a [Simplified Chinese README](README.zh-CN.md) is also available.
 
 ## Supporting the project
 

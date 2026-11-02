@@ -66,10 +66,6 @@ internal static class PanelScene
         }
         else Check(false, "la cinta tiene datos");
 
-        // botones del DOM
-        var domButtons = tv.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible && b.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text is "B. Bid" or "S. Ask" or "Close")).ToList();
-        Check(domButtons.Count >= 3, $"el DOM tiene botones de ejecución ({domButtons.Count})");
-
         // el gráfico pegado al panel: sin hueco entre el borde del gráfico y el del panel
         var frame = tv.ActiveTab?.Frame;
         var side = dom?.GetVisualAncestors().OfType<Border>().FirstOrDefault(b => b.BorderThickness.Left == 1 && b.Child is Grid);

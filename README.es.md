@@ -1,17 +1,22 @@
+**Español** · [English](README.md) · [中文](README.zh-CN.md)
+
+> Original de upstream c28900e, conservado con enlaces de idioma adaptados. Los instaladores enlazados son del autor original, no incluyen necesariamente las correcciones exclusivas de este fork. Este fork no afirma haber publicado instaladores ni certificado Windows nativo, brokers reales/demo o el ciclo físico de suspensión/salida de macOS. Véanse la [guía actual del fork](docs/en/portar-a-windows.md) y el [estado de validación](docs/en/TRANSLATION_STATUS.md). Licencia: código disponible bajo MIT + Commons Clause, no código abierto aprobado por OSI.
+
 <div align="center">
 
 # Trading Hub
 
-**La plataforma de trading gratis y de código abierto que corre 100 % en tu Mac.**
+**La plataforma de trading gratis y de código abierto que corre 100 % en tu computadora: Mac y Windows.**
 Gráficos con footprint, operación con DOM, backtesting profesional anti-sobreoptimización y estrategias con IA,
 con tus datos y tus claves siempre en tu computadora.
 
 Creada por [**@ralphtradesz**](https://x.com/ralphtradesz)
 
-¿Usás Windows? [Mirá cómo portarla con Claude](#usás-windows).
+¿Usás Windows? **[Descargá el instalador](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)** ([cómo instalarla](#usás-windows)).
 
 [![Licencia MIT + Commons Clause](https://img.shields.io/badge/licencia-MIT%20%2B%20Commons%20Clause-amber.svg)](LICENSE)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-black.svg)
+![Windows 10 y 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6.svg)
 ![.NET 10](https://img.shields.io/badge/.NET-10-512BD4.svg)
 ![Avalonia](https://img.shields.io/badge/UI-Avalonia-8B44AC.svg)
 
@@ -121,67 +126,25 @@ simulada: nada opera dinero real hasta que lo habilites en Conexiones. Más deta
 
 ## ¿Usás Windows?
 
-Hoy Trading Hub se compila para Mac con Apple Silicon, pero está hecho con .NET y Avalonia, que también corren en
-Windows: lo que depende de macOS está en pocos lugares bien identificados. Con **Claude Code** podés portarla en tu PC,
-por etapas y con las pruebas en verde en cada paso.
+Trading Hub corre en Windows 10 y 11 con un instalador de un clic: no hace falta compilar nada ni instalar .NET.
 
-1. Instalá en la PC (Windows 10 u 11 de 64 bits): [Git](https://git-scm.com), el
-   [SDK de .NET 10](https://dotnet.microsoft.com/download) y [Claude Code](https://claude.com/claude-code), e iniciá
-   sesión con tu cuenta de Claude.
-2. Cloná el repositorio y abrí una terminal en la carpeta:
-   ```bash
-   git clone https://github.com/ralphtradesz/trading-hub.git
-   cd trading-hub
-   claude
-   ```
-3. Pegale a Claude Code el prompt de abajo. Va a separar lo propio de cada sistema (claves en el Administrador de
-   credenciales, modo sin dormir, bandeja del sistema, atajos con Ctrl, barra de título), compilar y correr las
-   pruebas al final de cada etapa, y dejarte un `build-windows.ps1` que arma la app en `dist\Trading Hub`.
-4. Probala primero con la cuenta simulada y los datos gratis de Binance.
+1. Descargá el instalador:
+   - **[PC con Intel o AMD (la mayoría)](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)**
+   - [PC con Windows en ARM (Snapdragon, Surface Pro X)](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Setup-arm64.exe)
+2. Abrilo. Como el instalador todavía no tiene firma de un certificado pago, Windows puede mostrar «Windows protegió
+   tu PC»: tocá **Más información** y después **Ejecutar de todas formas**.
+3. Tocá **Instalar**. No pide permisos de administrador: queda en tu usuario, con accesos en el menú Inicio y en el
+   escritorio. Al terminar, **Abrir Trading Hub**.
 
-<details>
-<summary><b>Ver el prompt completo para Claude Code</b></summary>
+Arranca con una cuenta simulada, igual que en Mac. Tus datos quedan en `%APPDATA%\Trading Hub`, tus estrategias e
+indicadores en `Documentos\Trading Hub` y tus claves en el **Administrador de credenciales de Windows**. Para
+actualizar, instalá la versión nueva encima (tus datos no se tocan); para desinstalar, **Configuración → Aplicaciones →
+Trading Hub → Desinstalar**.
 
-```
-Quiero portar Trading Hub a Windows sin romper la versión de macOS. Es una app de escritorio en C#/.NET 10 con
-Avalonia y SkiaSharp (solución TradingHub.slnx). Leé primero CLAUDE.md, README.md, docs/desarrollo.md y
-PORTAR_A_WINDOWS.md (tiene el inventario de lo que depende de macOS y el plan por etapas).
-
-Reglas:
-- La versión de macOS tiene que seguir compilando y funcionando igual. Separá lo de cada sistema con
-  OperatingSystem.IsMacOS()/IsWindows() o, mejor, con interfaces chicas (ISecretStore, ISleepGuard, IShell, ISound)
-  y una implementación por plataforma. Nada de copiar archivos enteros.
-- Nunca guardes claves, tokens ni contraseñas en archivos de texto: en Windows usá el Administrador de credenciales
-  (advapi32 CredWrite/CredRead/CredDelete) o DPAPI. Las pruebas no pueden tocar las credenciales reales: usá una
-  variable de entorno (como TRADINGHUB_KEYCHAIN_FILE en Mac) para apuntar a un almacén de prueba.
-- Las herramientas y pruebas nunca usan los datos reales del usuario: las escenas sin pantalla ya usan carpetas
-  temporales (TRADINGHUB_DATA_DIR, TRADINGHUB_STRATEGIES_DIR, TRADINGHUB_INDICATORS_DIR); mantené eso.
-- No agregues confirmaciones que bloqueen clics en los botones de operar; la seguridad va por límites de riesgo.
-- La interfaz está en español rioplatense: los textos nuevos, igual.
-
-Hacelo por etapas y al final de cada una compilá (dotnet build TradingHub.slnx), corré las pruebas
-(dotnet test tests/TradingHub.Tests) y contame qué cambiaste:
-1. Que compile y arranque en Windows (Program.cs sin la espera de pantalla de macOS, rutas, fuentes).
-2. Almacén de claves de Windows detrás de la misma interfaz que el Llavero (Connections.cs).
-3. Integraciones: SleepGuard con SetThreadExecutionState, bandeja del sistema (TrayIcon + GetCursorPos para ubicar
-   el panel), abrir links/carpetas/reportes con UseShellExecute, sonidos sin afplay, y Claude Code (buscar claude.exe
-   o claude.cmd con `where`, %USERPROFILE%\.local\bin y %APPDATA%\npm; abrir /login en cmd o Windows Terminal).
-4. Interfaz: barra de título con los botones de Windows a la derecha, atajos con Ctrl (un helper común en vez de
-   KeyModifiers.Meta) y textos por plataforma (Mac/PC, Llavero/Administrador de credenciales, barra de menú/bandeja).
-5. Un build-windows.ps1 que publique self-contained para win-x64 y win-arm64 con el ícono, y deje la app lista en
-   una carpeta dist\Trading Hub. Si podés, un script de Inno Setup opcional.
-6. Verificación final: pruebas unitarias, las escenas sin pantalla que correspondan
-   (dotnet run --project tools/TradingHub.UiSnapshot -- capturas 4 trading conexiones panel footprint mercado)
-   y una lista de lo que conviene probar a mano con la cuenta simulada.
-
-Si algo no se puede hacer igual que en Mac (por ejemplo, seguir con la tapa cerrada), ocultá esa opción en Windows y
-explicalo en el texto de Ajustes. Mostrá los errores reales si algo falla; no sigas como si hubiera funcionado.
-```
-
-</details>
-
-La guía completa, con el inventario de cada parte que depende de macOS y qué usar en Windows, está en
-[PORTAR_A_WINDOWS.md](PORTAR_A_WINDOWS.md). Si lo lográs, ¡abrí un *pull request* para que lo aproveche todo el mundo!
+Para compilarla vos en Windows: [Git](https://git-scm.com), el [SDK de .NET 10](https://dotnet.microsoft.com/download)
+y [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`), y en la carpeta del repositorio
+`.\build-windows.ps1` (deja los instaladores en `dist`). Desde una Mac: `brew install makensis` y `./build-windows.sh`.
+Qué depende de cada sistema está en [PORTAR_A_WINDOWS.md](PORTAR_A_WINDOWS.md).
 
 ## Más indicadores
 
@@ -228,7 +191,7 @@ Esos indicadores son de sus autores: usalos respetando la licencia de cada fuent
 | [Ajustes](docs/ajustes.md) | Todas las opciones |
 | [Privacidad](docs/privacidad.md) | Qué queda en tu Mac y qué se conecta a internet |
 | [Desarrollo](docs/desarrollo.md) | Estructura del código, pruebas y escenas |
-| [Portar a Windows](PORTAR_A_WINDOWS.md) | Cómo llevarla a Windows con Claude, con el prompt completo |
+| [Windows](PORTAR_A_WINDOWS.md) | Qué depende de cada sistema operativo y cómo se armó la versión de Windows |
 
 ## Apoyá el proyecto
 

@@ -148,6 +148,12 @@ public sealed class AppSettings
     /// <summary>Seguir con la tapa cerrada (pide tu contraseña de administrador) y, si se quiere, solo con el cargador.</summary>
     public bool KeepAwakeLidClosed { get; set; }
     public bool LidClosedOnlyOnPower { get; set; } = true;
+    /// <summary>Idioma de la interfaz (es, en, zh-CN). null = todavía no se eligió: se toma el del sistema al arrancar.</summary>
+    public string? Language { get; set; }
+
+    /// <summary>Si ya había ajustes guardados (alguien que ya usaba la app antes de que hubiera idiomas).</summary>
+    public static bool Saved => File.Exists(FilePath);
+
     public double WindowWidth { get; set; } = 1600;
     public double WindowHeight { get; set; } = 960;
     public List<string> Favorites { get; set; } = new() { "binance-futures:BTCUSDT", "binance-futures:ETHUSDT", "sim:SIM-BTC" };
@@ -285,6 +291,7 @@ public sealed class AppServices
 
     private readonly Dictionary<string, TradingHub.Feeds.Rithmic.RithmicTradingSession> _rithmicSessions = new();
     private readonly Dictionary<string, TradingHub.Feeds.Tradovate.TradovateTradingSession> _tradovateSessions = new();
+    private readonly List<TradingHub.Feeds.Tradovate.TradovateTradingSession> _retiredTradovateSessions = new();
 
     /// <summary>Cuentas de Tradovate de una conexión (sincroniza órdenes, posiciones y saldos en segundo plano).</summary>
     public TradingHub.Feeds.Tradovate.TradovateTradingSession TradovateSessionFor(ConnectionProfile p)
@@ -339,19 +346,16 @@ public sealed class AppServices
         Markets = new MarketConditions(this);
         // cada estrategia que arranca en vivo arma su contexto de mercado con el último mes (no solo con el calentamiento)
         TradingHub.Strategies.LiveStrategyRunner.Started += OnRunnerStarted;
+        Connections.FeedInUse = RetainTradovateFeed;
         // la sesión de órdenes de Rithmic sigue la configuración nueva sin abrir otra (una segunda cortaría la primera)
         Connections.Reconfigured += p =>
         {
             if (p.IsRithmic && _rithmicSessions.TryGetValue(p.Id, out var session)) session.Reconfigure(Connections.RithmicSettingsOf(p));
-            // Tradovate: la sesión de órdenes usa la conexión del feed, que se rehace con los datos nuevos
-            if (p.Kind == ConnectionKind.Tradovate)
+            // A changed profile gets a new Tradovate context. Existing activity keeps its original transport.
+            if (_tradovateSessions.Remove(p.Id, out var tv))
             {
-                if (_tradovateSessions.Remove(p.Id, out var tv)) tv.Dispose();
-                foreach (var key in _realBrokers.Keys.Where(k => k.StartsWith($"tradovate|{p.Id}|", StringComparison.Ordinal)).ToList())
-                {
-                    (_realBrokers[key] as IDisposable)?.Dispose();
-                    _realBrokers.Remove(key);
-                }
+                if (TradovateInUse(tv)) _retiredTradovateSessions.Add(tv);
+                else DisposeTradovate(tv);
             }
 
             ReplaceStaleBrokers(p);
@@ -479,9 +483,6 @@ public sealed class AppServices
 
     public IEnumerable<SimBroker> SimBrokers => _simBrokers.Values;
 
-    /// <summary>Todas las cuentas abiertas en esta sesión (simuladas y reales): para saber si queda algo abierto antes de reiniciar.</summary>
-    internal IEnumerable<ITradingAccount> OpenAccounts() => _simBrokers.Values.Cast<ITradingAccount>().Concat(_realBrokers.Values);
-
     private readonly Dictionary<ITradingAccount, BracketManager> _brackets = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Stop/objetivos de una cuenta (uno por cuenta e instrumento), con la plantilla del instrumento.</summary>
@@ -548,7 +549,7 @@ public sealed class AppServices
             var session = TradovateSessionFor(tp);
             long id = long.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
             var acc = session.Accounts.FirstOrDefault(a => a.Id == id) ?? new TradingHub.Feeds.Tradovate.TradovateAccount(id, parts[2], true);
-            return Cache(key, tp, new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc, $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}"));
+            return Cache(key, tp, new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc, $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}"), session.Connection);
         }
 
         if (accountId.StartsWith("rithmic|", StringComparison.Ordinal))
@@ -570,11 +571,12 @@ public sealed class AppServices
     /// that decide where its orders go (Binance: market, testnet or REAL, and API key, which also decide its REST server;
     /// Rithmic: system and user, as its shared session follows a new server by itself).
     /// </summary>
-    private sealed class BrokerOrigin(string profileId, bool real, object? settings)
+    private sealed class BrokerOrigin(string profileId, bool real, object? settings, TradingHub.Feeds.Tradovate.TradovateConnection? transport)
     {
         public string ProfileId { get; } = profileId;
         public bool Real { get; } = real;
         public object? Settings { get; } = settings;
+        public TradingHub.Feeds.Tradovate.TradovateConnection? Transport { get; } = transport;
 
         private volatile bool _replaced;
 
@@ -590,10 +592,10 @@ public sealed class AppServices
         _ => (p.Kind, p.Testnet, p.ApiKey),
     };
 
-    private ITradingAccount Cache(string key, ConnectionProfile p, ITradingAccount broker)
+    private ITradingAccount Cache(string key, ConnectionProfile p, ITradingAccount broker, TradingHub.Feeds.Tradovate.TradovateConnection? transport = null)
     {
         _realBrokers[key] = broker;
-        _brokerOrigins.AddOrUpdate(broker, new BrokerOrigin(p.Id, broker.IsReal, BrokerSettingsOf(p)));
+        _brokerOrigins.AddOrUpdate(broker, new BrokerOrigin(p.Id, broker.IsReal, BrokerSettingsOf(p), transport));
         return broker;
     }
 
@@ -612,7 +614,8 @@ public sealed class AppServices
         var replaced = new List<ITradingAccount>();
         foreach (var (key, broker) in _realBrokers.ToList())
         {
-            if (!_brokerOrigins.TryGetValue(broker, out var origin) || origin.ProfileId != p.Id || Equals(origin.Settings, now)) continue;
+            if (!_brokerOrigins.TryGetValue(broker, out var origin) || origin.ProfileId != p.Id
+                || (origin.Transport == null && Equals(origin.Settings, now))) continue;
             origin.Replaced = true;
             _realBrokers.Remove(key);
             _replacedBrokers.Add(broker);
@@ -624,16 +627,61 @@ public sealed class AppServices
         BrokersReplaced?.Invoke(replaced);
     }
 
-    /// <summary>Disposes the replaced brokers nothing works through anymore: no live strategy, position or working order.</summary>
+    private bool BrokerInUse(ITradingAccount broker)
+    {
+        if (!broker.PositionReady || !broker.OrdersReady || broker.Position.Volume != 0 || broker.ActiveOrders.Any()) return true;
+        foreach (var runner in Runners)
+            if (ReferenceEquals(runner.Account, broker) && (runner.IsRunning || runner.IsClosing || runner.HasWorkingOrders)) return true;
+        return false;
+    }
+
+    private bool TradovateInUse(TradingHub.Feeds.Tradovate.TradovateTradingSession session)
+    {
+        if (!session.SnapshotReady || session.HasOpenPositionsOrOrders) return true;
+        foreach (var broker in _realBrokers.Values)
+            if (_brokerOrigins.TryGetValue(broker, out var origin) && ReferenceEquals(origin.Transport, session.Connection) && BrokerInUse(broker)) return true;
+        foreach (var broker in _replacedBrokers)
+            if (_brokerOrigins.TryGetValue(broker, out var origin) && ReferenceEquals(origin.Transport, session.Connection) && BrokerInUse(broker)) return true;
+        return false;
+    }
+
+    private bool RetainTradovateFeed(IMarketDataFeed feed)
+    {
+        if (feed is not TradingHub.Feeds.Tradovate.TradovateFeed tv) return false;
+        foreach (var data in Hub.Items)
+            if (ReferenceEquals(data.Feed, feed)) return true;
+        foreach (var session in _tradovateSessions.Values)
+            if (ReferenceEquals(session.Connection, tv.Connection) && TradovateInUse(session)) return true;
+        foreach (var session in _retiredTradovateSessions)
+            if (ReferenceEquals(session.Connection, tv.Connection) && TradovateInUse(session)) return true;
+        return false;
+    }
+
+    private static void DisposeTradovate(TradingHub.Feeds.Tradovate.TradovateTradingSession session)
+    {
+        session.Dispose();
+        // No remaining account consumer needs this channel; a retained feed can still use market data independently.
+        session.Connection.User.Dispose();
+    }
+
+    /// <summary>Unknown snapshots and outstanding requests are consumers too; only confirmed idle contexts can leave.</summary>
     private void DisposeIdleReplacedBrokers()
     {
-        if (_replacedBrokers.Count == 0) return;
-        _replacedBrokers.RemoveAll(b =>
+        for (int i = _replacedBrokers.Count - 1; i >= 0; i--)
         {
-            if (b.Position.Volume != 0 || b.ActiveOrders.Any() || Runners.Any(r => (r.IsRunning || r.IsClosing) && ReferenceEquals(r.Account, b))) return false;
-            (b as IDisposable)?.Dispose();
-            return true;
-        });
+            var broker = _replacedBrokers[i];
+            if (BrokerInUse(broker)) continue;
+            _replacedBrokers.RemoveAt(i);
+            (broker as IDisposable)?.Dispose();
+        }
+        for (int i = _retiredTradovateSessions.Count - 1; i >= 0; i--)
+        {
+            var session = _retiredTradovateSessions[i];
+            if (TradovateInUse(session)) continue;
+            _retiredTradovateSessions.RemoveAt(i);
+            DisposeTradovate(session);
+        }
+        Connections.ReleaseRetiredFeeds();
     }
 
     /// <summary>
@@ -690,8 +738,8 @@ public sealed class AppServices
             try
             {
                 r.Stop(flatten: mode == QuitMode.ClosePositions, keepProtection: mode == QuitMode.KeepStops);
-                // what is left at the broker now (nothing after a cancel or a close, unless it had not adopted them yet): the
-                // next start adopts only those (a keep-protection stop records its own)
+                // Record only the protection intentionally retained; unresolved cancellations remain tracked until
+                // acknowledgment and the quit flow waits for them or warns before disposing the connection.
                 if (r.Persist && mode != QuitMode.KeepStops) TradingHub.Strategies.LiveStore.SaveProtectionOrderIds(r.Info());
             }
             catch (Exception ex)
@@ -709,8 +757,10 @@ public sealed class AppServices
             TradingHub.Strategies.LiveStrategyRunner.Started -= OnRunnerStarted;
             Sleep.Dispose();
             foreach (var b in _realBrokers.Values) (b as IDisposable)?.Dispose();
+            foreach (var b in _replacedBrokers) (b as IDisposable)?.Dispose();
             foreach (var rs in _rithmicSessions.Values) rs.Dispose();
-            foreach (var ts in _tradovateSessions.Values) ts.Dispose();
+            foreach (var ts in _tradovateSessions.Values) DisposeTradovate(ts);
+            foreach (var ts in _retiredTradovateSessions) DisposeTradovate(ts);
             Hub.Dispose();
             Connections.DisposeAll();
         }

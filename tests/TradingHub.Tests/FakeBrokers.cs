@@ -284,6 +284,13 @@ internal sealed class FakeTradovate : IDisposable
     private long _nextOrder = 1000, _nextFill = 5000;
     private int _position;
 
+    public async Task DisconnectUserAndFlatten()
+    {
+        _position = 0;
+        if (_user is { State: WebSocketState.Open } socket)
+            await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture disconnect", CancellationToken.None);
+    }
+
     public FakeTradovate()
     {
         Server.OnHttp = req =>

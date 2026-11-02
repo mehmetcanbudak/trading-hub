@@ -82,6 +82,8 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
     public Position Position { get; }
     public IEnumerable<Order> ActiveOrders => _active;
     public string? LastError { get; private set; }
+    public bool PositionReady => _resolved is { } c && _session.PositionReadyFor(_account, c.Symbol, c.Exchange);
+    public bool OrdersReady => _resolved != null && _session.OrdersReadyFor(_account);
     public event Action? Changed;
 
     /// <summary>Contrato donde opera (ESZ6, CME); null hasta que Rithmic lo confirma.</summary>
@@ -112,7 +114,7 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
         if (s.Price > 0) o.Price = s.Price;
         o.TriggerPrice = s.PriceType is 3 or 4 ? s.Trigger : o.Price;
         if (s.Quantity > 0) o.QuantityToFill = s.Quantity;
-        o.Unfilled = s.Done ? 0 : s.Unfilled;
+        o.Unfilled = s.Done && !s.Cancelled && !s.Rejected ? 0 : Math.Max(0, o.QuantityToFill - s.Filled);
         if (s.Done)
         {
             o.State = s.Rejected ? OrderStates.Failed : OrderStates.Done;
@@ -231,7 +233,7 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
 
     /// <summary>Stop loss / objetivo: Trading Hub los maneja en OCO (Rithmic no tiene "solo reducir" en una orden simple).</summary>
     public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
-        Send(dir, type == OrderTypes.Stop ? OrderTypes.Stop : OrderTypes.Limit, qty, price, comment, reduceOnly: true);
+        Send(dir, type is OrderTypes.Market or OrderTypes.Stop ? type : OrderTypes.Limit, qty, price, comment, reduceOnly: true);
 
     /// <summary>Rithmic's state of an order, found by basket id or by the tag this broker gave it (restored orders: basket id only).</summary>
     private RithmicOrderState? StateOf(Order order)

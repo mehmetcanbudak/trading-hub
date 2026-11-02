@@ -427,7 +427,7 @@ internal sealed partial class StrategiesView
         };
 
         var config = Ui.Card(Ui.V(14,
-            Ui.H(8, Ui.Icon(MaterialIconKind.ChartTimelineVariantShimmer, 17, Ui.Accent), Ui.H2("Windows")),
+            Ui.H(8, Ui.Icon(MaterialIconKind.ChartTimelineVariantShimmer, 17, Ui.Accent), Ui.H2("Walk-forward windows")),
             new TextBlock
             {
                 Text = "Optimize in sample, test selected parameters on the following unseen days, advance and repeat. Uses the ranges selected in Optimization.",

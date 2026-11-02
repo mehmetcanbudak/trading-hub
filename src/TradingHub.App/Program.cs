@@ -7,12 +7,7 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        // modo laboratorio: Trading Hub como servidor MCP para Claude Code (sin ventanas)
-        if (args.Contains("--mcp"))
-        {
-            Environment.ExitCode = Lab.LabServer.RunAsync().GetAwaiter().GetResult();
-            return;
-        }
+        bool headless = args.Contains("--mcp");
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog.Write(e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) =>
@@ -21,11 +16,21 @@ internal static class Program
             e.SetObserved();
         };
 
+        // The desktop is the data writer; a standalone MCP reader must not claim its instance lease.
+        if (!headless && !Services.SingleInstance.Claim(Services.AppPaths.Root)) return;
+        LoadLanguage(persist: !headless);
+        if (headless)
+        {
+            Environment.ExitCode = Lab.LabServer.RunAsync().GetAwaiter().GetResult();
+            return;
+        }
+
         WaitForDisplay();
         try
         {
             BuildAvaloniaApp().AfterSetup(_ =>
             {
+                Localization.Lang.Install();
                 // un error en un control se registra y la app sigue andando (no se cierra en pleno trading)
                 Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (_, e) =>
                 {
@@ -41,12 +46,37 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// Loads the selected language before either desktop or MCP work. Existing English-fork settings without a language
+    /// stay English. A standalone MCP process reads the preference without rewriting settings owned by the desktop.
+    /// </summary>
+    private static void LoadLanguage(bool persist)
+    {
+        try
+        {
+            bool existing = Services.AppSettings.Saved;
+            var s = Services.AppSettings.Load();
+            if (s.Language == null)
+            {
+                s.Language = Localization.Lang.Default(existing);
+                if (persist) s.Save();
+            }
+
+            Localization.Lang.Load(s.Language);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            Localization.Lang.Load(Localization.Lang.English);
+        }
+    }
+
     [System.Runtime.InteropServices.DllImport("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")]
     private static extern int CGGetActiveDisplayList(uint maxDisplays, uint[]? activeDisplays, out uint displayCount);
 
     /// <summary>
     /// Con la pantalla apagada o bloqueada macOS no tiene pantalla activa y Avalonia no puede arrancar el dibujo
-    /// (error -6661): en vez de cerrarse, Trading Hub espera a que vuelva la pantalla y ahí abre.
+    /// (error -6661): en vez de cerrarse, Trading Hub espera a que vuelva la pantalla y ahí abre. En Windows no hace falta.
     /// </summary>
     private static void WaitForDisplay()
     {

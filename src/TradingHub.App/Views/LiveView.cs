@@ -18,7 +18,7 @@ namespace TradingHub.App.Views;
 /// </summary>
 internal sealed partial class LiveView : UserControl, IPage
 {
-    private static readonly CultureInfo Es = new("en-US");
+    private static CultureInfo Es => TradingHub.Common.UiCulture.Current;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     private readonly AppServices _svc;
     private readonly Action<string> _status;
@@ -242,7 +242,7 @@ internal sealed partial class LiveView : UserControl, IPage
         int pending = LiveStore.LoadProposals().Sum(p => p.Items.Count(i => i.Status == "pending"));
         _kpis.Children.Add(Kpi("PnL", Money(net), $"open {Money(open)}", net >= 0 ? Ui.Up : Ui.Down));
         _kpis.Children.Add(Kpi("Today", Money(today), "closed + open PnL of running strategies", today >= 0 ? Ui.Up : Ui.Down));
-        _kpis.Children.Add(Kpi("Live", running.Count.ToString(Inv), paused > 0 ? $"{paused} paused or risk-stopped" : $"{entries.Count} total", running.Count > 0 ? Ui.Accent : null));
+        _kpis.Children.Add(Kpi("Live", running.Count.ToString(Inv), paused > 0 ? $"{paused} paused or risk-stopped" : $"Total strategies: {entries.Count}", running.Count > 0 ? Ui.Accent : null));
         _kpis.Children.Add(Kpi("Closed trades", trades.ToString(Inv), "click to view all trade details", null, () => OpenTrades(), "All trades with MAE, MFE, size and more; select a trade to view it on the chart"));
         _kpis.Children.Add(Kpi("Pending changes", pending.ToString(Inv), "awaiting your approval", pending > 0 ? Ui.Warn : null, pending > 0 ? () => Select("proposals") : null));
 
@@ -360,7 +360,7 @@ internal sealed partial class LiveView : UserControl, IPage
     }
 
     private static TextBlock Num(string text, IBrush? color = null) =>
-        new() { Text = text, HorizontalAlignment = HorizontalAlignment.Right, Foreground = color ?? Ui.Text0, FontFamily = new FontFamily("Menlo, SF Mono"), FontSize = 12.5 };
+        new() { Text = text, HorizontalAlignment = HorizontalAlignment.Right, Foreground = color ?? Ui.Text0, FontFamily = Ui.MonoFont, FontSize = 12.5 };
 
     /// <summary>El tamaño y, abajo, cuántos contratos y de cuál manda cada orden (en el color de acento si es el micro).</summary>
     private static Control SizeCell(LiveEntry e, decimal size, OrderPlan plan)

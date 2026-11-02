@@ -10,6 +10,7 @@ NAME="Trading Hub"
 BUNDLE_ID="app.tradinghub.desktop"
 SIGN_IDENTITY=""
 [ -f build.local.env ] && source ./build.local.env
+VERSION="$(dotnet msbuild src/TradingHub.App/TradingHub.App.csproj -nologo -getProperty:Version)"
 
 # TH_OUT / TH_STAGE override the output/staging directories (defaults: dist and a temporary directory).
 OUT="${TH_OUT:-dist}"
@@ -30,8 +31,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleExecutable</key><string>TradingHub</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppSleepDisabled</key><true/>
@@ -47,12 +48,13 @@ if [ -n "$SIGN_IDENTITY" ] && security find-identity -v -p codesigning 2>/dev/nu
   codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
   codesign --verify --deep --strict "$APP" && echo "Signed with: $SIGN_IDENTITY"
 else
-  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+  codesign --force --deep --sign - "$APP"
   echo "Signed ad hoc"
+  codesign --verify --deep --strict "$APP"
 fi
 
 rm -rf "$OUT/$NAME.app"
-ditto "$APP" "$OUT/$NAME.app" 2>/dev/null || true
+ditto "$APP" "$OUT/$NAME.app"
 echo "Built: $APP"
 if [ "$1" = "--install" ]; then
   rm -rf "/Applications/$NAME.app"

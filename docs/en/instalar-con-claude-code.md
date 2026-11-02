@@ -4,6 +4,9 @@
 
 Your own Claude Code can build the app on your Mac, install it in Applications and connect optional AI features to your existing Claude session. Programming experience is not required.
 
+For Windows 10/11 x64/ARM64, use the implemented [Windows installation/build guide](portar-a-windows.md), not the Mac commands below. Per-user self-contained NSIS installers can be built from this fork with .NET SDK 10 and NSIS. Upstream release downloads are not fork binaries; native Windows and actual real/demo brokerage validation remain separate gates.
+
+
 ## Before starting
 
 - Apple Silicon Mac (M1 or later), macOS 12 or later.

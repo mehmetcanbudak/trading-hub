@@ -3,6 +3,7 @@ using SkiaSharp;
 using TradingHub.Data;
 using TradingHub.Indicators;
 using TradingHub.Market;
+using TradingHub.Rendering;
 using TradingHub.Rendering.Context;
 
 namespace TradingHub.Charting.Dom;
@@ -65,9 +66,9 @@ public sealed class TapeRenderer
         var head = RenderContext.GetFont(t.FontFamily, 10, false, false);
         float c1 = 6, c2 = width * 0.36f, c3 = width - 6;
         _text.Color = t.TextDim;
-        canvas.DrawText("Time", c1, 14, head, _text);
-        canvas.DrawText("Price", c2, 14, head, _text);
-        canvas.DrawText("Volume", c3 - RenderContext.MeasureWidth(head, "Volume"), 14, head, _text);
+        canvas.DrawUiText("Time", c1, 14, head, _text);
+        canvas.DrawUiText("Price", c2, 14, head, _text);
+        canvas.DrawUiText("Volume", c3 - RenderContext.MeasureWidth(head, "Volume"), 14, head, _text);
 
         int maxRows = (int)((height - HeaderH) / RowH) + 1;
         if (tape.Anchor is { } anchor && anchor >= tape.Data.Trades.Count - 1) tape.Anchor = null;
@@ -88,10 +89,10 @@ public sealed class TapeRenderer
             var f = big ? bold : font;
             _text.Color = big ? SKColors.White : col;
             var local = TimeZoneInfo.ConvertTimeFromUtc(r.Time, tape.TimeZone);
-            canvas.DrawText(local.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture), c1, y + baseOff, f, _text);
-            canvas.DrawText(inst.FormatPrice(r.Price), c2, y + baseOff, f, _text);
+            canvas.DrawUiText(local.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture), c1, y + baseOff, f, _text);
+            canvas.DrawUiText(inst.FormatPrice(r.Price), c2, y + baseOff, f, _text);
             string v = VolumeFormat.Compact(r.Volume, dec);
-            canvas.DrawText(v, c3 - RenderContext.MeasureWidth(f, v), y + baseOff, f, _text);
+            canvas.DrawUiText(v, c3 - RenderContext.MeasureWidth(f, v), y + baseOff, f, _text);
         }
 
         // desplazada: el encabezado avisa y un clic ahí vuelve a lo último
@@ -101,7 +102,7 @@ public sealed class TapeRenderer
             canvas.DrawRect(0, 0, width, HeaderH, _fill);
             string msg = tape.NewSinceAnchor > 0 ? $"▲ {tape.NewSinceAnchor:N0} new · click to return" : "▲ click to return to latest";
             _text.Color = t.LastPriceUp;
-            canvas.DrawText(msg, width / 2 - RenderContext.MeasureWidth(head, msg) / 2, 14, head, _text);
+            canvas.DrawUiText(msg, width / 2 - RenderContext.MeasureWidth(head, msg) / 2, 14, head, _text);
         }
     }
 
