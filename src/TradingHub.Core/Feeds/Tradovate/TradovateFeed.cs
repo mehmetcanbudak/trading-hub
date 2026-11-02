@@ -18,6 +18,8 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
     public const string FeedId = "tradovate";
     private readonly TradovateConnection _conn;
     private readonly ConcurrentDictionary<long, ChartRoute> _charts = new();
+    // Publish a route and hand off its buffered packets atomically; no producer may append to a detached orphan list.
+    private readonly object _chartGate = new();
 
     /// <summary>
     /// Paquetes de gráfico que llegaron antes de saber de quién son: la respuesta de md/getChart (con los ids) y los
@@ -346,9 +348,14 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
         {
             lock (route)
             {
-                _charts[id] = route;
-                if (_orphans.TryRemove(id, out var pending))
-                    foreach (var packet in pending.Packets) Deliver(route, packet);
+                List<JsonElement>? pending = null;
+                lock (_chartGate)
+                {
+                    _charts[id] = route;
+                    if (_orphans.TryRemove(id, out var entry)) pending = entry.Packets;
+                }
+                if (pending != null)
+                    foreach (var packet in pending) Deliver(route, packet);
             }
         }
     }
@@ -360,18 +367,18 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
             foreach (var packet in charts.EnumerateArray())
             {
                 long id = packet.TryGetProperty("id", out var idEl) && idEl.TryGetInt64(out var v) ? v : 0;
-                if (!_charts.TryGetValue(id, out var route))
+                ChartRoute? route;
+                lock (_chartGate)
                 {
-                    // todavía sin ruta: se guarda un rato (los viejos se descartan)
-                    var entry = _orphans.GetOrAdd(id, _ => (DateTime.UtcNow, new List<JsonElement>()));
-                    lock (entry.Packets)
+                    if (!_charts.TryGetValue(id, out route))
+                    {
+                        // The same gate protects registration and buffering, including the append itself.
+                        var entry = _orphans.GetOrAdd(id, _ => (DateTime.UtcNow, new List<JsonElement>()));
                         if (entry.Packets.Count < 5000) entry.Packets.Add(packet.Clone());
-                    foreach (var old in _orphans.Where(kv => (DateTime.UtcNow - kv.Value.At).TotalSeconds > 60).Select(kv => kv.Key).ToList()) _orphans.TryRemove(old, out _);
-                    // pudo registrarse justo ahora
-                    if (_charts.TryGetValue(id, out var late) && _orphans.TryRemove(id, out var again))
-                        lock (late)
-                            foreach (var pk in again.Packets) Deliver(late, pk);
-                    continue;
+                        foreach (var old in _orphans.Where(kv => (DateTime.UtcNow - kv.Value.At).TotalSeconds > 60).Select(kv => kv.Key).ToList())
+                            _orphans.TryRemove(old, out _);
+                        continue;
+                    }
                 }
 
                 lock (route) Deliver(route, packet);

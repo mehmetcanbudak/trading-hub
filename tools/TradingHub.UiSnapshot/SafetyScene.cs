@@ -666,8 +666,8 @@ internal static partial class SafetyScene
                 }
 
                 Confirm(cancel);
-                // the fake server acknowledges over its order plant; under heavy machine load that has taken longer than 15 s
-                Until(() => Work() is { Done: true }, 45);
+                // Wait for the complete cancellation acknowledgment; Done can be observed before Cancelled is published.
+                Until(() => Work() is { Done: true, Cancelled: true }, 45);
                 var worked = Work();
                 Check(worked is { Done: true, Cancelled: true },
                     $"confirmed Cancel cancels the working REAL order with real orders disabled (done {worked?.Done}, cancelled {worked?.Cancelled})");
