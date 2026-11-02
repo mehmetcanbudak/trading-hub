@@ -185,9 +185,14 @@ jobs:
           retention-days: 7
 
   macos-build-and-tests:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 35
     steps:
+      - name: Require native Apple Silicon
+        run: |
+          arch="$(uname -m)"
+          echo "Native macOS architecture: $arch"
+          test "$arch" = arm64
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
