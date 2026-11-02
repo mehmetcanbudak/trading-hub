@@ -70,6 +70,27 @@ If upstream rewrites history or the ledger is invalid, investigate it. **Do not 
 
 Port references are independent: decide which reviewed runtime/safety/UI changes are relevant, validate them in a separate port task, then deliberately update a port's pinned oracle. A C# sync does not authorize changing either port worktree or its pin.
 
+## Maintain the English-source catalogs
+
+English display literals/templates are canonical. Spanish and Simplified Chinese JSON are generated artifacts, not independent sources of truth. Keep both translations and matching interpolation holes in `tools/TradingHub.I18n/overrides.json` for reviewed collisions and new fork-only text; regenerate instead of editing a catalog alone. `collisions.json` records the choices requiring review. Do not translate persisted IDs, protocols, arbitrary user text or C# identifiers just because the inclusive extraction tool finds them.
+
+`provenance.json` pins checkpoint/fork/upstream correspondence and retains upstream English aliases. Its `fork` input for this integration is the safety base `5fe1bdf`, not the moving integration branch. Reproduce the committed catalogs from the repository root with the exact recorded inputs:
+
+```bash
+i18n_env="$(mktemp -d /tmp/tradinghub-i18n.XXXXXX)"
+python3 -m venv "$i18n_env"
+"$i18n_env/bin/python" -m pip install tree-sitter==0.25.2 tree-sitter-c-sharp==0.23.5
+"$i18n_env/bin/python" tools/TradingHub.I18n/rebase.py . \
+  9ee74a4c527ac43120423acd41e006ec9d7877ad \
+  5fe1bdf53c1aad92fabfbc73576c75bbeb8f0a1f \
+  c28900e03ba473ee21f3983e65c1adf980ae0077 \
+  tools/TradingHub.I18n/provenance.json \
+  --publish src/TradingHub.App/Localization \
+  --overrides tools/TradingHub.I18n/overrides.json
+```
+
+The generator fails on unreviewed collisions or mismatched interpolation holes. For a new upstream integration, review and deliberately version its provenance inputs; do not silently remap old correspondence to the current tree. Run both `coverage` commands above afterward. The .NET tool also retains `extract`, `pending`, `merge` and `check`; review its inclusive candidates before translating them. Python/tree-sitter are maintainer-only dependencies, not application runtime requirements.
+
 ## Tests and operational limits
 
 The tracker tests use temporary Git repositories and fake GitHub responses. They cover no-change/new-commit detection, history rewrites, invalid checkpoints, doc mappings, preserved notes, bounded reports, wrong-repository writes and retry-safe notification deduplication. No upstream source is executed by these tests.

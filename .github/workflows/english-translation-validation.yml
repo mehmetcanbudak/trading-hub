@@ -67,6 +67,8 @@ jobs:
         env:
           # Unique test-only entries are removed by the native credential fixture.
           TRADINGHUB_TEST_CREDMAN: '1'
+          # Hosted-only: request and immediately release a thread execution assertion; no power-plan or lid changes.
+          TRADINGHUB_TEST_POWER: '1'
         run: dotnet test tests/TradingHub.Tests --configuration Release --no-restore --no-build --logger "trx;LogFileName=windows.trx" --results-directory "${{ runner.temp }}/tradinghub-results"
       - name: Verify English source and documentation
         run: python tools/check_english_translation.py

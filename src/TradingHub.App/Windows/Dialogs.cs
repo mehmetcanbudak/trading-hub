@@ -61,7 +61,7 @@ internal abstract class TradingHubDialog<T> : Window
 
 /// <summary>
 /// Confirmation question (yes/no). Danger and paid actions default to Cancel: Enter and Esc cancel, only a click or
-/// ⌘Enter confirms. Ordinary questions keep the action as the default button.
+/// Command/Ctrl+Enter confirms. Ordinary questions keep the action as the default button.
 /// </summary>
 internal sealed class ConfirmDialog : TradingHubDialog<bool>
 {
@@ -90,13 +90,13 @@ internal sealed class ConfirmDialog : TradingHubDialog<bool>
         ok.Click += (_, _) => Close(true);
         if (safe)
         {
-            ToolTip.SetTip(ok, "Click or press ⌘Enter to confirm");
+            ToolTip.SetTip(ok, $"Click or press {Keys.Label("Enter")} to confirm");
             // in the tunnel phase, before any button sees it (a focused action button would take a plain Enter as a click)
             AddHandler(KeyDownEvent, (_, e) =>
             {
                 if (e.Key != Key.Enter) return;
                 e.Handled = true;
-                Close(e.KeyModifiers.HasFlag(KeyModifiers.Meta));
+                Close(e.KeyModifiers.HasFlag(Keys.Command));
             }, RoutingStrategies.Tunnel);
         }
 

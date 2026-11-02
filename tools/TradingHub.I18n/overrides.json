@@ -802,5 +802,9 @@
   "Total strategies: {0}": {
     "es": "Total de estrategias: {0}",
     "zh-CN": "策略总数：{0}"
+  },
+  "Click or press {0} to confirm": {
+    "es": "Haz clic o pulsa {0} para confirmar",
+    "zh-CN": "点击或按 {0} 确认"
   }
 }

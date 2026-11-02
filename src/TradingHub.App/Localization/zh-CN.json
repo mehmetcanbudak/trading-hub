@@ -950,6 +950,7 @@
   "Click and press the key combination. Esc cancels · Backspace leaves it unassigned.": "点击后按下组合键。Esc 取消 · Backspace 设为未分配。",
   "Click and press the key combination. Esc cancels · ⌫ leaves it unassigned.": "点击后按下组合键。Esc 取消 · ⌫ 设为未分配。",
   "Click and press the key combination. Escape cancels · Backspace unassigns.": "点击后按下组合键。Escape 取消 · Backspace 取消分配。",
+  "Click or press {0} to confirm": "点击或按 {0} 确认",
   "Click to close the positions at market (Enter never chooses this)": "点击以市价平仓（Enter 键不会选择此操作）",
   "Client ID": "Client ID",
   "Close": "关闭",
