@@ -371,7 +371,7 @@ foreach (var page in pages)
         var child = presenter?.Child as Avalonia.Controls.Control;
         Console.WriteLine($"Presentador: {child?.GetType().Name} tamaño={child?.Bounds}");
         if (child is Avalonia.Controls.ItemsControl ic) Console.WriteLine($"Ítems en el presentador: {ic.ItemCount}");
-        var shot = child != null ? Avalonia.Controls.TopLevel.GetTopLevel(child)?.CaptureRenderedFrame() : null;
+        using var shot = child != null ? Avalonia.Controls.TopLevel.GetTopLevel(child)?.CaptureRenderedFrame() : null;
         shot?.Save(Path.Combine(outDir, "choice.png"));
         continue;
     }
@@ -386,7 +386,7 @@ foreach (var page in pages)
         var flyout = (Avalonia.Controls.Flyout)picker.GetType().GetField("_flyout", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(picker)!;
         var content = (Avalonia.Controls.Control)flyout.Content!;
         var top = Avalonia.Controls.TopLevel.GetTopLevel(content);
-        var shot = top?.CaptureRenderedFrame();
+        using var shot = top?.CaptureRenderedFrame();
         var pp = Path.Combine(outDir, "picker.png");
         shot?.Save(pp);
         Console.WriteLine(shot != null ? $"Captura: {pp}" : "No se pudo capturar el selector");
@@ -412,7 +412,7 @@ foreach (var page in pages)
         Pump(0.5);
         var status = (Avalonia.Controls.TextBlock)vt.GetField("_dlStatus", fl)!.GetValue(view)!;
         Console.WriteLine("1 año: " + status.Text);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "data_rithmic_year.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "data_rithmic_year.png"));
         // descarga de ayer (el servidor falso tiene operaciones de las últimas 2 horas: hoy no se baja, ayer da vacío)
         var y = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "Yesterday");
         y.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
@@ -437,10 +437,10 @@ foreach (var page in pages)
         while (!lay.IsCompleted) Pump(0.05);
         foreach (var c in tv.Tabs.Where(t => t.Model != null)) { c.Model!.Settings.Colors = null; c.Model.ApplyColors(); }
         Pump(3);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "theme_dark.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_dark.png"));
         TradingHub.App.Services.AppTheme.Apply(TradingHub.App.Services.AppTheme.Light);
         Pump(2);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "theme_light.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_light.png"));
         tv.OpenChartSettings(tv.ActiveTab);
         Pump(1.5);
         var sw = (typeof(TradingHub.App.Views.TradingView).GetField("_settingsWindows", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(tv) as System.Collections.IDictionary)?.Values.Cast<Avalonia.Controls.Window>().FirstOrDefault();
@@ -449,17 +449,17 @@ foreach (var page in pages)
             var tabsCtl = sw.GetVisualDescendants().OfType<Avalonia.Controls.TabControl>().First();
             tabsCtl.SelectedIndex = tabsCtl.ItemCount - 1;
             Pump(1);
-            sw.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "theme_chart_settings_light.png"));
+            using (var capturedFrame = sw.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_chart_settings_light.png"));
             sw.Close();
         }
 
         window.Navigate("settings");
         Pump(1.5);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "theme_settings_light.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_settings_light.png"));
         TradingHub.App.Services.AppTheme.Apply(TradingHub.App.Services.AppTheme.Dark);
         window.Navigate("accounts");
         Pump(1.5);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "theme_accounts_dark.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_accounts_dark.png"));
         Console.WriteLine("Capturas del tema listas");
         continue;
     }
@@ -488,7 +488,7 @@ foreach (var page in pages)
         Pump(1.5);
         var found = TradingHub.Data.HistoricalData.Scan(TradingHub.App.Services.AppPaths.Ticks).FirstOrDefault(x => x.FeedId == "importado" && x.Symbol == "US100");
         Console.WriteLine($"En Datos: {(found == null ? "no" : $"US100 · importado, {found.Days.Count} día(s)")}");
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "data_import.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "data_import.png"));
         continue;
     }
 
@@ -540,7 +540,7 @@ foreach (var page in pages)
                 tabs.SelectedIndex = t;
                 Pump(1.3);
                 string name = $"accounts_{(acc == "sim" ? "sim" : "rithmic")}_{t}";
-                window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, name + ".png"));
+                using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, name + ".png"));
                 Console.WriteLine($"Captura: {name}");
             }
         }
@@ -558,7 +558,7 @@ foreach (var page in pages)
         var prof = App.Services.Connections.Profiles.FirstOrDefault(p => p.IsRithmic && (parts[1] != "amp" || p.Kind == TradingHub.App.Services.ConnectionKind.AmpFutures));
         if (prof != null) cv.GetType().GetMethod("Select", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(cv, new object[] { prof });
         Pump(9);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, $"connections_{parts[1]}.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, $"connections_{parts[1]}.png"));
         Console.WriteLine($"Perfil: {prof?.Name} ({prof?.Kind}) · {prof?.RithmicSystem} · {prof?.RithmicUri}");
         continue;
     }
@@ -650,10 +650,10 @@ foreach (var page in pages)
         {
             var w = tv.Detach(tv.ActiveTab!);
             Pump(seconds);
-            var fshot = w?.CaptureRenderedFrame();
+            using var fshot = w?.CaptureRenderedFrame();
             fshot?.Save(Path.Combine(outDir, "trading_float_window.png"));
             Console.WriteLine($"Ventana aparte: {w?.Title} · ventanas={tv.FloatingWindows.Count} · pestañas={tv.Pages.Count}");
-            var main = window.CaptureRenderedFrame();
+            using var main = window.CaptureRenderedFrame();
             main?.Save(Path.Combine(outDir, shotName));
             if (w != null) tv.DockBack(w);
             Pump(1);
@@ -681,7 +681,7 @@ foreach (var page in pages)
             Pump(seconds);
             tv.UpdatePosition();
             Pump(0.5);
-            var bshot = window.CaptureRenderedFrame();
+            using var bshot = window.CaptureRenderedFrame();
             bshot?.Save(Path.Combine(outDir, shotName));
             Console.WriteLine($"Captura: {Path.Combine(outDir, shotName)}");
             Console.WriteLine(br.ClosePartial(0.5m));
@@ -720,12 +720,12 @@ foreach (var page in pages)
                 var win = new TradingHub.App.Windows.DrawingSettingsWindow(App.Services, dl, cm.Instrument, cm.Period, () => cm.Invalidate(), () => { }, () => { });
                 win.Show(window);
                 Pump(1.2);
-                win.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_drawsettings.png"));
+                using (var capturedFrame = win.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_drawsettings.png"));
                 var fib = new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.FibRetracement, Points = { new(T(25), hi), new(T(5), lo) } };
                 var win2 = new TradingHub.App.Windows.DrawingSettingsWindow(App.Services, fib, cm.Instrument, cm.Period, () => { }, () => { }, () => { });
                 win2.Show(window);
                 Pump(1.2);
-                win2.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_drawsettings_fib.png"));
+                using (var capturedFrame = win2.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_drawsettings_fib.png"));
                 Console.WriteLine("Capturas: trading_drawsettings.png, trading_drawsettings_fib.png");
                 win.Close();
                 win2.Close();
@@ -745,14 +745,14 @@ foreach (var page in pages)
             tv.ActiveTab.View.InvalidateVisual();
             Pump(0.6);
             Console.WriteLine($"Leyenda: {st.Legend.Count} zonas ({string.Join(", ", st.Legend.Select(h => h.Action).Distinct())}) · botón de ir a lo último: {(st.GoLatestButton != null ? "sí" : "no")}");
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_drawings.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_drawings.png"));
             cm.Viewport.ScrollBars = 25;
             st.MouseX = null;
             st.MouseY = null;
             cm.Invalidate();
             Pump(0.6);
             Console.WriteLine($"Corrido 25 velas: botón de ir a lo último {(st.GoLatestButton != null ? "visible" : "NO visible")}");
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_drawings_scrolled.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_drawings_scrolled.png"));
             continue;
         }
         else if (action == "links")
@@ -777,7 +777,7 @@ foreach (var page in pages)
             Pump(0.6);
             var st2 = (TradingHub.Charting.Rendering.ChartRenderState)typeof(TradingHub.App.Controls.ChartView).GetField("_state", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(charts[1].View)!;
             Console.WriteLine($"Cruz vinculada en el segundo: {(st2.LinkedTime != null ? st2.LinkedTime.Value.ToString("HH:mm") : "no")} precio={(st2.LinkedPrice != null ? st2.LinkedPrice.Value.ToString("0.0") : "-")}");
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_links.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_links.png"));
             continue;
         }
         else if (action == "toolbar")
@@ -808,7 +808,7 @@ foreach (var page in pages)
             // Chart Trader propio y cross trading: desde BTCUSDT se compra BTCUSDC
             var trChart = tv.ActiveTab!;
             Pump(1);
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_trader.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_trader.png"));
             var cross = tv.SetCrossTradingAsync(trChart, trChart.Symbol == "BTCUSDT" ? "BTCUSDC" : "BTCUSDT");
             while (!cross.IsCompleted) Pump(0.05);
             for (int i = 0; i < 80 && (trChart.CrossData?.LastPrice ?? 0) == 0; i++) Pump(0.1);
@@ -821,7 +821,7 @@ foreach (var page in pages)
             Console.WriteLine($"Después de comprar: {target.Instrument.Symbol} posición {target.Position.Volume} · {own.Instrument.Symbol} posición {own.Position.Volume}");
             trChart.Trader?.Refresh();
             Pump(0.5);
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_trader_cross.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_trader_cross.png"));
             var flat = tv.AccountActionAsync(trChart, a => a.Flatten(), "cerrada");
             while (!flat.IsCompleted) Pump(0.05);
             Pump(1);
@@ -859,10 +859,10 @@ foreach (var page in pages)
 
             void Shot(string name)
             {
-                window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, name + ".png"));
+                using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, name + ".png"));
                 // si la lista abierta es una ventana aparte, también se captura
                 var popupTop = box.Items.OfType<Avalonia.Controls.ComboBoxItem>().Select(Avalonia.Controls.TopLevel.GetTopLevel).FirstOrDefault(t => t != null && t != window);
-                popupTop?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, name + "_lista.png"));
+                using (var capturedFrame = popupTop?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, name + "_lista.png"));
             }
 
             string State() => $"abierta={box.IsDropDownOpen} · elegida='{(box.SelectedItem as Avalonia.Controls.ComboBoxItem)?.Content}' · cuenta del gráfico={ch.AccountId} · opera en={tv.AccountOf(ch)?.Name}";
@@ -929,12 +929,12 @@ foreach (var page in pages)
             ch.Model.Viewport.ScrollBars = 0;
             ch.Model.Viewport.AutoScale = true;
             PumpPush(1);
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_cross_projection.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_cross_projection.png"));
 
             // panel de la derecha = el mismo Chart Trader del gráfico activo
             tv.SetPanel("ticket", true);
             PumpPush(1.5);
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_side_trader.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_side_trader.png"));
             var docked = typeof(TradingHub.App.Views.TradingView).GetField("_dockedTrader", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(tv) as TradingHub.App.Views.ChartTraderPanel;
             Console.WriteLine($"Panel de la derecha: {(docked == null ? "no" : $"Chart Trader de {docked.Chart.Symbol} (mismo gráfico={ReferenceEquals(docked.Chart, ch)})")}");
 
@@ -942,12 +942,12 @@ foreach (var page in pages)
             tv.OpenChartSettings(ch);
             Pump(1);
             var sw = (typeof(TradingHub.App.Views.TradingView).GetField("_settingsWindows", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(tv) as System.Collections.IDictionary)?.Values.Cast<Avalonia.Controls.Window>().FirstOrDefault();
-            sw?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "chart_settings_window.png"));
+            using (var capturedFrame = sw?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "chart_settings_window.png"));
             ch.Model.Settings.Colors = new() { ["BackgroundTop"] = 0xFF131722, ["BackgroundBottom"] = 0xFF131722, ["UpCandle"] = 0xFF26A69A, ["DownCandle"] = 0xFFF23645, ["UpCandleBorder"] = 0xFF26A69A, ["DownCandleBorder"] = 0xFFF23645 };
             ch.Model.ApplyColors();
             sw?.Close();
             PumpPush(1);
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_custom_colors.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_custom_colors.png"));
             var others = tv.Tabs.Where(t => !ReferenceEquals(t, ch) && t.Model != null).Select(t => t.Model!.Theme.BackgroundTop.ToString()).Distinct();
             Console.WriteLine($"Colores: este gráfico fondo {ch.Model.Theme.BackgroundTop} · los otros {string.Join(", ", others)}");
 
@@ -962,7 +962,7 @@ foreach (var page in pages)
             ch.Model.Viewport.ScrollBars = 0;
             ch.Model.Viewport.BarWidth = 22;
             PumpPush(1);
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_trade_marks.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_trade_marks.png"));
 
             // plantillas: se guarda este gráfico, se le cambia todo y se aplica la plantilla
             var model = ch.Model;
@@ -1034,14 +1034,14 @@ foreach (var page in pages)
             ch.Model!.Viewport.ScrollBars = 0;
             ch.Model.Viewport.BarWidth = 9;
             Pump(1);
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "strategy_visual.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "strategy_visual.png"));
 
             tv.OpenStrategySettings(ch, cs);
             Pump(1.5);
             var sw = Avalonia.Application.Current!.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime lt
                 ? lt.Windows.OfType<TradingHub.App.Windows.StrategyChartWindow>().FirstOrDefault() : null;
             sw ??= window.OwnedWindows.OfType<TradingHub.App.Windows.StrategyChartWindow>().FirstOrDefault();
-            sw?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "strategy_settings.png"));
+            using (var capturedFrame = sw?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "strategy_settings.png"));
             if (sw == null || EnglishScene.Labels(sw).Any(TradingHub.UiSnapshot.EnglishLocalizationAudit.LooksSpanish))
             {
                 Console.WriteLine("FAIL chart-strategy settings contain an untranslated label or did not open");
@@ -1054,7 +1054,7 @@ foreach (var page in pages)
                 Pump(0.6);
                 scroll.ScrollToEnd();
                 Pump(0.4);
-                sw.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "strategy_settings_resultados.png"));
+                using (var capturedFrame = sw.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "strategy_settings_resultados.png"));
             }
 
             sw?.Close();
@@ -1085,8 +1085,8 @@ foreach (var page in pages)
             tv.DetachDom();
             Pump(1.5);
             var dw = tv.PanelWindow("dom");
-            dw?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_domfloat_window.png"));
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "trading_domfloat_main.png"));
+            using (var capturedFrame = dw?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_domfloat_window.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_domfloat_main.png"));
             Console.WriteLine($"DOM afuera: {(dw != null ? dw.Title : "no")} · flotante={tv.DomIsFloating}");
             tv.DockDom();
             Pump(1);
@@ -1097,7 +1097,7 @@ foreach (var page in pages)
         {
             var settingsWin = tv.ShowDomSettings();
             Pump(1.5);
-            var dshot = settingsWin?.CaptureRenderedFrame();
+            using var dshot = settingsWin?.CaptureRenderedFrame();
             dshot?.Save(Path.Combine(outDir, shotName));
             Console.WriteLine(dshot != null ? $"Captura: {Path.Combine(outDir, shotName)}" : "No encontré la ventana del DOM");
             settingsWin?.Close();
@@ -1105,7 +1105,7 @@ foreach (var page in pages)
         }
 
         Pump(0.5);
-        var tshot = window.CaptureRenderedFrame();
+        using var tshot = window.CaptureRenderedFrame();
         tshot?.Save(Path.Combine(outDir, shotName));
         Console.WriteLine($"Captura: {Path.Combine(outDir, shotName)}");
         continue;
@@ -1141,8 +1141,8 @@ foreach (var page in pages)
             t.GetMethod("DetachClaude", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, null);
             Pump(1.5);
             var cw = (Avalonia.Controls.Window?)t.GetField("_claudeWindow", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view);
-            cw?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "strategies_claudefloat_window.png"));
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "strategies_claudefloat_main.png"));
+            using (var capturedFrame = cw?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "strategies_claudefloat_window.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "strategies_claudefloat_main.png"));
             Console.WriteLine($"Chat afuera: {(cw != null ? cw.Title : "no")} · conversaciones en el historial: {TradingHub.App.Services.ChatHistory.List().Count}");
             t.GetMethod("DockClaude", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, null);
             Pump(0.8);
@@ -1160,7 +1160,7 @@ foreach (var page in pages)
             var until = DateTime.UtcNow.AddSeconds(40);
             while (!send.IsCompleted && DateTime.UtcNow < until) Pump(0.05);
             Pump(2.5);
-            var frame2 = window.CaptureRenderedFrame();
+            using var frame2 = window.CaptureRenderedFrame();
             var path2 = Path.Combine(outDir, $"strategies_{parts[1]}.png");
             frame2?.Save(path2);
             Console.WriteLine($"Captura: {path2}");
@@ -1184,7 +1184,7 @@ foreach (var page in pages)
         Pump(0.8);
     }
 
-    var frame = window.CaptureRenderedFrame();
+    using var frame = window.CaptureRenderedFrame();
     var path = Path.Combine(outDir, page.Replace('+', '_') + ".png");
     frame?.Save(path);
     Console.WriteLine(frame != null ? $"Captura: {path}" : $"No se pudo capturar {page}");

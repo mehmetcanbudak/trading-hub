@@ -127,13 +127,37 @@ jobs:
               $app.Refresh()
             } while (!$app.HasExited -and $app.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
             if ($app.HasExited -or $app.MainWindowHandle -eq 0) { throw 'Native main window did not open' }
-            Add-Type -AssemblyName System.Windows.Forms
             Add-Type -AssemblyName System.Drawing
-            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class OwnedWindowCapture {
+            public const uint RenderFullContent = 2;
+            [StructLayout(LayoutKind.Sequential)]
+            public struct Rect { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool GetWindowRect(IntPtr window, out Rect rect);
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+          }
+          '@
+            $rect = [OwnedWindowCapture+Rect]::new()
+            if (![OwnedWindowCapture]::GetWindowRect($app.MainWindowHandle, [ref]$rect)) { throw 'Native window bounds unavailable' }
+            $width = $rect.Right - $rect.Left
+            $height = $rect.Bottom - $rect.Top
+            if ($width -le 0 -or $height -le 0) { throw 'Native window has no drawable area' }
+            $bitmap = [System.Drawing.Bitmap]::new($width, $height, [System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
             $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
             try {
-              $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $dc = $graphics.GetHdc()
+              try {
+                # Capture only our HWND, not a desktop privacy/setup overlay; never change privacy settings.
+                if (![OwnedWindowCapture]::PrintWindow($app.MainWindowHandle, $dc, [OwnedWindowCapture]::RenderFullContent)) { throw 'Native window capture failed' }
+              } finally {
+                $graphics.ReleaseHdc($dc)
+              }
               $bitmap.Save((Join-Path $report 'windows-native.png'))
             } finally {
               $graphics.Dispose()

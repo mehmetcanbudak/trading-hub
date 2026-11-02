@@ -91,7 +91,7 @@ internal static partial class SafetyScene
         void Shot(Window target, string name)
         {
             pump(0.2);
-            target.CaptureRenderedFrame()?.Save(Path.Combine(outDir, name + ".png"));
+            using (var capturedFrame = target.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, name + ".png"));
         }
 
         var svc = App.Services;
@@ -893,7 +893,7 @@ internal static partial class SafetyScene
         void Shot(Window target, string name)
         {
             pump(0.2);
-            target.CaptureRenderedFrame()?.Save(Path.Combine(outDir, name + ".png"));
+            using (var capturedFrame = target.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, name + ".png"));
         }
 
         // the strategies a dialog lists, and all its text

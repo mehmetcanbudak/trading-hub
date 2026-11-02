@@ -43,7 +43,7 @@ internal static class ConnectionsScene
         void Shot(string name)
         {
             pump(1);
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, name + ".png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, name + ".png"));
         }
 
         using var oanda = FakeBrokers.Oanda();

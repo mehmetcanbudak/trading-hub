@@ -31,7 +31,7 @@ internal static class CornersScene
             Console.WriteLine($"{new string(' ', 2 * Depth(v, num))}{v.GetType().Name} #{(v as Control)?.Name}{extra} {v.Bounds}");
         }
 
-        w.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "esquinas.png"));
+        using (var capturedFrame = w.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "esquinas.png"));
         w.Close();
         return 0;
     }

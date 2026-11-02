@@ -142,7 +142,7 @@ internal static class BacktestMarketScene
         var tabs = (Ui.Segmented<string>)t.GetField("_resultTabs", Any)!.GetValue(view)!;
         tabs.Choose("market");
         pump(1);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "backtest_mercado.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "backtest_mercado.png"));
         var texts = view.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text ?? "").ToList();
         Check(texts.Contains("Range") && texts.Contains("Mixed") && texts.Contains("Uptrend") && texts.Contains("Downtrend") &&
               texts.Any(x => x.StartsWith("Low volatility", StringComparison.Ordinal)) && texts.Contains("PERFORMANCE BY MARKET CONDITION"),
@@ -171,7 +171,7 @@ internal static class BacktestMarketScene
         }
 
         pump(0.5);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "backtest_mercado_filtrado.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "backtest_mercado_filtrado.png"));
         texts = view.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text ?? "").ToList();
         Check(texts.Contains("In all conditions") && texts.Any(x => x.StartsWith("With filter (only in range)", StringComparison.Ordinal)),
             "compara todas las condiciones contra solo las elegidas");
@@ -204,7 +204,7 @@ internal static class BacktestMarketScene
             var period = ranges.OfType<ParameterRange>().FirstOrDefault(r => r.IsPeriod);
             Check(period is { Enabled: true } && period.Choices.SequenceEqual(new[] { "M15", "H1" }) && comboText.Text != before,
                 $"al tildar M15 y H1 se prueban los dos ({string.Join(", ", period?.Choices ?? new())}; {before} → {comboText.Text})");
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "optimizar_periodos.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "optimizar_periodos.png"));
 
             // «Usar en Backtest» con una fila que eligió H1 pone ese período en el backtest
             var pars = new Dictionary<string, object?>(((Dictionary<string, object?>)t.GetMethod("BaseParameters", Any)!.Invoke(view, null)!)) { [ParameterRange.PeriodName] = "H1" };
@@ -233,7 +233,7 @@ internal static class BacktestMarketScene
         pump(0.4);
         Check(App.Services.Settings.FavoriteStrategies.Contains(file.FileName) && Rows() == rowsBefore + 1 && menu.IsOpen,
             $"la estrella pone la estrategia en «Favoritos», arriba de todas, sin cerrar la lista ({rowsBefore} → {Rows()} filas)");
-        if (menu.Content is Control flyoutContent) TopLevel.GetTopLevel(flyoutContent)?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "estrategias_favoritos.png"));
+        if (menu.Content is Control flyoutContent) using (var capturedFrame = TopLevel.GetTopLevel(flyoutContent)?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "estrategias_favoritos.png"));
         Star()?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         pump(0.4);
         Check(!App.Services.Settings.FavoriteStrategies.Contains(file.FileName) && Rows() == rowsBefore, "tocándola de nuevo sale de favoritos");

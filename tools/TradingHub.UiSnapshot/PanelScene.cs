@@ -24,7 +24,7 @@ internal static class PanelScene
         var tv = window.Trading;
         foreach (var key in new[] { "ticket", "dom", "tape" }) tv.SetPanel(key, true);
         pump(2);
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "panel_tres.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "panel_tres.png"));
 
         Control? Section(string title) => tv.GetVisualDescendants().OfType<TextBlock>()
             .FirstOrDefault(t => t.Text == title.ToUpperInvariant() && t.IsEffectivelyVisible)
@@ -44,7 +44,7 @@ internal static class PanelScene
             sv.Offset = new Vector(0, 10_000);
             pump(0.5);
             Check(sv.Offset.Y > 0 && sv.Offset.Y >= sv.Extent.Height - sv.Viewport.Height - 1, $"el Chart Trader se desliza hasta abajo ({sv.Offset.Y:0} px de {sv.Extent.Height - sv.Viewport.Height:0})");
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "panel_ticket_abajo.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "panel_ticket_abajo.png"));
             sv.Offset = new Vector(0, 0);
         }
 
@@ -57,7 +57,7 @@ internal static class PanelScene
             window.MouseWheel(center, new Vector(0, -3));
             pump(0.5);
             Check(model.Anchor != null && model.Anchor < count - 1, $"la cinta se desliza hacia operaciones más viejas ({count} operaciones, arriba la {model.Anchor})");
-            window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "panel_cinta_desplazada.png"));
+            using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "panel_cinta_desplazada.png"));
             var top = tape.TranslatePoint(new Point(tape.Bounds.Width / 2, 8), window) ?? default;
             window.MouseDown(top, MouseButton.Left);
             window.MouseUp(top, MouseButton.Left);
@@ -84,10 +84,10 @@ internal static class PanelScene
             pump(1);
             var w = tv.PanelWindow(key);
             Check(w is { IsVisible: true }, $"{key} en una ventana aparte ({w?.Title})");
-            w?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, $"panel_ventana_{key}.png"));
+            using (var capturedFrame = w?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, $"panel_ventana_{key}.png"));
         }
 
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "panel_todo_afuera.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "panel_todo_afuera.png"));
         foreach (var key in new[] { "ticket", "tape", "dom" })
         {
             tv.PanelWindow(key)?.Close();
@@ -98,7 +98,7 @@ internal static class PanelScene
         dom = tv.GetVisualDescendants().OfType<DomView>().FirstOrDefault();
         tape = tv.GetVisualDescendants().OfType<TapeView>().FirstOrDefault();
         Check(tv.PanelWindow("ticket") == null && dom is { IsEffectivelyVisible: true } && tape is { IsEffectivelyVisible: true }, "al cerrar las ventanas vuelven al panel");
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "panel_de_vuelta.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "panel_de_vuelta.png"));
 
         // la barra del gráfico: tipo de gráfico en un selector, períodos favoritos en fila y el resto en su selector
         var toolbar = tv.Toolbar;
@@ -114,7 +114,7 @@ internal static class PanelScene
         fly.ShowAt(menuBtn);
         pump(1);
         var menu = fly.Content as Control;
-        TopLevel.GetTopLevel(menu)?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "barra_periodos.png"));
+        using (var capturedFrame = TopLevel.GetTopLevel(menu)?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "barra_periodos.png"));
         // clic derecho sobre 30m lo pone en la barra
         var pick30 = menu?.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content as string == "30m");
         var popupTop = TopLevel.GetTopLevel(menu);
@@ -129,7 +129,7 @@ internal static class PanelScene
         pump(0.3);
         barTexts = toolbar.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
         Check(settings.FavoritePeriods.Contains("M30") && barTexts.Contains("30m"), "clic derecho agrega el período a la barra");
-        window.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "barra_grafico.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "barra_grafico.png"));
         settings.FavoritePeriods.Remove("M30");
         toolbar.Sync();
 
@@ -144,7 +144,7 @@ internal static class PanelScene
             var content = confirm.Content as Control;
             var labels = content?.GetVisualDescendants().OfType<Button>().Select(b => b.Content as string).ToList() ?? new();
             Check(labels.Contains("Cancel") && labels.Contains("Reset") && content is StackPanel { Margin.Left: >= 12 }, $"el cartel tiene margen, «Cancelar» y la acción ({string.Join(", ", labels)})");
-            TopLevel.GetTopLevel(content)?.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "cartel_confirmar.png"));
+            using (var capturedFrame = TopLevel.GetTopLevel(content)?.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "cartel_confirmar.png"));
             confirm.Hide();
         }
         else Check(false, "encuentra el botón de reiniciar la cuenta simulada");

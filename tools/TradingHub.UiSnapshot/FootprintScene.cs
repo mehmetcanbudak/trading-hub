@@ -45,7 +45,7 @@ internal static class FootprintScene
         model.Viewport.ScrollBars = 0;
         model.Invalidate();
         pump(2);
-        var frame = window.CaptureRenderedFrame();
+        using var frame = window.CaptureRenderedFrame();
         frame?.Save(Path.Combine(outDir, "footprint_colores.png"));
 
         // los colores elegidos aparecen en el gráfico (se buscan píxeles de cada uno)
@@ -82,12 +82,12 @@ internal static class FootprintScene
         var labels = editor.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
         Check(labels.Contains("Positive delta text") && labels.Contains("Negative delta text") && labels.Contains("Text color"), "la escalera de delta tiene color del texto, delta positivo y negativo");
         Check(!labels.Contains("Bid text") && !labels.Contains("Bar direction"), "no muestra opciones que no le tocan");
-        editor.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "footprint_editor_delta.png"));
+        using (var capturedFrame = editor.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "footprint_editor_delta.png"));
         list.SelectedIndex = 1;
         pump(1);
         labels = editor.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
         Check(labels.Contains("Bid text") && !labels.Contains("Ask text"), "la escalera de bid tiene su color de texto");
-        editor.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "footprint_editor_bid.png"));
+        using (var capturedFrame = editor.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "footprint_editor_bid.png"));
         editor.Close();
 
         // los colores se guardan en la plantilla (JSON) y vuelven
@@ -101,7 +101,7 @@ internal static class FootprintScene
         pump(1);
         var pills = iw.GetVisualDescendants().OfType<TextBlock>().Where(t => t.Text is "ATAS" or "extra" or "Trading Hub" && t.IsEffectivelyVisible).Select(t => t.Text).ToList();
         Check(!pills.Contains("ATAS"), $"la biblioteca de indicadores no muestra «ATAS» ({string.Join(", ", pills)})");
-        iw.CaptureRenderedFrame()?.Save(Path.Combine(outDir, "indicadores.png"));
+        using (var capturedFrame = iw.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "indicadores.png"));
         iw.Close();
 
         Console.WriteLine(Failures.Count == 0 ? "FOOTPRINT: todo OK" : $"FOOTPRINT: {Failures.Count} falla(s)");

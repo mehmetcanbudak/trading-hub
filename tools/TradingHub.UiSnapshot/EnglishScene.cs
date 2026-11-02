@@ -54,7 +54,7 @@ internal static class EnglishScene
         {
             pump(0.3);
             English(target, name);
-            var frame = target.CaptureRenderedFrame();
+            using var frame = target.CaptureRenderedFrame();
             Check(frame != null, name + " renders");
             frame?.Save(Path.Combine(outDir, name + ".png"));
         }
