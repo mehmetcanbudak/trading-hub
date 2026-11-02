@@ -378,18 +378,39 @@ public class BinanceBrokerTests
         await Accepted(fake, exit);
         string first = exit.ExchangeOrderId;
 
-        fake.PostDelayMs = 3000; // the replacement takes a while to be acknowledged
+        var postArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePost = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.BeforePostReply = ct =>
+        {
+            postArrived.TrySetResult();
+            return releasePost.Task.WaitAsync(ct);
+        };
         Assert.Same(exit, broker.Replace(exit, 60500m, 1m));
         Assert.Equal(60500m, Level(exit)); // like the other brokers, the handle shows the request at once
         Assert.Equal(1m, exit.Unfilled);
         Assert.Equal(1m, exit.QuantityToFill);
 
-        await Polls(fake, 1);
-        await Task.Delay(300);
-        Assert.Equal(first, exit.ExchangeOrderId); // still waiting for Binance's answer
-        Assert.Equal(60500m, Level(exit)); // a poll meanwhile did not put the old order's values back
-        Assert.Equal(1m, exit.Unfilled);
-        Assert.Same(exit, Assert.Single(broker.ActiveOrders)); // the new order is not taken for someone else's
+        await postArrived.Task.WaitAsync(TimeSpan.FromSeconds(12));
+        int polls = fake.OpenOrderPolls;
+        var polled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnChanged()
+        {
+            if (fake.OpenOrderPolls > polls && broker.OrdersReady) polled.TrySetResult();
+        }
+        broker.Changed += OnChanged;
+        try
+        {
+            await polled.Task.WaitAsync(TimeSpan.FromSeconds(12));
+            Assert.Equal(first, exit.ExchangeOrderId); // the fixture still holds Binance's reply
+            Assert.Equal(60500m, Level(exit)); // a completed poll did not put the old values back
+            Assert.Equal(1m, exit.Unfilled);
+            Assert.Same(exit, Assert.Single(broker.ActiveOrders));
+        }
+        finally
+        {
+            broker.Changed -= OnChanged;
+            releasePost.TrySetResult();
+        }
 
         await Until(() => exit.ExchangeOrderId != first);
         var open = Assert.Single(fake.Open);
@@ -913,7 +934,7 @@ internal sealed class FakeBinance : IDisposable
     public FakeBinance(bool futures)
     {
         Futures = futures;
-        _server.OnHttp = Handle;
+        _server.OnHttpAsync = Handle;
     }
 
     public bool Futures { get; }
@@ -934,6 +955,9 @@ internal sealed class FakeBinance : IDisposable
 
     /// <summary>Delay before answering a new order (the order exists at the exchange meanwhile).</summary>
     public int PostDelayMs { get; set; }
+
+    /// <summary>Hold a POST reply after exchange acceptance; other requests continue normally.</summary>
+    public Func<CancellationToken, Task>? BeforePostReply { get; set; }
 
     /// <summary>How many of the next new orders Binance refuses.</summary>
     public int RejectPosts { get; set; }
@@ -1229,9 +1253,11 @@ internal sealed class FakeBinance : IDisposable
         return extra.Count == 0 ? null : string.Join(", ", extra);
     }
 
-    private (int Status, string Body) Handle(FakeRequest r)
+    private async ValueTask<(int Status, string Body)> Handle(FakeRequest r, CancellationToken ct)
     {
         var answer = Answer(r);
+        if (r.Method == "POST" && BeforePostReply is { } beforeReply)
+            await beforeReply(ct).ConfigureAwait(false);
         if (answer.Status >= 400)
             lock (_gate) _refused.Add(r.Method + " " + r.Route + " -> " + answer.Body);
         return answer;

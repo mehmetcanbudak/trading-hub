@@ -44,6 +44,9 @@ internal sealed class FakeHttpServer : IDisposable
     /// <summary>Pedido HTTP: método, ruta con query, encabezados, cuerpo → (código, cuerpo, tipo).</summary>
     public Func<FakeRequest, (int Status, string Body)>? OnHttp { get; set; }
 
+    /// <summary>Async HTTP replies can wait for a test-controlled event without blocking request workers.</summary>
+    public Func<FakeRequest, CancellationToken, ValueTask<(int Status, string Body)>>? OnHttpAsync { get; set; }
+
     /// <summary>Respuesta en streaming (por ejemplo precios de OANDA): escribe líneas mientras quiera.</summary>
     public Func<FakeRequest, Stream, CancellationToken, Task>? OnStream { get; set; }
 
@@ -100,7 +103,9 @@ internal sealed class FakeHttpServer : IDisposable
                 return;
             }
 
-            var (status, text) = OnHttp?.Invoke(req) ?? (404, "{}");
+            var (status, text) = OnHttpAsync is { } respond
+                ? await respond(req, _cts.Token).ConfigureAwait(false)
+                : OnHttp?.Invoke(req) ?? (404, "{}");
             var bytes = Encoding.UTF8.GetBytes(text);
             ctx.Response.StatusCode = status;
             ctx.Response.ContentType = text.StartsWith('{') || text.StartsWith('[') ? "application/json" : "text/plain";
