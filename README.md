@@ -8,7 +8,7 @@ Footprint charts, Depth of Market (DOM) trading, professional backtesting design
 
 Created by [@ralphtradesz](https://x.com/ralphtradesz). English work in this fork reuses [indigiti/TradeDock's community translation](https://github.com/indigiti/tradedock/tree/translation/english-documentation-ui), with additional completion, compatibility fixes and validation.
 
-**English branch:** `feat/english-localization`. English is the canonical source/documentation language; the runtime interface supports **English, Spanish and Simplified Chinese** under Settings → General → Language. Existing English-fork settings without a language remain English; fresh installs follow the OS (Spanish/Chinese, otherwise English). Reports and assistant prose follow the selected language; generated C#, filenames and sample identifiers stay English. Stored identifiers, personal history and third-party content are not destructively rewritten. See [Settings](docs/en/ajustes.md) and the [validation dashboard](docs/en/TRANSLATION_STATUS.md).
+**Canonical C# branch:** `memoshi`. English is the canonical source/documentation language; the runtime interface supports **English, Spanish and Simplified Chinese** under Settings → General → Language. Existing English-fork settings without a language remain English; fresh installs follow the OS (Spanish/Chinese, otherwise English). Reports and assistant prose follow the selected language; generated C#, filenames and sample identifiers stay English. Stored identifiers, personal history and third-party content are not destructively rewritten. See [Settings](docs/en/ajustes.md) and the [validation dashboard](docs/en/TRANSLATION_STATUS.md).
 
 **Upstream updates:** [Daily monitoring and the reviewed English sync process](docs/en/upstream-sync.md) track new original-repository commits without automatic merges or deployment.
 
@@ -107,7 +107,7 @@ Requirements: Apple Silicon Mac, macOS 12 or later, and .NET 10.
 ```bash
 curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
 bash /tmp/dotnet-install.sh --channel 10.0
-git clone --branch feat/english-localization https://github.com/mehmetcanbudak/trading-hub.git
+git clone --branch memoshi https://github.com/mehmetcanbudak/trading-hub.git
 cd trading-hub
 ./build-app.sh --install
 ```

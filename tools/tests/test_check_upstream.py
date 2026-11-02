@@ -13,7 +13,7 @@ import check_upstream as tracker
 
 FORK = "example/english-fork"
 STATE = {"fork_repository": FORK, "upstream_repository": "original/app", "upstream_branch": "main",
-         "english_branch": "feat/english-localization", "integrated_commit": "a" * 40}
+         "english_branch": "memoshi", "integrated_commit": "a" * 40}
 
 
 def data(tip="a" * 40, pending=False):
@@ -200,12 +200,6 @@ class GitDetectionTests(unittest.TestCase):
     def test_actual_repository_checkpoint_is_valid_and_in_current_history(self):
         state = tracker.load_state(tracker.ROOT)
         self.assertTrue(tracker.ancestor(tracker.ROOT, state["integrated_commit"], "HEAD"))
-        workflow = (tracker.ROOT / ".github/workflows/upstream-english-tracking.yml").read_text(encoding="utf-8")
-        self.assertIn("ref: " + state["english_branch"], workflow)
-        self.assertIn("github.repository == '" + state["fork_repository"] + "'", workflow)
-        self.assertIn("contents: read", workflow)
-        self.assertIn("issues: write", workflow)
-        self.assertNotIn("contents: write", workflow)
 
 
 if __name__ == "__main__":

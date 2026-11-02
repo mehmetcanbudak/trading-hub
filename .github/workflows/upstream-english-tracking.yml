@@ -5,7 +5,7 @@ on:
     - cron: '37 6 * * *'
   workflow_dispatch:
   push:
-    branches: [feat/english-localization]
+    branches: [memoshi]
     paths:
       - .github/upstream-english.json
       - .github/workflows/upstream-english-tracking.yml
@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: feat/english-localization
+          ref: memoshi
           fetch-depth: 0
           persist-credentials: false
       - name: Test tracker behavior without network or notifications

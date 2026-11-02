@@ -2,7 +2,7 @@
 
 # Keep the English fork aligned with upstream
 
-This fork tracks `ralphtradesz/trading-hub:main` while maintaining English work on `mehmetcanbudak/trading-hub:feat/english-localization`. Rust/Swift ports remain separate worktrees/branches. **The monitor never pushes to the original author's repository, merges code, translates automatically, changes your scripts/data or installs the app.**
+This fork tracks `ralphtradesz/trading-hub:main` while maintaining its canonical English-first C# version on `mehmetcanbudak/trading-hub:memoshi`. Rust/Swift ports remain separate worktrees/branches. **The monitor never pushes to the original author's repository, merges code, translates automatically, changes your scripts/data or installs the app.**
 
 ## What is tracked
 
@@ -13,7 +13,7 @@ This fork tracks `ralphtradesz/trading-hub:main` while maintaining English work 
 - The bot replaces only its marked report section. Keep notes and checklist progress outside that section; they are preserved. Recheck completed items when another upstream tip arrives. A closed tracker reopens while unreviewed work remains.
 - [Translation status](TRANSLATION_STATUS.md) records actual build, compatibility and UI evidence. [English validation](../../.github/workflows/english-translation-validation.yml) runs for pull requests into the English branch as well as pushes.
 
-The fork's default branch is English so GitHub can run its schedule there; `main` code is not changed for this setup. The monitor's token has read-only contents and issue-write permissions, not code-write or merge permissions. It fetches upstream Git objects but never checks out or executes upstream code.
+The fork's default branch is `memoshi` so GitHub can run its schedule there; historical `main`, English, safety and sync refs are retained for rollback, not parallel development bases. The monitor's token has read-only contents and issue-write permissions, not code-write or merge permissions. It fetches upstream Git objects but never checks out or executes upstream code.
 
 ## Check now without writing GitHub issues
 
@@ -32,9 +32,9 @@ If upstream rewrites history or the ledger is invalid, investigate it. **Do not 
 1. Read the tracker and upstream commits. Decide what changed in behavior, storage, brokerage safety, dependency/license requirements and user-facing language. Translation is not permission to alter account/order IDs or blindly rename existing user code.
 2. Use a new isolated worktree, leaving dirty English/port worktrees and their branches untouched. Fetch exact inputs and create a dedicated sync branch from a reviewed English base:
    ```bash
-   git fetch origin feat/english-localization
+   git fetch origin memoshi
    git fetch upstream main
-   git worktree add -b sync/upstream-SHORT_SHA ../trading-hub-sync-SHORT_SHA origin/feat/english-localization
+   git worktree add -b sync/upstream-SHORT_SHA ../trading-hub-sync-SHORT_SHA origin/memoshi
    git -C ../trading-hub-sync-SHORT_SHA merge --no-ff --no-commit FULL_UPSTREAM_SHA
    ```
    Use the exact reviewed upstream SHA from the tracker, not a moving tip. If required safety work is not yet merged into English, review it first and use its exact reviewed base commit for the new worktree; preserve its acceptance requirements explicitly. Resolve conflicts manually. Abort only this worktree's merge if needed; preserve unrelated working files.
@@ -63,12 +63,12 @@ If upstream rewrites history or the ledger is invalid, investigate it. **Do not 
    git commit
    git push -u origin sync/upstream-SHORT_SHA
    gh pr create --repo mehmetcanbudak/trading-hub \
-     --base feat/english-localization --head sync/upstream-SHORT_SHA --draft
+     --base memoshi --head sync/upstream-SHORT_SHA --draft
    ```
    Read the diff and macOS/Windows checks; finish missing translations and resolve failures. Merge only after human review. There is no automatic merge. Do not open a PR against the original upstream or include Rust/Swift work unintentionally.
 8. The next monitor run sees the advanced checkpoint and reports remaining work or **Up to date**. A successful merge does not replace the installed app: update separately using the installation guide, with a backup and a fully quit app.
 
-Port references are independent: decide which reviewed runtime/safety/UI changes are relevant, validate them in a separate port task, then deliberately update a port's pinned oracle. A C# sync does not authorize changing either port worktree or its pin.
+`memoshi` is the C# reference for future port work. Existing Rust/Swift branches, dirty work and pinned oracles remain untouched during this consolidation. Each port's agents must review the applicable runtime/safety/UI changes, validate them in that port and record the exact adopted `memoshi` SHA separately; do not silently use a moving branch tip as a reproducible oracle.
 
 ## Maintain the English-source catalogs
 

@@ -2,7 +2,7 @@
 
 [← Main README](../../README.md) · [Spanish documentation](../README.es.md)
 
-Full English guides for the `feat/english-localization` branch of this fork, covering Apple Silicon macOS and implemented Windows 10/11 x64/ARM64 support. English is canonical; runtime UI, reports and assistant prose can use English, Spanish or Simplified Chinese. Generated C#/sample identifiers stay English. Spanish folder names and API/storage identifiers are deliberately preserved; existing personal and third-party content is not rewritten. Native Windows, actual real/demo brokerage execution and physical macOS lifecycle/power validation remain separate release gates, not certified by this integration.
+Full English guides for this fork's canonical C# branch, `memoshi`, covering Apple Silicon macOS and implemented Windows 10/11 x64/ARM64 support. English is canonical; runtime UI, reports and assistant prose can use English, Spanish or Simplified Chinese. Generated C#/sample identifiers stay English. Spanish folder names and API/storage identifiers are deliberately preserved; existing personal and third-party content is not rewritten. Automated native Windows installation and UI evidence is recorded in the dashboard; real/demo brokerage execution and physical macOS lifecycle/power validation remain separate release gates.
 
 | Area | Guide |
 |---|---|

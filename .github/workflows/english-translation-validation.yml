@@ -3,13 +3,11 @@ name: English translation validation
 on:
   push:
     branches:
-      - feat/english-localization
-      - translation/english-documentation-ui
+      - memoshi
       - 'sync/upstream-*'
   pull_request:
     branches:
-      - main
-      - feat/english-localization
+      - memoshi
   workflow_dispatch:
 
 permissions:

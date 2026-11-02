@@ -1,10 +1,10 @@
 # Trading Hub — English localization validation
 
 **Reviewed:** 2026-11-02
-**Branch:** `sync/upstream-c28900e`
-**Implementation:** isolated integration candidate combining the reviewed safety branch with upstream Windows v1.1 and multilingual v1.2. English remains canonical source and existing English installations remain English. Local validation below is current; the October evidence is explicitly historical. This candidate has not replaced the installed app and is not a real-broker or physical-power certification.
+**Branch:** `memoshi`
+**Implementation:** canonical English-first C# branch consolidating the English, safety, upstream-sync and historical main histories. Upstream Windows v1.1 and multilingual v1.2 are included; existing English installations remain English. Runtime source is unchanged from verified integration head `617259d`. Historical research is preserved as dated snapshots, not current findings. No installed app or Rust/Swift worktree is changed; this is not real-broker or physical-power certification.
 
-**Review:** [Draft integration PR #4](https://github.com/mehmetcanbudak/trading-hub/pull/4). Safety findings are also recorded on PR #3; the original safety source is not approved unchanged for release.
+**Review:** [Integration PR #4](https://github.com/mehmetcanbudak/trading-hub/pull/4) and safety PR #3 retain the review/evidence history. The original safety source is not approved unchanged; its corrections are included. The user authorized consolidation into `memoshi`, not an automatic app release or a port rebase.
 
 ## Scope and provenance
 
@@ -20,7 +20,7 @@ Source revisions:
 - Safety PR #3 starting point: `5fe1bdf53c1aad92fabfbc73576c75bbeb8f0a1f`.
 - Windows/platform upstream: `9c17ef1957ccd20ad2b04feadf2c69241504a86b`.
 - Multilingual upstream: `c28900e03ba473ee21f3983e65c1adf980ae0077`; live upstream recheck on 2026-11-02 found no later main commit.
-- Both upstream commits are reconciled in the isolated candidate. The English, safety, Rust and Swift worktrees and branch tips are not integration scratch space.
+- Both upstream commits are reconciled. `main`, `feat/english-localization`, `fix/live-order-safety` and `sync/upstream-c28900e` are ancestors of the consolidated branch; their old refs are retained for rollback. All six dirty English tracked-file changes were already represented in the integration; three previously untracked historical notes under `docs/research/` and `plans/` are now preserved without rewriting their dated conclusions.
 
 ### Required safety behavior
 
@@ -41,6 +41,7 @@ Sibling protection remains emulated, not atomic broker-native OCO. Ledger append
 | Full compatibility/safety suite | **351 passed, 7 Windows-only skipped, 358 total** | Full suite rerun after the history handoff fix: `test-results/history-fixed.trx`; native Windows cases run in the hosted matrix, not on macOS. |
 | Failing-before safety regressions | Confirmed | Pinned safety source: ledger suite 3 failed/8 passed; corrected runner/replay/close suite 24 failed/112 passed. The integrated full suite passes. |
 | English source/review guard | **191 files, 11,979 text tokens, 111 documented exceptions; 0 failures** | Final full audit after native-modifier and history-handoff fixes; 92 explicit reviewed fingerprints. Original `9ee74a4` audit baseline is unchanged. |
+| Canonical branch consolidation | **Local configuration and runtime gates passed** | `memoshi` uses the consolidated `617259d` runtime, already verified by all three hosted native jobs. Fresh local checks pass: Release build, 351 tests/7 Windows-only skips, 13 tracker tests, source/docs and both catalog audits, 120 English/88 safety/42 quit UI checks. Both workflow YAML diagnostics pass; the actual monitor runs on `memoshi`. Original English patch/file digests are backed up before primary-worktree cutover; port refs, worktrees and pins stay unchanged. |
 | Negative audit enforcement | **5 expected failures**, restored baseline passes | Rejects unaccented and accented Spanish, an application numeric change, a raw generated-C# numeric change, and a new unreviewed English source file. Probes exist only in an owned detached fixture and are removed afterward. |
 | English guides and links | Passed | 22 Markdown files, 196 local links/anchors and 16 guide section checks before this dashboard evidence update. |
 | Upstream language reconciliation | **3,300/3,300 entries covered in each language; 0 missing/mismatched** | 4,674 canonical English-source keys per catalog; 105 reviewed collisions and 202 authoritative overrides, including the native Command/Ctrl confirmation tooltip. Compatibility aliases/provenance are retained, not silently discarded. |
@@ -65,15 +66,15 @@ Current local evidence is under `/Volumes/TradingHub-upstream-a861ab10ae/evidenc
 
 ### Release gates still open
 
-- Human review of the completed native Windows x64/ARM64 and macOS checks, their actual application captures and the explicit safety requirements. Automated gates now pass; this draft candidate is not an automatic release or permission to route real orders.
+- Release approval must review the native Windows x64/ARM64 and macOS checks, actual application captures and explicit safety requirements. Automated integration gates pass; making `memoshi` canonical is not an app release or permission to route real orders.
 - Verify packaged GUI restart/tray/quit behavior in an authorized desktop session; do not use or alter the existing installed app as a fixture. Final-output strict/deep signature verification is now resolved and passed.
 - Real broker/provider licensing, native cancel/fill races, disconnect/reconnect behavior and account-side risk settings require an authorized simulated/provider test environment. Fake providers do not certify brokerage execution.
 - Physical Windows/macOS sleep/lid/thermal behavior, actual paid-model availability/output and arbitrary third-party extensions are not exercised. No privileged power operation or paid call was made.
-- Preserve all required safety behavior above. Do not merge as a release or advance the upstream checkpoint by treating source parity, a green shared-runtime test or cross-publishing as native certification.
+- Preserve all required safety behavior above. The rolling upstream checkpoint records reviewed source integration after the established native/English/safety gates, not real-money, signed-release or physical-power certification. Keep those release limits visible after checkpoint advancement.
 
 ### Ports' pinned-reference decision
 
-Keep the Rust and Swift reference pinned to `5f7c19e7528f47582f34f14d2c06e71d388b9858`. Neither port worktree nor its reference metadata is changed. First port the reviewed ownership/replay/cancellation/quit semantics with native tests; then separately review English-source multilingual parity. C# Windows credential, tray, power and CLI APIs are not portable implementations and do not justify automatically advancing either port's pin.
+`memoshi` is the canonical C# base for future Rust/Swift work. Leave both existing port worktrees and their `5f7c19e7528f47582f34f14d2c06e71d388b9858` reference pins unchanged while their agents are working. Each port must deliberately adopt an exact reviewed `memoshi` SHA, port ownership/replay/cancellation/quit semantics with native tests and reconcile English-source multilingual behavior. C# Windows credential, tray, power and CLI APIs are not portable implementations and do not justify silently repinning either port.
 
 ## Historical evidence — 2026-10-19
 
@@ -107,9 +108,9 @@ Preserved the original dirty English worktree's documentation-only safety guidan
 
 ## Upstream maintenance
 
-The [upstream sync guide](upstream-sync.md), [checkpoint ledger](../../.github/upstream-english.json) and [daily/manual monitor](../../.github/workflows/upstream-english-tracking.yml) track the original repository separately from this English branch. `integrated_commit` deliberately remains `9ee74a4c527ac43120423acd41e006ec9d7877ad` while the candidate is reviewed and release gates remain open. Current upstream main is `c28900e03ba473ee21f3983e65c1adf980ae0077`; tracker issue #2 correctly reports the two pending commits. Git ancestry in a candidate branch is not checkpoint approval. The historical C# audit baseline also remains unchanged.
+The [upstream sync guide](upstream-sync.md), [checkpoint ledger](../../.github/upstream-english.json) and [daily/manual monitor](../../.github/workflows/upstream-english-tracking.yml) track the original repository separately from `memoshi`. `integrated_commit` advances to `c28900e03ba473ee21f3983e65c1adf980ae0077` for this user-authorized consolidation: the unchanged runtime passed [all three native platform jobs at `617259d`](https://github.com/mehmetcanbudak/trading-hub/actions/runs/41506213481), and fresh `memoshi` configuration, tracker, compatibility, English, catalog and UI checks pass. The checkpoint records reviewed upstream source, not app installation or brokerage/physical-power certification. The historical C# audit baseline stays at `9ee74a4c527ac43120423acd41e006ec9d7877ad`.
 
-Local tracker tests cover synthetic upstream additions, history rewrites, invalid checkpoints, English doc mappings, preserved issue notes/checklists, bounded output, notification deduplication/retry and fork-only writes. The monitor never merges, auto-translates, advances the checkpoint, installs an app or touches trading data. Historical setup runs 39237527539 and 39237638444 maintained exactly one tracker issue without duplicate update comments; their then-current “Up to date” status is not the present pending status. The authorized English default branch and Issues remain enabled; the monitor is scheduled at 06:37 UTC. Integration/review targets this fork's English branch, never the original author's repository, main or either port.
+Local tracker tests cover synthetic upstream additions, history rewrites, invalid checkpoints, English doc mappings, preserved issue notes/checklists, bounded output, notification deduplication/retry and fork-only writes. The monitor never merges, auto-translates, advances the checkpoint, installs an app or touches trading data. Historical setup runs 39237527539 and 39237638444 maintained exactly one tracker issue without duplicate update comments; their then-current “Up to date” reports are not evidence for the present tree. Daily/manual monitoring now checks canonical `memoshi`, with Issues enabled and the schedule at 06:37 UTC. Future integration/review targets this fork's `memoshi`, never the original author's repository, historical main or either port.
 
 ## Compatibility is not missing translation
 

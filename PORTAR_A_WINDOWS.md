@@ -60,4 +60,4 @@ Ejecutá los gates existentes con proveedores falsos y directorios temporales. M
 
 ## Después
 
-La integración se revisa mediante un PR en el fork, dirigido a `feat/english-localization`; main y los worktrees Rust/Swift quedan aparte. Mantener sus referencias fijadas es una decisión separada. Linux requiere sus propias integraciones y validación nativas; soporte Windows no implica una publicación Linux.
+La integración se revisa mediante un PR en el fork, dirigido a `memoshi`; main y los worktrees Rust/Swift quedan aparte. Mantener sus referencias fijadas es una decisión separada. Linux requiere sus propias integraciones y validación nativas; soporte Windows no implica una publicación Linux.

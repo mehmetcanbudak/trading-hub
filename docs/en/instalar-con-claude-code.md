@@ -14,9 +14,9 @@ For Windows 10/11 x64/ARM64, use the implemented [Windows installation/build gui
 
 ## Steps
 
-1. Obtain **this English branch**, not the Spanish main branch:
+1. Obtain **the canonical English-first C# branch**, not the historical main branch:
    ```bash
-   git clone --branch feat/english-localization https://github.com/mehmetcanbudak/trading-hub.git
+   git clone --branch memoshi https://github.com/mehmetcanbudak/trading-hub.git
    ```
    Alternatively download the ZIP while that branch is selected on GitHub.
 2. Open Terminal in the folder:

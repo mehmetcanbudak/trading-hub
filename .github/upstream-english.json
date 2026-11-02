@@ -2,6 +2,6 @@
   "fork_repository": "mehmetcanbudak/trading-hub",
   "upstream_repository": "ralphtradesz/trading-hub",
   "upstream_branch": "main",
-  "english_branch": "feat/english-localization",
-  "integrated_commit": "9ee74a4c527ac43120423acd41e006ec9d7877ad"
+  "english_branch": "memoshi",
+  "integrated_commit": "c28900e03ba473ee21f3983e65c1adf980ae0077"
 }

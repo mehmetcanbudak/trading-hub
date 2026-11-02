@@ -4,10 +4,10 @@
 
 This fork is built locally from the repository. On macOS, the build script assembles `Trading Hub.app`, signs it and optionally copies it to Applications. Windows x64/ARM64 self-contained builds and per-user NSIS installers are also implemented; see [Windows installation](portar-a-windows.md). The first build takes a few minutes while NuGet dependencies download. No published fork installer or completed native Windows certification is claimed.
 
-For this fork's completed English work, use branch **`feat/english-localization`**, not the Spanish `main` branch:
+For this fork's consolidated English-first C# version, use **`memoshi`**, not the historical `main` branch:
 
 ```bash
-git clone --branch feat/english-localization https://github.com/mehmetcanbudak/trading-hub.git
+git clone --branch memoshi https://github.com/mehmetcanbudak/trading-hub.git
 cd trading-hub
 ```
 

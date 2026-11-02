@@ -19,7 +19,7 @@ REF = "refs/remotes/english-tracker/upstream"
 CHECKLIST = """## Human review checklist
 
 - [ ] Review all pending upstream commits, including trading/data/security changes.
-- [ ] Merge into a separate sync branch based on `feat/english-localization`; resolve conflicts manually.
+- [ ] Merge into a separate sync branch based on the configured English branch; resolve conflicts manually.
 - [ ] Translate new/changed UI, errors, prompts, reports, SDK labels and generated sample code.
 - [ ] Update English guides and screenshots; preserve the Spanish originals and attribution.
 - [ ] Preserve account/order IDs, broker payloads, storage formats and existing personal scripts.
