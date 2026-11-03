@@ -83,7 +83,7 @@ internal sealed partial class LiveView
         if (_portfolioId == null || portfolios.All(p => p.Def.Id != _portfolioId)) _portfolioId = portfolios.FirstOrDefault()?.Def.Id;
         var current = portfolios.FirstOrDefault(p => p.Def.Id == _portfolioId);
 
-        string key = string.Join("|", portfolios.Select(p => $"{p.Def.Id}:{p.Def.Name}:{p.Def.Capital}:{string.Join(",", p.Members.Select(m => $"{m.Key}{m.StateLabel}{m.Ledger.Fills.Count}{m.Runner?.SizeMultiplier ?? m.Info.Size}{Math.Round(m.OpenPnL, 0)}"))}")) +
+        string key = string.Join("|", portfolios.Select(p => $"{p.Def.Id}:{p.Def.Name}:{p.Def.Capital}:{string.Join(",", p.Members.Select(m => $"{m.Key}{m.StateLabel}{m.LedgerError}{m.Ledger?.Fills.Count}{m.Runner?.SizeMultiplier ?? m.Info.Size}{m.OpenPnL:0}"))}")) +
                      $"|{_portfolioId}|{LiveStore.ProposalsStamp.Ticks}";
         bool agentChanged = _svc.Live.RiskAgent.Version != _agentVersion;
         if (!force && key == _portfolioKey && !agentChanged) return;
@@ -124,9 +124,6 @@ internal sealed partial class LiveView
     private void BuildPortfolioDetail(LivePortfolioView p)
     {
         var def = p.Def;
-        var analysis = LiveCenter.Analyze(p);
-        var m = analysis.Metrics;
-        decimal open = p.Members.Sum(x => x.OpenPnL);
 
         // encabezado y acciones
         var actions = new WrapPanel { ItemSpacing = 8, LineSpacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
@@ -142,6 +139,20 @@ internal sealed partial class LiveView
             Ui.Faint($"{(def.Auto ? "Automatic: all live strategies without a custom portfolio · " : "")}{p.Members.Count} strategy/strategies · reference capital {def.Capital.ToString("#,##0", Es)}" +
                      $"{(p.HasReal ? " · includes REAL accounts" : "")}").Also(t => t.TextWrapping = TextWrapping.Wrap)));
         _portfolioDetail.Children.Add(head);
+
+        if (p.Members.Any(e => e.Ledger == null))
+        {
+            var errors = Ui.V(8, Ui.H3("History unavailable"));
+            foreach (var entry in p.Members.Where(e => e.Ledger == null))
+                errors.Children.Add(new TextBlock { Text = $"{entry.Info.Strategy} · {entry.Info.Symbol}: {entry.LedgerError}", Foreground = Ui.Warn, TextWrapping = TextWrapping.Wrap });
+            _portfolioDetail.Children.Add(Ui.Card(errors, 12));
+            _portfolioDetail.Children.Add(Ui.Card(MembersTable(p, null), 10));
+            return;
+        }
+
+        var analysis = LiveCenter.Analyze(p);
+        var m = analysis.Metrics;
+        decimal open = p.Members.Sum(x => x.OpenPnL!.Value);
 
         // números del portafolio
         var kpis = new WrapPanel { ItemSpacing = 10, LineSpacing = 10 };
@@ -183,7 +194,7 @@ internal sealed partial class LiveView
         }
     }
 
-    private Control MembersTable(LivePortfolioView p, PortfolioResult analysis)
+    private Control MembersTable(LivePortfolioView p, PortfolioResult? analysis)
     {
         const string cols = "2.4*,1*,0.8*,1*,0.6*,0.7*,1*,0.9*,0.9*";
         var table = new StackPanel();
@@ -203,14 +214,14 @@ internal sealed partial class LiveView
             return table;
         }
 
-        decimal total = p.Members.Sum(x => x.Ledger.Realized);
+        decimal? total = p.Members.All(x => x.Ledger != null) ? p.Members.Sum(x => x.Ledger!.Realized) : null;
         int n = p.Members.Count;
         for (int i = 0; i < n; i++)
         {
             var e = p.Members[i];
-            var cm = i < analysis.ComponentMetrics.Count ? analysis.ComponentMetrics[i] : new PerformanceMetrics();
+            var cm = analysis != null && i < analysis.ComponentMetrics.Count ? analysis.ComponentMetrics[i] : null;
             double corr = 0;
-            if (n > 1 && analysis.Correlation.GetLength(0) == n)
+            if (analysis != null && n > 1 && analysis.Correlation.GetLength(0) == n)
             {
                 for (int j = 0; j < n; j++)
                     if (j != i) corr += analysis.Correlation[i, j];
@@ -223,14 +234,14 @@ internal sealed partial class LiveView
             {
                 Ui.V(1, new TextBlock { Text = e.Info.Strategy, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis },
                     new TextBlock { Text = $"{e.Info.Symbol} {e.Info.Period} · {TradingHub.Common.EnglishText.Of(e.Info.Account)}{(e.Locked ? $" · {e.SourceLabel} 🔒" : "")}", Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis }),
-                new TextBlock { Text = e.StateLabel, FontSize = 12, Foreground = e.Running ? Ui.Up : Ui.Text2 },
+                new TextBlock { Text = e.StateLabel, FontSize = 12, Foreground = e.Ledger == null ? Ui.Warn : e.Running ? Ui.Up : Ui.Text2 },
                 Num("×" + size.ToString("0.##", Es)),
-                Num(Money(e.Net), e.Net >= 0 ? Ui.Up : Ui.Down),
-                Num(e.Ledger.Trades.Count.ToString(Inv)),
-                Num(cm.TotalTrades > 0 ? (cm.ProfitFactor >= 999 ? "∞" : cm.ProfitFactor.ToString("0.00", Es)) : "—"),
-                Num((-cm.MaxDrawdown).ToString("#,##0.00", Es)),
-                Num(total != 0 ? $"{e.Ledger.Realized / Math.Abs(total) * 100:0} %" : "—"),
-                Num(n > 1 && analysis.Days.Count >= 3 ? corr.ToString("0.00", Es) : "—", corr > 0.6 ? Ui.Warn : null),
+                Num(Money(e.Net), e.Net == null ? Ui.Text2 : e.Net >= 0 ? Ui.Up : Ui.Down),
+                Num(e.Ledger?.Trades.Count.ToString(Inv) ?? "—"),
+                Num(cm is { TotalTrades: > 0 } ? (cm.ProfitFactor >= 999 ? "∞" : cm.ProfitFactor.ToString("0.00", Es)) : "—"),
+                Num(cm?.MaxDrawdown is { } drawdown ? (-drawdown).ToString("#,##0.00", Es) : "—"),
+                Num(total is { } knownTotal && knownTotal != 0 && e.Ledger is { } ledger ? $"{ledger.Realized / Math.Abs(knownTotal) * 100:0} %" : "—"),
+                Num(analysis != null && n > 1 && analysis.Days.Count >= 3 ? corr.ToString("0.00", Es) : "—", corr > 0.6 ? Ui.Warn : null),
             };
             for (int c = 0; c < cells.Length; c++)
             {
@@ -241,6 +252,7 @@ internal sealed partial class LiveView
             }
 
             var row = new Border { Child = g, BorderBrush = Ui.Line, BorderThickness = new Thickness(0, 1, 0, 0), Background = Brushes.Transparent, Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand) };
+            if (e.LedgerError != null) ToolTip.SetTip(row, e.LedgerError);
             var entry = e;
             row.PointerPressed += (_, ev) =>
             {

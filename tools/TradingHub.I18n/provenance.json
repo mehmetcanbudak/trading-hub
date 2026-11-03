@@ -1,7 +1,7 @@
 {
   "checkpoint": "9ee74a4c527ac43120423acd41e006ec9d7877ad",
   "fork": "5fe1bdf53c1aad92fabfbc73576c75bbeb8f0a1f",
-  "upstream": "c28900e03ba473ee21f3983e65c1adf980ae0077",
+  "upstream": "1d5a774d3d1bf2baf9259597234d227daad915a9",
   "entries": {
     "\nContrato: con este tamaño conviene {0} ({1} {2}); cambia solo cuando quede plana.": {
       "english": "\nContract: at this size {0} is better ({1} {2}); it only switches when flat.",

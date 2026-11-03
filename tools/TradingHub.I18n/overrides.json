@@ -806,5 +806,193 @@
   "Click or press {0} to confirm": {
     "es": "Haz clic o pulsa {0} para confirmar",
     "zh-CN": "点击或按 {0} 确认"
+  },
+  "History unavailable": {
+    "es": "Historial no disponible",
+    "zh-CN": "交易历史不可用"
+  },
+  "Unavailable": {
+    "es": "No disponible",
+    "zh-CN": "不可用"
+  },
+  "The risk change was not applied.": {
+    "es": "No se aplicó el cambio de riesgo.",
+    "zh-CN": "风险修改未应用。"
+  },
+  "The strategy remains paused; review its activity log before resuming.": {
+    "es": "La estrategia sigue en pausa; revisá su registro de actividad antes de reanudarla.",
+    "zh-CN": "策略仍处于暂停状态；恢复前请查看活动日志。"
+  },
+  "A pending intent lost its authoritative history.": {
+    "es": "Una intención de escritura pendiente perdió su historial de referencia.",
+    "zh-CN": "待恢复的追加意图丢失了其基准历史记录。"
+  },
+  "Account position and working orders are still synchronizing.": {
+    "es": "La posición de la cuenta y las órdenes activas todavía se están sincronizando.",
+    "zh-CN": "账户持仓和活动委托仍在同步。"
+  },
+  "Binance execution status unknown ({0}): {1}": {
+    "es": "Estado de ejecución de Binance desconocido ({0}): {1}",
+    "zh-CN": "Binance 执行状态未知（{0}）：{1}"
+  },
+  "Binance submission outcome remains unknown.": {
+    "es": "El resultado del envío a Binance sigue siendo desconocido.",
+    "zh-CN": "Binance 委托提交结果仍未知。"
+  },
+  "Binance submission outcome remains unknown; awaiting exact client identity reconciliation.": {
+    "es": "El resultado del envío a Binance sigue siendo desconocido; se espera la conciliación por el identificador exacto del cliente.",
+    "zh-CN": "Binance 委托提交结果仍未知；正在等待按精确客户端标识进行核对。"
+  },
+  "Cannot recover ledger '{0}'. Keep the strategy stopped and reconcile its history before restarting: {1}": {
+    "es": "No se puede recuperar el registro contable '{0}'. Mantené la estrategia detenida y conciliá su historial antes de reiniciarla: {1}",
+    "zh-CN": "无法恢复账本“{0}”。请保持策略停止，并在重启前核对其历史记录：{1}"
+  },
+  "Cannot replace an order while its submission or previous replacement outcome is unresolved.": {
+    "es": "No se puede reemplazar una orden mientras siga sin resolverse su envío o el resultado del reemplazo anterior.",
+    "zh-CN": "委托提交或上一次替换的结果尚未确定，无法替换委托。"
+  },
+  "Cannot resume: ledger fills are still pending. Restore ledger storage and save the pending fills before opening new exposure.": {
+    "es": "No se puede reanudar: hay ejecuciones pendientes en el registro contable. Restaurá su almacenamiento y guardalas antes de abrir nueva exposición.",
+    "zh-CN": "无法恢复：账本仍有待保存的成交。请先恢复账本存储并保存这些成交，再新增敞口。"
+  },
+  "Cannot resume: ledger recovery failed ({0}). Keep new entries paused and reconcile its history.": {
+    "es": "No se puede reanudar: falló la recuperación del registro contable ({0}). Mantené las nuevas entradas en pausa y conciliá su historial.",
+    "zh-CN": "无法恢复：账本恢复失败（{0}）。请保持暂停新增开仓，并核对其历史记录。"
+  },
+  "Cannot resume: pending ledger fills could not be saved ({0}). New entries remain paused.": {
+    "es": "No se puede reanudar: no se pudieron guardar las ejecuciones pendientes del registro contable ({0}). Las nuevas entradas siguen en pausa.",
+    "zh-CN": "无法恢复：账本中的待保存成交无法写入（{0}）。新增开仓仍暂停。"
+  },
+  "Could not persist ledger '{0}': {1}": {
+    "es": "No se pudo guardar el registro contable '{0}': {1}",
+    "zh-CN": "无法持久化账本“{0}”：{1}"
+  },
+  "Could not save a fill to its ledger ({0}): it stays pending and is saved before the next fill; new entries are paused": {
+    "es": "No se pudo guardar una ejecución en su registro contable ({0}): queda pendiente y se guardará antes de la siguiente; las nuevas entradas están en pausa",
+    "zh-CN": "无法将成交写入账本（{0}）：该成交保持待保存状态，并将在下一笔成交前写入；新增开仓已暂停"
+  },
+  "New entries remain paused; entry cancellation or its notification failed ({0}). Reconcile the working orders.": {
+    "es": "Las nuevas entradas siguen en pausa; falló la cancelación de entradas o su notificación ({0}). Conciliá las órdenes activas.",
+    "zh-CN": "新增开仓仍暂停；开仓委托取消或其通知失败（{0}）。请核对活动委托。"
+  },
+  "Order cancellation is still awaiting confirmation.": {
+    "es": "La cancelación de la orden todavía espera confirmación.",
+    "zh-CN": "委托取消仍在等待确认。"
+  },
+  "Order cancellation requested": {
+    "es": "Cancelación de orden solicitada",
+    "zh-CN": "已请求取消委托"
+  },
+  "Order move requested to {0} (stop and targets follow)": {
+    "es": "Movimiento de la orden solicitado a {0} (el stop y los objetivos la siguen)",
+    "zh-CN": "已请求将委托移至 {0}（止损和止盈随之调整）"
+  },
+  "Position closed: remaining stop and target cancellation requested.": {
+    "es": "Posición cerrada: se solicitó cancelar el stop y los objetivos restantes.",
+    "zh-CN": "持仓已平：已请求取消剩余止损和止盈委托。"
+  },
+  "Recovered pending ledger fills: new entries remain paused until the fills are saved; existing exposure remains managed.": {
+    "es": "Se recuperaron ejecuciones pendientes del registro contable: las nuevas entradas siguen en pausa hasta guardarlas; la exposición existente sigue gestionándose.",
+    "zh-CN": "已恢复账本中的待保存成交：保存完成前，新增开仓保持暂停；现有敞口继续受到管理。"
+  },
+  "Rithmic amendment outcome is unknown: ": {
+    "es": "El resultado de la modificación en Rithmic es desconocido: ",
+    "zh-CN": "Rithmic 改单结果未知："
+  },
+  "Rithmic amendment outcome is unknown: {0}": {
+    "es": "El resultado de la modificación en Rithmic es desconocido: {0}",
+    "zh-CN": "Rithmic 改单结果未知：{0}"
+  },
+  "Rithmic rejected amendment: ": {
+    "es": "Rithmic rechazó la modificación: ",
+    "zh-CN": "Rithmic 拒绝了改单："
+  },
+  "Rithmic rejected amendment: {0}": {
+    "es": "Rithmic rechazó la modificación: {0}",
+    "zh-CN": "Rithmic 拒绝了改单：{0}"
+  },
+  "Rithmic submission outcome is unknown: ": {
+    "es": "El resultado del envío a Rithmic es desconocido: ",
+    "zh-CN": "Rithmic 委托提交结果未知："
+  },
+  "Rithmic submission outcome is unknown: {0}": {
+    "es": "El resultado del envío a Rithmic es desconocido: {0}",
+    "zh-CN": "Rithmic 委托提交结果未知：{0}"
+  },
+  "Saved {0} pending fill to its ledger; resume manually when ready": {
+    "es": "Se guardó {0} ejecución pendiente en su registro contable; reanudá manualmente cuando estés listo",
+    "zh-CN": "已将 {0} 笔待保存成交写入账本；准备就绪后请手动恢复"
+  },
+  "Saved {0} pending fills to its ledger; resume manually when ready": {
+    "es": "Se guardaron {0} ejecuciones pendientes en su registro contable; reanudá manualmente cuando estés listo",
+    "zh-CN": "已将 {0} 笔待保存成交写入账本；准备就绪后请手动恢复"
+  },
+  "Stop/target amendment was not confirmed: existing working protection remains owned.": {
+    "es": "La modificación del stop o del objetivo no fue confirmada: la protección activa existente sigue bajo seguimiento.",
+    "zh-CN": "止损或止盈改单未获确认：现有活动保护单仍由应用跟踪管理。"
+  },
+  "The durable append intent '{0}.wal' is unreadable.": {
+    "es": "No se puede leer la intención de anexado persistente '{0}.wal'.",
+    "zh-CN": "无法读取持久化追加意图“{0}.wal”。"
+  },
+  "The durable append intent has no fill.": {
+    "es": "La intención de anexado persistente no contiene ninguna ejecución.",
+    "zh-CN": "持久化追加意图中没有成交。"
+  },
+  "The durable append intent is damaged or belongs to another ledger generation.": {
+    "es": "La intención de anexado persistente está dañada o pertenece a otra generación del registro contable.",
+    "zh-CN": "持久化追加意图已损坏，或属于账本的另一代次。"
+  },
+  "The ledger disappeared before its pending intent was reconciled.": {
+    "es": "El registro contable desapareció antes de conciliar su intención pendiente.",
+    "zh-CN": "账本在待恢复意图核对完成前消失了。"
+  },
+  "The ledger generation is damaged.": {
+    "es": "La generación del registro contable está dañada.",
+    "zh-CN": "账本代次信息已损坏。"
+  },
+  "The ledger has unexpected data beyond its durable append range.": {
+    "es": "El registro contable contiene datos inesperados más allá de su intervalo de anexado persistente.",
+    "zh-CN": "账本在持久化追加范围之外含有意外数据。"
+  },
+  "The ledger history is missing from an existing generation.": {
+    "es": "Falta el historial del registro contable en una generación existente.",
+    "zh-CN": "现有账本代次缺少历史记录。"
+  },
+  "The ledger is shorter than its authoritative committed prefix.": {
+    "es": "El registro contable es más corto que su prefijo confirmado de referencia.",
+    "zh-CN": "账本短于其作为基准的已提交前缀。"
+  },
+  "The ledger no longer matches its pending intent's assigned byte range.": {
+    "es": "El registro contable ya no coincide con el intervalo de bytes asignado a su intención pendiente.",
+    "zh-CN": "账本不再与待恢复意图分配的字节范围相符。"
+  },
+  "The ledger tail does not match its durable append intent.": {
+    "es": "El final del registro contable no coincide con su intención de anexado persistente.",
+    "zh-CN": "账本尾部与其持久化追加意图不符。"
+  },
+  "The order is not available in Rithmic yet; no replacement was sent.": {
+    "es": "La orden todavía no está disponible en Rithmic; no se envió ningún reemplazo.",
+    "zh-CN": "该委托在 Rithmic 中尚不可用；未发送替换委托。"
+  },
+  "Tradovate cancel acceptance is unknown: no command acknowledgment returned.": {
+    "es": "No se sabe si Tradovate aceptó la cancelación: no se recibió confirmación del comando.",
+    "zh-CN": "Tradovate 取消请求是否被接受尚未知：未返回命令回执。"
+  },
+  "Tradovate order acceptance is unknown: no order ID returned.": {
+    "es": "No se sabe si Tradovate aceptó la orden: no se recibió ningún ID de orden.",
+    "zh-CN": "Tradovate 委托是否被接受尚未知：未返回委托 ID。"
+  },
+  "Tradovate order acceptance is unknown;": {
+    "es": "No se sabe si Tradovate aceptó la orden;",
+    "zh-CN": "Tradovate 委托是否被接受尚未知；"
+  },
+  "Tradovate order acceptance is unknown; awaiting client-tag reconciliation: ": {
+    "es": "No se sabe si Tradovate aceptó la orden; se espera la conciliación por etiqueta del cliente: ",
+    "zh-CN": "Tradovate 委托是否被接受尚未知；正在等待按客户端标签进行核对："
+  },
+  "Tradovate order acceptance is unknown; awaiting client-tag reconciliation: {0}": {
+    "es": "No se sabe si Tradovate aceptó la orden; se espera la conciliación por etiqueta del cliente: {0}",
+    "zh-CN": "Tradovate 委托是否被接受尚未知；正在等待按客户端标签进行核对：{0}"
   }
 }

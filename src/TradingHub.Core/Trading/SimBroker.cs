@@ -12,7 +12,7 @@ namespace TradingHub.Trading;
 /// - Stop: se dispara cuando opera en el precio de disparo y llena a mercado.
 /// Se usa desde el hilo de UI.
 /// </summary>
-public sealed class SimBroker : TradingManager, ITradingAccount, IDisposable
+public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderReplacement, IDisposable
 {
     private readonly InstrumentData _data;
     private readonly List<Order> _orders = new();
@@ -85,6 +85,8 @@ public sealed class SimBroker : TradingManager, ITradingAccount, IDisposable
             Price = type is not (OrderTypes.Market or OrderTypes.Stop) ? Instrument.RoundPrice(price) : 0,
             Comment = comment, ReduceOnly = true,
         });
+
+    public bool IsReplacementPending(Order order) => false;
 
     /// <summary>Cambia precio y cantidad en el lugar (la orden conserva su identidad).</summary>
     public Order Replace(Order o, decimal newPrice, decimal newQuantity)

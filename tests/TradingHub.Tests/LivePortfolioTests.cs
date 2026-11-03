@@ -101,6 +101,81 @@ public class LivePortfolioTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_ledger_persistence_failure_pauses_entries_but_keeps_owned_protection_and_closing_alive(bool restoreBeforeClose)
+    {
+        InTemporaryStore(() =>
+        {
+            var inst = new Instrument { Symbol = "TEST", FeedId = "test", TickSize = 1m, VolumeStep = 1m, PointValue = 1m };
+            var data = new InstrumentData(inst, new SimulatedFeed());
+            for (int i = 0; i < 5; i++) data.Trades.Add(new Trade(i + 1, T0.AddSeconds(i * 30), 100, 1, TradeSide.Buy));
+            var broker = new SimBroker(data, new Portfolio(), new TradingStatistics());
+            using var runner = new LiveStrategyRunner(new BuyTwo { StopLossTicks = 5, TakeProfitTicks = 10 }, data, broker, ChartPeriod.M1);
+            runner.Start();
+            string file = LiveStore.LedgerFile(runner.Key);
+            try
+            {
+                Directory.CreateDirectory(file);
+                int start = data.Trades.Count;
+                data.Trades.Add(new Trade(6, T0.AddMinutes(3), 100, 1, TradeSide.Buy));
+                var appended = typeof(InstrumentData).GetField("TradesAppended", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                ((Action<int, int>?)appended!.GetValue(data))?.Invoke(start, 1);
+                Assert.Equal(2m, runner.Ledger.Position);
+                Assert.Equal(2m, broker.Position!.Volume);
+                Assert.True(runner.IsRunning);
+                Assert.True(runner.Paused);
+                Assert.Equal(1, LiveStore.PendingFills(runner.Key));
+                Assert.Equal(2, runner.ActiveOrders.Count(o => o.IsProtective));
+                Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
+                Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Limit);
+
+                int submitted = broker.Orders.Count;
+                var rejected = runner.Submit(OrderSide.Buy, StrategyOrderType.Market, 1, 0, "must remain blocked");
+                Assert.Equal(StrategyOrderState.Canceled, rejected.State);
+                Assert.Equal(submitted, broker.Orders.Count);
+                runner.SetPaused(false);
+                Assert.True(runner.Paused);
+                Assert.Contains(runner.LogLines, line => line.Contains("Cannot resume", StringComparison.Ordinal));
+
+                if (restoreBeforeClose) Directory.Delete(file);
+                runner.ClosePosition("Close while ledger entries are paused");
+                Assert.Equal(0m, runner.Ledger.Position);
+                Assert.Equal(0m, broker.Position.Volume);
+                Assert.True(runner.IsRunning);
+                Assert.True(runner.Paused); // A storage repair does not silently resume new exposure.
+                Assert.False(runner.IsClosing);
+                Assert.Empty(broker.ActiveOrders);
+                var saved = LiveStore.LoadLedger(runner.Key, 1);
+                Assert.Equal(new[] { true, false }, saved.Fills.Select(fill => fill.Buy));
+                Assert.Equal(new[] { 2m, 2m }, saved.Fills.Select(fill => fill.Quantity));
+                Assert.Equal(restoreBeforeClose ? 0 : 2, LiveStore.PendingFills(runner.Key));
+                runner.SetPaused(false);
+                Assert.Equal(!restoreBeforeClose, runner.Paused);
+                if (!restoreBeforeClose)
+                {
+                    Directory.Delete(file);
+                    var fillsBeforeResume = runner.Ledger.Fills.ToArray();
+                    var tradesBeforeResume = runner.Ledger.Trades.ToArray();
+                    int ordersBeforeResume = broker.Orders.Count;
+                    runner.SetPaused(false); // Explicit resume must save real pending fills, without inventing an execution.
+                    Assert.False(runner.Paused);
+                    Assert.Equal(fillsBeforeResume, runner.Ledger.Fills);
+                    Assert.Equal(tradesBeforeResume, runner.Ledger.Trades);
+                    Assert.Equal(ordersBeforeResume, broker.Orders.Count);
+                    Assert.Equal(fillsBeforeResume, LiveStore.LoadLedger(runner.Key, 1).Fills);
+                    Assert.Equal(0, LiveStore.PendingFills(runner.Key));
+                }
+            }
+            finally
+            {
+                runner.Stop(flatten: false);
+                LiveStore.DeleteFills(runner.Key);
+            }
+        });
+    }
+
     /// <summary>Runs <paramref name="test"/> with the live store in a new temporary folder, then restores the previous one.</summary>
     private static void InTemporaryStore(Action test)
     {
@@ -120,6 +195,35 @@ public class LivePortfolioTests
     }
 
     private const string LedgerKey = "TradingHub.Tests.Strategy|test:TEST|Cuenta simulada";
+
+    [Fact]
+    public void Saving_existing_pending_fills_does_not_invent_a_fill_or_create_a_missing_history()
+    {
+        InTemporaryStore(() =>
+        {
+            Assert.Null(LiveStore.SavePendingFills(LedgerKey));
+            Assert.False(File.Exists(LiveStore.LedgerFile(LedgerKey)));
+            Assert.Empty(LiveStore.LoadLedger(LedgerKey, 1).Fills);
+            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+        });
+    }
+
+    [Fact]
+    public void Explicit_pending_save_recovers_a_fill_observed_before_the_store_could_be_opened()
+    {
+        InTemporaryStore(() =>
+        {
+            var fill = new LiveFill(T0, true, 1, 100);
+            File.WriteAllText(LiveStore.Root, "artificial root I/O fault");
+            try { Assert.NotNull(LiveStore.AppendFill(LedgerKey, fill)); }
+            finally { File.Delete(LiveStore.Root); }
+            Assert.Null(LiveStore.SavePendingFills(LedgerKey));
+            Assert.Equal(new[] { fill }, LiveStore.LoadLedger(LedgerKey, 1).Fills);
+            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+            Assert.Null(LiveStore.SavePendingFills(LedgerKey));
+            Assert.Equal(new[] { fill }, LiveStore.LoadLedger(LedgerKey, 1).Fills);
+        });
+    }
 
     [Fact]
     public void A_corrupt_line_in_the_middle_of_a_ledger_only_skips_that_line()
@@ -171,12 +275,11 @@ public class LivePortfolioTests
         });
     }
 
-    // Per-call stream injection uses the same append implementation without a process-wide test override.
-    private static readonly Func<string, LiveFill, Func<string, Stream>, string?> AppendWithStream =
-        typeof(LiveStore).GetMethod(nameof(LiveStore.AppendFill),
-            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic,
-            null, new[] { typeof(string), typeof(LiveFill), typeof(Func<string, Stream>) }, null)!
-            .CreateDelegate<Func<string, LiveFill, Func<string, Stream>, string?>>();
+    // Inject only the varying I/O adapter; observations still use the same append/load consumer seam.
+    private static string? AppendWithStream(string key, LiveFill fill, Func<string, Stream> openLedger) =>
+        LiveStore.AppendFill(key, fill, path => path.EndsWith(".jsonl", StringComparison.Ordinal)
+            ? openLedger(path)
+            : new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0));
 
     public enum LedgerFailure { BeforeWrite, PartialWrite, Rollback, Flush, Dispose }
 
@@ -200,9 +303,7 @@ public class LivePortfolioTests
             if (failure == LedgerFailure.BeforeWrite) throw new IOException("Injected write failure");
             if (failure == LedgerFailure.PartialWrite)
             {
-                // Persist a complete JSONL record and only the beginning of the next one.
-                int firstLine = buffer.IndexOf((byte)'\n') + 1;
-                _file.Write(buffer[..Math.Min(buffer.Length, firstLine + 7)]);
+                _file.Write(buffer[..Math.Min(buffer.Length, 7)]);
                 throw new IOException("Injected partial write failure");
             }
 
@@ -220,7 +321,7 @@ public class LivePortfolioTests
         public override void Flush()
         {
             if (failure == LedgerFailure.Flush) throw new IOException("Injected flush failure");
-            _file.Flush();
+            _file.Flush(flushToDisk: true);
         }
 
         protected override void Dispose(bool disposing)
@@ -312,6 +413,40 @@ public class LivePortfolioTests
         });
     }
 
+    [Theory]
+    [InlineData(LedgerFailure.BeforeWrite)]
+    [InlineData(LedgerFailure.PartialWrite)]
+    [InlineData(LedgerFailure.Flush)]
+    [InlineData(LedgerFailure.Dispose)]
+    public void An_intent_that_cannot_be_published_does_not_modify_history_or_drop_local_pending_fills(LedgerFailure failure)
+    {
+        InTemporaryStore(() =>
+        {
+            var opening = new LiveFill(T0, true, 2, 100);
+            var closing = new LiveFill(T0.AddMinutes(1), false, 1, 110);
+            var next = new LiveFill(T0.AddMinutes(2), false, 1, 105);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, opening));
+            string file = LiveStore.LedgerFile(LedgerKey);
+            byte[] committed = File.ReadAllBytes(file);
+            Assert.NotNull(LiveStore.AppendFill(LedgerKey, closing, path =>
+                path.EndsWith(".wal.tmp", StringComparison.Ordinal)
+                    ? new FaultingLedgerStream(path, failure)
+                    : new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0)));
+            Assert.Equal(committed, File.ReadAllBytes(file));
+            Assert.Equal(1, LiveStore.PendingFills(LedgerKey));
+            var waiting = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { opening, closing }, waiting.Fills);
+            Assert.Equal(1m, waiting.Position);
+            Assert.Equal(10m, waiting.Realized);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, next));
+            var saved = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { opening, closing, next }, saved.Fills);
+            Assert.Equal(0m, saved.Position);
+            Assert.Equal(15m, saved.Realized);
+            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+        });
+    }
+
     [Fact]
     public void A_fill_appended_after_a_cut_off_last_line_is_not_lost()
     {
@@ -339,12 +474,101 @@ public class LivePortfolioTests
             Directory.CreateDirectory(file);
             Assert.NotNull(LiveStore.AppendFill(LedgerKey, new LiveFill(T0, true, 1, 100)));
             LiveStore.DeleteFills(LedgerKey); // starting fresh: the unsaved fill belongs to the deleted history
+            Directory.Delete(file); // Remove the artificial I/O fault before querying the now-deleted history.
             Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
-
-            Directory.Delete(file);
+            Assert.Empty(LiveStore.LoadLedger(LedgerKey, 1).Fills);
             var next = new LiveFill(T0.AddMinutes(1), false, 1, 101);
             Assert.Null(LiveStore.AppendFill(LedgerKey, next));
             Assert.Equal(new[] { JsonSerializer.Serialize(next) }, File.ReadAllLines(file));
+        });
+    }
+
+    [Fact]
+    public void Identical_legitimate_fills_are_not_deduplicated_by_content_or_timestamp()
+    {
+        InTemporaryStore(() =>
+        {
+            var fill = new LiveFill(T0, true, 1, 100);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, fill));
+            Assert.Null(LiveStore.AppendFill(LedgerKey, fill));
+            var ledger = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(new[] { fill, fill }, ledger.Fills);
+            Assert.Equal(2m, ledger.Position);
+        });
+    }
+
+    [Fact]
+    public void Unreadable_history_is_not_reported_as_a_flat_position()
+    {
+        InTemporaryStore(() =>
+        {
+            Directory.CreateDirectory(LiveStore.LedgerFile(LedgerKey));
+            var error = Assert.Throws<IOException>(() => LiveStore.LoadLedger(LedgerKey, 1));
+            Assert.Contains("Keep the strategy stopped", error.Message);
+        });
+    }
+
+    [Fact]
+    public void A_disappeared_acknowledged_history_is_not_an_ordinary_missing_ledger()
+    {
+        InTemporaryStore(() =>
+        {
+            Assert.Null(LiveStore.AppendFill(LedgerKey, new LiveFill(T0, true, 1, 100)));
+            string file = LiveStore.LedgerFile(LedgerKey);
+            File.Delete(file);
+            Assert.Throws<IOException>(() => LiveStore.PendingFills(LedgerKey));
+            Assert.Throws<IOException>(() => LiveStore.LoadLedger(LedgerKey, 1));
+            Assert.NotNull(LiveStore.AppendFill(LedgerKey, new LiveFill(T0.AddMinutes(1), false, 1, 110)));
+            Assert.False(File.Exists(file));
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_missing_or_mismatched_committed_range_blocks_recovery_and_preserves_the_damage(bool mismatch)
+    {
+        InTemporaryStore(() =>
+        {
+            var opening = new LiveFill(T0, true, 2, 100);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, opening));
+            Assert.NotNull(AppendWithStream(LedgerKey, new LiveFill(T0.AddMinutes(1), false, 1, 110),
+                path => new FaultingLedgerStream(path, LedgerFailure.Dispose, failRollback: true)));
+            string file = LiveStore.LedgerFile(LedgerKey);
+            if (mismatch)
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.ReadWrite);
+                stream.Position = stream.Length - 2;
+                stream.WriteByte((byte)'x');
+            }
+            else File.WriteAllText(file, "");
+            byte[] damaged = File.ReadAllBytes(file);
+            Assert.Throws<IOException>(() => LiveStore.LoadLedger(LedgerKey, 1));
+            Assert.NotNull(LiveStore.AppendFill(LedgerKey, new LiveFill(T0.AddMinutes(2), true, 1, 90)));
+            Assert.Equal(damaged, File.ReadAllBytes(file));
+        });
+    }
+
+    [Fact]
+    public void Appending_to_a_large_legacy_ledger_does_not_copy_its_history()
+    {
+        InTemporaryStore(() =>
+        {
+            var fill = new LiveFill(T0, true, 1, 100);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, fill)); // Warm the serializer and persistence path.
+            string file = LiveStore.LedgerFile(LedgerKey);
+            string line = JsonSerializer.Serialize(fill);
+            using (var writer = new StreamWriter(file, append: true))
+                for (int i = 0; i < 32_768; i++) writer.WriteLine(line);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            string? error = LiveStore.AppendFill(LedgerKey, new LiveFill(T0.AddMinutes(1), false, 1, 101));
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.Null(error);
+            Assert.True(allocated < 512 * 1024, $"One append allocated {allocated:N0} bytes for an existing multi-megabyte ledger.");
+            var ledger = LiveStore.LoadLedger(LedgerKey, 1);
+            Assert.Equal(32_770, ledger.Fills.Count);
+            Assert.Equal(32_768m, ledger.Position);
+            Assert.Equal(1m, ledger.Realized);
         });
     }
 

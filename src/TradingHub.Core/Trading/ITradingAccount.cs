@@ -72,6 +72,20 @@ public interface ITradingAccount
 }
 
 /// <summary>
+/// Optional acknowledgment-aware implementation of <see cref="ITradingAccount.Replace"/>. Replace retains one stable
+/// order handle through native amendment or cancel/replacement, including uncertain predecessor/new submissions,
+/// and never sends new replacement exposure before definitive predecessor cancellation.
+/// This is not native reduce-only enforcement or atomic broker-native OCO.
+/// </summary>
+public interface ITrackedOrderReplacement
+{
+    /// <summary>True until the broker confirms the working amendment/replacement or definitively resolves it as
+    /// terminal/failed. On failure the handle restores authoritative old values. Optimistic price/quantity changes
+    /// are not confirmation. Resolution raises ITradingAccount.Changed; unknown outcomes remain pending.</summary>
+    bool IsReplacementPending(Order order);
+}
+
+/// <summary>
 /// Real-order permission, decided when an order is sent (never only when an account is chosen): on a real account an
 /// order that opens, adds to or reverses a position needs its connection enabled with real orders allowed. Reductions
 /// and cancels are never blocked, and neither are simulated, testnet, practice or demo accounts.

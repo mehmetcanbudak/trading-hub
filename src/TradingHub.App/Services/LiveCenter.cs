@@ -22,7 +22,8 @@ internal sealed class LiveEntry
     public ChartStrategy? ChartStrategy { get; init; }
 
     /// <summary>Su contabilidad (en memoria si corre; si no, la guardada).</summary>
-    public LiveLedger Ledger { get; set; } = null!;
+    public LiveLedger? Ledger { get; set; }
+    public string? LedgerError { get; init; }
 
     public bool Running => Runner?.IsRunning == true;
 
@@ -40,14 +41,15 @@ internal sealed class LiveEntry
     public string SourceLabel => Source == "chart" ? "Chart" : "Live";
 
     public string StateLabel =>
-        Running ? Runner!.DailyLimitActive ? "Stopped for today" : Paused ? "Paused" : "Running"
+        Ledger == null ? "History unavailable"
+        : Running ? Runner!.DailyLimitActive ? "Stopped for today" : Paused ? "Paused" : "Running"
         : WaitingResume ? "Awaiting manual resume"
         : Runner?.IsClosing == true ? "Closing position"
         : Runner?.HasWorkingOrders == true ? "Awaiting order confirmation"
         : "Stopped";
 
-    public decimal OpenPnL => Running ? Ledger.OpenPnL(Runner!.Data.LastPrice) : 0;
-    public decimal Net => Ledger.Realized + OpenPnL;
+    public decimal? OpenPnL => Ledger is { } ledger ? Running ? ledger.OpenPnL(Runner!.Data.LastPrice) : 0 : null;
+    public decimal? Net => Ledger?.Realized + OpenPnL;
 }
 
 /// <summary>La próxima orden de una estrategia: cuántos contratos, de cuál y si es el micro (con su equivalente en el mini).</summary>
@@ -108,7 +110,7 @@ internal sealed partial class LiveCenter
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     private readonly AppServices _svc;
     private readonly HashSet<LiveStrategyRunner> _watched = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<string, (long Length, LiveLedger Ledger)> _ledgers = new();
+    private readonly Dictionary<string, (long Length, DateTime WriteTime, LiveLedger Ledger)> _ledgers = new();
     private readonly Dictionary<string, (decimal Mae, decimal Mfe, bool Exact)> _excursions = new();
     private DateTime _lastTick;
     private DateTime _proposalsStamp;
@@ -182,23 +184,31 @@ internal sealed partial class LiveCenter
     internal bool AwaitingBroker(string key) =>
         _svc.Runners.Any(r => r.Key == key && !r.IsRunning && (r.IsClosing || r.HasWorkingOrders));
 
-    private LiveLedger LedgerOf(string key, decimal pointValue)
+    private LiveLedger? LedgerOf(string key, decimal pointValue, out string? error)
     {
-        long length = 0;
         try
         {
-            var f = new FileInfo(LiveStore.LedgerFile(key));
-            length = f.Exists ? f.Length : 0;
-        }
-        catch
-        {
-            // sin archivo
-        }
+            int pending = LiveStore.PendingFills(key);
+            var file = new FileInfo(LiveStore.LedgerFile(key));
+            long length = file.Exists ? file.Length : 0;
+            DateTime writeTime = file.Exists ? file.LastWriteTimeUtc : DateTime.MinValue;
+            if (pending == 0 && _ledgers.TryGetValue(key, out var cached) && cached.Length == length && cached.WriteTime == writeTime)
+            {
+                error = null;
+                return cached.Ledger;
+            }
 
-        if (LiveStore.PendingFills(key) == 0 && _ledgers.TryGetValue(key, out var c) && c.Length == length) return c.Ledger;
-        var l = LiveStore.LoadLedger(key, pointValue);
-        _ledgers[key] = (length, l);
-        return l;
+            var ledger = LiveStore.LoadLedger(key, pointValue);
+            _ledgers[key] = (length, writeTime, ledger);
+            error = null;
+            return ledger;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _ledgers.Remove(key);
+            error = ex.Message;
+            return null;
+        }
     }
 
     /// <summary>Todas: las que corren (panel y gráficos) y las guardadas que están detenidas.</summary>
@@ -240,7 +250,8 @@ internal sealed partial class LiveCenter
                         Source = "chart",
                         PointValue = inst?.PointValue ?? 1,
                     };
-                    list.Add(new LiveEntry { Key = key, Source = "chart", Info = info, Runner = cs.Runner, Chart = chart, ChartStrategy = cs, Ledger = LedgerOf(key, info.PointValue) });
+                    var ledger = LedgerOf(key, info.PointValue, out var ledgerError);
+                    list.Add(new LiveEntry { Key = key, Source = "chart", Info = info, Runner = cs.Runner, Chart = chart, ChartStrategy = cs, Ledger = ledger, LedgerError = ledgerError });
                 }
             }
         }
@@ -262,7 +273,8 @@ internal sealed partial class LiveCenter
                 if (seen.Contains(info.Key)) continue;
                 seen.Add(info.Key);
                 info.Running = false;
-                list.Add(new LiveEntry { Key = info.Key, Source = info.Source == "chart" ? "chart" : "panel", Info = info, Ledger = LedgerOf(info.Key, info.PointValue) });
+                var ledger = LedgerOf(info.Key, info.PointValue, out var ledgerError);
+                list.Add(new LiveEntry { Key = info.Key, Source = info.Source == "chart" ? "chart" : "panel", Info = info, Ledger = ledger, LedgerError = ledgerError });
             }
         }
 
@@ -276,7 +288,7 @@ internal sealed partial class LiveCenter
     /// <summary>Cambia tamaño y límites (de una que corre o de lo guardado). Las bloqueadas no se tocan.</summary>
     public bool ApplyRisk(LiveEntry e, decimal size, decimal maxDailyLoss, decimal maxDrawdown, bool closeOnLimit)
     {
-        if (e.Locked) return false;
+        if (e.Locked || e.Ledger == null) return false;
         size = Math.Max(0, size);
         var r = e.Runner ?? Running(e.Key);
         if (r != null)
@@ -317,8 +329,19 @@ internal sealed partial class LiveCenter
     public void SetPaused(LiveEntry e, bool paused)
     {
         if (e.Locked) return;
-        if (e.Runner is { IsRunning: true } r) r.SetPaused(paused);
+        if (!paused && e.Ledger == null)
+        {
+            Notify(e.LedgerError ?? "History unavailable");
+            return;
+        }
+        bool requestedPause = paused;
+        if (e.Runner is { IsRunning: true } r)
+        {
+            r.SetPaused(paused);
+            paused = r.Paused;
+        }
         LiveStore.UpdateRunner(e.Key, i => i.Paused = paused);
+        if (!requestedPause && paused) Notify("The strategy remains paused; review its activity log before resuming.");
         _svc.SaveLiveState();
     }
 
@@ -355,6 +378,7 @@ internal sealed partial class LiveCenter
     public async Task<string?> ResumeAsync(LiveEntry e)
     {
 
+        if (e.Ledger == null) return e.LedgerError ?? "History unavailable";
         if (e.ChartStrategy is { } cs && e.Chart is { } chart && Trading?.Invoke() is { } tv)
         {
             cs.Live = true;
@@ -567,7 +591,16 @@ internal sealed partial class LiveCenter
         for (int i = 0; i < 240 && data.IsLoadingHistory; i++) await Task.Delay(500);
         var strategy = spec.File.Create();
         strategy.SetParameters(spec.Parameters);
-        var (execInst, ratio) = await ExecutionContractAsync(spec, strategy, data);
+        Instrument execInst;
+        decimal ratio;
+        try
+        {
+            (execInst, ratio) = await ExecutionContractAsync(spec, strategy, data);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (null, "Could not start: " + ex.Message);
+        }
         var execData = ReferenceEquals(execInst, spec.Instrument) ? data : _svc.Open(spec.ProfileId, execInst);
         var account = _svc.AccountFor(execData, spec.AccountId);
         var runner = new LiveStrategyRunner(strategy, data, account, spec.Period, spec.TimeZoneId, spec.SessionStart)
@@ -625,6 +658,7 @@ internal sealed partial class LiveCenter
     /// </summary>
     internal OrderPlan PlanOf(LiveEntry e)
     {
+        if (e.Ledger == null) return new OrderPlan(0, e.Info.ExecSymbol ?? e.Info.Symbol, e.Info.Symbol, false, false, 0);
         if (e.Runner is { } r)
         {
             decimal q = QuantityOf(r.StrategyInstance.GetParameters());
@@ -636,7 +670,7 @@ internal sealed partial class LiveCenter
         var info = e.Info;
         decimal qty = QuantityOf(info.Parameters), size = info.Size;
         var (symbol, ratio) = PreferredContract(info.FeedId, info.Symbol, qty, size);
-        if (e.Ledger.Position != 0 && e.Ledger.OpenSymbol is { } open && !open.Equals(symbol, StringComparison.OrdinalIgnoreCase))
+        if (e.Ledger is { Position: not 0, OpenSymbol: { } open } && !open.Equals(symbol, StringComparison.OrdinalIgnoreCase))
         {
             symbol = open;
             ratio = open.Equals(info.Symbol, StringComparison.OrdinalIgnoreCase) ? 1 : RatioOf(info.Symbol, open);
@@ -734,6 +768,7 @@ internal sealed partial class LiveCenter
     /// <summary>Reinicia con otros parámetros (sigue la misma contabilidad y, si tenía posición, la sigue gestionando).</summary>
     public async Task<string?> RestartWithParametersAsync(LiveEntry e, Dictionary<string, object?> parameters)
     {
+        if (e.Ledger == null) return e.LedgerError ?? "History unavailable";
         if (e.Locked) return "Locked: parameters cannot be changed here.";
         if (e.ChartStrategy is { } cs && e.Chart is { } chart && Trading?.Invoke() is { } tv)
         {
@@ -780,12 +815,20 @@ internal sealed partial class LiveCenter
     public string? ResetHistory(LiveEntry e)
     {
         if (e.Locked) return "Locked: history cannot be deleted here.";
+        if (e.Ledger == null) return e.LedgerError ?? "History unavailable";
         if (AwaitingBroker(e.Key)) return "A position or order request is still active; wait for confirmation before resetting history.";
-        if (e.Runner is { } r && (r.IsRunning || r.IsClosing))
+        try
         {
-            if (!r.ResetLedger()) return "An open position exists: close it first.";
+            if (e.Runner is { } r && (r.IsRunning || r.IsClosing))
+            {
+                if (!r.ResetLedger()) return "An open position exists: close it first.";
+            }
+            else LiveStore.DeleteFills(e.Key);
         }
-        else LiveStore.DeleteFills(e.Key); // detenida: se borra aunque su contabilidad diga que tenía posición (la cuenta manda)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex.Message;
+        }
 
         _ledgers.Remove(e.Key);
         LiveStore.UpdateRunner(e.Key, i =>
@@ -803,6 +846,7 @@ internal sealed partial class LiveCenter
     public async Task<string?> DeleteAsync(LiveEntry e, bool history)
     {
         if (e.Locked) return "Locked: cannot be removed here.";
+        if (history && e.Ledger == null) return e.LedgerError ?? "History unavailable";
         if (e.Runner is { IsRunning: true } r)
         {
             r.StopReason = "Removed";
@@ -810,9 +854,16 @@ internal sealed partial class LiveCenter
         }
         if (AwaitingBroker(e.Key)) return PendingBrokerMessage;
 
+        try
+        {
+            LiveStore.RemoveRunner(e.Key, history);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex.Message;
+        }
         if (e.ChartStrategy is { } cs && e.Chart is { } chart && Trading?.Invoke() is { } tv) tv.RemoveStrategy(chart, cs);
         _svc.Runners.RemoveAll(x => x.Key == e.Key && !x.IsClosing && !x.HasWorkingOrders);
-        LiveStore.RemoveRunner(e.Key, history);
         _ledgers.Remove(e.Key);
         // también de los portafolios
         var defs = LiveStore.LoadPortfolios();

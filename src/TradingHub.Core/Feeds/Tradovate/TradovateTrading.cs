@@ -16,6 +16,7 @@ public sealed record TradovateFill(long Id, long OrderId, long AccountId, string
 public sealed class TradovateOrderState
 {
     public long Id { get; init; }
+    public string ClientOrderId { get; set; } = "";
     public long AccountId { get; set; }
     public long ContractId { get; set; }
     public string Symbol { get; set; } = "";
@@ -72,6 +73,8 @@ public sealed class TradovateTradingSession : IDisposable
     private readonly Dictionary<(long, long), TradovatePositionState> _positions = new();
     private readonly Dictionary<long, TradovateFill> _fills = new();
     private readonly ConcurrentDictionary<long, TradovateCashState> _cash = new();
+    private readonly HashSet<string> _pendingSubmissions = new(StringComparer.Ordinal);
+    private readonly HashSet<Order> _pendingReplacements = new();
     private readonly HashSet<long> _snapshotOrderCandidates = new();
     private readonly HashSet<(long, long)> _snapshotPositionCandidates = new();
     private readonly CancellationTokenSource _life = new();
@@ -109,13 +112,14 @@ public sealed class TradovateTradingSession : IDisposable
     private volatile bool _snapshotReady;
     public bool SnapshotReady => IsConnected && _snapshotReady;
 
-    /// <summary>Confirmed native activity across every account, without allocating account/order snapshots.</summary>
+    /// <summary>Native activity or unresolved placement acceptance; either retains the owning transport.</summary>
     public bool HasOpenPositionsOrOrders
     {
         get
         {
             lock (_gate)
             {
+                if (_pendingSubmissions.Count > 0 || _pendingReplacements.Count > 0) return true;
                 foreach (var position in _positions.Values)
                     if (position.Net != 0) return true;
                 foreach (var order in _orders.Values)
@@ -124,6 +128,16 @@ public sealed class TradovateTradingSession : IDisposable
             }
         }
     }
+    internal void TrackReplacement(Order order)
+    {
+        lock (_gate) _pendingReplacements.Add(order);
+    }
+
+    internal void ResolveReplacement(Order order)
+    {
+        lock (_gate) _pendingReplacements.Remove(order);
+    }
+
     public event Action<TradovateFill>? FillReceived;
 
     public void Start()
@@ -285,13 +299,22 @@ public sealed class TradovateTradingSession : IDisposable
                     long id = Long(e, "id");
                     if (id == 0) break;
                     _snapshotOrderCandidates.Remove(id);
-                    if (!_orders.TryGetValue(id, out var o)) _orders[id] = o = new TradovateOrderState { Id = id };
+                    if (!_orders.TryGetValue(id, out var o))
+                    {
+                        _orders[id] = o = new TradovateOrderState { Id = id };
+                        ApplyFills(o); // A fill can precede its order entity.
+                    }
                     o.AccountId = Long(e, "accountId");
                     o.ContractId = Long(e, "contractId");
                     o.Symbol = _conn.KnownContractName(o.ContractId) ?? o.Symbol;
                     o.IsBuy = Str(e, "action") == "Buy";
                     o.Status = Str(e, "ordStatus");
                     o.Time = Time(e, "timestamp");
+                    if (Str(e, "clOrdId") is { Length: > 0 } clientId)
+                    {
+                        o.ClientOrderId = clientId;
+                        _pendingSubmissions.Remove(clientId);
+                    }
                     if (_versions.TryGetValue(id, out var v)) ApplyVersion(o, v);
                     break;
                 }
@@ -337,10 +360,7 @@ public sealed class TradovateTradingSession : IDisposable
                     _fills[fid] = fill;
                     if (fo != null)
                     {
-                        decimal qty = _fills.Values.Where(x => x.OrderId == orderId).Sum(x => x.Quantity);
-                        decimal value = _fills.Values.Where(x => x.OrderId == orderId).Sum(x => x.Quantity * x.Price);
-                        fo.Filled = qty;
-                        fo.AvgFill = qty > 0 ? value / qty : 0;
+                        ApplyFills(fo);
                     }
 
                     newFill = fill;
@@ -350,6 +370,19 @@ public sealed class TradovateTradingSession : IDisposable
         }
 
         if (newFill != null) FillReceived?.Invoke(newFill);
+    }
+
+    private void ApplyFills(TradovateOrderState order)
+    {
+        decimal quantity = 0, value = 0;
+        foreach (var fill in _fills.Values)
+        {
+            if (fill.OrderId != order.Id) continue;
+            quantity += fill.Quantity;
+            value += fill.Quantity * fill.Price;
+        }
+        order.Filled = quantity;
+        order.AvgFill = quantity > 0 ? value / quantity : 0;
     }
 
     private static void ApplyVersion(TradovateOrderState o, JsonElement v)
@@ -396,12 +429,16 @@ public sealed class TradovateTradingSession : IDisposable
     // ===================================================================== órdenes
 
     /// <summary>Manda una orden; devuelve su número en Tradovate (o lanza el motivo del rechazo).</summary>
-    public async Task<long> PlaceAsync(TradovateAccount account, string contract, bool buy, string orderType, int qty, decimal? price, decimal? stopPrice, bool automated, CancellationToken ct)
+    public async Task<long> PlaceAsync(TradovateAccount account, string contract, bool buy, string orderType, int qty, decimal? price, decimal? stopPrice, bool automated, string clientOrderId, CancellationToken ct)
     {
         var body = new JsonObject
         {
             ["accountSpec"] = account.Name,
             ["accountId"] = account.Id,
+            // Official PlaceOrder schema: clOrdId is a string of at most 64 characters;
+            // Order entities (including user/syncrequest replay) return that same field.
+            // https://api.tradovate.com/#operation/placeOrder
+            ["clOrdId"] = clientOrderId,
             ["action"] = buy ? "Buy" : "Sell",
             ["symbol"] = contract,
             ["orderQty"] = qty,
@@ -411,18 +448,34 @@ public sealed class TradovateTradingSession : IDisposable
         if (price is { } p) body["price"] = p;
         if (stopPrice is { } sp) body["stopPrice"] = sp;
         if (orderType != "Market") body["timeInForce"] = "GTC";
-        var res = await _conn.PostAsync("/order/placeorder", body, ct).ConfigureAwait(false);
-        string reason = Str(res, "failureReason");
-        long id = Long(res, "orderId");
-        if (id == 0 || (reason.Length > 0 && reason != "Success"))
-            throw new TradovateException("Tradovate rejected order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : reason.Length > 0 ? reason : "no reason supplied"));
-        return id;
+        lock (_gate) _pendingSubmissions.Add(clientOrderId);
+        try
+        {
+            var res = await _conn.PostAsync("/order/placeorder", body, ct).ConfigureAwait(false);
+            string reason = Str(res, "failureReason");
+            long id = Long(res, "orderId");
+            if (reason.Length > 0 && reason != "Success")
+                throw new TradovateOrderRejectedException("Tradovate rejected order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : reason));
+            if (id == 0) throw new InvalidOperationException("Tradovate order acceptance is unknown: no order ID returned.");
+            return id;
+        }
+        catch (Exception ex) when (IsDefinitePlacementRejection(ex))
+        {
+            lock (_gate) _pendingSubmissions.Remove(clientOrderId);
+            throw;
+        }
     }
+
+    internal static bool IsDefinitePlacementRejection(Exception ex) =>
+        ex is TradovateOrderRejectedException ||
+        ex is TradovateException { Status: 400 or 401 or 403 or 404 or 405 or 422 or 429 };
 
     public async Task CancelAsync(long orderId, CancellationToken ct)
     {
         var res = await _conn.PostAsync("/order/cancelorder", new JsonObject { ["orderId"] = orderId }, ct).ConfigureAwait(false);
         if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateException("Tradovate did not cancel order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
+        if (Str(res, "failureReason") != "Success" && Long(res, "commandId") == 0)
+            throw new InvalidOperationException("Tradovate cancel acceptance is unknown: no command acknowledgment returned.");
     }
 
     public async Task ModifyAsync(TradovateOrderState o, int qty, decimal price, CancellationToken ct)
@@ -431,7 +484,7 @@ public sealed class TradovateTradingSession : IDisposable
         if (o.Type is "Stop" or "StopLimit") body["stopPrice"] = price;
         else body["price"] = price;
         var res = await _conn.PostAsync("/order/modifyorder", body, ct).ConfigureAwait(false);
-        if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateException("Tradovate did not modify order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
+        if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateOrderRejectedException("Tradovate did not modify order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
     }
 
     public async Task LiquidateAsync(long accountId, long contractId, CancellationToken ct) =>
@@ -440,11 +493,15 @@ public sealed class TradovateTradingSession : IDisposable
     public void Dispose() => _life.Cancel();
 }
 
+internal sealed class TradovateOrderRejectedException(string message) : Exception(message)
+{
+}
+
 /// <summary>
 /// Una cuenta de Tradovate operando un futuro (ES → el contrato del mes, ESZ6). Sirve con los gráficos de cualquier
 /// conexión de futuros (Tradovate, Rithmic): el Chart Trader, el DOM, los stops y las estrategias operan igual.
 /// </summary>
-public sealed class TradovateBroker : ITradingAccount, IDisposable
+public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement, IDisposable
 {
     private readonly InstrumentData _data;
     private readonly TradovateTradingSession _session;
@@ -452,6 +509,13 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
     private readonly object _gate = new();
     private readonly Dictionary<long, Order> _byId = new();
     private readonly List<Order> _pending = new();
+    private readonly Dictionary<string, Order> _byClientId = new(StringComparer.Ordinal);
+    private readonly HashSet<Order> _cancelPending = new();
+    private readonly HashSet<Order> _cancelInFlight = new();
+    private readonly HashSet<Order> _cancelAwaitingAck = new();
+    private sealed record Replacement(decimal Price, int Total);
+    private readonly Dictionary<Order, Replacement> _replacements = new();
+    private readonly Dictionary<Order, decimal> _queuedModifyPrices = new();
     private (long Id, string Name)? _contract;
     private List<Order> _active = new();
 
@@ -474,7 +538,19 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
     public IEnumerable<Order> ActiveOrders => _active;
     public string? LastError { get; private set; }
     public bool PositionReady => _contract != null && _session.SnapshotReady;
-    public bool OrdersReady => _contract != null && _session.SnapshotReady;
+    public bool OrdersReady
+    {
+        get
+        {
+            if (_contract == null || !_session.SnapshotReady) return false;
+            lock (_gate)
+            {
+                foreach (var order in _pending)
+                    if (order.State == OrderStates.Active && order.ExchangeOrderId.Length == 0) return false;
+                return true;
+            }
+        }
+    }
     public event Action? Changed;
 
     /// <summary>Raíz del contrato (NQ) aunque el gráfico sea de otra conexión.</summary>
@@ -521,30 +597,79 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
     private void Sync()
     {
         if (_contract is not { } c) return;
-        var states = _session.OrdersOf(_account.Id, c.Id);
+        List<Order>? cancellations = null;
         var active = new List<Order>();
         lock (_gate)
         {
+            // A disconnect publishes cached native states, not a fresh working-order replay.
+            // Retain obligations, but retry them only when the replacement user channel can report the result.
+            bool replayReady = _session.SnapshotReady;
+            if (!replayReady) _cancelAwaitingAck.Clear();
+            var states = _session.OrdersOf(_account.Id, c.Id);
             foreach (var s in states)
             {
-                if (!_byId.TryGetValue(s.Id, out var o))
+                Order o;
+                if (s.ClientOrderId.Length > 0 && _byClientId.TryGetValue(s.ClientOrderId, out var owned) &&
+                    (owned.ExchangeOrderId.Length == 0 || IdOf(owned) == s.Id))
                 {
-                    if (s.Done) continue; // terminada antes de abrir Trading Hub
+                    o = owned;
+                    o.ExchangeOrderId = s.Id.ToString(CultureInfo.InvariantCulture);
+                    _byId[s.Id] = o;
+                    if (LastError?.StartsWith("Tradovate order acceptance is unknown;", StringComparison.Ordinal) == true)
+                        LastError = null;
+                }
+                else if (!_byId.TryGetValue(s.Id, out o!))
+                {
+                    if (s.Done) continue; // Completed before this broker observed it.
                     o = new Order { ExchangeOrderId = s.Id.ToString(CultureInfo.InvariantCulture), Comment = "Tradovate" };
                     _byId[s.Id] = o;
                 }
 
                 Apply(s, o);
+                if (_replacements.TryGetValue(o, out var replacement) &&
+                    (s.Done || (s.Quantity == replacement.Total &&
+                    (o.Type == OrderTypes.Stop ? s.StopPrice : s.Price) == replacement.Price)))
+                {
+                    _replacements.Remove(o);
+                    if (!_queuedModifyPrices.ContainsKey(o)) _session.ResolveReplacement(o);
+                }
+                _pending.Remove(o);
+                if (o.State != OrderStates.Active)
+                {
+                    _cancelPending.Remove(o);
+                    _cancelAwaitingAck.Remove(o);
+                    _queuedModifyPrices.Remove(o);
+                    _session.ResolveReplacement(o);
+                }
                 if (s.Rejected && s.Text.Length > 0) LastError = "Tradovate rejected order: " + s.Text;
                 if (o.State == OrderStates.Active) active.Add(o);
             }
 
             // las recién mandadas que todavía no aparecieron
             foreach (var o in _pending.Where(o => o.State == OrderStates.Active && !active.Contains(o))) active.Add(o);
-            _pending.RemoveAll(o => o.State != OrderStates.Active || o.ExchangeOrderId.Length > 0);
+            _pending.RemoveAll(o => o.State != OrderStates.Active);
+            foreach (var order in _cancelPending)
+                if (replayReady && order.State == OrderStates.Active && IdOf(order) != 0 &&
+                    !_cancelAwaitingAck.Contains(order) && _cancelInFlight.Add(order))
+                    (cancellations ??= new()).Add(order);
+            if (replayReady)
+            {
+                foreach (var queued in _queuedModifyPrices.ToArray())
+                {
+                    if (_replacements.ContainsKey(queued.Key)) continue;
+                    if (queued.Key.State == OrderStates.Active && queued.Key.Unfilled <= 0) continue;
+                    _queuedModifyPrices.Remove(queued.Key);
+                    if (queued.Key.State == OrderStates.Active && !_cancelPending.Contains(queued.Key))
+                        StartReplacement(queued.Key, queued.Value, queued.Key.Unfilled);
+                    else
+                        _session.ResolveReplacement(queued.Key);
+                }
+            }
+            _active = active;
         }
 
-        _active = active;
+        if (cancellations != null)
+            foreach (var order in cancellations) _ = CancelBoundAsync(order);
         var p = _session.PositionFor(_account.Id, c.Id);
         Position.Volume = p?.Net ?? 0;
         Position.AveragePrice = p?.NetPrice ?? 0;
@@ -570,10 +695,17 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
             return order;
         }
 
-        lock (_gate) _pending.Add(order);
+        // Register ownership before any send or websocket event can race the HTTP reply.
+        string clientOrderId = "th-" + Guid.NewGuid().ToString("N");
+        lock (_gate)
+        {
+            _byClientId.Add(clientOrderId, order);
+            _pending.Add(order);
+        }
         Sync();
         _ = Task.Run(async () =>
         {
+            bool placementStarted = false;
             try
             {
                 var (_, contract) = await ContractAsync().ConfigureAwait(false);
@@ -581,8 +713,9 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
                 string ot = type == OrderTypes.Market ? "Market" : type == OrderTypes.Stop ? "Stop" : "Limit";
                 // las de una estrategia (comentario «Estrategia: …») van marcadas como automáticas, como pide Tradovate
                 bool automated = comment.Contains(": ", StringComparison.Ordinal);
+                placementStarted = true;
                 long id = await _session.PlaceAsync(_account, contract, dir == OrderDirections.Buy, ot, q,
-                    type == OrderTypes.Limit ? px : null, type == OrderTypes.Stop ? px : null, automated, CancellationToken.None).ConfigureAwait(false);
+                    type == OrderTypes.Limit ? px : null, type == OrderTypes.Stop ? px : null, automated, clientOrderId, CancellationToken.None).ConfigureAwait(false);
                 lock (_gate)
                 {
                     order.ExchangeOrderId = id.ToString(CultureInfo.InvariantCulture);
@@ -593,9 +726,20 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
             }
             catch (Exception ex)
             {
-                order.State = OrderStates.Failed;
-                order.Status = OrderStatus.Rejected;
-                LastError = ex.Message;
+                lock (_gate)
+                {
+                    // A transport failure, timeout, 408/5xx, or unreadable/missing reply is
+                    // not a rejection. Keep the exact handle owned until clOrdId replay.
+                    bool rejected = !placementStarted || TradovateTradingSession.IsDefinitePlacementRejection(ex);
+                    if (rejected && order.ExchangeOrderId.Length == 0)
+                    {
+                        order.State = OrderStates.Failed;
+                        order.Status = OrderStatus.Rejected;
+                        _cancelPending.Remove(order);
+                    }
+                    LastError = order.ExchangeOrderId.Length > 0 ? null : rejected ? ex.Message :
+                        "Tradovate order acceptance is unknown; awaiting client-tag reconciliation: " + ex.Message;
+                }
             }
 
             Sync();
@@ -614,21 +758,40 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
 
     public void Cancel(Order order)
     {
-        _ = Task.Run(async () =>
+        lock (_gate)
         {
-            try
-            {
-                for (int i = 0; i < 30 && IdOf(order) == 0 && order.State == OrderStates.Active; i++) await Task.Delay(100).ConfigureAwait(false);
-                long id = IdOf(order);
-                if (id != 0) await _session.CancelAsync(id, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                LastError = ex.Message;
-            }
+            if (order.State != OrderStates.Active) return;
+            _cancelPending.Add(order);
+            _queuedModifyPrices.Remove(order);
+            if (!_replacements.ContainsKey(order)) _session.ResolveReplacement(order);
+        }
+        Sync();
+    }
 
-            Sync();
-        });
+    private async Task CancelBoundAsync(Order order)
+    {
+        try
+        {
+            await _session.CancelAsync(IdOf(order), CancellationToken.None).ConfigureAwait(false);
+            lock (_gate)
+            {
+                // CommandResult acknowledges the request, not the native cancellation.
+                // Keep ownership until terminal replay; do not resend on every working/fill event.
+                if (_session.SnapshotReady && order.State == OrderStates.Active && _cancelPending.Contains(order))
+                    _cancelAwaitingAck.Add(order);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Keep the obligation. A later native update/replay may retry; do not
+            // call Sync here and turn an unavailable cancel endpoint into a loop.
+            LastError = ex.Message;
+        }
+        finally
+        {
+            lock (_gate) _cancelInFlight.Remove(order);
+        }
+        Changed?.Invoke();
     }
 
     public void CancelAt(decimal price)
@@ -641,32 +804,100 @@ public sealed class TradovateBroker : ITradingAccount, IDisposable
         foreach (var o in _active.ToList()) Cancel(o);
     }
 
-    public void Modify(Order order, decimal newPrice) => Replace(order, newPrice, order.Unfilled);
+    public bool IsReplacementPending(Order order)
+    {
+        lock (_gate) return _replacements.ContainsKey(order) || _queuedModifyPrices.ContainsKey(order);
+    }
+
+    public void Modify(Order order, decimal newPrice)
+    {
+        decimal price = Instrument.RoundPrice(newPrice);
+        lock (_gate)
+        {
+            if (order.State != OrderStates.Active || _cancelPending.Contains(order)) return;
+            if (_replacements.ContainsKey(order) || _queuedModifyPrices.ContainsKey(order) || !_session.SnapshotReady)
+            {
+                _queuedModifyPrices[order] = price;
+                _session.TrackReplacement(order);
+            }
+            else
+                StartReplacement(order, price, order.Unfilled);
+        }
+        Changed?.Invoke();
+    }
 
     public Order Replace(Order order, decimal newPrice, decimal newQuantity)
     {
-        decimal px = Instrument.RoundPrice(newPrice);
-        int total = (int)Math.Round(order.Filled + newQuantity);
-        if (order.Type == OrderTypes.Stop) order.TriggerPrice = px;
-        else order.Price = px;
+        lock (_gate)
+        {
+            // Explicit replacement quantities are not a trailing-price queue.
+            if (order.State != OrderStates.Active || _cancelPending.Contains(order) ||
+                _replacements.ContainsKey(order) || _queuedModifyPrices.ContainsKey(order)) return order;
+            StartReplacement(order, Instrument.RoundPrice(newPrice), newQuantity);
+        }
+        Changed?.Invoke();
+        return order;
+    }
+
+    // Called under the broker gate by both explicit replacements and deferred price-only modifies.
+    private void StartReplacement(Order order, decimal price, decimal remaining)
+    {
+        var replacement = new Replacement(price, (int)Math.Round(order.Filled + remaining));
+        _replacements.Add(order, replacement);
+        _session.TrackReplacement(order);
         _ = Task.Run(async () =>
         {
             try
             {
-                for (int i = 0; i < 30 && IdOf(order) == 0 && order.State == OrderStates.Active; i++) await Task.Delay(100).ConfigureAwait(false);
-                long id = IdOf(order);
-                var s = _contract is { } c ? _session.OrdersOf(_account.Id, c.Id).FirstOrDefault(x => x.Id == id) : null;
-                if (s == null) throw new InvalidOperationException("The order is not available in Tradovate yet");
-                await _session.ModifyAsync(s, total, px, CancellationToken.None).ConfigureAwait(false);
+                Task? submission = null;
+                while (submission == null)
+                {
+                    lock (_gate)
+                    {
+                        if (!_replacements.TryGetValue(order, out var current) || !ReferenceEquals(current, replacement))
+                            return;
+                        if (order.State != OrderStates.Active || _cancelPending.Contains(order))
+                        {
+                            _replacements.Remove(order);
+                            _queuedModifyPrices.Remove(order);
+                            _session.ResolveReplacement(order);
+                            return;
+                        }
+                        // Unknown placement/replay cannot authorize another native request.
+                        long id = IdOf(order);
+                        if (id != 0 && _session.SnapshotReady && _contract is { } contract)
+                        {
+                            var native = _session.OrdersOf(_account.Id, contract.Id).FirstOrDefault(s => s.Id == id);
+                            if (native != null && !native.Done)
+                                submission = _session.ModifyAsync(native, replacement.Total, replacement.Price, CancellationToken.None);
+                        }
+                    }
+                    if (submission == null) await Task.Delay(100).ConfigureAwait(false);
+                }
+                await submission.ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                LastError = ex.Message;
+                lock (_gate)
+                {
+                    LastError = ex.Message;
+                    if (TradovateTradingSession.IsDefinitePlacementRejection(ex) &&
+                        _replacements.TryGetValue(order, out var current) && ReferenceEquals(current, replacement))
+                    {
+                        var native = _contract is { } contract
+                            ? _session.OrdersOf(_account.Id, contract.Id).FirstOrDefault(s => s.Id == IdOf(order))
+                            : null;
+                        if (native != null) Apply(native, order);
+                        _replacements.Remove(order);
+                        if (!_queuedModifyPrices.ContainsKey(order)) _session.ResolveReplacement(order);
+                    }
+                }
             }
 
+            // Apply authoritative values even on rejection; optimistic caller fields
+            // and successful command submission are never amendment acknowledgments.
             Sync();
         });
-        return order;
     }
 
     public void Flatten()

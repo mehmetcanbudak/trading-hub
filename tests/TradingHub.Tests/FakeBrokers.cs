@@ -283,6 +283,19 @@ internal sealed class FakeTradovate : IDisposable
     private WebSocket? _user;
     private long _nextOrder = 1000, _nextFill = 5000;
     private int _position;
+    public JsonArray ReplayOrders { get; } = new();
+    public JsonArray ReplayVersions { get; } = new();
+    public JsonArray ReplayFills { get; } = new();
+
+    public Task PublishOrder(JsonObject order) => Push("order", "Updated", order.ToJsonString());
+    public Task PublishVersion(JsonObject version) => Push("orderVersion", "Created", version.ToJsonString());
+    public Task PublishFill(JsonObject fill) => Push("fill", "Created", fill.ToJsonString());
+
+    public async Task ReconnectUser()
+    {
+        if (_user is { State: WebSocketState.Open } socket)
+            await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture replay", CancellationToken.None);
+    }
 
     public async Task DisconnectUserAndFlatten()
     {
@@ -321,14 +334,14 @@ internal sealed class FakeTradovate : IDisposable
             {
                 long id = JsonNode.Parse(req.Body)!["orderId"]!.GetValue<long>();
                 _ = Push("order", "Updated", $"{{\"id\":{id},\"accountId\":101,\"contractId\":555,\"action\":\"Buy\",\"ordStatus\":\"Canceled\",\"timestamp\":\"{DateTime.UtcNow:O}\"}}");
-                return (200, $"{{\"orderId\":{id}}}");
+                return (200, $"{{\"failureReason\":\"Success\",\"commandId\":{id}}}");
             }
 
             if (req.Route == "/v1/order/modifyorder")
             {
                 var b = JsonNode.Parse(req.Body)!.AsObject();
                 lock (Orders) Orders.Add(b);
-                _ = Push("orderVersion", "Created", $"{{\"id\":9,\"orderId\":{b["orderId"]},\"orderQty\":{b["orderQty"]},\"orderType\":\"{b["orderType"]}\",\"price\":{b["price"]?.ToJsonString() ?? "0"}}}");
+                _ = Push("orderVersion", "Created", $"{{\"id\":9,\"orderId\":{b["orderId"]},\"orderQty\":{b["orderQty"]},\"orderType\":\"{b["orderType"]}\",\"price\":{b["price"]?.ToJsonString() ?? "0"},\"stopPrice\":{b["stopPrice"]?.ToJsonString() ?? "0"}}}");
                 return (200, $"{{\"orderId\":{b["orderId"]}}}");
             }
 
@@ -365,7 +378,7 @@ internal sealed class FakeTradovate : IDisposable
                 {
                     case "user/syncrequest":
                         await FakeHttpServer.SendText(ws, $"a[{{\"s\":200,\"i\":{id},\"d\":{{\"accounts\":[{{\"id\":101,\"name\":\"DEMO101\",\"active\":true}}],\"contracts\":[{{\"id\":555,\"name\":\"{Contract}\"}}]," +
-                                                          "\"positions\":[],\"orders\":[],\"orderVersions\":[],\"fills\":[],\"cashBalances\":[{\"accountId\":101,\"amount\":50000,\"realizedPnL\":0}]}}]", ct);
+                                                          $"\"positions\":[],\"orders\":{ReplayOrders.ToJsonString()},\"orderVersions\":{ReplayVersions.ToJsonString()},\"fills\":{ReplayFills.ToJsonString()},\"cashBalances\":[{{\"accountId\":101,\"amount\":50000,\"realizedPnL\":0}}]}}}}]", ct);
                         break;
                     case "md/getChart":
                     {
@@ -438,7 +451,7 @@ internal sealed class FakeTradovate : IDisposable
         int qty = o["orderQty"]!.GetValue<int>();
         string now = DateTime.UtcNow.ToString("O");
         await Push("orderVersion", "Created", $"{{\"id\":{id + 1},\"orderId\":{id},\"orderQty\":{qty},\"orderType\":\"{type}\",\"price\":{o["price"]?.ToJsonString() ?? "0"},\"stopPrice\":{o["stopPrice"]?.ToJsonString() ?? "0"}}}");
-        await Push("order", "Created", $"{{\"id\":{id},\"accountId\":101,\"contractId\":555,\"action\":\"{action}\",\"ordStatus\":\"Working\",\"timestamp\":\"{now}\"}}");
+        await Push("order", "Created", $"{{\"id\":{id},\"accountId\":101,\"contractId\":555,\"clOrdId\":{o["clOrdId"]?.ToJsonString() ?? "null"},\"action\":\"{action}\",\"ordStatus\":\"Working\",\"timestamp\":\"{now}\"}}");
         if (type != "Market") return;
         await Task.Delay(30);
         _position += action == "Buy" ? qty : -qty;

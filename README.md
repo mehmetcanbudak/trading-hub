@@ -14,6 +14,8 @@ Created by [@ralphtradesz](https://x.com/ralphtradesz). English work in this for
 
 **Using Windows?** See [Windows installation and platform integration](docs/en/portar-a-windows.md).
 
+**Using a Mac (M1 or newer)?** To install **this fork**, use the [manual build instructions](#option-2-install-manually) or the [installation guide](docs/en/instalacion.md). This fork currently publishes no prebuilt downloads. The [original upstream Mac app](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Mac.zip) is available, but does not include this fork's additional fixes. For that archive, unzip it and drag the app to Applications; after verifying its source and signature, macOS may require System Settings → Privacy & Security → **Open Anyway** on the first launch. Do not disable system security checks or replace this fork's installation unintentionally.
+
 ![Trading Hub](docs/en/img/trading.png)
 
 ## What is Trading Hub?

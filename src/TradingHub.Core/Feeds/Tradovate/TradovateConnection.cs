@@ -181,13 +181,14 @@ public sealed class TradovateConnection : IDisposable
             if (body != null) req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized && attempt == 0)
+            // Placement is never retried: its pre-send clOrdId is reconciled by user replay.
+            if (path != "/order/placeorder" && resp.StatusCode == System.Net.HttpStatusCode.Unauthorized && attempt == 0)
             {
                 _access = null; // vencido o cortado: uno nuevo
                 continue;
             }
 
-            if ((int)resp.StatusCode == 429 && attempt < 3)
+            if (path != "/order/placeorder" && (int)resp.StatusCode == 429 && attempt < 3)
             {
                 await Task.Delay(TimeSpan.FromSeconds(2 + attempt * 3), ct).ConfigureAwait(false);
                 continue;

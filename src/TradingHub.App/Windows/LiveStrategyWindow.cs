@@ -150,7 +150,7 @@ internal sealed class LiveStrategyWindow : Window
         return v;
     }
 
-    private static string Money(decimal v) => v.ToString("+#,##0.00;-#,##0.00;0.00", Es);
+    private static string Money(decimal? v) => v?.ToString("+#,##0.00;-#,##0.00;0.00", Es) ?? "—";
 
     /// <summary>Formulario con lo actual (riesgo, parámetros y portafolio).</summary>
     private void LoadForm()
@@ -223,12 +223,24 @@ internal sealed class LiveStrategyWindow : Window
         _state.Text = "Status: " + e.StateLabel + (why.Length > 0 && !e.Running ? $" · {why}" : r is { DailyLimitActive: true } ? $" · {why}" : "");
         _state.Foreground = e.Running ? (e.Paused || r!.DailyLimitActive ? Ui.Warn : Ui.Up) : Ui.Text1;
 
-        var stats = LiveStore.StatsOf(info, e.Ledger, 25_000m);
+        if (e.Ledger is not { } ledger)
+        {
+            _state.Text += "\n" + e.LedgerError;
+            _state.Foreground = Ui.Warn;
+            _kpis.Children.Clear();
+            _kpis.Children.Add(Kpi("Position", "Unavailable", "History unavailable", Ui.Warn));
+            _kpis.Children.Add(Kpi("Net", "—", "History unavailable", Ui.Warn));
+            _riskNote.Text = e.LedgerError ?? "History unavailable";
+            RefreshActions();
+            return;
+        }
+
+        var stats = LiveStore.StatsOf(info, ledger, 25_000m);
         _kpis.Children.Clear();
-        decimal pos = e.Ledger.Position;
+        decimal pos = ledger.Position;
         var plan = _svc.Live.PlanOf(e);
-        string posSymbol = e.Ledger.OpenSymbol ?? plan.Symbol;
-        _kpis.Children.Add(Kpi("Position", pos == 0 ? "Flat" : $"{(pos > 0 ? "Long" : "Short")} {Math.Abs(pos).ToString("0.####", Es)} {posSymbol}", pos == 0 ? "" : "@ " + e.Ledger.AveragePrice.ToString("0.#####", Inv), pos > 0 ? Ui.Up : pos < 0 ? Ui.Down : null));
+        string posSymbol = ledger.OpenSymbol ?? plan.Symbol;
+        _kpis.Children.Add(Kpi("Position", pos == 0 ? "Flat" : $"{(pos > 0 ? "Long" : "Short")} {Math.Abs(pos).ToString("0.####", Es)} {posSymbol}", pos == 0 ? "" : "@ " + ledger.AveragePrice.ToString("0.#####", Inv), pos > 0 ? Ui.Up : pos < 0 ? Ui.Down : null));
         // cuántos contratos y de cuál manda cada orden: que nunca haya dudas entre el mini y el micro
         _kpis.Children.Add(Kpi("Each order", plan.Text, plan.Detail.Length > 0 ? plan.Detail : MarketInfoHasMicro(info) ? "mini contract" : "", plan.Micro ? Ui.Accent : null));
         _kpis.Children.Add(Kpi("Open", Money(e.OpenPnL), r != null ? $"today {Money(r.TodayPnL)}" : "", e.OpenPnL >= 0 ? Ui.Up : Ui.Down));
@@ -264,37 +276,47 @@ internal sealed class LiveStrategyWindow : Window
     {
         var e = _entry;
         bool running = e.Running, locked = e.Locked;
-        string key = $"{running}|{e.Paused}|{locked}|{e.WaitingResume}|{e.Ledger.Position != 0}|{e.Ledger.Trades.Count > 0}";
+        string key = $"{running}|{e.Paused}|{locked}|{e.WaitingResume}|{e.LedgerError}|{e.Ledger?.Position != 0}|{e.Ledger?.Trades.Count > 0}";
         if (key == _actionsKey) return;
         _actionsKey = key;
         _actions.Children.Clear();
         void Add(Button b) => _actions.Children.Add(b);
+        if (e.Ledger is not { } ledger)
+        {
+            Add(Ui.Button("View on chart", MaterialIconKind.ChartBoxOutline, () => _ = ShowOnChartAsync()));
+            return;
+        }
         if (running && !locked)
         {
             Add(e.Paused
                 ? Ui.Button("Resume", MaterialIconKind.PlayCircleOutline, () => SetPaused(false), "primary")
                 : Ui.Button("Pause", MaterialIconKind.PauseCircleOutline, () => SetPaused(true)));
-            if (e.Ledger.Position != 0) Add(Ui.Button("Close position", MaterialIconKind.CloseCircleOutline, () => _ = ClosePositionAsync(), "danger"));
+            if (ledger.Position != 0) Add(Ui.Button("Close position", MaterialIconKind.CloseCircleOutline, () => _ = ClosePositionAsync(), "danger"));
         }
 
         if (running)
         {
             Add(Ui.Button("Stop strategy", MaterialIconKind.Stop, () => _ = StopAsync(false)));
-            if (!locked && e.Ledger.Position != 0) Add(Ui.Button("Stop and close", MaterialIconKind.StopCircleOutline, () => _ = StopAsync(true), "danger"));
+            if (!locked && ledger.Position != 0) Add(Ui.Button("Stop and close", MaterialIconKind.StopCircleOutline, () => _ = StopAsync(true), "danger"));
         }
         else Add(Ui.Button(e.WaitingResume ? "Resume on chart" : "Restart", MaterialIconKind.Play, () => _ = ResumeAsync(), "primary"));
 
         Add(Ui.Button("View on chart", MaterialIconKind.ChartBoxOutline, () => _ = ShowOnChartAsync()));
-        if (e.Ledger.Trades.Count > 0) Add(Ui.Button("View trades", MaterialIconKind.FormatListBulleted, OpenTrades));
-        if (!locked && e.Ledger.Fills.Count > 0 && e.Ledger.Position == 0)
+        if (ledger.Trades.Count > 0) Add(Ui.Button("View trades", MaterialIconKind.FormatListBulleted, OpenTrades));
+        if (!locked && ledger.Fills.Count > 0 && ledger.Position == 0)
             Add(Ui.Button("Start fresh", MaterialIconKind.Restart, () => _ = ResetHistoryAsync()));
         if (!locked) Add(Ui.Button("Delete", MaterialIconKind.DeleteOutline, () => _ = DeleteAsync(), "danger"));
     }
 
     private async Task ResetHistoryAsync()
     {
+        if (_entry.Ledger is not { } ledger)
+        {
+            _status(_entry.LedgerError ?? "History unavailable");
+            return;
+        }
         if (!await ConfirmDialog.ShowAsync(this, "Start fresh",
-                $"Deletes the {_entry.Ledger.Trades.Count} recorded trade(s) for «{_entry.Info.Strategy}» (PnL, statistics and equity curve). The strategy remains unchanged. This cannot be undone.",
+                $"Deletes the {ledger.Trades.Count} recorded trade(s) for «{_entry.Info.Strategy}» (PnL, statistics and equity curve). The strategy remains unchanged. This cannot be undone.",
                 "Delete its history", danger: true))
             return;
         var err = _svc.Live.ResetHistory(_entry);
@@ -313,14 +335,20 @@ internal sealed class LiveStrategyWindow : Window
     private void SetPaused(bool paused)
     {
         _svc.Live.SetPaused(_entry, paused);
-        _status(paused ? $"{_entry.Info.Strategy} paused: no new entries" : $"{_entry.Info.Strategy} resumed");
+        _status(!paused && _entry.Paused ? "The strategy remains paused; review its activity log before resuming."
+            : paused ? $"{_entry.Info.Strategy} paused: no new entries" : $"{_entry.Info.Strategy} resumed");
         _actionsKey = "";
         Refresh();
     }
 
     private async Task ClosePositionAsync()
     {
-        if (!await ConfirmDialog.ShowAsync(this, "Close position", $"Closes the position at market for «{_entry.Info.Strategy}» ({_entry.Ledger.Position.ToString("0.####", Inv)}). The strategy continues running and can re-enter (pause it to prevent this).", "Close position", danger: true))
+        if (_entry.Ledger is not { } ledger)
+        {
+            _status(_entry.LedgerError ?? "History unavailable");
+            return;
+        }
+        if (!await ConfirmDialog.ShowAsync(this, "Close position", $"Closes the position at market for «{_entry.Info.Strategy}» ({ledger.Position.ToString("0.####", Inv)}). The strategy continues running and can re-enter (pause it to prevent this).", "Close position", danger: true))
             return;
         _svc.Live.ClosePosition(_entry);
         _status($"{_entry.Info.Strategy}: position closed at market");
@@ -355,7 +383,7 @@ internal sealed class LiveStrategyWindow : Window
 
     private async Task ShowOnChartAsync()
     {
-        var last = _entry.Ledger.Trades.LastOrDefault();
+        var last = _entry.Ledger?.Trades.LastOrDefault();
         var err = await _svc.Live.ShowTradeAsync(_entry, last);
         _status(err ?? (last != null ? $"Latest trade for {_entry.Info.Strategy} on chart" : $"{_entry.Info.Symbol} on chart"));
     }
@@ -369,8 +397,9 @@ internal sealed class LiveStrategyWindow : Window
             "An open position will remain unchanged (close it first if needed).",
             "Delete", danger: true);
         if (!ok) return;
-        bool history = _entry.Ledger.Fills.Count > 0 && await ConfirmDialog.ShowAsync(this, "Delete its history too?",
-            $"Has {_entry.Ledger.Trades.Count} recorded trade(s). Deleted history cannot be recovered; retaining it allows an identical strategy relaunch to continue that history.",
+        var ledger = _entry.Ledger;
+        bool history = ledger is { Fills.Count: > 0 } && await ConfirmDialog.ShowAsync(this, "Delete its history too?",
+            $"Has {ledger.Trades.Count} recorded trade(s). Deleted history cannot be recovered; retaining it allows an identical strategy relaunch to continue that history.",
             "Delete history", danger: true);
         var err = await _svc.Live.DeleteAsync(_entry, history);
         _status(err ?? $"{_entry.Info.Strategy} removed from Live");
@@ -379,6 +408,11 @@ internal sealed class LiveStrategyWindow : Window
 
     private async Task ApplyRiskAsync()
     {
+        if (_entry.Ledger == null)
+        {
+            _status(_entry.LedgerError ?? "History unavailable");
+            return;
+        }
         decimal size = _size.Value ?? 1, dl = _dailyLoss.Value ?? 0, dd = _maxDd.Value ?? 0;
         if (!await ConfirmRealAsync("Change risk on REAL account", $"{_entry.Info.Strategy}: size ×{size.ToString("0.##", Inv)}, max daily loss {dl.ToString("0.##", Inv)}, max drawdown {dd.ToString("0.##", Inv)}.", "Apply"))
             return;

@@ -55,6 +55,8 @@ If upstream rewrites history or the ledger is invalid, investigate it. **Do not 
    git diff --check
    ```
    Set all six isolated storage overrides and `TRADINGHUB_SLEEP_GUARD=off` before application/test commands; use the full commands in [Translation status](TRANSLATION_STATUS.md#reproduce). Review `english`, `safety` (including quit), both runtime-language surfaces, generators and reports. Run platform packaging/native gates separately from shared compilation. No real orders, paid data/model calls, privileged power changes or personal data are fixtures.
+
+   When hosted CI is unavailable, record that infrastructure limit instead of repeatedly dispatching jobs or disabling gates. Run the reachable local build, compatibility/safety tests, English/catalog audits, isolated UI and signed Mac-package smoke; cross-publish both Windows architectures separately. Cross-publishing is **not** native Windows installation, Credential Manager, IPC, desktop or power validation. Keep those native release gates, authenticated provider scenarios and physical tests explicitly open. For an upstream documentation-only checkpoint, cite the exact previously native-validated runtime and verify that its runtime/build inputs match the documentation merge; do not use that evidence to certify additional fork runtime changes.
 5. New source-structure audit failures require review, not bypassing the check. Update only individually reviewed entries in `tools/english-localization-review.json`, then rerun all gates. The historical audit baseline in that file and `EnglishLocalizationAudit.cs` is **not** the rolling upstream checkpoint; never replace it just to make an upstream merge pass.
 6. After the required compatibility, English, safety, UI and platform gates have evidence, set `.github/upstream-english.json` → `integrated_commit` to the exact upstream SHA incorporated by the merge. Keep every other JSON field; the SHA must be an ancestor of the resulting English branch. A draft may contain all upstream code while retaining the prior checkpoint if release gates remain open. Record actual evidence/blockers in TRANSLATION_STATUS; merging source or updating a label alone is not validation. The historical C# audit baseline remains separate.
 7. Commit the reviewed integration (and the checkpoint only if its gates passed), then open a PR **inside this fork**:
@@ -83,7 +85,7 @@ python3 -m venv "$i18n_env"
 "$i18n_env/bin/python" tools/TradingHub.I18n/rebase.py . \
   9ee74a4c527ac43120423acd41e006ec9d7877ad \
   5fe1bdf53c1aad92fabfbc73576c75bbeb8f0a1f \
-  c28900e03ba473ee21f3983e65c1adf980ae0077 \
+  1d5a774d3d1bf2baf9259597234d227daad915a9 \
   tools/TradingHub.I18n/provenance.json \
   --publish src/TradingHub.App/Localization \
   --overrides tools/TradingHub.I18n/overrides.json

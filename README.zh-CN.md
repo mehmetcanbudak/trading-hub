@@ -11,6 +11,10 @@
 
 使用 Windows？**[下载安装程序](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)**（[安装方法](#使用-windows)）。
 
+使用 Mac（M1 或更新）？可下载**[原始上游应用](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Mac.zip)**，解压后拖到“应用程序”文件夹。确认来源和签名可信后，首次打开时可能需要在 系统设置 → 隐私与安全性 中点击“仍要打开”。此下载不包含本 fork 的额外修正；不要意外替换已安装的 `memoshi`，也不要关闭系统安全检查。
+
+本 fork 暂不发布预编译下载；要使用本 fork，请从 `memoshi` 分支按[手动安装](#手动安装)或[安装指南](docs/en/instalacion.md)编译。
+
 [![许可证 MIT + Commons Clause](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-MIT%20%2B%20Commons%20Clause-amber.svg)](LICENSE)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-black.svg)
 ![Windows 10 和 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6.svg)

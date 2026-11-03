@@ -708,6 +708,7 @@ internal static partial class SafetyScene
         });
 
         Part("Tradovate reconfiguration preserves outstanding account management", () => TradovateReconfiguration(Check));
+        Part("unavailable ledger history and GUI cache recovery", () => LedgerRecovery(window, pump, Shot, Check));
 
         cache.Remove(cacheKey);
         svc.Connections.Profiles.Remove(realProfile);

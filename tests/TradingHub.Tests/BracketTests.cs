@@ -19,14 +19,12 @@ public class BracketTests
         public readonly InstrumentData Data = new(Inst, new SimulatedFeed());
         public readonly SimBroker Broker;
         public readonly BracketManager Brackets;
-        public readonly List<string> Messages = new();
 
         public Rig(decimal price = 100)
         {
             Data.Trades.Add(new Trade(_id++, T0, price, 1, TradeSide.Buy));
             Broker = new SimBroker(Data, new Portfolio(), new TradingStatistics());
             Brackets = new BracketManager(Broker);
-            Brackets.Message += Messages.Add;
         }
 
         /// <summary>Opera un precio (como si llegara del mercado).</summary>
@@ -49,17 +47,18 @@ public class BracketTests
         Assert.Equal(2m, r.Position);
 
         // hacia la pérdida = stop, hacia la ganancia = objetivo
-        Assert.StartsWith("Stop loss", r.Brackets.DropFromPosition(90));
-        Assert.StartsWith("Target", r.Brackets.DropFromPosition(110));
+        r.Brackets.DropFromPosition(90);
+        r.Brackets.DropFromPosition(110);
         Assert.Equal(BracketRole.StopLoss, r.Brackets.RoleOf(r.Brackets.StopLoss!));
+        Assert.Equal(90m, r.Brackets.StopLoss!.TriggerPrice);
         Assert.Single(r.Brackets.Targets);
         Assert.Equal(2m, r.Brackets.Targets[0].Unfilled);
+        Assert.Equal(110m, r.Brackets.Targets[0].Price);
 
         // el objetivo se llena: la posición queda plana y el stop se cancela solo
         r.Trade(111);
         Assert.Equal(0m, r.Position);
         Assert.Empty(r.Broker.ActiveOrders);
-        Assert.Contains(r.Messages, m => m.Contains("canceled"));
     }
 
     [Fact]
@@ -67,9 +66,10 @@ public class BracketTests
     {
         var r = new Rig();
         r.Broker.Market(OrderDirections.Sell, 1);
-        Assert.Contains("above", r.Brackets.SetStopLoss(95));
-        Assert.Contains("below", r.Brackets.AddTarget(105));
+        r.Brackets.SetStopLoss(95);
+        r.Brackets.AddTarget(105);
         Assert.Empty(r.Broker.ActiveOrders);
+        Assert.Equal(-1m, r.Position);
     }
 
     [Fact]
@@ -146,8 +146,8 @@ public class BracketTests
     {
         var r = new Rig();
         var entry = r.Broker.Limit(OrderDirections.Buy, 2, 95);
-        Assert.Contains("Stop attached", r.Brackets.AttachToEntry(entry, 90));
-        Assert.Contains("Target attached", r.Brackets.AttachToEntry(entry, 105));
+        r.Brackets.AttachToEntry(entry, 90);
+        r.Brackets.AttachToEntry(entry, 105);
         var pb = r.Brackets.PendingFor(entry)!;
         Assert.Equal(5, pb.StopTicks);
         Assert.Equal(10, pb.Targets[0].Ticks);

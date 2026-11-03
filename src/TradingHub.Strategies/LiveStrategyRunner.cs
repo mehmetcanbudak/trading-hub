@@ -326,6 +326,11 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         if (IsRunning) return;
         if (_closing || HasWorkingOrders) throw new InvalidOperationException("The previous close or order cancellation is still unresolved.");
         Ledger ??= Persist ? LiveStore.LoadLedger(Key, _data.Instrument.PointValue) : new LiveLedger(Key, _data.Instrument.PointValue);
+        if (Persist && LiveStore.PendingFills(Key) > 0)
+        {
+            SetPaused(true);
+            Log("Recovered pending ledger fills: new entries remain paused until the fills are saved; existing exposure remains managed.");
+        }
         StopReason = null;
         _strategy.InternalInit(this);
         _builder = new BarBuilder(_data.Instrument, _period, _session, _strategy.UseFootprint);
@@ -445,10 +450,38 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     public void SetPaused(bool paused)
     {
         if (Paused == paused) return;
+        if (!paused && Persist)
+        {
+            try
+            {
+                if (LiveStore.SavePendingFills(Key) is { } error)
+                {
+                    Log($"Cannot resume: pending ledger fills could not be saved ({error}). New entries remain paused.");
+                    return;
+                }
+                if (LiveStore.PendingFills(Key) > 0)
+                {
+                    Log("Cannot resume: ledger fills are still pending. Restore ledger storage and save the pending fills before opening new exposure.");
+                    return;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log($"Cannot resume: ledger recovery failed ({ex.Message}). Keep new entries paused and reconcile its history.");
+                return;
+            }
+        }
         Paused = paused;
         if (paused)
         {
-            foreach (var o in _orders.Where(o => !o.IsProtective && Opens(o.Side)).ToList()) Cancel(o);
+            foreach (var order in _orders.Where(o => !o.IsProtective && o.IsActive).ToList())
+            {
+                if (order.Live is Order live && live.State != OrderStates.Active) continue;
+                decimal remaining = order.Live is Order active ? active.Unfilled : Math.Max(0, order.LiveQuantity - order.Booked);
+                decimal position = Ledger?.Position ?? 0;
+                bool opens = position == 0 || Math.Sign(position) == (order.Side == OrderSide.Buy ? 1 : -1) || remaining > Math.Abs(position);
+                if (opens) Cancel(order);
+            }
             Log("Paused: no new entries (an existing position remains managed until closed)");
         }
         else Log("Resumed: trading again");
@@ -989,17 +1022,30 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     }
 
     /// <summary>
-    /// Saves a fill to its ledger. If the file cannot be written it is logged, and the fill stays pending and is saved, in
-    /// order, before the next one.
+    /// Saves every observed fill even when advisory pending-state inspection fails. A persistence failure pauses new
+    /// exposure without stopping owned protection, closing, cancellation acknowledgments or late-fill accounting.
     /// </summary>
     private void SaveFill(LiveFill fill)
     {
         if (!Persist) return;
-        int waiting = LiveStore.PendingFills(Key);
+        int waiting = 0;
+        try { waiting = LiveStore.PendingFills(Key); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // AppendFill must still receive this observed fill; it retains it and reports the actual storage error.
+        }
         if (LiveStore.AppendFill(Key, fill) is { } error)
-            Log($"Could not save a fill to its ledger ({error.TrimEnd('.')}): it stays pending and is saved before the next fill");
+        {
+            Log($"Could not save a fill to its ledger ({error.TrimEnd('.')}): it stays pending and is saved before the next fill; new entries are paused");
+            try { SetPaused(true); }
+            catch (Exception ex)
+            {
+                // Paused is already set before cancellation. Do not lose this fill's booking if a broker cancel fails.
+                Log($"New entries remain paused; entry cancellation or its notification failed ({ex.Message}). Reconcile the working orders.");
+            }
+        }
         else if (waiting > 0)
-            Log($"Saved {waiting} pending fill{(waiting == 1 ? "" : "s")} to its ledger");
+            Log($"Saved {waiting} pending fill{(waiting == 1 ? "" : "s")} to its ledger; resume manually when ready");
     }
 
     /// <summary>Manda el cierre de la posición propia (nunca más de lo que la cuenta tiene en ese sentido).</summary>

@@ -21,6 +21,18 @@ internal sealed class FakeRithmicServer : IDisposable
     public TaskCompletionSource? OrderReplayRelease { get; set; }
     public TaskCompletionSource? PositionSnapshotRelease { get; set; }
     public TaskCompletionSource OrderReplayRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public bool LoseNewOrderResponse { get; set; }
+    public string? NewOrderRejection { get; set; }
+    public TaskCompletionSource<string> UnacknowledgedOrderAccepted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource? ModifyResponseRelease { get; set; }
+    public TaskCompletionSource ModifyResponseSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public bool SuppressModifyNotification { get; set; }
+    public bool LoseModifyResponse { get; set; }
+    public bool ApplyLostModification { get; set; } = true;
+    public string? ModifyRejection { get; set; }
+    public bool RejectModifyByNotification { get; set; }
+    private int _modifyRequests;
+    public int ModifyRequests => Volatile.Read(ref _modifyRequests);
 
     public void SeedPosition(bool buy, int quantity, double price) => ApplyFill(buy, quantity, price);
 
@@ -233,10 +245,10 @@ internal sealed class FakeRithmicServer : IDisposable
                     case 320:
                         OrderReplayRequested.TrySetResult();
                         if (OrderReplayRelease != null) await OrderReplayRelease.Task.WaitAsync(_cts.Token);
-                        KeyValuePair<string, (bool Buy, int Qty, double Price, int Type, string Tag)>[] replay;
-                        lock (_gate) replay = Open.ToArray();
-                        foreach (var (basket, order) in replay)
-                            await Send(ws, Notify(351, 13, basket, order).Int(110121, 1).Int(154112, order.Qty).Int(154111, 0));
+                        (string Basket, (bool Buy, int Qty, double Price, int Type, string Tag) Order, int Filled)[] replay;
+                        lock (_gate) replay = Open.Select(kv => (kv.Key, kv.Value, _filled.GetValueOrDefault(kv.Key))).ToArray();
+                        foreach (var (basket, order, filled) in replay)
+                            await Send(ws, Notify(351, 13, basket, order).Int(110121, 1).Int(154112, order.Qty - filled).Int(154111, filled));
                         await Send(ws, Msg(321, m).String(132766, "0"));
                         break;
                     case 400:
@@ -310,11 +322,23 @@ internal sealed class FakeRithmicServer : IDisposable
     private async Task NewOrder(WebSocket ws, ProtoMessage m)
     {
         string basket = "B" + Interlocked.Increment(ref _basket);
-        var o = (Buy: m.Int(112003) == 1, Qty: (int)m.Int(112004), Price: m.Double(110306), Type: (int)m.Int(112008), Tag: m.String(154119) ?? "");
+        var o = (Buy: m.Int(112003) == 1, Qty: (int)m.Int(112004), Price: m.Has(110306) ? m.Double(110306) : m.Double(149247), Type: (int)m.Int(112008), Tag: m.String(154119) ?? "");
         lock (Tags) Tags.Add(o.Tag);
+        if (NewOrderRejection is { } rejection)
+        {
+            await Send(ws, Msg(313, m).String(132766, "1").String(132766, rejection));
+            return;
+        }
         if (m.String(112016) != "simulator")
         {
             await Send(ws, Msg(313, m).String(132766, "1").String(132766, "invalid trade route"));
+            return;
+        }
+        if (LoseNewOrderResponse)
+        {
+            lock (_gate) Open[basket] = o;
+            UnacknowledgedOrderAccepted.TrySetResult(basket);
+            await ws.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture lost order response", _cts.Token);
             return;
         }
 
@@ -356,17 +380,42 @@ internal sealed class FakeRithmicServer : IDisposable
 
     private async Task Modify(WebSocket ws, ProtoMessage m)
     {
+        string? rejection = ModifyRejection;
+        bool rejectByNotification = RejectModifyByNotification;
         string basket = m.String(110300) ?? "";
         (bool Buy, int Qty, double Price, int Type, string Tag) o;
         lock (_gate)
         {
             if (!Open.TryGetValue(basket, out o)) return;
-            o = (o.Buy, (int)m.Int(112004), m.Has(110306) ? m.Double(110306) : m.Double(149247), o.Type, o.Tag);
-            Open[basket] = o;
+            if (rejection == null && !rejectByNotification && (!LoseModifyResponse || ApplyLostModification))
+            {
+                o = (o.Buy, (int)m.Int(112004), m.Has(110306) ? m.Double(110306) : m.Double(149247), o.Type, o.Tag);
+                Open[basket] = o;
+            }
         }
+        Interlocked.Increment(ref _modifyRequests);
 
-        await Send(ws, Msg(315, m).String(132766, "0"));
-        await Send(ws, Notify(351, 14, basket, o).Int(154112, o.Qty));
+        if (LoseModifyResponse)
+        {
+            await ws.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture lost modify response", _cts.Token);
+            return;
+        }
+        if (ModifyResponseRelease != null) await ModifyResponseRelease.Task.WaitAsync(_cts.Token);
+        if (rejection != null)
+            await Send(ws, Msg(315, m).String(132766, "1").String(132766, rejection));
+        else
+        {
+            await Send(ws, Msg(315, m).String(132766, "0"));
+            if (rejectByNotification)
+            {
+                // Rejection packets can echo the attempted amendment rather than the still-working values.
+                var attempted = (o.Buy, (int)m.Int(112004), m.Has(110306) ? m.Double(110306) : m.Double(149247), o.Type, o.Tag);
+                await Send(ws, Notify(351, 16, basket, attempted).String(120008, "exchange refused amendment"));
+            }
+            else if (!SuppressModifyNotification)
+                await Send(ws, Notify(351, 14, basket, o).Int(154112, o.Qty));
+        }
+        ModifyResponseSent.TrySetResult();
     }
 
     /// <summary>Resultado cerrado del día (en dólares, ES = 50 por punto).</summary>
@@ -456,6 +505,31 @@ internal sealed class FakeRithmicServer : IDisposable
         await Send(ws, Notify(352, 5, basket, order).Double(110307, price).Int(110308, quantity)
             .Int(154111, filled).Int(154112, order.Qty - filled));
         await SendPnl(snapshot: false);
+    }
+
+    public void FillWhileDisconnected(string basket, int quantity, double price)
+    {
+        lock (_gate)
+        {
+            var order = Open[basket];
+            int filled = _filled.GetValueOrDefault(basket) + quantity;
+            if (quantity <= 0 || filled >= order.Qty) throw new ArgumentOutOfRangeException(nameof(quantity));
+            _filled[basket] = filled;
+            ApplyFill(order.Buy, quantity, price);
+        }
+    }
+
+    public async Task ReplayFill(string basket, int cumulative, int quantity, double price)
+    {
+        (bool Buy, int Qty, double Price, int Type, string Tag) order;
+        WebSocket ws;
+        lock (_gate)
+        {
+            order = Open[basket];
+            ws = _sessions[2];
+        }
+        await Send(ws, Notify(352, 5, basket, order).Double(110307, price).Int(110308, quantity)
+            .Int(154111, cumulative).Int(154112, order.Qty - cumulative));
     }
 
     public async Task RemoveOrderWhileDisconnected(string basket)

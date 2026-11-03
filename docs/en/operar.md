@@ -49,7 +49,7 @@ PnL and position are below the buttons so updates do not shift click targets.
 | Limit | Bid/Ask, DOM, chart context menu. | Price trades through the limit, or subsequent volume at the price exceeds the queue ahead at submission. |
 | Stop | DOM beyond current price or chart context menu. | A trade triggers the stop, which then fills at market. |
 
-Protective stops and targets are reduce-only: they must not reverse a position.
+Protective exits are intended to reduce exposure. The simulator enforces this, and Binance Futures sends its supported native `reduceOnly` payloads. A local reducing flag is **not** exchange enforcement for Binance Spot, Rithmic or Tradovate simple orders; client coordination cannot guarantee that competing exits never reverse a position.
 
 ## Trade with DOM
 
@@ -81,11 +81,11 @@ The optional execution strip has quantity shortcuts, Buy/Sell MKT, Buy/Sell Bid/
 3. Set target distance. **+ target** adds up to three partial targets with percentages automatically apportioned to 100%; × removes one.
 4. **Breakeven at TP1**, enabled by default, moves the stop to entry after the first target fills.
 
-With the template enabled, a new position gets OCO protective orders: closing the position cancels remaining protective orders. Pending limit/stop entries carry attachments until filled. Increasing a position extends protection; partial exits resize it.
+With the template enabled, a new position gets client-coordinated stop/target orders: closing the position requests cancellation of the remaining protection. Pending limit/stop entries carry attachments until explicit fills arrive. Increasing a position extends protection; partial exits resize it. Delayed acceptance/cancellation remains owned, both account snapshots must be ready, and a disappearing or rejected target does not count as a target fill or trigger breakeven.
 
 **Apply to position** replaces the current position's stop/targets with the template. You can also drag SL/TP handles from a position or pending entry, or drag from the position line toward profit for a target and toward loss for a stop.
 
-Do not assume all strategy/OCO management is broker-native. App-managed protection requires the application and connection to remain operational; verify provider behavior before real trading.
+None of the integrated live-account adapters currently submits broker-native OCO groups. Safe native amendments or sequenced replacements retain one tracked handle and wait for actual working-state acknowledgment; an optimistic price/quantity update is not confirmation. Unknown placement replies are reconciled by exact client identity instead of blindly retried. Client-managed sibling cancellation, trailing and resizing require the application and connection to remain operational; broker orders left after Quit have no app-managed OCO protection. Verify authorized demo-account behavior before relying on real trading.
 
 ## Cross trading
 

@@ -49,6 +49,8 @@ Without an available micro, reducing a fractional multiplier below one contract 
 
 **Close position when a limit is reached** defaults on. Limit events create table/status notices. **Pause** instead cancels pending entries and blocks new exposure while continuing to manage an existing position toward exit.
 
+A ledger persistence error also pauses **new or reversing exposure**. Existing protective/reducing orders, cancellation acknowledgments, closing and late-fill accounting continue. Repair storage and explicitly resume; resume first saves already pending fills and remains paused if recovery cannot complete. Restoring storage never silently resumes trading.
+
 ## Strategies table and detail window
 
 Summary cards show total/day PnL, running count, closed trades and pending changes. Rows show state (including context pause), size/contract, position, today's/net PnL, trades, PF, current drawdown and limits.
@@ -63,6 +65,8 @@ Open a row for:
 
 Each runner maintains its own ledger even when sharing an account with other strategies or manual trades. On restart, a ledger position confirmed by an authoritative account snapshot remains managed: the strategy takes over stop loss and take profit left at the broker by recorded IDs rather than blindly duplicating them. **Missing, delayed or incomplete account data is unknown, not proof of a flat account.** Account reconciliation and order replay must complete before new exposure is allowed; an unavailable snapshot must not be treated as a successful close merely because a timeout elapsed. Reconcile conflicting or uncertain positions/orders at the broker before resuming.
 
+Unreadable history or a damaged append intent is shown as **History unavailable**, not a flat position or zero PnL. The strategy remains listed; affected totals are unavailable, and launch/restart, portfolio analysis and risk proposals cannot use fabricated figures. Retain the files and reconcile the ledger before restarting.
+
 **Stop all** is the emergency action: after confirmation, stop all live/chart runners, cancel their orders and request market closure of their positions. Check broker positions afterward; disconnected/rejected orders can prevent the requested closure.
 
 ## Incident checks
@@ -75,7 +79,10 @@ Changing a Tradovate login or mode creates a new account context. Existing posit
 
 Binance Spot native position quantity is the total base-asset wallet holding (**free + locked**), including holdings used by other quote pairs or manual activity. Strategy exit requests remain limited to the strategy ledger quantity, not the whole wallet. Locked assets may not be immediately sellable; Binance can reject an exit for insufficient free balance. Spot supplies no aggregate native cost basis here, so a zero average-price/PnL field is not a measured zero investment result; use the strategy ledger and broker records.
 
-Sibling-exit cancellation/resizing is broker-emulated where native atomic OCO is unavailable. Close/cancel acknowledgments and competing fills can race; reduce-only protection is account-wide where supported, not a transaction isolating each strategy or manual holding. Do not treat fake-provider passes as proof of atomic protection at a real broker.
+The integrated Binance, Rithmic and Tradovate adapters do **not** submit native OCO groups. Their sibling-exit cancellation/resizing is client-coordinated. Owned orders remain tracked through delayed acceptance, cancellation and amendment acknowledgment; incomplete snapshots and disappearance are not fill proof. Broker-confirmed working values—not optimistic ticket values or command receipts—release replacement capacity. Explicit fill deltas cap protection while an independent position report catches up. These safeguards do not make competing fills atomic.
+Binance Futures enforces its supported native `reduceOnly` payloads, but that is account-wide reduction, not strategy-isolated OCO; Spot, Rithmic and Tradovate simple exits here do not gain exchange enforcement from a local reducing marker. Keep the application and connection operational, and do not treat fake-provider passes as real-broker certification.
+
+An order submission with a lost/ambiguous reply is **unknown**, not automatically rejected. Exact preassigned client/tag identities reconcile it onto the original owned handle; cancellation intent survives delayed binding, and uncertain placement is not retried as new exposure. This attribution is process/session-local: after an application crash, reconcile broker orders and fills rather than assuming an unrecorded identity proves rejection.
 
 
 ## Trades
@@ -84,7 +91,11 @@ View/filter/sort closed strategy trades by strategy, market, side, entry/exit/pr
 
 **Important accounting limit:** live-strategy ledgers record fills using the current last market price, not authoritative broker execution prices, and **exclude commissions**. Do not use these estimates as brokerage statements. Accounts uses its separate account-fill history.
 
-Ledger write-prefix recovery is **process-local**, not crash durability: it can recover the successfully written prefix known to the running process after an interrupted append. It does not prove persistence across process/power loss, replace backups or establish authoritative broker fills. After a crash or uncertain write, reconcile with the broker and retain the original records for diagnosis.
+Ledger appends use a checksummed write-ahead intent and disk flush before acknowledgment. A fresh process reads the committed JSONL prefix plus a published intent once; the next save completes that recorded byte range before adding another fill. Identical legitimate fills remain distinct. Readers, writers and deletion share an interprocess lease; historical JSONL fields, ledger keys and paths stay compatible.
+
+Keep the entire Live directory together, including `.wal`, `.id` and lock/deletion sidecars. **Do not manually delete an intent or downgrade to an older binary while recovery is pending.** Explicit Resume can finish existing pending work without inventing another execution; a damaged or inconsistent intent requires investigation, not a guessed flat balance. Existing malformed committed lines are preserved, skipped and counted; this is not proof that incomplete historical accounting is authoritative.
+
+The guarantee covers **process-crash-consistent journal replay**, not machine power loss, filesystem rollback/tampering, events lost before a durable intent, authoritative broker execution prices or exactly-once broker-event delivery. It does not replace backups or broker reconciliation.
 
 
 ## Portfolios
