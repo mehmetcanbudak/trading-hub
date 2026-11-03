@@ -1,10 +1,10 @@
 # Trading Hub — English localization validation
 
 **Reviewed:** 2026-11-03
-**Branch:** `memoshi`; **reviewed runtime:** `9d5791a`; **PR #5 merge:** `265d60f`.
-**Implementation:** canonical English-first C# reference with the consolidated English, reviewed safety, Windows v1.1 and multilingual v1.2 histories. The approved integration includes latest upstream `1d5a774`, process-crash-consistent ledger replay and broker-acknowledged protection hardening. Existing English installations, persistent identities and real-account controls remain intact. Rust/Swift branches/worktrees/pins and the installed personal-profile runtime `6363664` are not changed by this follow-up. Public releases remain explicitly deferred.
+**Branch:** `memoshi`; **reviewed runtime:** `9d5791a`; **installed Mac source:** `c27e5aa`; **PR #5 merge:** `265d60f`.
+**Implementation:** canonical English-first C# reference with the consolidated English, reviewed safety, Windows v1.1 and multilingual v1.2 histories. The approved integration includes latest upstream `1d5a774`, process-crash-consistent ledger replay and broker-acknowledged protection hardening. Existing English installations, persistent identities and real-account controls remain intact. The separately authorized personal Mac update is installed and accepted below. Rust/Swift branches/worktrees/pins remain untouched. Public releases remain explicitly deferred.
 
-**Review:** [PR #5](https://github.com/mehmetcanbudak/trading-hub/pull/5) merged at `265d60f93f7a99aaa287c459f9fcf5d8dc827627` after the user approved integration for personal Mac use with documented release/provider/native-Windows limits. [Integration PR #4](https://github.com/mehmetcanbudak/trading-hub/pull/4) and safety PR #3 retain the earlier history; the original safety source was corrected, not accepted unchanged. This approval does not publish a release, replace the installed app or authorize a port rebase.
+**Review:** [PR #5](https://github.com/mehmetcanbudak/trading-hub/pull/5) merged at `265d60f93f7a99aaa287c459f9fcf5d8dc827627` after the user approved integration for personal Mac use with documented release/provider/native-Windows limits. [Integration PR #4](https://github.com/mehmetcanbudak/trading-hub/pull/4) and safety PR #3 retain the earlier history; the original safety source was corrected, not accepted unchanged. The later normal-profile installation required separate user authorization; neither action publishes a release or authorizes a port rebase.
 
 ## Scope and provenance
 
@@ -33,16 +33,29 @@ The documentation merge's `src`, tests, tools, installer, solution and build inp
 | Spanish/Chinese UI | **7 main pages each; 0 known untranslated candidates** | Rendered Chinese Settings and Spanish Live were visually inspected; this is finite surface coverage, not a natural-language proof. |
 | Generators/reports | **Passed in the English scenario** | Five strategy templates, two indicator sources and three complete guide examples compile; existing backtest/report/export paths remain covered. |
 | Private Mac package | **Self-contained ARM64; both staged/copied strict/deep signatures passed** | Ad-hoc signing only; `build-app.sh` ran without `--install`. Native MCP initialized, answered ping and listed 16 tools with exit 0/empty stderr. |
-| Actual packaged Mac GUI | **Opened; Settings → Live responded; native close exited 0** | PID-scoped accessibility and owned-window captures only; no forced termination. This follow-up did not repeat native tray/restart acceptance or replace the installed app. |
+| Actual packaged Mac GUI | **Opened; Settings → Live responded; native close exited 0** | PID-scoped accessibility and owned-window captures only; no forced termination. That earlier private run did not repeat native tray/restart acceptance; the subsequent normal installation is recorded below. |
 | Windows platform outputs | **Self-contained x64 and ARM64 published; PE architectures verified** | No native Windows host, PowerShell or NSIS compiler was available here. No fresh Windows desktop, Credential Manager, IPC, power or installer result is claimed. |
 | Tracker/shell checks | **13 tracker tests passed; Bash/zsh syntax passed** | Temporary histories/fake issue API; no broker credentials or trading data. |
 | Actions maintenance | **checkout v7, setup-dotnet v6, upload-artifact v7** | Official stable action manifests use Node 24. This is source/manifest review, not a new hosted-run result. |
 | ImgBot PR #1 | **Reviewed and closed without merging** | All eight optimized images retained identical RGBA pixels but changed color/EXIF metadata for only 136,614 bytes saved. Existing assets remain unchanged. |
 | Actual Claude session/request | **Authenticated request attempted; account quota blocked output** | Real CLI 2.1.316 through production `ClaudeAgent.RunAsync`, default `claude-opus-5-5`, supported US$0.25 cap, restricted/safe mode, no tools/MCP/session persistence. The service reported its weekly limit; reported cost US$0.00, zero tools. |
 
-The temporary direct-apphost GUI launch also emitted `sandbox_extension_issue_file_to_process ... Operation not permitted` for its owned temporary bundle. The window rendered, both native navigation actions succeeded and close exited 0; the diagnostic is retained in `mac-native/packaged-gui.json`. No privacy setting, signature check or system security control was weakened to suppress it. A normal installed-app update/acceptance remains separate.
+The temporary direct-apphost GUI launch also emitted `sandbox_extension_issue_file_to_process ... Operation not permitted` for its owned temporary bundle. The window rendered, both native navigation actions succeeded and close exited 0; the diagnostic is retained in `mac-native/packaged-gui.json`. No privacy setting, signature check or system security control was weakened to suppress it. The subsequent LaunchServices normal-profile acceptance is recorded separately below.
 
 After explicit user authorization, one minimal nonsensitive JSON request exercised the real production Claude bridge, not the fake CLI. The reply was **“You've hit your weekly limit · resets 8am (Europe/Istanbul)”** after about 6.46 seconds; no requested model output was produced and `NeedsLogin` was false. `actual-claude/ACTUAL_CLAUDE_RESULT.json` retains the exact result. No retry, alternate account, API-key fallback or quota workaround was attempted. Successful generation/model availability still requires restored quota and a later authorized retest.
+
+### Personal Mac installation — 2026-11-03
+
+The user-authorized `./build-app.sh --install` rebuilt source `c27e5aa02be9128477a7c2c9afaeae2639120735` with .NET 10.0.402 into fresh owned output/staging paths and replaced `/Applications/Trading Hub.app`. This includes the reviewed runtime code at `9d5791a`. The self-contained ARM64 bundle remains ad-hoc signed; staged, installed and rollback strict/deep signature checks passed. All nine installed application binaries matched the freshly signed stage. The previous `6363664` app exited through its native protected Quit action before replacement.
+
+All **13 protected profile, account, drawing and strategy/indicator files remained byte-identical**, both across replacement and after the actual normal-profile launch and native Quit. Language remains `en`, real-account auto-resume remains off and all configured providers still disallow real orders. Market history was not reset or exported; Keychain was not exported.
+
+The actual LaunchServices app rendered the English four-tab workspace, retained session volume profile and simulated account with no position. Connected public Binance data advanced. Native protected Quit exited the updated process; the app is left closed and ready for later launch. No order control or model request was used. Only the acceptance process received `TRADINGHUB_SLEEP_GUARD=off`; no power preference was changed.
+
+Startup initially waited in a file-open call while a macOS system dialog was frontmost. Its protected-window capture returned `could not create image from window`; the dialog cleared without automated approval and the app then rendered. Exact dialog text was not observed and no privacy setting was changed. The successful actual-app capture and initial wait diagnostic are retained privately, not published.
+
+The verified rollback bundle, protected-file backup, exact binary hashes and `INSTALL_ACCEPTANCE.json` are under `~/Library/Application Support/Trading Hub Backups/memoshi-c27e5aa-s4dr0hno/`. Only this task's disposable package copies and harness are removed; previous backups and unrelated outputs remain untouched. A fresh upstream monitor check at **2026-11-03 17:40 UTC** reported `1d5a774` as both latest and integrated, with **0 pending commits**.
+
 
 ### Reviewed safety changes and remaining guarantees
 
@@ -54,12 +67,15 @@ After explicit user authorization, one minimal nonsensitive JSON request exercis
 
 ### Still open or deliberately deferred
 
-1. Authenticated Binance Futures testnet: a usable dedicated key/secret must be entered privately in the isolated demo profile before authorized lifecycle, partial-fill, cancel/replace, reconnect, snapshot and late-fill scenarios. The previous one-time secret was never revealed; no secret is requested in chat or extracted from Keychain. Other providers need their own authorized scenarios.
-2. Physical Mac sleep/wake/lid/thermal tests require user participation and a safe pause in the other agents' work. Native Windows physical behavior and fresh native regression/desktop/installer gates need a Windows host; cross-publishing is not a substitute.
-3. Successful real Claude output is blocked by the account's weekly quota. The authorized capped request and error propagation were exercised; login is valid, but no model output or universal model availability is certified. Wait for quota reset and obtain later retest authorization rather than bypassing the limit.
-4. Additional third-party strategies/indicators require a specifically selected source/version and isolated replay. Built-ins/examples and the previously authorized custom delta are not universal extension certification.
-5. Human integration approval and PR #5 merging are complete. A later normal installation remains separate: the installed runtime is still `6363664`; fresh native tray/restart/personal-profile acceptance of this runtime was not claimed.
-6. Public release publication, distribution signing/notarization and downloadable fork artifacts are **deferred by request**, not current personal-use work.
+1. Disk headroom remains urgent: approximately **3.3 GiB** was available after this task's package cleanup and normal-app shutdown; it had fallen to 1.3 GiB during acceptance. Free additional space before further large builds. Only owned disposable outputs were removed; user data, previous backups and other worktrees are not cleanup targets.
+2. Authenticated Binance Futures testnet: a usable dedicated key/secret must be entered privately in the isolated demo profile before authorized lifecycle, partial-fill, cancel/replace, reconnect, snapshot and late-fill scenarios. The previous one-time secret was never revealed; no secret is requested in chat or extracted from Keychain. Other providers need their own authorized scenarios.
+3. Physical Mac sleep/wake/lid/thermal tests require user participation and a safe pause in other active work. Native Windows power behavior also requires physical-device testing.
+4. Fresh native Windows x64/ARM64 regression, desktop, Credential Manager, IPC and installer/data-preservation gates need a Windows host. Seven native-only cases remain skipped on macOS; cross-publishing is not a substitute. Hosted CI is unavailable and is not manually retried.
+5. Successful real Claude output is blocked by the account's weekly quota. The authorized capped request and error propagation were exercised; login is valid, but no model output or universal model availability is certified. Wait for quota reset and obtain later retest authorization rather than bypassing the limit.
+6. Additional third-party strategies/indicators require a specifically selected source/version and isolated replay. Built-ins/examples and the previously authorized custom delta are not universal extension certification.
+7. Normal installation/rendering/protected Quit are complete. Before stronger release claims, repeat the latest runtime's isolated native tray/reopen/language-restart and position-bearing quit scenarios; historical native lifecycle evidence and fake-account tests remain distinct.
+8. Stronger broker, durability and financial-accounting guarantees remain bounded by [Reviewed safety changes and remaining guarantees](#reviewed-safety-changes-and-remaining-guarantees), not missing upstream merges.
+9. Public release publication, distribution signing/notarization and downloadable fork artifacts are **deferred by request**, not current personal-use work.
 
 Local receipts are under `/var/folders/xm/66q9p6h91vs2w2l6fdl2j4z00000gn/T/memoshi-followup-fg6f_56e`. Focused TRX, captures, journal consumer stores and validation receipts are retained privately at `/Volumes/TradingHub-upstream-a861ab10ae/evidence/integration/memoshi-1d5a774-9d5791a`; the timed-out bulk copy was replaced by an explicit receipt/capture copy, not treated as successful. No personal-profile capture or credential was published.
 
