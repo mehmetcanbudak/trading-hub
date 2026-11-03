@@ -104,11 +104,20 @@ public class SessionVolumeProfile : Indicator
             p.CommittedEnd++;
             AddTo(p.Committed, p.CommittedEnd);
         }
+        p.EndBar = bar;
+
+        // This draw-only profile needs snapshots at period boundaries and the current bar, not every historical bar.
+        bool snapshotNeeded = bar == CurrentBar - 1 || _period switch
+        {
+            ProfilePeriod.Session => IsNewSession(bar + 1),
+            ProfilePeriod.Week => IsNewWeek(bar + 1),
+            _ => false,
+        };
+        if (!snapshotNeeded) return;
 
         var levels = new Dictionary<decimal, (decimal Bid, decimal Ask)>(p.Committed);
         AddTo(levels, bar);
         p.Levels = new SortedDictionary<decimal, (decimal Bid, decimal Ask)>(levels);
-        p.EndBar = bar;
         Finish(p);
     }
 
