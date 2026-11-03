@@ -58,6 +58,7 @@ ditto "$APP" "$OUT/$NAME.app"
 echo "Built: $APP"
 if [ "$1" = "--install" ]; then
   rm -rf "/Applications/$NAME.app"
-  ditto --noextattr --norsrc "$APP" "/Applications/$NAME.app"
+  # Managed assemblies carry signing metadata in extended attributes; preserve it after signing.
+  ditto "$APP" "/Applications/$NAME.app"
   codesign --verify --deep --strict "/Applications/$NAME.app" && echo "Installed in /Applications/$NAME.app"
 fi

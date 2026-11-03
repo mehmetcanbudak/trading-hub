@@ -237,6 +237,11 @@ jobs:
             TRADINGHUB_LANG="$language" dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll \
               "$RUNNER_TEMP/tradinghub-ui/$language" 2 trading settings connections data strategies accounts live
           done
+      - name: Build, install and verify the self-contained macOS app
+        env:
+          TH_OUT: ${{ runner.temp }}/tradinghub-macos-package
+          TH_STAGE: ${{ runner.temp }}/tradinghub-macos-package-stage
+        run: ./build-app.sh --install
       - name: Upload macOS validation evidence
         if: always()
         uses: actions/upload-artifact@v4

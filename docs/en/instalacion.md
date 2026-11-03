@@ -69,7 +69,7 @@ The build script temporarily adds `~/.dotnet` to its own PATH; no shell configur
 - Publishes a self-contained Release build for `osx-arm64`.
 - Assembles the bundle in a temporary directory, outside Desktop: iCloud-added extended attributes can break code signing.
 - Signs the app and places a copy in `dist/Trading Hub.app`.
-- With `--install`, removes the existing `/Applications/Trading Hub.app`, copies the new bundle and verifies its signature. Back up an existing bundle first if you need a rollback.
+- With `--install`, removes the existing `/Applications/Trading Hub.app`, preserves the signed bundle's extended attributes while copying it, and performs strict/deep signature verification. Back up an existing bundle first if you need a rollback. Stripping extended attributes after signing can invalidate managed-assembly signatures; metadata removal is only safe before signing.
 
 Without `--install`, Applications is untouched.
 

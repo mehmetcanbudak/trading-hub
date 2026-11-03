@@ -95,6 +95,12 @@ internal static class EnglishScene
         Check(Environment.GetEnvironmentVariable("TRADINGHUB_SLEEP_GUARD") == "off", "power changes are disabled");
         var svc = App.Services;
         Check(svc.Connections.Profiles.All(p => !p.AllowRealOrders), "all fixture profiles keep real orders disabled");
+        Workspace.Save(window.Trading);
+        int pagesBeforeReopen = window.Trading.Pages.Count;
+        window.Hide();
+        window.Show();
+        pump(1);
+        Check(window.Trading.Pages.Count == pagesBeforeReopen, "reopening the main window preserves saved chart pages without duplicates");
         var chart = window.Trading.ActiveTab!;
         var model = chart.Model!;
         var compiler = new ScriptCompiler();

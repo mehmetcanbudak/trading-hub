@@ -39,6 +39,7 @@ public sealed class MainWindow : Window
     private DateTime _lastStatus;
     private DateTime _lastTickAt;
     private string _current = "";
+    private bool _startupStarted;
 
     public MainWindow(AppServices svc)
     {
@@ -92,6 +93,9 @@ public sealed class MainWindow : Window
 
         Opened += async (_, _) =>
         {
+            // Opened also fires after a tray reopen; restoration and automatic resume run only once per process.
+            if (_startupStarted) return;
+            _startupStarted = true;
             FitToScreen();
             await Trading.RestoreOrDefaultAsync();
             // y las tuyas en vivo, si así está en Ajustes (unos segundos después: las conexiones ya arrancaron)
