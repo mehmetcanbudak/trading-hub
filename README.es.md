@@ -1,6 +1,6 @@
 **Español** · [English](README.md) · [中文](README.zh-CN.md)
 
-> Original de upstream c28900e, conservado con enlaces de idioma adaptados. Los instaladores enlazados son del autor original, no incluyen necesariamente las correcciones exclusivas de este fork. Este fork no afirma haber publicado instaladores ni certificado Windows nativo, brokers reales/demo o el ciclo físico de suspensión/salida de macOS. Véanse la [guía actual del fork](docs/en/portar-a-windows.md) y el [estado de validación](docs/en/TRANSLATION_STATUS.md). Licencia: código disponible bajo MIT + Commons Clause, no código abierto aprobado por OSI.
+> Original de upstream 1d5a774, conservado con enlaces de idioma adaptados. Los instaladores enlazados son del autor original y no incluyen las correcciones exclusivas de este fork. Para usar este fork, compilá la rama `memoshi` siguiendo la [guía de instalación](docs/en/instalacion.md); no se publican binarios de este fork. La validación disponible y sus límites figuran en el [estado de validación](docs/en/TRANSLATION_STATUS.md). No se afirma certificación de brokers reales/demo ni de suspensión física. Licencia: código disponible bajo MIT + Commons Clause, no código abierto aprobado por OSI.
 
 <div align="center">
 
@@ -13,6 +13,8 @@ con tus datos y tus claves siempre en tu computadora.
 Creada por [**@ralphtradesz**](https://x.com/ralphtradesz)
 
 ¿Usás Windows? **[Descargá el instalador](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)** ([cómo instalarla](#usás-windows)).
+
+¿Usás Mac (M1 o más nueva)? La **[app original de upstream](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Mac.zip)** se descomprime y se arrastra a Aplicaciones. Si verificaste su origen y firma, la primera apertura puede requerir Ajustes del Sistema → Privacidad y seguridad → «Abrir igualmente». Esa descarga no incluye las correcciones de este fork; no reemplaces tu instalación de `memoshi` por accidente ni desactives los controles de seguridad.
 
 [![Licencia MIT + Commons Clause](https://img.shields.io/badge/licencia-MIT%20%2B%20Commons%20Clause-amber.svg)](LICENSE)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-black.svg)
