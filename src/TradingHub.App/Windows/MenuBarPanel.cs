@@ -162,8 +162,10 @@ internal sealed class MenuBarPanel : Window
                 FontWeight = plan.Micro ? FontWeight.SemiBold : FontWeight.Normal,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             };
-            var pos = new TextBlock { Text = Side(e.Ledger.Position, inst.FormatPrice(e.Ledger.AveragePrice), e.Ledger.OpenSymbol ?? plan.Symbol), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-            var pnl = new TextBlock { Text = $"open {Money(e.OpenPnL)} · today {Money(r.TodayPnL)}", FontSize = 12, Foreground = MoneyBrush(e.OpenPnL + r.TodayPnL), VerticalAlignment = VerticalAlignment.Center };
+            var ledger = r.Ledger;
+            decimal open = ledger.OpenPnL(r.Data.LastPrice);
+            var pos = new TextBlock { Text = Side(ledger.Position, inst.FormatPrice(ledger.AveragePrice), ledger.OpenSymbol ?? plan.Symbol), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            var pnl = new TextBlock { Text = $"open {Money(open)} · today {Money(r.TodayPnL)}", FontSize = 12, Foreground = MoneyBrush(open + r.TodayPnL), VerticalAlignment = VerticalAlignment.Center };
             var bottom = new DockPanel();
             DockPanel.SetDock(pnl, Dock.Right);
             bottom.Children.Add(pnl);

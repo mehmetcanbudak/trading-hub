@@ -86,6 +86,11 @@ public sealed class RithmicOrderState
     public bool Cancelled { get; set; }
     public string Reason { get; set; } = "";
 
+    // Only complete native working reports prove amendment capacity, never local/provisional fields or receipts.
+    internal long WorkingRevision;
+    internal decimal WorkingQuantity, WorkingPrice;
+    internal long ModifyRejectionRevision;
+
     /// <summary>Cuándo se vio la orden por primera vez (UTC).</summary>
     public DateTime Time { get; set; } = DateTime.UtcNow;
 }
@@ -110,6 +115,7 @@ public sealed class RithmicTradingSession : IDisposable
     private CancellationTokenSource? _connCts;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ProtoMessage>> _pending = new();
     private readonly ConcurrentDictionary<string, RithmicOrderState> _orders = new();
+    private readonly object _orderGate = new();
     private readonly ConcurrentDictionary<string, RithmicPosition> _positions = new();
     private readonly ConcurrentDictionary<string, decimal> _balances = new();
     private readonly ConcurrentDictionary<string, RithmicAccountSummary> _summaries = new();
@@ -172,14 +178,40 @@ public sealed class RithmicTradingSession : IDisposable
 
     public decimal? BalanceFor(string account) => _balances.TryGetValue(account, out var b) ? b : null;
 
-    public IReadOnlyList<RithmicOrderState> OrdersFor(string account, string symbol, string exchange) =>
-        _orders.Values.Where(o => o.Account == account && o.Symbol == symbol && o.Exchange == exchange).ToList();
+    public IReadOnlyList<RithmicOrderState> OrdersFor(string account, string symbol, string exchange)
+    {
+        lock (_orderGate)
+            return _orders.Values.Where(o => o.Account == account && o.Symbol == symbol && o.Exchange == exchange).ToList();
+    }
 
-    public RithmicOrderState? OrderByTag(string userTag) => _orders.Values.FirstOrDefault(o => o.UserTag == userTag);
+    public RithmicOrderState? OrderByTag(string userTag)
+    {
+        lock (_orderGate) return _orders.Values.FirstOrDefault(o => o.UserTag == userTag);
+    }
+
+    internal (long WorkingRevision, decimal Quantity, decimal Price, long RejectionRevision, string Reason) ReplacementState(RithmicOrderState order)
+    {
+        lock (_orderGate)
+            return (order.WorkingRevision, order.WorkingQuantity, order.WorkingPrice, order.ModifyRejectionRevision, order.Reason);
+    }
+
+    internal void RestoreRejectedReplacement(RithmicOrderState order)
+    {
+        lock (_orderGate)
+        {
+            if (order.WorkingRevision == 0) return;
+            order.Quantity = order.WorkingQuantity;
+            if (order.PriceType is 3 or 4) order.Trigger = order.WorkingPrice;
+            else order.Price = order.WorkingPrice;
+            order.Unfilled = Math.Max(0, order.Quantity - order.Filled);
+        }
+    }
 
     /// <summary>Todas las órdenes de la cuenta que se vieron en esta sesión (las de hoy, activas y terminadas).</summary>
-    public IReadOnlyList<RithmicOrderState> OrdersOf(string account) =>
-        _orders.Values.Where(o => o.Account == account).OrderBy(o => o.Time).ToList();
+    public IReadOnlyList<RithmicOrderState> OrdersOf(string account)
+    {
+        lock (_orderGate) return _orders.Values.Where(o => o.Account == account).OrderBy(o => o.Time).ToList();
+    }
 
     /// <summary>Posiciones de la cuenta por contrato (incluye las que ya quedaron planas hoy).</summary>
     public IReadOnlyList<(string Symbol, string Exchange, RithmicPosition Position)> PositionsOf(string account) =>
@@ -321,7 +353,7 @@ public sealed class RithmicTradingSession : IDisposable
         }
     }
 
-    private sealed class RithmicRejectedException : Exception
+    internal sealed class RithmicRejectedException : Exception
     {
         public RithmicRejectedException(string message) : base(message)
         {
@@ -478,8 +510,15 @@ public sealed class RithmicTradingSession : IDisposable
         _replayCandidates.TryRemove(basket, out _);
         long ssboe = m.Int(RpO.Ssboe);
         var when = ssboe > 0 ? DateTimeOffset.FromUnixTimeSeconds(ssboe).UtcDateTime.AddTicks(m.Int(RpO.Usecs) * 10) : DateTime.UtcNow;
-        var o = _orders.GetOrAdd(basket, b => new RithmicOrderState { BasketId = b, Time = when });
-        if (m.String(RpO.UserTag) is { Length: > 0 } tag) o.UserTag = tag;
+        RithmicOrderState o;
+        lock (_orderGate)
+        {
+            string tag = m.String(RpO.UserTag) ?? "";
+            _orders.TryRemove("tag:" + tag, out var provisional);
+            o = _orders.GetOrAdd(basket, b => provisional ?? new RithmicOrderState { Time = when });
+            o.BasketId = basket;
+            if (tag.Length > 0) o.UserTag = tag;
+        }
         if (m.String(RpO.AccountId) is { Length: > 0 } acc) o.Account = acc;
         if (m.String(Rp.Symbol) is { Length: > 0 } sym) o.Symbol = sym;
         if (m.String(Rp.Exchange) is { Length: > 0 } ex) o.Exchange = ex;
@@ -488,9 +527,9 @@ public sealed class RithmicTradingSession : IDisposable
         if (m.Has(RpO.Quantity)) o.Quantity = m.Int(RpO.Quantity);
         if (m.Has(RpO.Price)) o.Price = (decimal)m.Double(RpO.Price);
         if (m.Has(RpO.TriggerPrice)) o.Trigger = (decimal)m.Double(RpO.TriggerPrice);
-        if (m.Has(RpO.TotalFillSize)) o.Filled = m.Int(RpO.TotalFillSize);
-        if (m.Has(RpO.TotalUnfilledSize)) o.Unfilled = m.Int(RpO.TotalUnfilledSize);
-        else if (o.Quantity > 0) o.Unfilled = Math.Max(0, o.Quantity - o.Filled);
+        if (m.Has(RpO.TotalFillSize)) o.Filled = Math.Max(o.Filled, m.Int(RpO.TotalFillSize));
+        if (o.Quantity > 0) o.Unfilled = Math.Max(0, o.Quantity - o.Filled);
+        else if (m.Has(RpO.TotalUnfilledSize)) o.Unfilled = m.Int(RpO.TotalUnfilledSize);
         if (m.Has(RpO.AvgFillPrice)) o.AvgFillPrice = (decimal)m.Double(RpO.AvgFillPrice);
         int notify = (int)m.Int(RpO.NotifyType);
         string text = m.String(RpO.Text) ?? m.String(RpO.ReportText) ?? m.String(RpO.CompletionReason) ?? "";
@@ -515,7 +554,8 @@ public sealed class RithmicTradingSession : IDisposable
                     if (size > 0 && price > 0 && o.Account.Length > 0)
                     {
                         // el total ejecutado después de esta ejecución la identifica (Rithmic la repite al reconectar)
-                        var fill = new RithmicFill($"{basket}|{o.Filled.ToString(CultureInfo.InvariantCulture)}", o.Account, o.Symbol, o.Exchange, o.IsBuy, size, price, when, basket);
+                        decimal cumulative = m.Has(RpO.TotalFillSize) ? m.Int(RpO.TotalFillSize) : o.Filled;
+                        var fill = new RithmicFill($"{basket}|{cumulative.ToString(CultureInfo.InvariantCulture)}", o.Account, o.Symbol, o.Exchange, o.IsBuy, size, price, when, basket);
                         if (_fills.TryAdd(fill.Id, fill)) FillReceived?.Invoke(fill);
                     }
 
@@ -545,6 +585,25 @@ public sealed class RithmicTradingSession : IDisposable
             }
         }
 
+        lock (_orderGate)
+        {
+            if (!exchange && notify == 16)
+            {
+                RestoreRejectedReplacement(o);
+                o.ModifyRejectionRevision++;
+            }
+
+            bool workingReport = !o.Done && (m.Int(Rp.TemplateId) == RpO.ResponseShowOrders ||
+                (!exchange && notify is 13 or 14) || (exchange && notify == 4));
+            int priceField = o.PriceType is 3 or 4 ? RpO.TriggerPrice : RpO.Price;
+            if (workingReport && m.Has(RpO.Quantity) && m.Has(priceField))
+            {
+                o.WorkingQuantity = m.Int(RpO.Quantity);
+                o.WorkingPrice = (decimal)m.Double(priceField);
+                o.WorkingRevision++;
+            }
+        }
+
         Changed?.Invoke();
     }
 
@@ -552,24 +611,30 @@ public sealed class RithmicTradingSession : IDisposable
 
     private async Task<ProtoMessage> RequestAsync(ProtoWriter w, CancellationToken ct)
     {
-        var client = _orderClient ?? throw new InvalidOperationException("Rithmic is not connected yet (" + StatusText + ")");
+        var client = _orderClient ?? throw new RithmicRejectedException("Rithmic is not connected yet (" + StatusText + ")");
         string tag = "v" + Interlocked.Increment(ref _seq).ToString(CultureInfo.InvariantCulture);
         var tcs = new TaskCompletionSource<ProtoMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[tag] = tcs;
-        await client.SendAsync(w.String(Rp.UserMsg, tag), ct).ConfigureAwait(false);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        await using (timeout.Token.Register(() => tcs.TrySetException(new TimeoutException("Rithmic timed out"))))
+        try
         {
+            await client.SendAsync(w.String(Rp.UserMsg, tag), ct).ConfigureAwait(false);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            await using var registration = timeout.Token.Register(() => tcs.TrySetException(new TimeoutException("Rithmic timed out")));
             var r = await tcs.Task.ConfigureAwait(false);
             var rp = r.Strings(Rp.RpCode).ToList();
-            if (rp.Count > 0 && rp[0] != "0") throw new InvalidOperationException("Rithmic rejected: " + string.Join(" — ", rp.Skip(1).DefaultIfEmpty(rp[0])));
+            if (rp.Count > 0 && rp[0] != "0")
+                throw new RithmicRejectedException("Rithmic rejected: " + string.Join(" — ", rp.Skip(1).DefaultIfEmpty(rp[0])));
             return r;
+        }
+        finally
+        {
+            _pending.TryRemove(tag, out _);
         }
     }
 
     private RithmicAccountInfo AccountOf(string accountId) =>
-        Accounts.FirstOrDefault(a => a.AccountId == accountId) ?? throw new InvalidOperationException($"Account {accountId} is not in this Rithmic session");
+        Accounts.FirstOrDefault(a => a.AccountId == accountId) ?? throw new RithmicRejectedException($"Account {accountId} is not in this Rithmic session");
 
     private string RouteFor(string exchange)
     {
@@ -577,7 +642,7 @@ public sealed class RithmicTradingSession : IDisposable
         {
             var r = _routes.Where(x => x.Exchange == exchange && x.Up).OrderByDescending(x => x.Default).FirstOrDefault();
             if (r.Route == null) r = _routes.FirstOrDefault(x => x.Exchange == exchange);
-            return r.Route ?? throw new InvalidOperationException($"Rithmic has no order route for {exchange}");
+            return r.Route ?? throw new RithmicRejectedException($"Rithmic has no order route for {exchange}");
         }
     }
 
@@ -594,24 +659,29 @@ public sealed class RithmicTradingSession : IDisposable
         if (priceType is 1 or 3) w.Double(RpO.Price, (double)price);
         if (priceType is 3 or 4) w.Double(RpO.TriggerPrice, (double)trigger);
         // la orden aparece enseguida (las notificaciones completan el resto)
-        _orders.TryAdd("tag:" + userTag, new RithmicOrderState { UserTag = userTag, Account = accountId, Symbol = symbol, Exchange = exchange, IsBuy = buy, PriceType = priceType, Quantity = quantity, Unfilled = quantity, Price = price, Trigger = trigger });
+        lock (_orderGate)
+            _orders.TryAdd("tag:" + userTag, new RithmicOrderState { UserTag = userTag, Account = accountId, Symbol = symbol, Exchange = exchange, IsBuy = buy, PriceType = priceType, Quantity = quantity, Unfilled = quantity, Price = price, Trigger = trigger });
         try
         {
             var r = await RequestAsync(w, ct).ConfigureAwait(false);
             var basket = r.String(RpO.BasketId) ?? "";
-            _orders.TryRemove("tag:" + userTag, out _);
             if (basket.Length > 0)
             {
-                var o = _orders.GetOrAdd(basket, b => new RithmicOrderState { BasketId = b, UserTag = userTag, Account = accountId, Symbol = symbol, Exchange = exchange, IsBuy = buy, PriceType = priceType, Quantity = quantity, Unfilled = quantity, Price = price, Trigger = trigger });
-                if (o.UserTag.Length == 0) o.UserTag = userTag;
+                lock (_orderGate)
+                {
+                    _orders.TryRemove("tag:" + userTag, out var provisional);
+                    var o = _orders.GetOrAdd(basket, b => provisional ?? new RithmicOrderState { UserTag = userTag, Account = accountId, Symbol = symbol, Exchange = exchange, IsBuy = buy, PriceType = priceType, Quantity = quantity, Unfilled = quantity, Price = price, Trigger = trigger });
+                    o.BasketId = basket;
+                    if (o.UserTag.Length == 0) o.UserTag = userTag;
+                }
             }
 
             Changed?.Invoke();
             return basket;
         }
-        catch
+        catch (RithmicRejectedException)
         {
-            _orders.TryRemove("tag:" + userTag, out _);
+            lock (_orderGate) _orders.TryRemove("tag:" + userTag, out _);
             throw;
         }
     }

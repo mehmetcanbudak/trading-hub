@@ -260,11 +260,11 @@ internal sealed class ChartTraderPanel : UserControl
             foreach (var o in a.ActiveOrders.Where(o => o.Direction == dir).ToList()) a.Cancel(o);
         }, dir == OrderDirections.Buy ? "Buy orders canceled" : "Sell orders canceled");
 
-    private BracketTemplate? Template() => _host.TradeData(_chart) is { } data ? _host.Services.Settings.BracketTemplateFor(data.Instrument.Key) : null;
+    private BracketTemplate? GetBracketTemplate() => _host.TradeData(_chart) is { } data ? _host.Services.Settings.BracketTemplateFor(data.Instrument.Key) : null;
 
     private void EditTemplate(Action<BracketTemplate> edit, bool reload = false)
     {
-        if (_syncing || Template() is not { } t) return;
+        if (_syncing || GetBracketTemplate() is not { } t) return;
         edit(t);
         _host.Services.Settings.Save();
         _templateSig = Sig(t);

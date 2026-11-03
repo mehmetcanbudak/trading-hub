@@ -34,11 +34,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install .NET SDK 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
       - name: Isolate all application stores
@@ -174,7 +174,7 @@ jobs:
           'Native ${{ matrix.arch }} install, GUI open/capture/close, uninstall and data preservation passed.' | Set-Content (Join-Path $report 'result.txt')
       - name: Upload Windows validation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tradinghub-windows-validation-${{ matrix.arch }}
           path: |
@@ -193,11 +193,11 @@ jobs:
           arch="$(uname -m)"
           echo "Native macOS architecture: $arch"
           test "$arch" = arm64
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install .NET SDK 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
       - name: Isolate all application stores
@@ -244,7 +244,7 @@ jobs:
         run: ./build-app.sh --install
       - name: Upload macOS validation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tradinghub-macos-validation
           path: |

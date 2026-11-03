@@ -237,4 +237,526 @@ public class BrokerConnectionTests
         Assert.Equal(0m, limit.Filled);
         Assert.DoesNotContain(limit, broker.ActiveOrders);
     }
+
+    [Theory]
+    [InlineData(502, "Upstream response lost")]
+    [InlineData(200, "")]
+    [InlineData(408, "Request timed out")]
+    public async Task Tradovate_unknown_acceptance_replay_keeps_original_owner_and_deferred_cancel(int status, string response)
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        var accepted = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int placements = 0, cancels = 0;
+        fake.Server.OnHttp = req =>
+        {
+            if (req.Route == "/v1/order/placeorder")
+            {
+                Interlocked.Increment(ref placements);
+                accepted.TrySetResult(JsonNode.Parse(req.Body)!.AsObject());
+                // The vendor accepted the request, but its successful reply never reached the caller.
+                return (status, response);
+            }
+            if (req.Route == "/v1/order/cancelorder")
+            {
+                Assert.Equal(7001, JsonNode.Parse(req.Body)!["orderId"]!.GetValue<long>());
+                if (Interlocked.Increment(ref cancels) == 1)
+                    return (503, "Cancel response unavailable");
+            }
+            return normalHttp(req);
+        };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var owned = broker.Limit(OrderDirections.Buy, 3, 4990, "Strategy: unknown acceptance");
+        var sent = await accepted.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        string tag = sent["clOrdId"]!.GetValue<string>();
+        Assert.InRange(tag.Length, 1, 64);
+        Assert.True(sent["isAutomated"]!.GetValue<bool>());
+        await Until(() => broker.LastError != null);
+        Assert.NotNull(broker.LastError);
+        Assert.Equal(OrderStates.Active, owned.State);
+        Assert.Contains(owned, broker.ActiveOrders);
+        Assert.Empty(owned.ExchangeOrderId);
+        Assert.True(session.HasOpenPositionsOrOrders); // Unknown acceptance retains the transport.
+        Assert.False(broker.OrdersReady);
+        broker.Cancel(owned);
+        // Cross the old finite binding wait; cancellation must remain an obligation, not a timer.
+        await Task.Delay(3200);
+        Assert.Equal(0, Volatile.Read(ref cancels));
+
+        JsonObject NativeOrder(long id, string clientTag) => new()
+        {
+            ["id"] = id, ["accountId"] = 101, ["contractId"] = 555,
+            ["action"] = "Buy", ["ordStatus"] = "Working",
+            ["timestamp"] = DateTime.UtcNow.ToString("O"), ["clOrdId"] = clientTag
+        };
+        JsonObject NativeFill(long id) => new()
+        {
+            ["id"] = id, ["orderId"] = 7001, ["contractId"] = 555,
+            ["action"] = "Buy", ["qty"] = 1, ["price"] = 4990,
+            ["timestamp"] = DateTime.UtcNow.ToString("O"), ["active"] = true
+        };
+        fake.ReplayOrders.Add(NativeOrder(7002, ""));
+        fake.ReplayVersions.Add(new JsonObject { ["id"] = 1, ["orderId"] = 7002, ["orderQty"] = 3, ["orderType"] = "Limit", ["price"] = 4990 });
+        await fake.ReconnectUser();
+        await Until(() => broker.ActiveOrders.Any(o => o.ExchangeOrderId == "7002"));
+        var manual = Assert.Single(broker.ActiveOrders, o => o.ExchangeOrderId == "7002");
+        Assert.NotSame(owned, manual);
+        Assert.Empty(owned.ExchangeOrderId);
+        Assert.False(broker.OrdersReady);
+        Assert.Contains(owned, broker.ActiveOrders);
+        Assert.Equal(0, Volatile.Read(ref cancels));
+
+        fake.ReplayOrders.Add(NativeOrder(7001, tag));
+        fake.ReplayVersions.Add(new JsonObject { ["id"] = 2, ["orderId"] = 7001, ["orderQty"] = 3, ["orderType"] = "Limit", ["price"] = 4990 });
+        var firstFill = NativeFill(8001);
+        fake.ReplayFills.Add(firstFill);
+        await fake.ReconnectUser();
+        await Until(() => owned.ExchangeOrderId == "7001" && Volatile.Read(ref cancels) == 1 && broker.LastError?.Contains("503", StringComparison.Ordinal) == true);
+        Assert.Equal("7001", owned.ExchangeOrderId);
+        Assert.Equal(1, owned.Filled);
+        Assert.Equal(2, owned.Unfilled);
+        Assert.Same(owned, Assert.Single(broker.ActiveOrders, o => o.ExchangeOrderId == "7001"));
+        Assert.Equal(OrderStates.Active, owned.State);
+        Assert.Equal(1, Volatile.Read(ref cancels)); // Failed cancel must not busy-spin.
+
+        await fake.ReconnectUser(); // A later replay retries the retained cancel, never placement.
+        await Until(() => owned.Canceled);
+        Assert.True(owned.Canceled);
+        Assert.Equal(2, Volatile.Read(ref cancels));
+        Assert.Equal(1, owned.Filled);
+        await fake.PublishFill(firstFill);
+        await fake.PublishFill(NativeFill(8002)); // Late fills still belong to the canceled original handle.
+        await Until(() => owned.Filled == 2);
+        Assert.Equal(2, owned.Filled);
+        Assert.Equal(1, owned.Unfilled);
+        Assert.True(owned.Canceled);
+        Assert.Equal("7001", owned.ExchangeOrderId);
+        Assert.Contains(manual, broker.ActiveOrders);
+        Assert.Equal(0, manual.Filled);
+        Assert.Equal(1, Volatile.Read(ref placements));
+    }
+
+    [Theory]
+    [InlineData(200, "{\"failureReason\":\"InvalidPrice\",\"failureText\":\"Invalid price\"}")]
+    [InlineData(400, "{\"errorText\":\"Invalid order\"}")]
+    [InlineData(401, "{\"errorText\":\"Unauthorized\"}")]
+    [InlineData(429, "{\"errorText\":\"Rate limit\"}")]
+    public async Task Tradovate_definite_placement_rejection_is_terminal_without_resubmission(int status, string response)
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        int placements = 0;
+        fake.Server.OnHttp = req =>
+        {
+            if (req.Route != "/v1/order/placeorder") return normalHttp(req);
+            Interlocked.Increment(ref placements);
+            return (status, response);
+        };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = broker.Limit(OrderDirections.Buy, 1, 4990);
+        await Until(() => order.State == OrderStates.Failed && !broker.ActiveOrders.Contains(order));
+        Assert.Equal(OrderStates.Failed, order.State);
+        Assert.Equal(OrderStatus.Rejected, order.Status);
+        Assert.Equal(0, order.Filled);
+        Assert.DoesNotContain(order, broker.ActiveOrders);
+        Assert.NotNull(broker.LastError);
+        Assert.Equal(1, Volatile.Read(ref placements));
+        Assert.False(session.HasOpenPositionsOrOrders);
+    }
+    [Theory]
+    [InlineData(200, "{\"commandId\":91,\"failureReason\":\"Success\"}", false)]
+    [InlineData(503, "Response unavailable", false)]
+    [InlineData(200, "{\"failureReason\":\"Other\",\"failureText\":\"Amendment refused\"}", true)]
+    public async Task Tradovate_replacement_requires_exact_native_total_and_price(int status, string response, bool rejected)
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        int amendments = 0;
+        fake.Server.OnHttp = req =>
+        {
+            if (req.Route != "/v1/order/modifyorder") return normalHttp(req);
+            Interlocked.Increment(ref amendments);
+            return (status, response);
+        };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = broker.Limit(OrderDirections.Buy, 3, 4990);
+        await Until(() => order.ExchangeOrderId.Length > 0 && order.QuantityToFill == 3);
+        string originalId = order.ExchangeOrderId;
+        long id = long.Parse(originalId, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Same(order, broker.Replace(order, 4985, 2));
+        await Until(() => Volatile.Read(ref amendments) == 1);
+        if (rejected)
+        {
+            await Until(() => broker.LastError != null && !broker.IsReplacementPending(order));
+            Assert.Equal(4990, order.Price);
+            Assert.Equal(3, order.QuantityToFill);
+            return;
+        }
+        // Optimistic public fields cannot certify protection capacity.
+        order.Price = 4985;
+        order.Unfilled = 2;
+        Assert.True(broker.IsReplacementPending(order));
+        broker.Replace(order, 4980, 1);
+        await Task.Delay(100);
+        Assert.Equal(1, Volatile.Read(ref amendments));
+        Assert.True(session.HasOpenPositionsOrOrders);
+        fake.ReplayOrders.Add(new JsonObject
+        {
+            ["id"] = id, ["accountId"] = 101, ["contractId"] = 555,
+            ["action"] = "Buy", ["ordStatus"] = "Working",
+            ["timestamp"] = DateTime.UtcNow.ToString("O")
+        });
+        fake.ReplayVersions.Add(new JsonObject { ["id"] = 90, ["orderId"] = id, ["orderQty"] = 3, ["orderType"] = "Limit", ["price"] = 4985 });
+        await fake.ReconnectUser();
+        await Until(() => session.SnapshotReady && order.QuantityToFill == 3);
+        Assert.True(broker.IsReplacementPending(order)); // Matching price, wrong TOTAL quantity.
+        fake.ReplayFills.Add(new JsonObject
+        {
+            ["id"] = 9901, ["orderId"] = id, ["contractId"] = 555,
+            ["action"] = "Buy", ["qty"] = 1, ["price"] = 4985,
+            ["timestamp"] = DateTime.UtcNow.ToString("O"), ["active"] = true
+        });
+        fake.ReplayVersions.Clear();
+        fake.ReplayVersions.Add(new JsonObject { ["id"] = 91, ["orderId"] = id, ["orderQty"] = 2, ["orderType"] = "Limit", ["price"] = 4985 });
+        await fake.ReconnectUser();
+        await Until(() => !broker.IsReplacementPending(order));
+        Assert.Equal(originalId, order.ExchangeOrderId);
+        Assert.Same(order, Assert.Single(broker.ActiveOrders, o => o.ExchangeOrderId == originalId));
+        Assert.Equal(2, order.QuantityToFill);
+        Assert.Equal(1, order.Unfilled);
+        Assert.Equal(1, Volatile.Read(ref amendments));
+    }
+
+    [Theory]
+    [InlineData(200, "{\"commandId\":91,\"failureReason\":\"Success\"}", false)]
+    [InlineData(503, "Response unavailable", false)]
+    [InlineData(200, "{\"failureReason\":\"Other\",\"failureText\":\"Amendment refused\"}", true)]
+    public async Task Tradovate_trailing_modify_coalesces_until_authoritative_amendment_resolution(int status, string response, bool rejected)
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        var firstRequest = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRequest = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int amendments = 0;
+        fake.Server.OnHttpAsync = async (req, ct) =>
+        {
+            if (req.Route != "/v1/order/modifyorder") return normalHttp(req);
+            var body = JsonNode.Parse(req.Body)!.AsObject();
+            if (Interlocked.Increment(ref amendments) == 1)
+            {
+                firstRequest.TrySetResult(body);
+                await release.Task.WaitAsync(ct);
+                return (status, response);
+            }
+            secondRequest.TrySetResult(body);
+            return (200, "{\"commandId\":92,\"failureReason\":\"Success\"}");
+        };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = broker.Stop(OrderDirections.Sell, 3, 4990);
+        await Until(() => order.ExchangeOrderId.Length > 0 && order.TriggerPrice == 4990);
+        long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
+        await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Stop"));
+        broker.Modify(order, 4991);
+        var first = await firstRequest.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        Assert.Equal(4991m, first["stopPrice"]!.GetValue<decimal>());
+        broker.Modify(order, 4992);
+        broker.Modify(order, 4993); // No subsequent market high is needed to deliver this latest price.
+        order.Price = 4993; // The runner may already have advanced its public trailing-stop fields.
+        order.TriggerPrice = 4993;
+        broker.Replace(order, 4980, 1); // Explicit sizing requests remain duplicate-suppressed.
+        await fake.PublishFill(new JsonObject
+        {
+            ["id"] = 9901, ["orderId"] = id, ["contractId"] = 555, ["action"] = "Sell",
+            ["qty"] = 1, ["price"] = 4990, ["timestamp"] = DateTime.UtcNow.ToString("O"), ["active"] = true
+        });
+        await Until(() => order.Filled == 1);
+        Assert.Equal(1, Volatile.Read(ref amendments));
+        Assert.True(broker.IsReplacementPending(order));
+        var firstReplyProcessed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        broker.Changed += () =>
+        {
+            if (release.Task.IsCompleted && Volatile.Read(ref amendments) == 1)
+                firstReplyProcessed.TrySetResult();
+        };
+        release.TrySetResult();
+        if (!rejected)
+        {
+            // Neither a command receipt nor an unknown HTTP outcome resolves A.
+            await firstReplyProcessed.Task.WaitAsync(TimeSpan.FromSeconds(8));
+            await fake.PublishOrder(new JsonObject
+            {
+                ["id"] = id, ["accountId"] = 101, ["contractId"] = 555, ["action"] = "Sell",
+                ["ordStatus"] = "Working", ["timestamp"] = DateTime.UtcNow.ToString("O")
+            });
+            Assert.Equal(1, Volatile.Read(ref amendments));
+            Assert.False(secondRequest.Task.IsCompleted);
+            await fake.PublishVersion(new JsonObject
+            {
+                ["id"] = 91, ["orderId"] = id, ["orderQty"] = 3, ["orderType"] = "Stop", ["stopPrice"] = 4991
+            });
+        }
+        var second = await secondRequest.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        Assert.Equal(id, second["orderId"]!.GetValue<long>());
+        Assert.Equal(4993m, second["stopPrice"]!.GetValue<decimal>());
+        Assert.Equal(3, second["orderQty"]!.GetValue<int>()); // One filled plus the THEN-current two remaining.
+        Assert.True(broker.IsReplacementPending(order));
+        Assert.True(session.HasOpenPositionsOrOrders);
+        await fake.PublishVersion(new JsonObject
+        {
+            ["id"] = 92, ["orderId"] = id, ["orderQty"] = 3, ["orderType"] = "Stop", ["stopPrice"] = 4993
+        });
+        await Until(() => !broker.IsReplacementPending(order));
+        Assert.Equal(4993m, order.TriggerPrice);
+        Assert.Equal(2m, order.Unfilled);
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+        Assert.Equal(2, Volatile.Read(ref amendments));
+        Assert.Single(fake.Orders); // Both amendments retain the one native placement and handle.
+    }
+
+    [Theory]
+    [InlineData("Canceled", OrderStatus.Canceled, 1)]
+    [InlineData("Filled", OrderStatus.Filled, 3)]
+    [InlineData("Rejected", OrderStatus.Rejected, 1)]
+    public async Task Tradovate_terminal_old_values_resolve_amendment_and_discard_queued_trailing_price(string nativeStatus, OrderStatus expectedStatus, int filled)
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        int amendments = 0;
+        fake.Server.OnHttp = req =>
+        {
+            if (req.Route != "/v1/order/modifyorder") return normalHttp(req);
+            Interlocked.Increment(ref amendments);
+            return (503, "Response unavailable");
+        };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = broker.Stop(OrderDirections.Sell, 3, 4990);
+        await Until(() => order.ExchangeOrderId.Length > 0 && order.TriggerPrice == 4990);
+        long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
+        await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Stop"));
+        broker.Replace(order, 4991, 2);
+        await Until(() => Volatile.Read(ref amendments) == 1 && broker.LastError != null);
+        broker.Modify(order, 4993);
+        await fake.PublishFill(new JsonObject
+        {
+            ["id"] = 9902, ["orderId"] = id, ["contractId"] = 555, ["action"] = "Sell",
+            ["qty"] = filled, ["price"] = 4990, ["timestamp"] = DateTime.UtcNow.ToString("O"), ["active"] = true
+        });
+        await fake.PublishOrder(new JsonObject
+        {
+            ["id"] = id, ["accountId"] = 101, ["contractId"] = 555, ["action"] = "Sell",
+            ["ordStatus"] = nativeStatus, ["timestamp"] = DateTime.UtcNow.ToString("O")
+        });
+        await Until(() => order.Status == expectedStatus && !broker.IsReplacementPending(order));
+        Assert.Equal(expectedStatus, order.Status);
+        Assert.Equal(4990m, order.TriggerPrice);
+        Assert.Equal(3m, order.QuantityToFill);
+        Assert.Equal((decimal)filled, order.Filled);
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.False(session.HasOpenPositionsOrOrders);
+        Assert.Empty(broker.ActiveOrders);
+        Assert.Equal(1, Volatile.Read(ref amendments));
+    }
+
+    [Fact]
+    public async Task Tradovate_cancel_command_receipt_retains_obligation_until_native_terminal_replay()
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        int cancels = 0;
+        fake.Server.OnHttp = req =>
+        {
+            if (req.Route != "/v1/order/cancelorder") return normalHttp(req);
+            Interlocked.Increment(ref cancels);
+            return (200, "{\"commandId\":93,\"failureReason\":\"Success\"}"); // No native cancellation yet.
+        };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = broker.Limit(OrderDirections.Buy, 3, 4990);
+        await Until(() => order.ExchangeOrderId.Length > 0 && order.QuantityToFill == 3);
+        long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
+        await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Limit"));
+        var receiptProcessed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        broker.Changed += () =>
+        {
+            if (Volatile.Read(ref cancels) == 1) receiptProcessed.TrySetResult();
+        };
+        broker.Cancel(order);
+        await receiptProcessed.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        Assert.False(order.Canceled);
+        Assert.Contains(order, broker.ActiveOrders);
+        Assert.True(session.HasOpenPositionsOrOrders);
+        await fake.PublishFill(new JsonObject
+        {
+            ["id"] = 9903, ["orderId"] = id, ["contractId"] = 555, ["action"] = "Buy",
+            ["qty"] = 1, ["price"] = 4990, ["timestamp"] = DateTime.UtcNow.ToString("O"), ["active"] = true
+        });
+        await Until(() => order.Filled == 1);
+        Assert.Equal(1, Volatile.Read(ref cancels)); // Working/fill events must not resend a receipted cancel.
+        fake.ReplayOrders.Add(new JsonObject
+        {
+            ["id"] = id, ["accountId"] = 101, ["contractId"] = 555, ["action"] = "Buy",
+            ["ordStatus"] = "Working", ["timestamp"] = DateTime.UtcNow.ToString("O")
+        });
+        fake.ReplayVersions.Add(new JsonObject { ["id"] = 94, ["orderId"] = id, ["orderQty"] = 3, ["orderType"] = "Limit", ["price"] = 4990 });
+        await fake.ReconnectUser();
+        await Until(() => session.SnapshotReady && Volatile.Read(ref cancels) == 2);
+        Assert.Equal(2, Volatile.Read(ref cancels));
+        Assert.False(order.Canceled);
+        await fake.PublishOrder(new JsonObject
+        {
+            ["id"] = id, ["accountId"] = 101, ["contractId"] = 555, ["action"] = "Buy",
+            ["ordStatus"] = "Canceled", ["timestamp"] = DateTime.UtcNow.ToString("O")
+        });
+        await Until(() => order.Canceled);
+        Assert.True(order.Canceled);
+        Assert.Equal(1m, order.Filled);
+        Assert.Empty(broker.ActiveOrders);
+        Assert.False(session.HasOpenPositionsOrOrders);
+    }
+
+    [Fact]
+    public async Task Tradovate_cancel_intent_discards_queued_trailing_price_even_if_prior_amendment_acknowledges()
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        int amendments = 0, cancels = 0;
+        fake.Server.OnHttp = req =>
+        {
+            if (req.Route == "/v1/order/modifyorder")
+            {
+                Interlocked.Increment(ref amendments);
+                return (200, "{\"commandId\":95,\"failureReason\":\"Success\"}");
+            }
+            if (req.Route == "/v1/order/cancelorder")
+            {
+                Interlocked.Increment(ref cancels);
+                return (200, "{\"commandId\":96,\"failureReason\":\"Success\"}");
+            }
+            return normalHttp(req);
+        };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = broker.Stop(OrderDirections.Sell, 3, 4990);
+        await Until(() => order.ExchangeOrderId.Length > 0);
+        long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
+        await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Stop"));
+        broker.Modify(order, 4991);
+        await Until(() => Volatile.Read(ref amendments) == 1);
+        broker.Modify(order, 4993);
+        broker.Cancel(order);
+        await Until(() => Volatile.Read(ref cancels) == 1);
+        broker.Modify(order, 4994); // Cancel intent also rejects later trailing updates.
+        await fake.PublishVersion(new JsonObject
+        {
+            ["id"] = 95, ["orderId"] = id, ["orderQty"] = 3, ["orderType"] = "Stop", ["stopPrice"] = 4991
+        });
+        await Until(() => order.TriggerPrice == 4991 && !broker.IsReplacementPending(order));
+        Assert.Equal(1, Volatile.Read(ref amendments));
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.True(session.HasOpenPositionsOrOrders);
+        await fake.PublishOrder(new JsonObject
+        {
+            ["id"] = id, ["accountId"] = 101, ["contractId"] = 555, ["action"] = "Sell",
+            ["ordStatus"] = "Canceled", ["timestamp"] = DateTime.UtcNow.ToString("O")
+        });
+        await Until(() => order.Canceled);
+        Assert.True(order.Canceled);
+        Assert.False(session.HasOpenPositionsOrOrders);
+        Assert.Equal(1, Volatile.Read(ref amendments));
+    }
+
+    [Fact]
+    public async Task Tradovate_newer_ready_price_supersedes_the_disconnected_queue_before_broker_sync()
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        int amendments = 0;
+        var firstRequest = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRequest = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.Server.OnHttp = req =>
+        {
+            if (req.Route != "/v1/order/modifyorder") return normalHttp(req);
+            var body = JsonNode.Parse(req.Body)!.AsObject();
+            if (Interlocked.Increment(ref amendments) == 1) firstRequest.TrySetResult(body);
+            else secondRequest.TrySetResult(body);
+            return (200, "{\"commandId\":10991,\"failureReason\":\"Success\"}");
+        };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        TradovateBroker? observedBroker = null;
+        Order? observedOrder = null;
+        int phase = 0;
+        // Registered first: deliver a newer user edit before the broker drains reconnect work.
+        session.Changed += () =>
+        {
+            if (observedBroker == null || observedOrder == null) return;
+            if (!session.SnapshotReady && Interlocked.CompareExchange(ref phase, 2, 1) == 1)
+                observedBroker.Modify(observedOrder, 4991);
+            else if (session.SnapshotReady && Interlocked.CompareExchange(ref phase, 3, 2) == 2)
+                observedBroker.Modify(observedOrder, 4993);
+        };
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        observedBroker = broker;
+        var order = broker.Stop(OrderDirections.Sell, 3, 4990);
+        observedOrder = order;
+        await Until(() => order.ExchangeOrderId.Length > 0);
+        long id = long.Parse(order.ExchangeOrderId, CultureInfo.InvariantCulture);
+        await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Stop"));
+        fake.ReplayOrders.Add(new JsonObject
+        {
+            ["id"] = id, ["accountId"] = 101, ["contractId"] = 555, ["action"] = "Sell",
+            ["ordStatus"] = "Working", ["timestamp"] = DateTime.UtcNow.ToString("O")
+        });
+        fake.ReplayVersions.Add(new JsonObject { ["id"] = 10990, ["orderId"] = id, ["orderQty"] = 3, ["orderType"] = "Stop", ["stopPrice"] = 4990 });
+        var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        broker.Changed += () =>
+        {
+            if (Volatile.Read(ref phase) == 3 && !broker.IsReplacementPending(order)) settled.TrySetResult();
+        };
+        Interlocked.Exchange(ref phase, 1);
+        await fake.ReconnectUser();
+        var first = await firstRequest.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        Assert.Equal(4993m, first["stopPrice"]!.GetValue<decimal>());
+        Assert.Equal(3, first["orderQty"]!.GetValue<int>());
+        await fake.PublishVersion(new JsonObject
+        {
+            ["id"] = 10991, ["orderId"] = id, ["orderQty"] = 3, ["orderType"] = "Stop", ["stopPrice"] = 4993
+        });
+        var outcome = await Task.WhenAny(settled.Task, secondRequest.Task).WaitAsync(TimeSpan.FromSeconds(8));
+        Assert.Same(settled.Task, outcome);
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.Equal(4993m, order.TriggerPrice);
+        Assert.Equal(1, Volatile.Read(ref amendments));
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+    }
+
 }

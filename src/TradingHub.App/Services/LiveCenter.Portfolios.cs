@@ -104,8 +104,10 @@ internal sealed partial class LiveCenter
     public static PortfolioResult Analyze(LivePortfolioView p)
     {
         if (p.Members.Count == 0) return new PortfolioResult();
+        if (p.Members.FirstOrDefault(m => m.Ledger == null) is { } unavailable)
+            throw new IOException(unavailable.LedgerError ?? "History unavailable");
         var now = DateTime.UtcNow;
-        var from = p.Members.Select(m => m.Ledger.Fills.Count > 0 ? m.Ledger.Fills[0].Time : now).Min();
+        var from = p.Members.Select(m => m.Ledger!.Fills is { Count: > 0 } fills ? fills[0].Time : now).Min();
         if (from >= now) from = now.AddDays(-1);
         var comps = p.Members.Select(m => new PortfolioComponent
         {
@@ -113,7 +115,7 @@ internal sealed partial class LiveCenter
             StrategyName = m.Info.Strategy,
             Label = $"{m.Info.Strategy} · {m.Info.Symbol}",
             Weight = 1,
-            Trades = m.Ledger.Trades.ToList(),
+            Trades = m.Ledger!.Trades.ToList(),
             Settings = new BacktestSettings { FeedId = m.Info.FeedId, Symbol = m.Info.Symbol, Period = m.Info.Period, FromUtc = from, ToUtc = now },
         }).ToList();
         decimal capital = p.Def.Capital > 0 ? p.Def.Capital : 25_000m;

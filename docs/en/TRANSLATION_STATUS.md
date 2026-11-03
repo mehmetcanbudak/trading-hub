@@ -1,8 +1,8 @@
 # Trading Hub — English localization validation
 
 **Reviewed:** 2026-11-03
-**Branch:** `memoshi`
-**Implementation:** canonical English-first C# branch consolidating the English, safety, upstream-sync and historical main histories. Upstream Windows v1.1 and multilingual v1.2 are included; existing English installations remain English. The installation follow-up repairs signed macOS bundle copying, repeated main-window startup after a tray reopen and concurrent Rithmic working-order publication exposed by Windows ARM64. Normal installation and isolated native UI validation are user-authorized; Rust/Swift worktrees and pins are not changed by this work. This is not real-broker or physical-power certification.
+**Target branch:** `memoshi`; **review branch:** `sync/upstream-1d5a774`.
+**Implementation:** canonical English-first C# reference with the consolidated English, reviewed safety, Windows v1.1 and multilingual v1.2 histories. The `sync/upstream-1d5a774` candidate adds the latest upstream Mac-download documentation, process-crash-consistent ledger replay and broker-acknowledged protection hardening. Existing English installations, persistent identities and real-account controls remain intact. Rust/Swift branches/worktrees/pins and the installed personal-profile runtime `6363664` are not changed by this follow-up. Public releases are explicitly deferred.
 
 **Review:** [Integration PR #4](https://github.com/mehmetcanbudak/trading-hub/pull/4) and safety PR #3 retain the review/evidence history. The original safety source is not approved unchanged; its corrections are included. The user authorized consolidation into `memoshi`, then normal macOS installation and isolated release validation, not an automatic public release or a port rebase.
 
@@ -12,7 +12,56 @@ This fork reuses the 28-commit community translation at `65ae0229bc0b36ba44156cf
 
 Completed coverage includes navigation, controls/tooltips, secondary windows, safety dialogs, chart/DOM/footprint labels, native indicator/SDK settings, compiler diagnostics, live/backtest status/errors, reports, built-in examples and English Claude/risk-agent instructions. All 16 detailed feature/setup/porting guides now cover their original sections, API examples and safety rules rather than being condensed summaries.
 
-## Current upstream integration — 2026-11-02
+## Current upstream and safety follow-up — 2026-11-03
+
+The reviewed upstream input is `1d5a774d3d1bf2baf9259597234d227daad915a9`, merged at `f9bf505`. It adds Mac-download guidance only; it introduces no application, provider or strategy feature. English, Spanish and Chinese instructions distinguish this fork's source build from the original author's binary, which does not include fork fixes. The English primary README remains canonical; the obsolete duplicate English README is not restored.
+
+The documentation merge's `src`, tests, tools, installer, solution and build inputs are identical to native-validated runtime `6363664` (`git diff --quiet` returned 0). This supports review of the **upstream documentation checkpoint**, not native certification of the additional fork runtime changes below. GitHub CI is unavailable by user report; no hosted run was manually dispatched or retried and no gate was disabled. A normal source push can still trigger the repository's existing automatic workflows; none is used here as fresh validation.
+
+### Observed local follow-up gates
+
+| Gate | Observed result | Boundary |
+|---|---|---|
+| Complete Release build | **0 warnings, 0 errors** | .NET 10.0.402 on Apple Silicon. CS0108 and CS0414 were removed without suppressions; new test-analyzer warnings were corrected too. |
+| Final compatibility/safety suite | **468 passed, 7 Windows-only skipped, 475 total** | `final-exact-suite/results/final-exact.trx`; the entire suite was selected, with seven native-only cases skipped on macOS. The earlier full-run Binance market-cancel failure is retained, not treated as a harmless retry. |
+| Controlled broker regressions | **64 Binance cases passed; full suite passed** | Deferred market cancel distinguishes already-filled, partially working and failed-lookup cases. Tradovate's forced disconnect-queue ordering regression failed before the production fix and passed afterward. |
+| Fresh-process ledger consumer | **Failing before, passing after** | A killed writer left partial bytes after failed rollback. The old reader lost a closing fill and reported the wrong position/PnL; the corrected fresh reader recovered three fills once, then a normal append produced four fills, flat exposure and realized PnL 10. |
+| English source/review guard | **191 files, 12,122 text tokens, 111 documented exceptions; 0 failures** | 97 individually reviewed structural fingerprints; historical baseline `9ee74a4` and the existing numeric/raw-template algorithm remain unchanged. |
+| English guides | **22 files, 200 local links/anchors, 16 guide section checks passed** | Full `check_english_translation.py`, not just the source-only audit. |
+| Upstream language coverage | **3,300/3,300 covered per language; 0 missing/mismatched** | 4,721 canonical keys per catalog, 249 authoritative overrides and 105 reviewed collisions. New recovery/acknowledgment prose is included; protocol markers and original vendor responses are not translated as application text. |
+| Actual English UI | **17 scenes; 121 English, 96 safety and 42 quit checks; 0 failures** | Fake providers and six isolated stores. New history-fault captures show unknown position/PnL, visible diagnostics, blocked unsafe service actions and same-length history-cache invalidation. |
+| Spanish/Chinese UI | **7 main pages each; 0 known untranslated candidates** | Rendered Chinese Settings and Spanish Live were visually inspected; this is finite surface coverage, not a natural-language proof. |
+| Generators/reports | **Passed in the English scenario** | Five strategy templates, two indicator sources and three complete guide examples compile; existing backtest/report/export paths remain covered. |
+| Private Mac package | **Self-contained ARM64; both staged/copied strict/deep signatures passed** | Ad-hoc signing only; `build-app.sh` ran without `--install`. Native MCP initialized, answered ping and listed 16 tools with exit 0/empty stderr. |
+| Actual packaged Mac GUI | **Opened; Settings → Live responded; native close exited 0** | PID-scoped accessibility and owned-window captures only; no forced termination. This follow-up did not repeat native tray/restart acceptance or replace the installed app. |
+| Windows platform outputs | **Self-contained x64 and ARM64 published; PE architectures verified** | No native Windows host, PowerShell or NSIS compiler was available here. No fresh Windows desktop, Credential Manager, IPC, power or installer result is claimed. |
+| Tracker/shell checks | **13 tracker tests passed; Bash/zsh syntax passed** | Temporary histories/fake issue API; no broker credentials or trading data. |
+| Actions maintenance | **checkout v7, setup-dotnet v6, upload-artifact v7** | Official stable action manifests use Node 24. This is source/manifest review, not a new hosted-run result. |
+| ImgBot PR #1 | **Reviewed and closed without merging** | All eight optimized images retained identical RGBA pixels but changed color/EXIF metadata for only 136,614 bytes saved. Existing assets remain unchanged. |
+| Actual Claude session | **CLI 2.1.316 installed and logged in** | Credential-free status reports `claude.ai`/`firstParty`; no model request, paid call or output-availability claim. |
+
+The temporary direct-apphost GUI launch also emitted `sandbox_extension_issue_file_to_process ... Operation not permitted` for its owned temporary bundle. The window rendered, both native navigation actions succeeded and close exited 0; the diagnostic is retained in `mac-native/packaged-gui.json`. No privacy setting, signature check or system security control was weakened to suppress it. A normal installed-app update/acceptance remains separate.
+
+### Reviewed safety changes and remaining guarantees
+
+- A checksummed, generation-bound append intent is flushed before acknowledgment. Fresh readers combine the committed prefix with that exact intent once; the next save finishes its assigned bytes. Cross-process leases and deletion generations prevent concurrent replay/resurrection. Explicit Resume retries pending fills without a dummy execution and remains paused on storage failure.
+- Storage faults block new/reversing exposure and fabricated financial totals, not late-fill accounting or existing protection/reductions. Unavailable history stays visible and prevents unsafe launch/restart, analysis and risk changes. [Live strategies](en-vivo.md) documents recovery and downgrade constraints.
+- Unknown placement is retained under exact client identity rather than blindly retried. Delayed cancel/modify acknowledgments keep their owned handle. Actual working reports acknowledge amendments; latest queued prices supersede older disconnect moves. Bracket actions no longer depend on a notification subscriber, expired timeout or disappearing order.
+- **No integrated live adapter currently submits native OCO groups.** Binance Futures' supported native `reduceOnly` is account-wide, not strategy-isolated OCO. Rithmic/Tradovate simple orders and Spot do not gain exchange enforcement from a local flag. Coordinated sibling protection is safer, not atomic; see [Trading](operar.md#stops-and-targets).
+- Ledger recovery now covers **process-crash consistency**, not power loss/filesystem rollback, events lost before a durable intent, broker-event exactly-once delivery or authoritative execution-price accounting. Live-ledger prices remain last-market-price estimates without commissions. Unknown submission attribution remains process/session-local.
+
+### Still open or deliberately deferred
+
+1. Authenticated Binance Futures testnet: a usable dedicated key/secret must be entered privately in the isolated demo profile before authorized lifecycle, partial-fill, cancel/replace, reconnect, snapshot and late-fill scenarios. The previous one-time secret was never revealed; no secret is requested in chat or extracted from Keychain. Other providers need their own authorized scenarios.
+2. Physical Mac sleep/wake/lid/thermal tests require user participation and a safe pause in the other agents' work. Native Windows physical behavior and fresh native regression/desktop/installer gates need a Windows host; cross-publishing is not a substitute.
+3. A real Claude request/output needs explicit authorization for a billable/quota-consuming call and actual account/model availability. Login status alone is not that test.
+4. Additional third-party strategies/indicators require a specifically selected source/version and isolated replay. Built-ins/examples and the previously authorized custom delta are not universal extension certification.
+5. Human review of this integration and any later normal installation remain distinct from source checks. Existing signed-runtime/tray/restart evidence below is historical, not a new run of these changes.
+6. Public release publication, distribution signing/notarization and downloadable fork artifacts are **deferred by request**, not current personal-use work.
+
+Local follow-up receipts are under `/var/folders/xm/66q9p6h91vs2w2l6fdl2j4z00000gn/T/memoshi-followup-fg6f_56e`; retained integration evidence lives outside Git on the private comparison volume. No personal-profile capture or credential was published.
+
+## Consolidation baseline — 2026-11-02
 
 Source revisions:
 
@@ -28,16 +77,16 @@ These are integration requirements, not optional translation details:
 
 1. **Quit and restart:** closing a window must retain background live strategies by default. Reopening the existing main window must preserve its chart pages and must not rerun startup auto-resume. Canceling Quit or a language restart must preserve the existing process and start no replacement. A replacement waits for the old process to exit and preserves its arguments. Explicit stop/close waits for acknowledgments and reports unresolved orders or positions honestly.
 2. **Dangerous confirmations:** Cancel remains the initial/default safe choice; Enter/Escape cannot accidentally approve a destructive action. The deliberate confirm gesture uses the platform's Command/Ctrl modifier. Existing real-account launch, paid-download, deletion and emergency-stop safeguards remain operational.
-3. **Order ownership and recovery:** stable IDs, legacy ledger identities and manual holdings remain intact. Unknown snapshots are not flat; complete position/order replay precedes adoption. Concurrent order/PnL callbacks must not overwrite newer working protection with an older order snapshot. Partial fills resize/cancel sibling protection without closing unrelated holdings. Cancel acknowledgments and late fills remain tracked after a strategy is stopped. A failed or partial ledger append cannot be counted twice in the same process.
+3. **Order ownership and recovery:** stable IDs, legacy ledger identities and manual holdings remain intact. Unknown snapshots are not flat; complete position/order replay precedes adoption. Concurrent order/PnL callbacks must not overwrite newer protection with an older snapshot. Partial fills resize/cancel siblings without closing unrelated holdings. Cancellation acknowledgments and late fills remain tracked after stop. Published append intents must replay once across process restart; failures must not invent flat/zero history or reopen new exposure.
 4. **Permission and connection boundaries:** permission is checked at order send; revoked permission blocks new exposure while allowing reductions. Replaced credential/transport contexts reject new exposure but remain available for cancellation and close acknowledgments until confirmed idle. Closing an owned Spot quantity must not liquidate manual or unrelated-asset balances.
 
-Sibling protection remains emulated, not atomic broker-native OCO. Ledger append recovery is process-local, not a promise of crash durability. Those limits must not be hidden by translated text or passing fake-provider tests.
+Sibling protection remains emulated, not atomic broker-native OCO. The current follow-up replaces the old process-local append boundary with process-crash-consistent journaling, without claiming power-loss durability or broker-event exactly-once delivery. Passing fake providers must not hide those limits.
 
-### Current evidence
+### Consolidation and installation baseline evidence
 
 | Gate | Observed result | Scope / remaining limit |
 |---|---|---|
-| Complete Release solution build | Passed; 0 errors | .NET 10.0.402 on Apple Silicon after the Rithmic repair: incremental build had 0 warnings/0 errors. Clean packaging/hosted builds still report the two pre-existing CS0108 and CS0414 warnings; neither is suppressed. |
+| Complete Release solution build | Passed; 0 errors | Historical installation baseline on .NET 10.0.402. Its clean packaging/hosted builds still reported CS0108 and CS0414; both are removed in the current follow-up above, without suppressions. |
 | Full compatibility/safety suite | **352 passed, 7 Windows-only skipped, 359 total** | Full local suite after the historical profile replay repair: `release-install-session/profile-replay/profile-replay-fixed.trx`. The new allocation regression failed before the fix. Existing partial-stop/user-limit ownership and sibling assertions are unchanged; earlier runtime `393bbb1` already passed both native Windows jobs in run 41613876096. |
 | Failing-before safety regressions | Confirmed | Pinned safety source: ledger suite 3 failed/8 passed; corrected runner/replay/close suite 24 failed/112 passed. The integrated full suite passes. |
 | English source/review guard | **191 files, 11,979 text tokens, 111 documented exceptions; 0 failures** | Full source/docs audit after the main-window startup, Rithmic publication and native profile replay reviews; 93 explicit fingerprints. Original `9ee74a4` audit baseline and numeric/template checks are unchanged. |
@@ -144,7 +193,7 @@ Preserved the original dirty English worktree's documentation-only safety guidan
 
 ## Upstream maintenance
 
-The [upstream sync guide](upstream-sync.md), [checkpoint ledger](../../.github/upstream-english.json) and [daily/manual monitor](../../.github/workflows/upstream-english-tracking.yml) track the original repository separately from `memoshi`. `integrated_commit` advances to `c28900e03ba473ee21f3983e65c1adf980ae0077` for this user-authorized consolidation: the unchanged runtime passed [all three native platform jobs at `617259d`](https://github.com/mehmetcanbudak/trading-hub/actions/runs/41506213481), and fresh `memoshi` configuration, tracker, compatibility, English, catalog and UI checks pass. The checkpoint records reviewed upstream source, not app installation or brokerage/physical-power certification. The historical C# audit baseline stays at `9ee74a4c527ac43120423acd41e006ec9d7877ad`.
+The [upstream sync guide](upstream-sync.md), [checkpoint ledger](../../.github/upstream-english.json) and [daily/manual monitor](../../.github/workflows/upstream-english-tracking.yml) track the original repository separately from `memoshi`. Consolidation advanced to `c28900e` after [all three native jobs at `617259d`](https://github.com/mehmetcanbudak/trading-hub/actions/runs/41506213481). This candidate advances the reviewed upstream checkpoint to documentation-only `1d5a774`: its merge retains the exact runtime/build inputs already validated natively at `6363664`, and fresh local source/docs/compatibility/English/catalog/UI/package checks cover the candidate while hosted CI is unavailable. A canonical-branch monitor correctly continues to report it pending until integration reaches `memoshi`. Checkpoint acceptance does not certify the additional fork runtime on native Windows, brokerage execution, power loss or physical hardware. The historical C# audit baseline stays at `9ee74a4c527ac43120423acd41e006ec9d7877ad`.
 
 Local tracker tests cover synthetic upstream additions, history rewrites, invalid checkpoints, English doc mappings, preserved issue notes/checklists, bounded output, notification deduplication/retry and fork-only writes. The monitor never merges, auto-translates, advances the checkpoint, installs an app or touches trading data. Historical setup runs 39237527539 and 39237638444 maintained exactly one tracker issue without duplicate update comments; their then-current “Up to date” reports are not evidence for the present tree. Daily/manual monitoring now checks canonical `memoshi`, with Issues enabled and the schedule at 06:37 UTC. Future integration/review targets this fork's `memoshi`, never the original author's repository, historical main or either port.
 
@@ -183,9 +232,9 @@ Personal history, existing reports/conversations, third-party indicators, arbitr
 
 ## Limits and deliberate exclusions
 
-Two existing warnings remain: CS0414 in CumulativeDeltaCandles and CS0108 for ChartTraderPanel.Template. They are not introduced language failures.
+The earlier CS0414 (`CumulativeDeltaCandles._base`) and CS0108 (`ChartTraderPanel.Template`) are fixed: dead state/its empty hook were removed, and the private template accessor is now `GetBracketTemplate`. Current full Release builds report zero warnings and errors; neither diagnostic is suppressed.
 
-No real-money orders, real provider credentials, actual paid Claude calls or privileged closed-lid operation are used as translation tests. Existing fake broker scenarios, the fake Claude bridge and captured power-helper script test built-in English paths safely. Windows cross-publishing and hosted shared-runtime build/tests/source auditing pass, but a complete Windows desktop port is not certified. Real brokerage connectivity/fills, provider licensing/model availability, actual paid-model output, physical closed-lid/thermal behavior and arbitrary extensions remain unverified. Raw vendor/model/system responses can have their own language; diagnostics are not silently rewritten or discarded.
+No real-money orders, broker credentials, paid Claude requests or privileged closed-lid operation are fixtures. Historical runtime `6363664` passed native Mac/x64/ARM64 jobs; this follow-up has fresh local shared-runtime tests, three-language UI, signed Mac-package/native GUI/MCP evidence and both Windows cross-publishes, **not a fresh native Windows run**. Authenticated provider execution, actual model output, physical sleep/lid/thermal behavior and specifically chosen additional extensions remain separate. Raw vendor/model/system responses retain their own language and diagnostics; the temporary native GUI sandbox-extension warning above is not discarded.
 
 A language heuristic and passing tests cannot prove arbitrary runtime content is English or certify trading safety. Completion claims apply to the reviewed built-in surfaces and full English guides, with the explicit compatibility/content exclusions above.
 
@@ -193,18 +242,17 @@ A language heuristic and passing tests cannot prove arbitrary runtime content is
 
 ```bash
 export PATH="$HOME/.dotnet:$PATH"
+fixture="$(mktemp -d /tmp/tradinghub-english.XXXXXX)"
+export TRADINGHUB_DATA_DIR="$fixture/data"
+export TRADINGHUB_STRATEGIES_DIR="$fixture/strategies"
+export TRADINGHUB_INDICATORS_DIR="$fixture/indicators"
+export TRADINGHUB_BACKTESTS_DIR="$fixture/backtests"
+export TRADINGHUB_LIVE_DIR="$fixture/live"
+export TRADINGHUB_KEYCHAIN_FILE="$fixture/fake-keychain.json"
+export TRADINGHUB_SLEEP_GUARD=off
 dotnet build TradingHub.slnx -c Release
 dotnet test tests/TradingHub.Tests -c Release
 python3 tools/check_english_translation.py
-
-fixture="$(mktemp -d /tmp/tradinghub-english.XXXXXX)"
-TRADINGHUB_DATA_DIR="$fixture/data" \
-TRADINGHUB_STRATEGIES_DIR="$fixture/strategies" \
-TRADINGHUB_INDICATORS_DIR="$fixture/indicators" \
-TRADINGHUB_BACKTESTS_DIR="$fixture/backtests" \
-TRADINGHUB_LIVE_DIR="$fixture/live" \
-TRADINGHUB_KEYCHAIN_FILE="$fixture/fake-keychain.json" \
-TRADINGHUB_SLEEP_GUARD=off \
 dotnet run -c Release --project tools/TradingHub.UiSnapshot -- \
   "$fixture/screenshots" 2 \
   trading settings connections data strategies accounts live english \

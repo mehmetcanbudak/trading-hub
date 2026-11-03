@@ -61,6 +61,355 @@ public class BinanceBrokerTests
 
     private static string CancelRoute(bool conditional) => conditional ? "DELETE /fapi/v1/algoOrder" : "DELETE /fapi/v1/order";
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Terminal_native_fill_discards_queued_trailing_price_without_new_exposure(bool conditional)
+    {
+        using var fake = new FakeBinance(true);
+        using var broker = Broker(fake);
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Accepted(fake, order);
+        fake.UnknownPosts = 1;
+        fake.HideOwnedOrders = true;
+        broker.Modify(order, 59500m);
+        await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
+        broker.Modify(order, 59700m);
+        fake.Fill(fake.Sent[1].ExchangeId, 2m);
+        fake.HideOwnedOrders = false;
+        await Until(() => order.Status == OrderStatus.Filled);
+        await Polls(fake, 3);
+        Assert.Equal(OrderStatus.Filled, order.Status);
+        Assert.Equal(2m, order.Filled);
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.Equal(2, fake.Sent.Count);
+        Assert.Empty(broker.ActiveOrders);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Trailing_modify_coalesces_the_latest_price_until_prior_native_replacement_resolves(bool conditional)
+    {
+        using var fake = new FakeBinance(true);
+        using var broker = Broker(fake);
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Accepted(fake, order);
+        var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int replies = 0;
+        fake.BeforePostReply = ct =>
+        {
+            if (Interlocked.Increment(ref replies) != 1) return Task.CompletedTask;
+            arrived.TrySetResult();
+            return release.Task.WaitAsync(ct);
+        };
+        broker.Modify(order, 59500m);
+        await arrived.Task.WaitAsync(TimeSpan.FromSeconds(12));
+        try
+        {
+            broker.Modify(order, 59600m);
+            broker.Modify(order, 59700m);
+            Assert.True(broker.IsReplacementPending(order));
+            await Polls(fake, 2);
+            Assert.Equal(2, fake.Sent.Count);
+            if (!conditional) fake.Fill(fake.Sent[1].ExchangeId, 0.5m);
+        }
+        finally { release.TrySetResult(); }
+        await Until(() => fake.Sent.Count == 3 && !broker.IsReplacementPending(order));
+        Assert.Equal(3, fake.Sent.Count);
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.Equal(59700m, Level(order));
+        Assert.Equal(59700m, fake.Sent[2].Level);
+        Assert.Equal(conditional ? 2m : 1.5m, fake.Sent[2].Qty);
+        Assert.Equal(conditional ? 0m : 0.5m, order.Filled);
+        Assert.Equal(2m, order.QuantityToFill);
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Queued_trailing_modify_waits_for_exact_unknown_submission_recovery(bool conditional)
+    {
+        using var fake = new FakeBinance(true);
+        using var broker = Broker(fake);
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Accepted(fake, order);
+        fake.UnknownPosts = 1;
+        fake.HideOwnedOrders = true;
+        broker.Modify(order, 59500m);
+        await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
+        broker.Modify(order, 59700m);
+        await Polls(fake, 4);
+        Assert.Equal(2, fake.Sent.Count);
+        Assert.True(broker.IsReplacementPending(order));
+        Assert.Empty(order.ExchangeOrderId);
+        fake.HideOwnedOrders = false;
+        await Until(() => fake.Sent.Count == 3 && !broker.IsReplacementPending(order));
+        Assert.Equal(3, fake.Sent.Count);
+        Assert.Equal(59700m, Level(order));
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cancel_discards_queued_trailing_price_without_placing_another_replacement(bool conditional)
+    {
+        using var fake = new FakeBinance(true);
+        using var broker = Broker(fake);
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Accepted(fake, order);
+        fake.UnknownPosts = 1;
+        fake.HideOwnedOrders = true;
+        broker.Modify(order, 59500m);
+        await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
+        broker.Modify(order, 59700m);
+        broker.Cancel(order);
+        fake.HideOwnedOrders = false;
+        await Until(() => order.Canceled);
+        await Polls(fake, 3);
+        Assert.True(order.Canceled);
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.Equal(2, fake.Sent.Count);
+        Assert.Empty(fake.Open);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Definite_cancel_rejection_restores_native_values_before_replacement_resolves(bool conditional)
+    {
+        using var fake = new FakeBinance(true);
+        using var broker = Broker(fake);
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Accepted(fake, order);
+        string id = order.ExchangeOrderId;
+        fake.RejectCancels = 1;
+        broker.Replace(order, 59500m, 1m);
+        Assert.True(broker.IsReplacementPending(order));
+        await Until(() => !broker.IsReplacementPending(order));
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.Equal(id, order.ExchangeOrderId);
+        Assert.Equal(OrderStates.Active, order.State);
+        Assert.Equal(59000m, Level(order));
+        Assert.Equal(2m, order.QuantityToFill);
+        Assert.Equal(2m, order.Unfilled);
+        Assert.Single(fake.Sent);
+    }
+
+    [Fact]
+    public async Task Spot_stop_replacement_ACK_and_optimistic_values_do_not_confirm_working_capacity()
+    {
+        using var fake = new FakeBinance(false);
+        using var broker = Broker(fake);
+        var order = broker.Stop(OrderDirections.Sell, 2m, 59000m);
+        await Accepted(fake, order);
+        string first = order.ExchangeOrderId;
+        fake.Fill(first, 0.5m);
+        await Until(() => order.Filled == 0.5m);
+        fake.HideOwnedOrders = true;
+        bool observedResolution = false;
+        broker.Changed += () =>
+        {
+            if (order.ExchangeOrderId != first && !broker.IsReplacementPending(order)) observedResolution = true;
+        };
+        broker.Replace(order, 59500m, 1m);
+        Assert.True(broker.IsReplacementPending(order));
+        Assert.Equal(59500m, order.TriggerPrice);
+        Assert.Equal(1m, order.Unfilled);
+        await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId != first);
+        await Polls(fake, 4); // a bare ACK and repeated not-found snapshots cannot release replacement capacity
+        Assert.Equal(OrderStates.Active, order.State);
+        Assert.True(broker.IsReplacementPending(order));
+        Assert.False(observedResolution);
+        broker.Replace(order, 59600m, 1m);
+        await Polls(fake, 2);
+        Assert.Equal(2, fake.Sent.Count);
+        fake.Fill(order.ExchangeOrderId, 0.25m);
+        fake.HideOwnedOrders = false;
+        await Until(() => !broker.IsReplacementPending(order) && observedResolution);
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.True(observedResolution);
+        Assert.Equal(1.5m, order.QuantityToFill); // total, not remaining, is the acknowledgment invariant
+        Assert.Equal(0.75m, order.Filled);
+        Assert.Equal(0.75m, order.Unfilled);
+        Assert.Equal(59500m, order.TriggerPrice);
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+    }
+
+    private sealed class SubmissionStrategy : Strategy
+    {
+        public void Enter() => BuyLimit(59000m, 2m);
+        public void Exit() => SellLimit(59010m, 2m);
+    }
+
+    [Fact]
+    public async Task Unknown_submission_replay_books_each_owned_fill_and_realized_profit_once()
+    {
+        using var fake = new FakeBinance(true) { UnknownPosts = 1, HideOwnedOrders = true };
+        var data = new InstrumentData(BtcUsdt, new SimulatedFeed());
+        using var broker = new BinanceBroker(data, fake.Settings, "Binance accounting test");
+        data.Trades.Add(new Trade(1, DateTime.UtcNow, 59000m, 1m, TradeSide.Buy));
+        var strategy = new SubmissionStrategy();
+        using var runner = new LiveStrategyRunner(strategy, data, broker, ChartPeriod.M1) { Persist = false };
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        runner.Start();
+        strategy.Enter();
+        await Until(() => fake.Sent.Count == 1 && broker.LastError != null);
+        var entry = Assert.Single(broker.ActiveOrders);
+        string entryId = Assert.Single(fake.Sent).ExchangeId;
+        fake.Fill(entryId, 1m);
+        fake.HideOwnedOrders = false;
+        await Until(() => runner.Ledger.Position == 1m);
+        Assert.Equal(1m, runner.Ledger.Position);
+        Assert.Same(entry, Assert.Single(broker.ActiveOrders));
+        await Polls(fake, 3);
+        Assert.Single(runner.Ledger.Fills);
+        fake.Fill(entryId, 1m);
+        await Until(() => runner.Ledger.Position == 2m);
+        Assert.Equal(2m, runner.Ledger.Position);
+        Assert.Equal(2, runner.Ledger.Fills.Count);
+        await Until(() => broker.OrdersReady);
+        fake.UnknownPosts = 1;
+        fake.HideOwnedOrders = true;
+        data.Trades.Add(new Trade(2, DateTime.UtcNow.AddSeconds(1), 59010m, 1m, TradeSide.Buy));
+        // Match the established runner fixture: appending storage alone does not deliver the market-data event.
+        var appended = typeof(InstrumentData).GetField("TradesAppended", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        ((Action<int, int>?)appended!.GetValue(data))?.Invoke(data.Trades.Count - 1, 1);
+        Assert.Equal(59010m, runner.LastPrice);
+        strategy.Exit();
+        await Until(() => fake.Sent.Count == 2 && broker.LastError != null);
+        string exitId = fake.Sent[1].ExchangeId;
+        fake.Fill(exitId, 2m);
+        fake.HideOwnedOrders = false;
+        await Until(() => runner.Ledger.Position == 0m && runner.Ledger.Realized == 20m);
+        await Polls(fake, 4);
+        Assert.Equal(0m, runner.Ledger.Position);
+        Assert.Equal(20m, runner.Ledger.Realized);
+        Assert.Equal(3, runner.Ledger.Fills.Count);
+        Assert.Equal(2, fake.Sent.Count);
+    }
+
+    [Theory]
+    [InlineData(false, false, 503, -1007)]
+    [InlineData(true, false, 503, -1007)]
+    [InlineData(true, true, 503, -1007)]
+    [InlineData(false, false, 400, -1007)]
+    [InlineData(true, false, 400, -1006)]
+    [InlineData(true, true, 503, 0)]
+    public async Task Unknown_submission_replays_exact_identity_without_adopting_a_manual_lookalike(bool futures, bool conditional, int httpStatus, int errorCode)
+    {
+        using var fake = new FakeBinance(futures) { UnknownPosts = 1, UnknownPostStatus = httpStatus, UnknownPostCode = errorCode, HideOwnedOrders = true };
+        using var broker = Broker(fake);
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Until(() => fake.Sent.Count == 1 && broker.LastError?.Contains("unknown", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Equal(OrderStates.Active, order.State);
+        Assert.Equal("", order.ExchangeOrderId);
+        Assert.Contains(order, broker.ActiveOrders);
+        Assert.False(broker.OrdersReady);
+        string manual = conditional
+            ? "algo:" + fake.AddExternalAlgo("SELL", "STOP_MARKET", 2m, 59000m).ToString(Inv)
+            : fake.AddExternal("SELL", "LIMIT", 2m, 59000m).ToString(Inv);
+        await Until(() => broker.ActiveOrders.Any(o => o.ExchangeOrderId == manual));
+        Assert.NotSame(order, broker.ActiveOrders.Single(o => o.ExchangeOrderId == manual));
+        broker.Replace(order, 59500m, 2m);
+        await Polls(fake, 4);
+        Assert.Single(fake.Sent);
+        Assert.Equal("", order.ExchangeOrderId); // repeated not-found queries are not rejection proof
+
+        string accepted = Assert.Single(fake.Sent).ExchangeId;
+        fake.Fill(accepted, 0.5m); // an algo can trigger and partially fill before its response is recovered
+        fake.HideOwnedOrders = false;
+        await Until(() => order.Filled == 0.5m && order.ExchangeOrderId.Length > 0);
+        Assert.Equal(0.5m, order.Filled);
+        await Polls(fake, 3);
+        Assert.Equal(0.5m, order.Filled);
+        Assert.Same(order, broker.ActiveOrders.Single(o => o.ExchangeOrderId == order.ExchangeOrderId));
+        fake.Fill(order.ExchangeOrderId, 1.5m);
+        await Until(() => order.Status == OrderStatus.Filled);
+        await Polls(fake, 3);
+        Assert.Equal(OrderStatus.Filled, order.Status);
+        Assert.Equal(2m, order.Filled);
+        Assert.Single(fake.Sent);
+        Assert.Contains(broker.ActiveOrders, o => o.ExchangeOrderId == manual);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Lost_submission_response_retains_cancel_until_delayed_client_binding(bool conditional)
+    {
+        using var fake = new FakeBinance(true) { HideOwnedOrders = true };
+        var settings = fake.Settings;
+        settings.RequestTimeout = TimeSpan.FromMilliseconds(200);
+        fake.BeforePostReply = ct => Task.Delay(Timeout.Infinite, ct);
+        using var broker = new BinanceBroker(new InstrumentData(BtcUsdt, new SimulatedFeed()), settings, "Binance test");
+        var order = Exit(broker, conditional, 2m, 59000m);
+        broker.Cancel(order);
+        await Until(() => fake.Sent.Count == 1 && broker.LastError != null);
+        await Polls(fake, 12); // beyond the old bounded binding wait
+        Assert.Equal(OrderStates.Active, order.State);
+        Assert.Equal("", order.ExchangeOrderId);
+        Assert.Single(fake.Sent);
+        fake.HideOwnedOrders = false;
+        await Until(() => order.Status == OrderStatus.Canceled);
+        Assert.Equal(OrderStatus.Canceled, order.Status);
+        Assert.Single(fake.Sent);
+        Assert.Contains(CancelRoute(conditional), fake.Calls);
+        Assert.Empty(fake.Open);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Unknown_replacement_is_not_replaced_again_and_retains_the_original_fill_total(bool conditional)
+    {
+        using var fake = new FakeBinance(true);
+        using var broker = Broker(fake);
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Accepted(fake, order);
+        string first = order.ExchangeOrderId;
+        if (!conditional)
+        {
+            fake.Fill(first, 0.5m);
+            await Until(() => order.Filled == 0.5m);
+        }
+        fake.HideOwnedOrders = true;
+        fake.UnknownPosts = 1;
+        broker.Replace(order, 59500m, order.Unfilled);
+        Assert.True(broker.IsReplacementPending(order));
+        await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
+        Assert.Equal(OrderStates.Active, order.State);
+        broker.Replace(order, 59600m, order.Unfilled);
+        await Polls(fake, 4);
+        Assert.Equal(2, fake.Sent.Count);
+        Assert.True(broker.IsReplacementPending(order));
+        broker.Cancel(order);
+        fake.HideOwnedOrders = false;
+        await Until(() => order.Status == OrderStatus.Canceled);
+        Assert.Equal(OrderStatus.Canceled, order.Status);
+        Assert.False(broker.IsReplacementPending(order));
+        Assert.Equal(conditional ? 0m : 0.5m, order.Filled);
+        Assert.Equal(2, fake.Sent.Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Definite_submission_rejection_is_terminal(bool conditional)
+    {
+        using var fake = new FakeBinance(true) { RejectPosts = 1 };
+        using var broker = Broker(fake);
+        var order = Exit(broker, conditional, 1m, 59000m);
+        await Until(() => order.Status == OrderStatus.Rejected);
+        Assert.Equal(OrderStates.Failed, order.State);
+        Assert.Empty(fake.Sent);
+        Assert.DoesNotContain(order, broker.ActiveOrders);
+    }
+
     [Fact]
     public async Task A_market_exit_is_sent_as_a_broker_enforced_reduce_only_market_order()
     {
@@ -340,6 +689,7 @@ public class BinanceBrokerTests
         broker.Modify(exit, 61000m);
         await Until(() => exit.State == OrderStates.Failed);
         Assert.Equal(OrderStates.Failed, exit.State);
+        Assert.False(broker.IsReplacementPending(exit));
         Assert.Equal(OrderStatus.Rejected, exit.Status);
         Assert.Equal(first, exit.ExchangeOrderId);
         Assert.Equal("CANCELED", fake.View(first).Status); // the old order is gone at the exchange
@@ -389,6 +739,7 @@ public class BinanceBrokerTests
         Assert.Equal(60500m, Level(exit)); // like the other brokers, the handle shows the request at once
         Assert.Equal(1m, exit.Unfilled);
         Assert.Equal(1m, exit.QuantityToFill);
+        Assert.True(broker.IsReplacementPending(exit));
 
         await postArrived.Task.WaitAsync(TimeSpan.FromSeconds(12));
         int polls = fake.OpenOrderPolls;
@@ -405,6 +756,7 @@ public class BinanceBrokerTests
             Assert.Equal(60500m, Level(exit)); // a completed poll did not put the old values back
             Assert.Equal(1m, exit.Unfilled);
             Assert.Same(exit, Assert.Single(broker.ActiveOrders));
+            Assert.True(broker.IsReplacementPending(exit));
         }
         finally
         {
@@ -418,6 +770,7 @@ public class BinanceBrokerTests
         Assert.Equal(1m, open.Qty);
         Assert.Equal(60500m, open.Level);
         await Polls(fake, 2);
+        Assert.False(broker.IsReplacementPending(exit));
         Assert.Equal(60500m, Level(exit));
         Assert.Equal(1m, exit.Unfilled);
         Assert.Same(exit, Assert.Single(broker.ActiveOrders));
@@ -488,11 +841,6 @@ public class BinanceBrokerTests
         var settings = fake.Settings;
         settings.RequestTimeout = TimeSpan.FromSeconds(2);
         using var broker = new BinanceBroker(new InstrumentData(BtcUsdt, new SimulatedFeed()), settings, "Binance test");
-        var errors = new ConcurrentQueue<string>();
-        broker.Changed += () =>
-        {
-            if (broker.LastError is { } e) errors.Enqueue(e);
-        };
         var exit = Exit(broker, conditional, 1m, 59000m);
         await Accepted(fake, exit);
         string id = exit.ExchangeOrderId;
@@ -503,6 +851,7 @@ public class BinanceBrokerTests
         Assert.Equal(59500m, Level(exit)); // the request shows at once
         await Until(() => Level(exit) == 59000m); // asked right away: still working, so not replaced
         await Polls(fake, 1);
+        Assert.True(broker.IsReplacementPending(exit)); // a working snapshot does not prove the uncertain cancel cannot arrive late
         Assert.Equal(OrderStates.Active, exit.State);
         Assert.Equal(59000m, Level(exit)); // not replaced: shown as it is at Binance again
         Assert.Single(fake.Sent);
@@ -510,8 +859,88 @@ public class BinanceBrokerTests
         fake.CancelAtExchange(id); // Binance carries out the cancel late
         await Until(() => exit.State == OrderStates.Failed);
         Assert.Equal(OrderStatus.Rejected, exit.Status); // not a silent Canceled
-        Assert.Contains(errors, e => e.Contains("replacement was not sent", StringComparison.Ordinal));
+        Assert.False(broker.IsReplacementPending(exit));
         Assert.Empty(broker.ActiveOrders);
+    }
+
+    [Fact]
+    public async Task Deferred_market_cancel_queries_actual_execution_after_a_held_NEW_ack_before_sending_DELETE()
+    {
+        using var fake = new FakeBinance(true);
+        var settings = fake.Settings;
+        settings.PollInterval = TimeSpan.FromHours(1); // Only the queued cancel can perform the final-state lookup.
+        using var broker = new BinanceBroker(new InstrumentData(BtcUsdt, new SimulatedFeed()), settings, "Binance market cancel");
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        Assert.True(broker.OrdersReady && broker.PositionReady);
+        var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.BeforePostReply = ct =>
+        {
+            arrived.TrySetResult();
+            return release.Task.WaitAsync(ct);
+        };
+        var order = broker.Market(OrderDirections.Sell, 0.02m);
+        broker.Cancel(order);
+        await arrived.Task.WaitAsync(TimeSpan.FromSeconds(12));
+        try
+        {
+            Assert.Empty(order.ExchangeOrderId);
+            Assert.Equal(OrderStates.Active, order.State);
+            Assert.Equal("FILLED", Assert.Single(fake.Placed).Status); // Engine execution precedes the held NEW ACK.
+            Assert.DoesNotContain("DELETE /fapi/v1/order", fake.Calls);
+        }
+        finally { release.TrySetResult(); }
+        await Until(() => order.Status == OrderStatus.Filled);
+        Assert.Equal(OrderStatus.Filled, order.Status);
+        Assert.Equal(0.02m, order.Filled);
+        Assert.Equal(0m, order.Unfilled);
+        Assert.Contains("GET /fapi/v1/order", fake.Calls);
+        Assert.DoesNotContain("DELETE /fapi/v1/order", fake.Calls);
+        broker.Cancel(order); // A known terminal handle must not fall through to detached-ID cancellation.
+        Assert.DoesNotContain("DELETE /fapi/v1/order", fake.Calls);
+    }
+
+    [Fact]
+    public async Task Unknown_market_submission_that_replays_working_still_honors_its_deferred_cancel_and_partial_fill()
+    {
+        using var fake = new FakeBinance(true) { HoldMarketExecution = true, UnknownPosts = 1, HideOwnedOrders = true };
+        using var broker = Broker(fake);
+        var order = broker.Market(OrderDirections.Sell, 0.02m);
+        broker.Cancel(order);
+        await Until(() => fake.Placed.Count == 1 && broker.LastError?.Contains("unknown", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Equal(OrderStates.Active, order.State);
+        Assert.Empty(order.ExchangeOrderId);
+        Assert.DoesNotContain("DELETE /fapi/v1/order", fake.Calls);
+        fake.Fill(Assert.Single(fake.Placed).Id, 0.005m);
+        fake.HideOwnedOrders = false;
+        await Until(() => order.Canceled);
+        Assert.True(order.Canceled);
+        Assert.Equal(0.005m, order.Filled);
+        Assert.Equal(0.015m, order.Unfilled);
+        Assert.Contains("DELETE /fapi/v1/order", fake.Calls);
+        Assert.Single(fake.Placed);
+        Assert.Empty(broker.ActiveOrders);
+    }
+
+    [Fact]
+    public async Task A_failed_market_execution_lookup_does_not_suppress_cancellation_of_working_exposure()
+    {
+        using var fake = new FakeBinance(true) { HoldMarketExecution = true };
+        var settings = fake.Settings;
+        settings.PollInterval = TimeSpan.FromHours(1);
+        using var broker = new BinanceBroker(new InstrumentData(BtcUsdt, new SimulatedFeed()), settings, "Binance uncertain market cancel");
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        Assert.True(broker.OrdersReady && broker.PositionReady);
+        var order = broker.Market(OrderDirections.Sell, 0.02m);
+        await Accepted(fake, order);
+        fake.FailLookups = 1;
+        broker.Cancel(order);
+        await Until(() => order.Canceled);
+        Assert.True(order.Canceled);
+        Assert.Equal(0m, order.Filled);
+        Assert.Contains("GET /fapi/v1/order", fake.Calls);
+        Assert.Contains("DELETE /fapi/v1/order", fake.Calls);
+        Assert.Single(fake.Placed);
     }
 
     [Fact]
@@ -871,6 +1300,7 @@ internal sealed record FakeBinanceOrder(long Id, string Symbol, string Side, str
 
     /// <summary>The conditional (algo) order that placed it when it triggered; 0 if it was sent as it is.</summary>
     public long PlacedBy { get; init; }
+    public string ClientId { get; init; } = "";
 }
 
 /// <summary>
@@ -881,6 +1311,7 @@ internal sealed record FakeBinanceAlgoOrder(long AlgoId, string Symbol, string S
 {
     public string Status { get; set; } = "NEW";
     public long ActualOrderId { get; set; }
+    public string ClientId { get; init; } = "";
     public bool IsOpen => Status == "NEW";
 
     /// <summary>How many more open algo-order lists still show it untriggered after it triggered (a lagging copy).</summary>
@@ -955,12 +1386,18 @@ internal sealed class FakeBinance : IDisposable
 
     /// <summary>Delay before answering a new order (the order exists at the exchange meanwhile).</summary>
     public int PostDelayMs { get; set; }
+    public bool HoldMarketExecution { get; set; }
 
     /// <summary>Hold a POST reply after exchange acceptance; other requests continue normally.</summary>
     public Func<CancellationToken, Task>? BeforePostReply { get; set; }
 
     /// <summary>How many of the next new orders Binance refuses.</summary>
     public int RejectPosts { get; set; }
+    public int RejectCancels { get; set; }
+    public int UnknownPosts { get; set; }
+    public int UnknownPostStatus { get; set; } = 503;
+    public int UnknownPostCode { get; set; } = -1007;
+    public bool HideOwnedOrders { get; set; }
 
     /// <summary>The next open-order request waits this long before answering (a network stall).</summary>
     public int StallOpenOrdersOnceMs { get; set; }
@@ -1197,7 +1634,7 @@ internal sealed class FakeBinance : IDisposable
     private static string Num(decimal v) => v.ToString("0.########", Inv);
 
     private static string Json(FakeBinanceOrder o) => string.Create(Inv,
-        $"{{\"orderId\":{o.Id},\"symbol\":\"{o.Symbol}\",\"status\":\"{o.Status}\",\"side\":\"{o.Side}\",\"type\":\"{o.Type}\",\"price\":\"{Num(o.Price)}\",\"stopPrice\":\"{Num(o.StopPrice)}\",\"origQty\":\"{Num(o.Qty)}\",\"executedQty\":\"{Num(o.Executed)}\",\"reduceOnly\":{(o.ReduceOnly ? "true" : "false")},\"time\":1790000000000,\"updateTime\":1790000000000}}");
+        $"{{\"orderId\":{o.Id},\"clientOrderId\":\"{o.ClientId}\",\"symbol\":\"{o.Symbol}\",\"status\":\"{o.Status}\",\"side\":\"{o.Side}\",\"type\":\"{o.Type}\",\"price\":\"{Num(o.Price)}\",\"stopPrice\":\"{Num(o.StopPrice)}\",\"origQty\":\"{Num(o.Qty)}\",\"executedQty\":\"{Num(o.Executed)}\",\"reduceOnly\":{(o.ReduceOnly ? "true" : "false")},\"time\":1790000000000,\"updateTime\":1790000000000}}");
 
     private enum AlgoAnswer
     {
@@ -1215,7 +1652,7 @@ internal sealed class FakeBinance : IDisposable
     {
         var placed = a.ActualOrderId != 0 ? _orders[a.ActualOrderId] : null;
         var sb = new StringBuilder();
-        sb.Append(Inv, $"{{\"algoId\":{a.AlgoId},\"clientAlgoId\":\"fake{a.AlgoId}\",\"algoType\":\"CONDITIONAL\",\"orderType\":\"{a.Type}\",\"symbol\":\"{a.Symbol}\",\"side\":\"{a.Side}\",\"positionSide\":\"BOTH\",\"timeInForce\":\"GTC\",\"quantity\":\"{Num(a.Qty)}\",\"algoStatus\":\"{a.Status}\"");
+        sb.Append(Inv, $"{{\"algoId\":{a.AlgoId},\"clientAlgoId\":\"{a.ClientId}\",\"algoType\":\"CONDITIONAL\",\"orderType\":\"{a.Type}\",\"symbol\":\"{a.Symbol}\",\"side\":\"{a.Side}\",\"positionSide\":\"BOTH\",\"timeInForce\":\"GTC\",\"quantity\":\"{Num(a.Qty)}\",\"algoStatus\":\"{a.Status}\"");
         if (answer != AlgoAnswer.New)
         {
             string actualPrice = placed is { Executed: > 0 } ? Num(placed.Price > 0 ? placed.Price : a.TriggerPrice) : "0.00000";
@@ -1256,6 +1693,11 @@ internal sealed class FakeBinance : IDisposable
     private async ValueTask<(int Status, string Body)> Handle(FakeRequest r, CancellationToken ct)
     {
         var answer = Answer(r);
+        if (r.Method == "POST" && answer.Status == 200 && UnknownPosts > 0)
+        {
+            UnknownPosts--;
+            answer = (UnknownPostStatus, $"{{\"code\":{UnknownPostCode},\"msg\":\"Unknown error, please check your request or try again later.\"}}");
+        }
         if (r.Method == "POST" && BeforePostReply is { } beforeReply)
             await beforeReply(ct).ConfigureAwait(false);
         if (answer.Status >= 400)
@@ -1321,21 +1763,22 @@ internal sealed class FakeBinance : IDisposable
             {
                 case ("GET", "/fapi/v1/openOrders" or "/api/v3/openOrders"):
                     _openOrderPolls++;
-                    return (200, "[" + string.Join(",", _orders.Values.Where(o => o.IsOpen && o.Symbol == r.Query("symbol")).OrderBy(o => o.Id).Select(Json)) + "]");
+                    return (200, "[" + string.Join(",", _orders.Values.Where(o => o.IsOpen && o.Symbol == r.Query("symbol") && (!HideOwnedOrders || o.External)).OrderBy(o => o.Id).Select(Json)) + "]");
                 case ("POST", "/fapi/v1/order" or "/api/v3/order"):
                     return Place(r);
                 case ("DELETE", "/fapi/v1/order" or "/api/v3/order"):
                     return CancelOne(r);
                 case ("GET", "/fapi/v1/order" or "/api/v3/order"):
                 {
-                    long id = long.Parse(r.Query("orderId"), Inv);
+                    long id = long.TryParse(r.Query("orderId"), Inv, out var requestedId) ? requestedId :
+                        _orders.Values.FirstOrDefault(o => o.ClientId.Length > 0 && o.ClientId == r.Query("origClientOrderId"))?.Id ?? 0;
                     if (FailLookups > 0)
                     {
                         FailLookups--;
                         return (500, "{\"code\":-1001,\"msg\":\"Internal error; unable to process your request. Please try again.\"}");
                     }
 
-                    if (!_orders.TryGetValue(id, out var o) || _forgotten.Contains(id.ToString(Inv))) return Error(-2013, "Order does not exist.");
+                    if (!_orders.TryGetValue(id, out var o) || _forgotten.Contains(id.ToString(Inv)) || (HideOwnedOrders && !o.External)) return Error(-2013, "Order does not exist.");
                     return (200, Json(o));
                 }
                 case ("GET", "/fapi/v2/positionRisk"):
@@ -1364,8 +1807,9 @@ internal sealed class FakeBinance : IDisposable
                         return (500, "{\"code\":-1001,\"msg\":\"Internal error; unable to process your request. Please try again.\"}");
                     }
 
-                    long id = long.Parse(r.Query("algoId"), Inv);
-                    if (!_algo.TryGetValue(id, out var a) || _forgotten.Contains(AlgoPrefix + id.ToString(Inv))) return Error(-2013, "Order does not exist.");
+                    long id = long.TryParse(r.Query("algoId"), Inv, out var requestedId) ? requestedId :
+                        _algo.Values.FirstOrDefault(a => a.ClientId.Length > 0 && a.ClientId == r.Query("clientAlgoId"))?.AlgoId ?? 0;
+                    if (!_algo.TryGetValue(id, out var a) || _forgotten.Contains(AlgoPrefix + id.ToString(Inv)) || (HideOwnedOrders && !a.External)) return Error(-2013, "Order does not exist.");
                     return (200, AlgoJson(a, AlgoAnswer.LookedUp));
                 }
                 case ("DELETE", "/fapi/v1/algoOpenOrders"):
@@ -1388,6 +1832,7 @@ internal sealed class FakeBinance : IDisposable
         var listed = new List<string>();
         foreach (var a in _algo.Values.Where(a => a.Symbol == symbol).OrderBy(a => a.AlgoId))
         {
+            if (HideOwnedOrders && !a.External) continue;
             if (a.StaleListings > 0)
             {
                 a.StaleListings--;
@@ -1406,6 +1851,11 @@ internal sealed class FakeBinance : IDisposable
     {
         lock (_gate)
         {
+            if (RejectCancels > 0)
+            {
+                RejectCancels--;
+                return Error(-2015, "Invalid API-key, IP, or permissions for action.");
+            }
             long id = long.Parse(r.Query("orderId"), Inv);
             if (!_orders.TryGetValue(id, out var o) || !o.IsOpen) return Error(-2011, "Unknown order sent.");
             if (_fillOnCancel.Remove(id.ToString(Inv)))
@@ -1424,6 +1874,11 @@ internal sealed class FakeBinance : IDisposable
     {
         lock (_gate)
         {
+            if (RejectCancels > 0)
+            {
+                RejectCancels--;
+                return Error(-2015, "Invalid API-key, IP, or permissions for action.");
+            }
             long id = long.Parse(r.Query("algoId"), Inv);
             if (!_algo.TryGetValue(id, out var a) || !a.IsOpen) return Error(-2011, "Unknown order sent.");
             if (_fillOnCancel.Remove(AlgoPrefix + id.ToString(Inv)))
@@ -1450,9 +1905,9 @@ internal sealed class FakeBinance : IDisposable
                 return Error(-2021, "Order would immediately trigger.");
             }
 
-            var o = new FakeBinanceOrder(++_nextId, r.Query("symbol"), r.Query("side"), type, Dec(r.Query("quantity")), Dec(r.Query("price")), Dec(r.Query("stopPrice")), r.Query("reduceOnly") == "true", External: false);
+            var o = new FakeBinanceOrder(++_nextId, r.Query("symbol"), r.Query("side"), type, Dec(r.Query("quantity")), Dec(r.Query("price")), Dec(r.Query("stopPrice")), r.Query("reduceOnly") == "true", External: false) { ClientId = r.Query("newClientOrderId") };
             _orders[o.Id] = o;
-            if (type == "MARKET")
+            if (type == "MARKET" && !HoldMarketExecution)
             {
                 // the matching engine fills it at once
                 FillLocked(o, o.Qty);
@@ -1479,7 +1934,7 @@ internal sealed class FakeBinance : IDisposable
                 return Error(-2021, "Order would immediately trigger.");
             }
 
-            var a = new FakeBinanceAlgoOrder(++_nextAlgoId, r.Query("symbol"), r.Query("side"), type, qty, trigger, Dec(r.Query("price")), r.Query("reduceOnly") == "true", External: false);
+            var a = new FakeBinanceAlgoOrder(++_nextAlgoId, r.Query("symbol"), r.Query("side"), type, qty, trigger, Dec(r.Query("price")), r.Query("reduceOnly") == "true", External: false) { ClientId = r.Query("clientAlgoId") };
             _algo[a.AlgoId] = a;
             return (200, AlgoJson(a, AlgoAnswer.New));
         }

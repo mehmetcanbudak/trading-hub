@@ -173,7 +173,7 @@ internal sealed partial class LiveView : UserControl, IPage
 
     private void OpenTrades(string? key = null, string? title = null, IEnumerable<string>? scope = null) => new LiveTradesWindow(_svc, _status, key, title, scope).Show(_window);
 
-    private static string Money(decimal v) => v.ToString("+#,##0.00;-#,##0.00;0.00", Es);
+    private static string Money(decimal? v) => v?.ToString("+#,##0.00;-#,##0.00;0.00", Es) ?? "—";
 
     private static Control Kpi(string label, string value, string sub, IBrush? color = null, Action? click = null, string? tip = null)
     {
@@ -235,19 +235,21 @@ internal sealed partial class LiveView : UserControl, IPage
         else _notice.IsVisible = false;
 
         _kpis.Children.Clear();
-        decimal net = entries.Sum(e => e.Net), open = running.Sum(e => e.OpenPnL);
+        bool complete = entries.All(e => e.Ledger != null);
+        decimal? net = complete ? entries.Sum(e => e.Net) : null;
+        decimal? open = running.All(e => e.Ledger != null) ? running.Sum(e => e.OpenPnL) : null;
         decimal today = running.Sum(e => e.Runner!.TodayPnL);
-        int trades = entries.Sum(e => e.Ledger.Trades.Count);
+        int? trades = complete ? entries.Sum(e => e.Ledger!.Trades.Count) : null;
         int paused = running.Count(e => e.Paused || e.Runner!.DailyLimitActive);
         int pending = LiveStore.LoadProposals().Sum(p => p.Items.Count(i => i.Status == "pending"));
-        _kpis.Children.Add(Kpi("PnL", Money(net), $"open {Money(open)}", net >= 0 ? Ui.Up : Ui.Down));
+        _kpis.Children.Add(Kpi("PnL", Money(net), complete ? $"open {Money(open)}" : "History unavailable", net == null ? Ui.Warn : net >= 0 ? Ui.Up : Ui.Down));
         _kpis.Children.Add(Kpi("Today", Money(today), "closed + open PnL of running strategies", today >= 0 ? Ui.Up : Ui.Down));
         _kpis.Children.Add(Kpi("Live", running.Count.ToString(Inv), paused > 0 ? $"{paused} paused or risk-stopped" : $"Total strategies: {entries.Count}", running.Count > 0 ? Ui.Accent : null));
-        _kpis.Children.Add(Kpi("Closed trades", trades.ToString(Inv), "click to view all trade details", null, () => OpenTrades(), "All trades with MAE, MFE, size and more; select a trade to view it on the chart"));
+        _kpis.Children.Add(Kpi("Closed trades", trades?.ToString(Inv) ?? "—", complete ? "click to view all trade details" : "History unavailable", null, () => OpenTrades(), "All trades with MAE, MFE, size and more; select a trade to view it on the chart"));
         _kpis.Children.Add(Kpi("Pending changes", pending.ToString(Inv), "awaiting your approval", pending > 0 ? Ui.Warn : null, pending > 0 ? () => Select("proposals") : null));
 
         // la tabla solo se rehace si cambió algo visible
-        string key = string.Join("|", entries.Select(e => $"{e.Key}:{e.StateLabel}:{OutOfContext(e)}:{e.Ledger.Fills.Count}:{e.Ledger.Position}:{(e.Runner?.SizeMultiplier ?? e.Info.Size)}:{_svc.Live.PlanOf(e).Text}:{Math.Round(e.OpenPnL, 0)}:{(e.Runner?.MaxDailyLoss ?? e.Info.MaxDailyLoss)}:{(e.Runner?.MaxDrawdown ?? e.Info.MaxDrawdown)}"));
+        string key = string.Join("|", entries.Select(e => $"{e.Key}:{e.StateLabel}:{e.LedgerError}:{OutOfContext(e)}:{e.Ledger?.Fills.Count}:{e.Ledger?.Position}:{(e.Runner?.SizeMultiplier ?? e.Info.Size)}:{_svc.Live.PlanOf(e).Text}:{e.OpenPnL:0}:{(e.Runner?.MaxDailyLoss ?? e.Info.MaxDailyLoss)}:{(e.Runner?.MaxDrawdown ?? e.Info.MaxDrawdown)}"));
         if (!force && key == _rowsKey) return;
         _rowsKey = key;
         _rows.Children.Clear();
@@ -279,9 +281,10 @@ internal sealed partial class LiveView : UserControl, IPage
     {
         var info = e.Info;
         var r = e.Runner;
-        var stats = LiveStore.StatsOf(info, e.Ledger, 25_000m);
+        var ledger = e.Ledger;
+        var stats = ledger != null ? LiveStore.StatsOf(info, ledger, 25_000m) : null;
         var g = new Grid { ColumnDefinitions = new ColumnDefinitions(RowColumns), Margin = new Thickness(10, 0) };
-        IBrush dotColor = e.Running ? (e.Paused || r!.DailyLimitActive ? Ui.Warn : Ui.Up) : e.WaitingResume ? Ui.Warn : Ui.Text2;
+        IBrush dotColor = ledger == null ? Ui.Warn : e.Running ? (e.Paused || r!.DailyLimitActive ? Ui.Warn : Ui.Up) : e.WaitingResume ? Ui.Warn : Ui.Text2;
         var dot = new Avalonia.Controls.Shapes.Ellipse { Width = 8, Height = 8, Fill = dotColor, VerticalAlignment = VerticalAlignment.Center };
         var badge = new Border
         {
@@ -299,22 +302,22 @@ internal sealed partial class LiveView : UserControl, IPage
                 if (info.IsReal) t.Foreground = Ui.Warn;
             }));
         decimal size = r?.SizeMultiplier ?? info.Size;
-        decimal pos = e.Ledger.Position;
+        decimal? pos = ledger?.Position;
         decimal dl = r?.MaxDailyLoss ?? info.MaxDailyLoss, dd = r?.MaxDrawdown ?? info.MaxDrawdown;
-        var m = stats.Metrics;
+        var m = stats?.Metrics;
         var plan = _svc.Live.PlanOf(e);
-        string posSymbol = e.Ledger.OpenSymbol ?? plan.Symbol;
+        string posSymbol = ledger?.OpenSymbol ?? plan.Symbol;
         Control[] cells =
         {
             name,
             StateCell(e, dotColor),
             SizeCell(e, size, plan),
-            Num(pos == 0 ? "—" : $"{(pos > 0 ? "L" : "C")} {Math.Abs(pos).ToString("0.####", Es)} {posSymbol}", pos > 0 ? Ui.Up : pos < 0 ? Ui.Down : null),
+            Num(pos is not { } quantity ? "Unavailable" : quantity == 0 ? "—" : $"{(quantity > 0 ? "L" : "C")} {Math.Abs(quantity).ToString("0.####", Es)} {posSymbol}", pos == null ? Ui.Warn : pos > 0 ? Ui.Up : pos < 0 ? Ui.Down : null),
             Num(r != null && e.Running ? Money(r.TodayPnL) : "—", r != null && e.Running ? (r.TodayPnL >= 0 ? Ui.Up : Ui.Down) : null),
-            Num(Money(e.Net), e.Net >= 0 ? Ui.Up : Ui.Down),
-            Num(m.TotalTrades.ToString(Inv)),
-            Num(m.TotalTrades > 0 ? (m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es)) : "—"),
-            Num((r?.CurrentDrawdown ?? stats.CurrentDrawdown).ToString("#,##0.00", Es)),
+            Num(Money(e.Net), e.Net == null ? Ui.Text2 : e.Net >= 0 ? Ui.Up : Ui.Down),
+            Num(m?.TotalTrades.ToString(Inv) ?? "—"),
+            Num(m is { TotalTrades: > 0 } ? (m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es)) : "—"),
+            Num((r?.CurrentDrawdown ?? stats?.CurrentDrawdown)?.ToString("#,##0.00", Es) ?? "—"),
             new TextBlock { Text = $"{(dl > 0 ? dl.ToString("#,##0", Es) : "—")} / {(dd > 0 ? dd.ToString("#,##0", Es) : "—")}", FontSize = 12, Foreground = Ui.Text1 },
             Ui.Icon(MaterialIconKind.ChevronRight, 16, Ui.Text2),
         };
@@ -333,7 +336,7 @@ internal sealed partial class LiveView : UserControl, IPage
         {
             if (ev.GetCurrentPoint(row).Properties.IsLeftButtonPressed) OpenManage(e);
         };
-        ToolTip.SetTip(row, "Manage risk, parameters, pause, stop or remove");
+        ToolTip.SetTip(row, e.LedgerError ?? "Manage risk, parameters, pause, stop or remove");
         return row;
     }
 
@@ -344,6 +347,7 @@ internal sealed partial class LiveView : UserControl, IPage
     private Control StateCell(LiveEntry e, IBrush dotColor)
     {
         var state = new TextBlock { Text = e.StateLabel, Foreground = dotColor, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        if (e.LedgerError != null) ToolTip.SetTip(state, e.LedgerError);
         if (!OutOfContext(e)) return state;
         var s = e.Runner!.StrategyInstance;
         var note = new TextBlock { Text = "paused by context", Foreground = Ui.Warn, FontSize = 11, TextWrapping = TextWrapping.Wrap };
@@ -402,7 +406,12 @@ internal sealed partial class LiveView : UserControl, IPage
     private void SuggestByRules()
     {
         var entries = _svc.Live.Entries().Where(e => !e.Locked).ToList();
-        var stats = entries.Select(e => LiveStore.StatsOf(e.Info, e.Ledger, 10_000)).ToList();
+        if (entries.FirstOrDefault(e => e.Ledger == null) is { } unavailable)
+        {
+            _status(unavailable.LedgerError ?? "History unavailable");
+            return;
+        }
+        var stats = entries.Select(e => LiveStore.StatsOf(e.Info, e.Ledger!, 10_000)).ToList();
         foreach (var s in stats) s.Info.Running = entries.First(e => e.Key == s.Info.Key).Running;
         var p = LiveSizing.SuggestByRules(stats);
         if (p.Items.Count == 0)
@@ -418,6 +427,11 @@ internal sealed partial class LiveView : UserControl, IPage
 
     private void AskClaude()
     {
+        if (_svc.Live.Entries().FirstOrDefault(e => e.Ledger == null) is { } unavailable)
+        {
+            _status(unavailable.LedgerError ?? "History unavailable");
+            return;
+        }
         _window.Navigate("strategies");
         if (_window.Page("strategies") is StrategiesView sv) sv.AskClaudeForSizing();
     }
@@ -517,11 +531,20 @@ internal sealed partial class LiveView : UserControl, IPage
             }
             else
             {
+                if (e.Ledger == null)
+                {
+                    _status(e.LedgerError ?? "History unavailable");
+                    return;
+                }
                 if (!confirmed && e.Info.IsReal &&
                     !await ConfirmDialog.ShowAsync(_window, "Approve change on REAL account", $"{item.Strategy}: ×{item.CurrentSize:0.##} → ×{item.ProposedSize:0.##}.\n{item.Reason}", "Approve and apply", danger: true))
                     return;
-                _svc.Live.ApplyRisk(e, item.ProposedSize, item.ProposedMaxDailyLoss ?? (e.Runner?.MaxDailyLoss ?? e.Info.MaxDailyLoss),
-                    item.ProposedMaxDrawdown ?? (e.Runner?.MaxDrawdown ?? e.Info.MaxDrawdown), e.Runner?.CloseOnLimit ?? e.Info.CloseOnLimit);
+                if (!_svc.Live.ApplyRisk(e, item.ProposedSize, item.ProposedMaxDailyLoss ?? (e.Runner?.MaxDailyLoss ?? e.Info.MaxDailyLoss),
+                    item.ProposedMaxDrawdown ?? (e.Runner?.MaxDrawdown ?? e.Info.MaxDrawdown), e.Runner?.CloseOnLimit ?? e.Info.CloseOnLimit))
+                {
+                    _status("The risk change was not applied.");
+                    return;
+                }
             }
         }
 

@@ -54,7 +54,8 @@ internal sealed class LiveRiskAgent
             if (!a.Enabled || IsRunning(p.Def.Id)) continue;
             if (!p.Members.Any(m => m.Running && !m.Locked)) continue;
             if (RunsToday(a) >= a.MaxRunsPerDay) continue;
-            int trades = p.Members.Sum(m => m.Ledger.Trades.Count);
+            if (p.Members.Any(m => m.Ledger == null)) continue;
+            int trades = p.Members.Sum(m => m.Ledger!.Trades.Count);
             var now = DateTime.UtcNow;
             bool due = a.LastRunUtc is not { } last
                 ? trades >= a.MinNewTrades
@@ -72,6 +73,8 @@ internal sealed class LiveRiskAgent
         if (IsRunning(portfolioId)) return "This portfolio is already being reviewed.";
         var p = _center.Portfolios().FirstOrDefault(x => x.Def.Id == portfolioId);
         if (p == null) return "Portfolio not found.";
+        if (p.Members.FirstOrDefault(m => m.Ledger == null) is { } unavailable)
+            return unavailable.LedgerError ?? "History unavailable";
         var a = p.Def.Agent;
         var adjustable = p.Members.Where(m => !m.Locked && (m.Running || m.WaitingResume)).ToList();
         if (adjustable.Count == 0) return "No strategies to adjust.";
@@ -104,7 +107,7 @@ internal sealed class LiveRiskAgent
             };
             var res = await agent.RunAsync(req, cts.Token);
             a.LastRunUtc = DateTime.UtcNow;
-            a.TradesAtLastRun = p.Members.Sum(m => m.Ledger.Trades.Count);
+            a.TradesAtLastRun = p.Members.Sum(m => m.Ledger!.Trades.Count);
             a.RunsUtc.Add(DateTime.UtcNow);
             a.RunsUtc.RemoveAll(t => t < DateTime.UtcNow.AddDays(-7));
             a.CostTotal += res.CostUsd;
@@ -234,26 +237,27 @@ internal sealed class LiveRiskAgent
         sb.AppendLine();
         var m = analysis.Metrics;
         sb.AppendLine($"PORTFOLIO (closed trades): net {N(m.NetProfit)} · {m.TotalTrades} trades · PF {N(Math.Min(m.ProfitFactor, 99))} · max drawdown {N(m.MaxDrawdown)} · " +
-                      $"Sharpe {m.SharpeRatio.ToString("0.00", Inv)} · currently open {N(p.Members.Sum(x => x.OpenPnL))}");
+                      $"Sharpe {m.SharpeRatio.ToString("0.00", Inv)} · currently open {N(p.Members.Sum(x => x.OpenPnL!.Value))}");
         sb.AppendLine();
         sb.AppendLine("STRATEGIES:");
         for (int i = 0; i < p.Members.Count; i++)
         {
             var e = p.Members[i];
-            var stats = LiveStore.StatsOf(e.Info, e.Ledger, capital);
+            var ledger = e.Ledger ?? throw new IOException(e.LedgerError ?? "History unavailable");
+            var stats = LiveStore.StatsOf(e.Info, ledger, capital);
             var sm = stats.Metrics;
             bool canChange = adjustable.Contains(e);
             var r = e.Runner;
             decimal size = r?.SizeMultiplier ?? e.Info.Size;
             decimal dl = r?.MaxDailyLoss ?? e.Info.MaxDailyLoss, dd = r?.MaxDrawdown ?? e.Info.MaxDrawdown;
-            double days = e.Ledger.Fills.Count > 0 ? (DateTime.UtcNow - e.Ledger.Fills[0].Time).TotalDays : 0;
+            double days = ledger.Fills.Count > 0 ? (DateTime.UtcNow - ledger.Fills[0].Time).TotalDays : 0;
             sb.AppendLine($"- key: {e.Key}");
             sb.AppendLine($"  {e.Info.Strategy} · {e.Info.Symbol} {e.Info.Period} · account {TradingHub.Common.EnglishText.Of(e.Info.Account)}{(e.Info.IsReal ? " (REAL)" : " (simulated)")} · {e.StateLabel}" +
                           $"{(canChange ? "" : $" · DO NOT change it ({(e.Locked ? "locked" : "stopped")})")}");
-            sb.AppendLine($"  size ×{N(size)} · max daily loss {(dl > 0 ? N(dl) : "no limit")} · max drawdown {(dd > 0 ? N(dd) : "no limit")} · position {N(e.Ledger.Position)} · open {N(e.OpenPnL)}");
+            sb.AppendLine($"  size ×{N(size)} · max daily loss {(dl > 0 ? N(dl) : "no limit")} · max drawdown {(dd > 0 ? N(dd) : "no limit")} · position {N(ledger.Position)} · open {N(e.OpenPnL!.Value)}");
             sb.AppendLine("  " + ContractLine(e, size));
             sb.AppendLine($"  {sm.TotalTrades} trades in {days:0.#} days · net {N(stats.Net)} · PF {N(Math.Min(sm.ProfitFactor, 99))} · win rate {sm.WinRate:0} % · " +
-                          $"average/trade {N(sm.TotalTrades > 0 ? e.Ledger.Trades.Average(t => t.NetPnl) : 0)} · average profit {N(sm.AverageWin)} · average loss {N(sm.AverageLoss)}");
+                          $"average/trade {N(sm.TotalTrades > 0 ? ledger.Trades.Average(t => t.NetPnl) : 0)} · average profit {N(sm.AverageWin)} · average loss {N(sm.AverageLoss)}");
             sb.AppendLine($"  current drawdown {N(stats.CurrentDrawdown)} · worst drawdown {N(sm.MaxDrawdown)} · last {stats.RecentTrades}: PF {N(Math.Min(stats.RecentProfitFactor, 99))}, average {N(stats.RecentExpectancy)}" +
                           $"{(r != null ? $" · today's PnL {N(r.TodayPnL)}" : "")}");
             if (i < analysis.DailyPnl.Count)

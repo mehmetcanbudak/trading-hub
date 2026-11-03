@@ -25,6 +25,14 @@
     <ProjectReference Include="..\..\src\TradingHub.Charting\TradingHub.Charting.csproj" />
     <!-- lo propio de cada sistema (atajos, claves, Claude Code, bandeja): ver PlatformTests -->
     <ProjectReference Include="..\..\src\TradingHub.App\TradingHub.App.csproj" />
+    <ProjectReference Include="..\TradingHub.LedgerCrashFixture\TradingHub.LedgerCrashFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="CopyLedgerCrashFixture" AfterTargets="Build">
+    <ItemGroup>
+      <LedgerCrashFixtureFiles Include="$(MSBuildProjectDirectory)/../TradingHub.LedgerCrashFixture/bin/$(Configuration)/$(TargetFramework)/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LedgerCrashFixtureFiles)" DestinationFiles="@(LedgerCrashFixtureFiles->'$(OutDir)LedgerCrashFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
 
 </Project>

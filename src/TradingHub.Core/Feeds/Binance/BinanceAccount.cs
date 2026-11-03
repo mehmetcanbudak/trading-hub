@@ -49,7 +49,7 @@ public sealed record BinancePosition(string Symbol, decimal Quantity, decimal En
 /// An order as Binance reports it: in the open-order list, when looked up, and in the answers to new and cancel requests
 /// (fields an answer leaves out are empty or 0).
 /// </summary>
-public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, string Type, decimal Price, decimal StopPrice, decimal Quantity, decimal Executed, string Status, bool ReduceOnly = false);
+public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, string Type, decimal Price, decimal StopPrice, decimal Quantity, decimal Executed, string Status, bool ReduceOnly = false, string ClientOrderId = "");
 
 /// <summary>
 /// A USD-M futures conditional (algo) order as Binance reports it: in the open algo-order list, when looked up, and in the
@@ -57,7 +57,10 @@ public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, 
 /// regular order it placed (0 before), and a lookup gives in <see cref="ActualQuantity"/> what that order executed.
 /// <see cref="ReduceOnly"/> is also set for a close-position order.
 /// </summary>
-public sealed record BinanceAlgoOrder(long AlgoId, string Symbol, string Side, string Type, decimal Price, decimal TriggerPrice, decimal Quantity, string Status, long ActualOrderId, decimal ActualQuantity, bool ReduceOnly = false);
+public sealed record BinanceAlgoOrder(long AlgoId, string Symbol, string Side, string Type, decimal Price, decimal TriggerPrice, decimal Quantity, string Status, long ActualOrderId, decimal ActualQuantity, bool ReduceOnly = false, string ClientAlgoId = "");
+
+/// <summary>The request may have executed; only an exact order query can resolve it.</summary>
+internal sealed class BinanceUnknownException(string message) : IOException(message);
 
 /// <summary>Binance refused a private request; <see cref="Code"/> is its error code (0 if the answer had none).</summary>
 internal sealed class BinanceRejectedException : InvalidOperationException
@@ -126,6 +129,13 @@ public sealed class BinanceAccountClient : IDisposable
                 // cuerpo no JSON
             }
 
+            // An unreadable gateway response is not rejection proof. Spot 5xx, -1006/-1007 and
+            // futures' unknown 503 variant can mean accepted exposure.
+            bool definite503 = _s.Futures && (code == -1008 || ((int)resp.StatusCode == 503 &&
+                msg is "Service Unavailable." or "Internal error; unable to process your request. Please try again."));
+            if (code is -1006 or -1007 || (!definite503 && (code is -1000 or -1001)) || (int)resp.StatusCode == 408 ||
+                ((int)resp.StatusCode >= 500 && !definite503) || (code == 0 && !definite503))
+                throw new BinanceUnknownException($"Binance execution status unknown ({(int)resp.StatusCode}): {msg}");
             throw new BinanceRejectedException($"Binance rejected operation ({(int)resp.StatusCode}): {msg}", code);
         }
 
@@ -159,12 +169,12 @@ public sealed class BinanceAccountClient : IDisposable
     private static BinanceOpenOrder ParseOrder(JsonElement o, string symbol) => new(
         o.GetProperty("orderId").GetInt64(), symbol, S(o, "side"), S(o, "type"),
         D(o, "price"), D(o, "stopPrice"), D(o, "origQty"), D(o, "executedQty"), S(o, "status"),
-        o.TryGetProperty("reduceOnly", out var ro) && ro.ValueKind == JsonValueKind.True);
+        o.TryGetProperty("reduceOnly", out var ro) && ro.ValueKind == JsonValueKind.True, S(o, "clientOrderId"));
 
     private static BinanceAlgoOrder ParseAlgoOrder(JsonElement a, string symbol) => new(
         a.GetProperty("algoId").GetInt64(), symbol, S(a, "side"), S(a, "orderType"),
         DecimalOrZero(a, "price"), DecimalOrZero(a, "triggerPrice"), DecimalOrZero(a, "quantity"), S(a, "algoStatus"),
-        IdOrZero(a, "actualOrderId"), DecimalOrZero(a, "actualQty"), Flag(a, "reduceOnly") || Flag(a, "closePosition"));
+        IdOrZero(a, "actualOrderId"), DecimalOrZero(a, "actualQty"), Flag(a, "reduceOnly") || Flag(a, "closePosition"), S(a, "clientAlgoId"));
 
     private static string Fmt(decimal v) => v.ToString("0.############", CultureInfo.InvariantCulture);
 
@@ -243,15 +253,38 @@ public sealed class BinanceAccountClient : IDisposable
             return null; // "Order does not exist."
         }
     }
+    internal async Task<BinanceOpenOrder?> GetOrderByClientAsync(string symbol, string clientId, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = await SignedAsync(HttpMethod.Get, P("/fapi/v1/order", "/api/v3/order"),
+                $"symbol={symbol}&origClientOrderId={Uri.EscapeDataString(clientId)}", ct).ConfigureAwait(false);
+            return ParseOrder(doc.RootElement, symbol);
+        }
+        catch (BinanceRejectedException ex) when (ex.Code == -2013) { return null; }
+    }
+
+    internal async Task<BinanceAlgoOrder?> GetAlgoByClientAsync(string symbol, string clientId, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = await SignedAsync(HttpMethod.Get, "/fapi/v1/algoOrder",
+                $"clientAlgoId={Uri.EscapeDataString(clientId)}", ct).ConfigureAwait(false);
+            return ParseAlgoOrder(doc.RootElement, symbol);
+        }
+        catch (BinanceRejectedException ex) when (ex.Code == -2013) { return null; }
+    }
+
 
     /// <summary>
     /// Sends an order (type: MARKET or LIMIT, or STOP_LOSS in spot) and returns Binance's answer: always the order id;
     /// status and quantities unless the answer is a bare acknowledgement (spot stops). USD-M futures stops are conditional
     /// orders, sent with <see cref="PlaceAlgoOrderAsync"/>.
     /// </summary>
-    public async Task<BinanceOpenOrder> PlaceOrderAsync(string symbol, OrderDirections dir, OrderTypes type, decimal qty, decimal price, bool reduceOnly, CancellationToken ct)
+    public async Task<BinanceOpenOrder> PlaceOrderAsync(string symbol, OrderDirections dir, OrderTypes type, decimal qty, decimal price, bool reduceOnly, CancellationToken ct, string? clientId = null)
     {
         var sb = new StringBuilder($"symbol={symbol}&side={(dir == OrderDirections.Buy ? "BUY" : "SELL")}&quantity={Fmt(qty)}");
+        if (clientId != null) sb.Append("&newClientOrderId=").Append(Uri.EscapeDataString(clientId));
         switch (type)
         {
             case OrderTypes.Market:
@@ -317,10 +350,11 @@ public sealed class BinanceAccountClient : IDisposable
     /// algoType=CONDITIONAL, type STOP_MARKET): Binance sends a market order once the price reaches
     /// <paramref name="triggerPrice"/>, by its default working type (contract price). Returns Binance's answer.
     /// </summary>
-    public async Task<BinanceAlgoOrder> PlaceAlgoOrderAsync(string symbol, OrderDirections dir, decimal qty, decimal triggerPrice, bool reduceOnly, CancellationToken ct)
+    public async Task<BinanceAlgoOrder> PlaceAlgoOrderAsync(string symbol, OrderDirections dir, decimal qty, decimal triggerPrice, bool reduceOnly, CancellationToken ct, string? clientId = null)
     {
         if (!_s.Futures) throw new NotSupportedException("Conditional (algo) orders exist only in USD-M futures");
         string query = $"algoType=CONDITIONAL&symbol={symbol}&side={(dir == OrderDirections.Buy ? "BUY" : "SELL")}&type=STOP_MARKET&quantity={Fmt(qty)}&triggerPrice={Fmt(triggerPrice)}";
+        if (clientId != null) query += "&clientAlgoId=" + Uri.EscapeDataString(clientId);
         if (reduceOnly) query += "&reduceOnly=true";
         using var doc = await SignedAsync(HttpMethod.Post, "/fapi/v1/algoOrder", query, ct).ConfigureAwait(false);
         return ParseAlgoOrder(doc.RootElement, symbol);
@@ -396,7 +430,7 @@ public sealed class BinanceAccountClient : IDisposable
 /// remain unavailable (0); strategy cost accounting continues to come from its own fills.
 /// </para>
 /// </remarks>
-public sealed class BinanceBroker : ITradingAccount, IDisposable
+public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, IDisposable
 {
     /// <summary>Starts the <see cref="Order.ExchangeOrderId"/> of a conditional order: an algo id is not an order id.</summary>
     private const string AlgoPrefix = "algo:";
@@ -414,12 +448,12 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     private readonly Dictionary<Order, Tracked> _byOrder = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<long, Tracked> _byId = new();
     private readonly Dictionary<long, Tracked> _byAlgoId = new();
+    private readonly Dictionary<string, Tracked> _byClient = new(StringComparer.Ordinal);
 
     // Exchange ids that finished, were replaced or triggered, and when: a list fetched around then may still show them.
     private readonly Dictionary<long, DateTime> _finished = new();
     private readonly Dictionary<long, DateTime> _finishedAlgo = new();
     private static readonly TimeSpan FinishedMemory = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan CancelDoubt = TimeSpan.FromSeconds(60); // an unanswered cancel may still be carried out
     private List<long> _listed = new();
     private List<long> _listedAlgo = new();
     private int _sending; // new orders waiting for Binance's answer: an unknown open order may be one of them
@@ -453,6 +487,15 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
 
         /// <summary>Binance accepted the submission: the handle follows an exchange order.</summary>
         public bool Accepted => Id != 0 || AlgoId != 0;
+        public string ClientId = "";
+        public bool SubmissionUnknown;
+        public bool CancelRequested;
+        public bool CancelQueued;
+        public bool ReplacementPending;
+        public bool RestoreReplacement;
+        public decimal ReplacementPrice;
+        public decimal ReplacementTotal;
+        public decimal? DesiredModifyPrice;
 
         /// <summary>Filled by this handle's earlier exchange orders (Modify cancels and sends a new one).</summary>
         public decimal FilledBefore;
@@ -467,13 +510,10 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         public int Busy;
 
         /// <summary>
-        /// Error of a Modify whose cancel had an unknown outcome and that sent no replacement, and when: if the order turns
-        /// out canceled, the handle is reported Rejected with it instead of silently Canceled. Binance may carry out such a
-        /// cancel late, so it is kept for a while even when the order is seen working.
+        /// Error of a Modify whose cancel had an unknown outcome and sent no replacement. A later working snapshot
+        /// cannot prove that this cancel will not arrive late; retain uncertainty until a definitive outcome.
         /// </summary>
         public string? ReplaceFailure;
-
-        public DateTime ReplaceFailedAt;
 
         /// <summary>Consecutive lookups for which Binance answered that the order does not exist.</summary>
         public int NotFound;
@@ -541,7 +581,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 _cts.Token.ThrowIfCancellationRequested();
                 PositionReady = true;
 
-                OrdersReady = lookupError == null;
+                lock (_gate) OrdersReady = lookupError == null && !HasUnknownSubmission();
                 LastError = lookupError;
                 Changed?.Invoke();
             }
@@ -577,6 +617,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     private async Task<string?> RefreshOrdersAsync(CancellationToken ct)
     {
         var open = await _client.GetOpenOrdersAsync(Instrument.Symbol, ct).ConfigureAwait(false);
+        string? submissionError = await ResolveSubmissionsAsync(ct).ConfigureAwait(false);
         string? algoError = null;
         if (_settings.Futures)
         {
@@ -602,10 +643,19 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 {
                     // it may be one of ours whose answer has not arrived, or the order a conditional order placed when it
                     // triggered, not known yet: next poll
-                    if (_sending > 0 || triggering) continue;
-                    t = new Tracked(new Order(), own: false);
-                    _byOrder[t.Order] = t;
-                    Bind(t, s.OrderId);
+                    if (s.ClientOrderId.Length > 0 && _byClient.TryGetValue(s.ClientOrderId, out var owned))
+                    {
+                        if (!owned.Last.IsCompleted || owned.Busy > 0) continue;
+                        t = owned;
+                        Bind(t, s.OrderId);
+                    }
+                    else
+                    {
+                        if (_sending > 0 || triggering) continue;
+                        t = new Tracked(new Order(), own: false);
+                        _byOrder[t.Order] = t;
+                        Bind(t, s.OrderId);
+                    }
                 }
 
                 listed.Add(s.OrderId);
@@ -642,7 +692,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                     t.NotFound = 0;
                     Apply(t, s);
                 }
-                else if (++t.NotFound >= 3)
+                else if (!t.ReplacementPending && ++t.NotFound >= 3)
                 {
                     FinishCanceled(t); // Binance dropped it: canceled or expired without fills
                 }
@@ -652,8 +702,10 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
             }
         }
 
+        DispatchQueuedModifies();
         Publish();
-        return error is null || algoError is null ? error ?? algoError : algoError + "; " + error;
+        QueueDeferredCancels();
+        return submissionError ?? error ?? algoError;
     }
 
     /// <summary>
@@ -674,10 +726,19 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 {
                     // it may be one of ours whose answer has not arrived; one that triggered is followed through the order
                     // it placed, which the regular open orders list
-                    if (_sending > 0 || a.ActualOrderId != 0) continue;
-                    t = new Tracked(new Order(), own: false);
-                    _byOrder[t.Order] = t;
-                    BindAlgo(t, a.AlgoId);
+                    if (a.ClientAlgoId.Length > 0 && _byClient.TryGetValue(a.ClientAlgoId, out var owned))
+                    {
+                        if (!owned.Last.IsCompleted || owned.Busy > 0) continue;
+                        t = owned;
+                        BindAlgo(t, a.AlgoId);
+                    }
+                    else
+                    {
+                        if (_sending > 0 || a.ActualOrderId != 0) continue;
+                        t = new Tracked(new Order(), own: false);
+                        _byOrder[t.Order] = t;
+                        BindAlgo(t, a.AlgoId);
+                    }
                 }
 
                 listed.Add(a.AlgoId);
@@ -718,7 +779,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                     t.NotFound = 0;
                     ApplyAlgo(t, a);
                 }
-                else if (++t.NotFound >= 3)
+                else if (!t.ReplacementPending && ++t.NotFound >= 3)
                 {
                     FinishCanceled(t); // Binance dropped it: canceled or expired without fills
                 }
@@ -782,6 +843,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
             }
 
             if (s.Quantity > 0) o.QuantityToFill = t.FilledBefore + s.Quantity;
+            ConfirmReplacement(t, s.Quantity > 0 ? t.FilledBefore + s.Quantity : 0, o.Type == OrderTypes.Stop ? s.StopPrice : s.Price);
         }
 
         t.Executed = Math.Max(t.Executed, s.Executed);
@@ -799,7 +861,6 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 Finish(t, OrderStates.Failed, OrderStatus.Rejected);
                 break;
             default: // NEW, PARTIALLY_FILLED (futures also NEW_INSURANCE, NEW_ADL): still working
-                if (t.ReplaceFailure != null && DateTime.UtcNow - t.ReplaceFailedAt > CancelDoubt) t.ReplaceFailure = null; // that cancel never happened
                 o.State = OrderStates.Active;
                 o.Status = t.FilledBefore + t.Executed > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
                 break;
@@ -839,6 +900,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
             }
 
             if (a.Quantity > 0) o.QuantityToFill = t.FilledBefore + a.Quantity;
+            ConfirmReplacement(t, a.Quantity > 0 ? t.FilledBefore + a.Quantity : 0, a.TriggerPrice);
         }
 
         o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
@@ -865,7 +927,6 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 else FinishCanceled(t);
                 break;
             default: // NEW, TRIGGERING, TRIGGERED until the order it placed is known: still working
-                if (t.ReplaceFailure != null && DateTime.UtcNow - t.ReplaceFailedAt > CancelDoubt) t.ReplaceFailure = null; // that cancel never happened
                 o.State = OrderStates.Active;
                 o.Status = t.FilledBefore + t.Executed > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
                 break;
@@ -906,6 +967,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     private void Bind(Tracked t, long id)
     {
         t.Id = id;
+        t.SubmissionUnknown = false;
         t.Order.ExchangeOrderId = id.ToString(CultureInfo.InvariantCulture);
         _byId[id] = t;
     }
@@ -913,6 +975,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     private void BindAlgo(Tracked t, long algoId)
     {
         t.AlgoId = algoId;
+        t.SubmissionUnknown = false;
         t.Order.ExchangeOrderId = AlgoPrefix + algoId.ToString(CultureInfo.InvariantCulture);
         _byAlgoId[algoId] = t;
     }
@@ -923,6 +986,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         t.Order.State = state;
         t.Order.Status = status;
         _byOrder.Remove(t.Order);
+        if (t.ClientId.Length > 0) _byClient.Remove(t.ClientId);
         if (t.AlgoId != 0)
         {
             _byAlgoId.Remove(t.AlgoId);
@@ -958,6 +1022,89 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     {
         lock (_gate) t.Last = t.Last.ContinueWith(_ => operation(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
     }
+    private void SetClientIdentity(Tracked t)
+    {
+        if (t.ClientId.Length > 0) _byClient.Remove(t.ClientId);
+        // 35 ASCII characters, within Spot/futures' 36-character limit. Never reused for another send.
+        t.ClientId = "th-" + Guid.NewGuid().ToString("N");
+        t.SubmissionUnknown = false; // an in-flight send is serialized; only an ambiguous result starts client-ID recovery
+        _byClient[t.ClientId] = t;
+    }
+
+    private bool HasUnknownSubmission()
+    {
+        foreach (var t in _byOrder.Values)
+            if (t.SubmissionUnknown) return true;
+        return false;
+    }
+
+    private async Task<string?> ResolveSubmissionsAsync(CancellationToken ct)
+    {
+        List<Tracked>? pending = null;
+        lock (_gate)
+        {
+            foreach (var t in _byOrder.Values)
+                if (t.SubmissionUnknown && t.Busy == 0 && t.Last.IsCompleted)
+                    (pending ??= new List<Tracked>()).Add(t);
+            if (pending == null) return HasUnknownSubmission() ? "Binance submission outcome remains unknown." : null;
+        }
+        string? error = null;
+        foreach (var t in pending)
+        {
+            string clientId;
+            lock (_gate) clientId = t.ClientId;
+            BinanceOpenOrder? regular = null;
+            BinanceAlgoOrder? algo = null;
+            try
+            {
+                if (IsConditional(t.Order.Type)) algo = await _client.GetAlgoByClientAsync(Instrument.Symbol, clientId, ct).ConfigureAwait(false);
+                else regular = await _client.GetOrderByClientAsync(Instrument.Symbol, clientId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                error = ex.Message;
+            }
+
+            lock (_gate)
+            {
+                if (!_byOrder.ContainsKey(t.Order) || t.ClientId != clientId || !t.SubmissionUnknown || t.Busy > 0) continue;
+                if (regular != null)
+                {
+                    Bind(t, regular.OrderId);
+                    Apply(t, regular);
+                }
+                else if (algo != null)
+                {
+                    BindAlgo(t, algo.AlgoId);
+                    ApplyAlgo(t, algo);
+                }
+                else
+                {
+                    // "Not found" is not evidence that a timed-out submission cannot arrive later.
+                    error ??= "Binance submission outcome remains unknown; awaiting exact client identity reconciliation.";
+                }
+            }
+        }
+
+        lock (_gate)
+            if (HasUnknownSubmission())
+                error ??= "Binance submission outcome remains unknown.";
+        return error;
+    }
+
+    private void QueueDeferredCancels()
+    {
+        lock (_gate)
+        {
+            foreach (var t in _byOrder.Values)
+            {
+                if (!t.CancelRequested || t.CancelQueued || !t.Accepted || t.SubmissionUnknown || t.Busy > 0) continue;
+                t.CancelQueued = true;
+                Enqueue(t, () => CancelAsync(t));
+            }
+        }
+    }
+
 
     private Order Send(OrderDirections dir, OrderTypes type, decimal qty, decimal price, string comment, bool reduceOnly = false)
     {
@@ -967,6 +1114,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         lock (_gate)
         {
             _byOrder[order] = t;
+            SetClientIdentity(t);
             _sending++;
             t.Last = Task.Run(() => SubmitAsync(t, type, qty, px, reduceOnly));
         }
@@ -981,14 +1129,16 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         BinanceOpenOrder? placed = null;
         BinanceAlgoOrder? placedAlgo = null;
         string? error = null;
+        bool rejected = false;
         try
         {
-            if (IsConditional(type)) placedAlgo = await _client.PlaceAlgoOrderAsync(Instrument.Symbol, order.Direction, qty, price, reduceOnly, _cts.Token).ConfigureAwait(false);
-            else placed = await _client.PlaceOrderAsync(Instrument.Symbol, order.Direction, type, qty, price, reduceOnly, _cts.Token).ConfigureAwait(false);
+            if (IsConditional(type)) placedAlgo = await _client.PlaceAlgoOrderAsync(Instrument.Symbol, order.Direction, qty, price, reduceOnly, _cts.Token, t.ClientId).ConfigureAwait(false);
+            else placed = await _client.PlaceOrderAsync(Instrument.Symbol, order.Direction, type, qty, price, reduceOnly, _cts.Token, t.ClientId).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             error = ex.Message;
+            rejected = ex is BinanceRejectedException;
         }
 
         lock (_gate)
@@ -1004,16 +1154,21 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 BindAlgo(t, placedAlgo.AlgoId);
                 ApplyAlgo(t, placedAlgo);
             }
-            else
+            else if (rejected)
             {
-                _byOrder.Remove(order);
-                order.State = OrderStates.Failed;
-                order.Status = OrderStatus.Rejected;
+                Finish(t, OrderStates.Failed, OrderStatus.Rejected);
+            }
+            else if (!t.Accepted)
+            {
+                t.SubmissionUnknown = true;
+                OrdersReady = false;
             }
         }
 
         LastError = error;
+        DispatchQueuedModifies();
         Publish();
+        QueueDeferredCancels();
         Changed?.Invoke();
     }
 
@@ -1027,6 +1182,21 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
     /// <summary>Stop loss / objetivo como orden solo-reducir (en futuros).</summary>
     public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
         Send(dir, type is OrderTypes.Market or OrderTypes.Stop ? type : OrderTypes.Limit, qty, price, comment, reduceOnly: _settings.Futures);
+
+    public bool IsReplacementPending(Order order)
+    {
+        lock (_gate)
+            return _byOrder.TryGetValue(order, out var t) &&
+                (!t.Accepted || t.Busy > 0 || t.SubmissionUnknown || t.ReplaceFailure != null || t.ReplacementPending || t.DesiredModifyPrice != null);
+    }
+
+    private static void ConfirmReplacement(Tracked t, decimal total, decimal price)
+    {
+        if (!t.ReplacementPending || t.Busy > 0 || t.SubmissionUnknown || t.ReplaceFailure != null || t.CancelRequested || total <= 0 || price <= 0) return;
+        if (!t.RestoreReplacement && (total != t.ReplacementTotal || price != t.ReplacementPrice)) return;
+        t.ReplacementPending = false;
+        t.RestoreReplacement = false;
+    }
 
     /// <summary>
     /// Binance does not modify price or quantity: the order is canceled and a new one sent, which the same handle (returned)
@@ -1043,7 +1213,17 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         lock (_gate)
         {
             if (!_byOrder.TryGetValue(order, out t)) return order;
+            if (t.SubmissionUnknown || !t.Accepted || t.Busy > 0 || t.ReplacementPending || t.ReplaceFailure != null)
+            {
+                LastError = "Cannot replace an order while its submission or previous replacement outcome is unresolved.";
+                return order;
+            }
             total = order.Filled + newQuantity;
+            t.DesiredModifyPrice = null; // an accepted explicit replacement supersedes an older queued price
+            t.ReplacementPending = true;
+            t.ReplacementPrice = price;
+            t.ReplacementTotal = total;
+            t.RestoreReplacement = false;
             t.Busy++; // from now on polls leave the requested price and quantity on the handle
             if (type == OrderTypes.Stop) order.TriggerPrice = price;
             else order.Price = price;
@@ -1061,7 +1241,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         long oldId, oldAlgoId;
         lock (_gate)
         {
-            if (!_byOrder.ContainsKey(order) || !t.Accepted)
+            if (!_byOrder.ContainsKey(order) || !t.Accepted || t.SubmissionUnknown)
             {
                 t.Busy--; // finished meanwhile, or never accepted
                 return;
@@ -1152,10 +1332,14 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 {
                     // not replaced. After an unknown outcome the cancel may still be carried out later: if the order then
                     // turns out canceled, that is reported as a failed Modify
-                    if (!pastCancel)
+                    if (!pastCancel && cancelError is not BinanceRejectedException)
                     {
                         t.ReplaceFailure = cancelError!.Message;
-                        t.ReplaceFailedAt = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        // Definite failure is not complete until authoritative old/native values have been restored.
+                        t.RestoreReplacement = true;
                     }
 
                     if (found != null) Apply(t, found); // still working (shown as it is at Binance again) or filled
@@ -1165,11 +1349,13 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
             else
             {
                 _sending++;
+                SetClientIdentity(t);
             }
         }
 
         if (canceled == null || rest <= 0)
         {
+            DispatchQueuedModifies();
             Publish();
             Changed?.Invoke();
             return;
@@ -1178,14 +1364,16 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         BinanceOpenOrder? placed = null;
         BinanceAlgoOrder? placedAlgo = null;
         string? error = null;
+        bool rejected = false;
         try
         {
-            if (IsConditional(type)) placedAlgo = await _client.PlaceAlgoOrderAsync(Instrument.Symbol, order.Direction, rest, price, order.ReduceOnly, _cts.Token).ConfigureAwait(false);
-            else placed = await _client.PlaceOrderAsync(Instrument.Symbol, order.Direction, type, rest, price, order.ReduceOnly, _cts.Token).ConfigureAwait(false);
+            if (IsConditional(type)) placedAlgo = await _client.PlaceAlgoOrderAsync(Instrument.Symbol, order.Direction, rest, price, order.ReduceOnly, _cts.Token, t.ClientId).ConfigureAwait(false);
+            else placed = await _client.PlaceOrderAsync(Instrument.Symbol, order.Direction, type, rest, price, order.ReduceOnly, _cts.Token, t.ClientId).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             error = ex.Message;
+            rejected = ex is BinanceRejectedException;
         }
 
         lock (_gate)
@@ -1232,30 +1420,45 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
                 order.Status = filled > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
                 ApplyAlgo(t, placedAlgo);
             }
+            else if (rejected)
+            {
+                Finish(t, OrderStates.Failed, OrderStatus.Rejected);
+            }
             else
             {
-                Finish(t, OrderStates.Failed, OrderStatus.Rejected); // the old order is canceled and Binance refused the new one
+                t.SubmissionUnknown = true;
+                OrdersReady = false;
+                order.ExchangeOrderId = "";
             }
         }
 
         LastError = error;
+        DispatchQueuedModifies();
         Publish();
+        QueueDeferredCancels();
         Changed?.Invoke();
     }
 
     public void Cancel(Order order)
     {
         Tracked? t;
-        lock (_gate) _byOrder.TryGetValue(order, out t);
+        lock (_gate)
+        {
+            if (order.State is OrderStates.Done or OrderStates.Failed) return;
+            _byOrder.TryGetValue(order, out t);
+            if (t != null)
+            {
+                t.CancelRequested = true;
+                t.DesiredModifyPrice = null;
+            }
+        }
         if (t != null)
         {
-            // a market order fills at once (Binance would answer "Unknown order"): the next poll reports how it ended
-            if (t.Own && order.Type == OrderTypes.Market) return;
-            Enqueue(t, () => CancelAsync(t));
+            QueueDeferredCancels();
             return;
         }
 
-        // not followed any more (it finished): cancel by its exchange id, as before
+        // A detached cancellation handle (for example a saved restart identity) still routes by its native id.
         if (order.ExchangeOrderId.StartsWith(AlgoPrefix, StringComparison.Ordinal))
         {
             if (long.TryParse(order.ExchangeOrderId.AsSpan(AlgoPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var algoId))
@@ -1279,10 +1482,15 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         long id, algoId;
         lock (_gate)
         {
-            if (!_byOrder.ContainsKey(t.Order) || !t.Accepted) return; // finished meanwhile, or never accepted
+            if (!_byOrder.ContainsKey(t.Order) || !t.Accepted || t.SubmissionUnknown)
+            {
+                t.CancelQueued = false;
+                return;
+            }
             id = t.Id;
             algoId = t.AlgoId;
             t.Busy++;
+            t.CancelQueued = true;
             t.ReplaceFailure = null; // canceling it is what is wanted now
         }
 
@@ -1297,7 +1505,26 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
             }
             else
             {
-                canceled = await _client.CancelOrderAsync(Instrument.Symbol, id, _cts.Token).ConfigureAwait(false);
+                bool terminal = false;
+                if (t.Own && t.Order.Type == OrderTypes.Market)
+                {
+                    // Futures' placement ACK can still say NEW/executedQty=0 after the market order filled.
+                    // Resolve that execution before sending a redundant cancel, without assuming all markets filled.
+                    try
+                    {
+                        var native = await _client.GetOrderAsync(Instrument.Symbol, id, _cts.Token).ConfigureAwait(false);
+                        lock (_gate)
+                        {
+                            if (t.Id == id && _byOrder.ContainsKey(t.Order) && native != null) Apply(t, native);
+                            terminal = !_byOrder.ContainsKey(t.Order);
+                        }
+                    }
+                    catch (Exception ex) when (!_cts.IsCancellationRequested)
+                    {
+                        LastError = ex.Message; // A failed lookup is not proof that working exposure cannot be canceled.
+                    }
+                }
+                if (!terminal) canceled = await _client.CancelOrderAsync(Instrument.Symbol, id, _cts.Token).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -1308,6 +1535,7 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         lock (_gate)
         {
             t.Busy--;
+            t.CancelQueued = false;
             if (canceled != null && t.Id == id && _byOrder.ContainsKey(t.Order)) Apply(t, canceled);
             else if (algoCanceled && t.AlgoId == algoId && _byOrder.ContainsKey(t.Order)) FinishCanceled(t); // before it triggered: nothing more filled
         }
@@ -1321,24 +1549,59 @@ public sealed class BinanceBroker : ITradingAccount, IDisposable
         foreach (var o in ActiveOrders.Where(o => (o.Type == OrderTypes.Stop ? o.TriggerPrice : o.Price) == price).ToList()) Cancel(o);
     }
 
-    public void CancelAll() => _ = Task.Run(async () =>
+    public void CancelAll()
     {
-        var errors = new List<string>();
-        try { await _client.CancelAllAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false); }
-        catch (Exception ex) { errors.Add(ex.Message); }
-
-        // USD-M futures cancel conditional (algo) orders on their own route, also when canceling the others failed
-        if (_settings.Futures)
+        lock (_gate)
+            foreach (var t in _byOrder.Values)
+            {
+                t.CancelRequested = true;
+                t.DesiredModifyPrice = null;
+            }
+        _ = Task.Run(async () =>
         {
-            try { await _client.CancelAllAlgoOrdersAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false); }
+            var errors = new List<string>();
+            try { await _client.CancelAllAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false); }
             catch (Exception ex) { errors.Add(ex.Message); }
+
+            // Conditional orders have a separate route. Local pending sends still require cancellation after binding.
+            if (_settings.Futures)
+            {
+                try { await _client.CancelAllAlgoOrdersAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false); }
+                catch (Exception ex) { errors.Add(ex.Message); }
+            }
+
+            if (errors.Count > 0) LastError = string.Join("; ", errors);
+            QueueDeferredCancels();
+            Changed?.Invoke();
+        });
+    }
+
+    public void Modify(Order order, decimal newPrice)
+    {
+        lock (_gate)
+        {
+            if (!_byOrder.TryGetValue(order, out var t) || order.State != OrderStates.Active || t.CancelRequested) return;
+            t.DesiredModifyPrice = Instrument.RoundPrice(newPrice);
         }
-
-        if (errors.Count > 0) LastError = string.Join("; ", errors);
+        DispatchQueuedModifies();
         Changed?.Invoke();
-    });
+    }
 
-    public void Modify(Order order, decimal newPrice) => Replace(order, newPrice, order.Unfilled);
+    private void DispatchQueuedModifies()
+    {
+        lock (_gate)
+        {
+            foreach (var t in _byOrder.Values)
+            {
+                if (t.DesiredModifyPrice is not { } price || t.Order.State != OrderStates.Active || t.CancelRequested ||
+                    !t.Accepted || t.Busy > 0 || t.SubmissionUnknown || t.ReplaceFailure != null || t.ReplacementPending) continue;
+                t.DesiredModifyPrice = null;
+                if (t.Order.Unfilled <= 0 || (t.Order.Type == OrderTypes.Stop ? t.Order.TriggerPrice : t.Order.Price) == price) continue;
+                // Replay may have added fills while the earlier amendment was unresolved.
+                Replace(t.Order, price, t.Order.Unfilled);
+            }
+        }
+    }
 
     public void Flatten()
     {

@@ -10,6 +10,7 @@
     <Project Path="src/TradingHub.App/TradingHub.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/TradingHub.LedgerCrashFixture/TradingHub.LedgerCrashFixture.csproj" />
     <Project Path="tests/TradingHub.Tests/TradingHub.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">

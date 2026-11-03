@@ -29,6 +29,7 @@ internal sealed class LiveTradesPanel : UserControl
     private readonly TextBlock _summary = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
     private readonly ListBox _list = new() { Background = Brushes.Transparent };
     private readonly TextBlock _empty = new() { Text = "No completed live trades yet.", Classes = { "muted" }, Margin = new Thickness(12), IsVisible = false };
+    private readonly TextBlock _historyError = new() { Foreground = Ui.Warn, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10), IsVisible = false };
     private List<Row> _rows = new();
     private Dictionary<string, (decimal Mae, decimal Mfe, bool Exact)> _ex = new();
     private string? _only;
@@ -104,6 +105,8 @@ internal sealed class LiveTradesPanel : UserControl
         DockPanel.SetDock(_summary, Dock.Top);
         _summary.Margin = new Thickness(0, 0, 0, 10);
         root.Children.Add(_summary);
+        DockPanel.SetDock(_historyError, Dock.Top);
+        root.Children.Add(_historyError);
         DockPanel.SetDock(hint, Dock.Bottom);
         root.Children.Add(hint);
         root.Children.Add(Ui.Card(scroll, 8));
@@ -119,12 +122,15 @@ internal sealed class LiveTradesPanel : UserControl
         var keep = _only;
         _filter.Items.Clear();
         _filter.Items.Add(new ComboBoxItem { Content = _scope == null ? "All strategies" : "All portfolio trades", Tag = null });
-        foreach (var e in entries.Where(e => e.Ledger.Trades.Count > 0).OrderBy(e => e.Info.Strategy))
-            _filter.Items.Add(new ComboBoxItem { Content = $"{e.Info.Strategy} · {e.Info.Symbol} · {TradingHub.Common.EnglishText.Of(e.Info.Account)} ({e.Ledger.Trades.Count})", Tag = e.Key });
+        foreach (var e in entries.Where(e => e.Ledger == null || e.Ledger.Trades.Count > 0).OrderBy(e => e.Info.Strategy))
+            _filter.Items.Add(new ComboBoxItem { Content = $"{e.Info.Strategy} · {e.Info.Symbol} · {TradingHub.Common.EnglishText.Of(e.Info.Account)} ({(e.Ledger is { } ledger ? ledger.Trades.Count.ToString(Inv) : "History unavailable")})", Tag = e.Key });
         _filter.SelectedItem = _filter.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (i.Tag as string) == keep) ?? _filter.Items[0];
         _filling = false;
-        _rows = entries.Where(e => keep == null || e.Key == keep)
-            .SelectMany(e => e.Ledger.Trades.ToList().Select(t => new Row(e, t))).ToList();
+        var selected = entries.Where(e => keep == null || e.Key == keep).ToList();
+        _historyError.Text = string.Join("\n", selected.Where(e => e.Ledger == null).Select(e => $"{e.Info.Strategy} · {e.Info.Symbol}: {e.LedgerError}"));
+        _historyError.IsVisible = _historyError.Text.Length > 0;
+        _rows = selected.Where(e => e.Ledger != null)
+            .SelectMany(e => e.Ledger!.Trades.ToList().Select(t => new Row(e, t))).ToList();
         Render();
         _ = ComputeExcursionsAsync();
     }
@@ -158,10 +164,11 @@ internal sealed class LiveTradesPanel : UserControl
     {
         var rows = Ordered().ToList();
         _list.ItemsSource = rows;
+        _empty.Text = _historyError.IsVisible ? "History unavailable" : "No completed live trades yet.";
         _empty.IsVisible = rows.Count == 0;
         if (rows.Count == 0)
         {
-            _summary.Text = "No closed trades yet.";
+            _summary.Text = _historyError.IsVisible ? "History unavailable" : "No closed trades yet.";
             return;
         }
 
