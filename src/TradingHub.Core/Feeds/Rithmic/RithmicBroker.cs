@@ -20,7 +20,7 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
     private readonly Dictionary<Order, string> _tagOf = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, Order> _byBasket = new();
     private (string Symbol, string Exchange)? _resolved;
-    private List<Order> _active = new();
+    private volatile List<Order> _active = new();
 
     /// <summary>
     /// The part of every order tag that identifies this process (<c>th-{SessionTag}-{order id}</c>). Order ids restart at 1
@@ -131,10 +131,11 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
     private void Sync()
     {
         if (_resolved is not { } c) return;
-        var states = _session.OrdersFor(_account, c.Symbol, c.Exchange);
         var active = new List<Order>();
         lock (_gate)
         {
+            // Concurrent order/PnL callbacks must capture, apply and publish under the same gate.
+            var states = _session.OrdersFor(_account, c.Symbol, c.Exchange);
             var seen = new HashSet<Order>(ReferenceEqualityComparer.Instance);
             foreach (var s in states)
             {
@@ -161,17 +162,16 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
             // las nuestras que todavía no aparecieron en Rithmic (recién mandadas)
             foreach (var o in _byTag.Values)
                 if (o.State == OrderStates.Active && o.ExchangeOrderId.Length == 0 && seen.Add(o)) active.Add(o);
+            var p = _session.PositionFor(_account, c.Symbol, c.Exchange);
+            Position.Volume = p?.Net ?? 0;
+            Position.AveragePrice = p?.AvgPrice ?? 0;
+            Position.RealizedPnL = p?.ClosedPnl ?? 0;
+            decimal open = p?.OpenPnl ?? 0;
+            if (open == 0 && Position.Volume != 0 && LastPrice > 0 && Position.AveragePrice > 0)
+                open = (LastPrice - Position.AveragePrice) * Position.Volume * (Instrument.PointValue > 0 ? Instrument.PointValue : 1);
+            Position.UnrealizedPnL = open;
+            _active = active;
         }
-
-        _active = active;
-        var p = _session.PositionFor(_account, c.Symbol, c.Exchange);
-        Position.Volume = p?.Net ?? 0;
-        Position.AveragePrice = p?.AvgPrice ?? 0;
-        Position.RealizedPnL = p?.ClosedPnl ?? 0;
-        decimal open = p?.OpenPnl ?? 0;
-        if (open == 0 && Position.Volume != 0 && LastPrice > 0 && Position.AveragePrice > 0)
-            open = (LastPrice - Position.AveragePrice) * Position.Volume * (Instrument.PointValue > 0 ? Instrument.PointValue : 1);
-        Position.UnrealizedPnL = open;
         Changed?.Invoke();
     }
 
