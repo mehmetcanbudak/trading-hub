@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using TradingHub.Common;
 using TradingHub.Market;
 
 namespace TradingHub.Data;
@@ -99,6 +100,12 @@ public static class TickFile
         {
             _bs.Flush();
             _fs.Flush();
+        }
+
+        internal void FlushToDisk()
+        {
+            _bs.Flush();
+            StorageSync.Flush(_fs);
         }
 
         public void Dispose()
@@ -365,6 +372,15 @@ public static class TickFile
     /// </summary>
     public static int Repair(string path, Instrument instrument)
     {
+        if (instrument.FeedId is IbBarImport.FeedId or IbBarStore.BarFolder)
+        {
+            string full = Path.GetFullPath(path);
+            string? root = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(full)));
+            if (root == null || !DateOnly.TryParseExact(Path.GetFileNameWithoutExtension(full), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day) ||
+                full != Path.GetFullPath(DayPath(root, instrument.FeedId, instrument.Symbol, day)))
+                throw new InvalidDataException("IB repair requires its standard owned day path.");
+            return IbBarStore.RepairDay(root, instrument, day);
+        }
         var trades = Read(path, out int dropped);
         if (dropped == 0) return 0;
         var tmp = path + ".reparando";
@@ -408,10 +424,12 @@ public static class TickFile
         string path = Path.Combine(root, Sanitize(feedId), Sanitize(symbol), ".recording-active.lock");
         try
         {
-            using var probe = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            using var probe = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             return false;
         }
         catch (IOException error) when (IsSharingViolation(error)) { return true; }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
     }
 
     private sealed class RecordingLease : FileStream

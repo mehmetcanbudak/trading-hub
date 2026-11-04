@@ -28,6 +28,7 @@
     <ProjectReference Include="..\TradingHub.LedgerCrashFixture\TradingHub.LedgerCrashFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\TradingHub.QuantColdFixture\TradingHub.QuantColdFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\TradingHub.AssistantCliFixture\TradingHub.AssistantCliFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TradingHub.IbSnapshotCrashFixture\TradingHub.IbSnapshotCrashFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <Target Name="CopyLedgerCrashFixture" AfterTargets="Build">
@@ -48,6 +49,12 @@
       <AssistantCliFixtureFiles Include="$(MSBuildProjectDirectory)/../TradingHub.AssistantCliFixture/bin/$(Configuration)/$(TargetFramework)/**/*" />
     </ItemGroup>
     <Copy SourceFiles="@(AssistantCliFixtureFiles)" DestinationFiles="@(AssistantCliFixtureFiles->'$(OutDir)AssistantCliFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+  <Target Name="CopyIbSnapshotCrashFixture" AfterTargets="Build">
+    <ItemGroup>
+      <IbSnapshotCrashFixtureFiles Include="$(MSBuildProjectDirectory)/../TradingHub.IbSnapshotCrashFixture/bin/$(Configuration)/$(TargetFramework)/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(IbSnapshotCrashFixtureFiles)" DestinationFiles="@(IbSnapshotCrashFixtureFiles->'$(OutDir)IbSnapshotCrashFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
 

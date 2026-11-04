@@ -17,7 +17,7 @@ public sealed class TickData
     private const byte SyntheticFlag = 0x80;
     private static byte EncodeSide(TradeSide side, bool synthetic) => (byte)((byte)side | (synthetic ? SyntheticFlag : 0));
 
-    private TickData(Instrument instrument, long[] times, long[] prices, double[] volumes, byte[] sides, int start, int end, bool compressed = false)
+    private TickData(Instrument instrument, long[] times, long[] prices, double[] volumes, byte[] sides, int start, int end, bool compressed = false, IbHistoryStamp? storageStamp = null)
     {
         Instrument = instrument;
         _times = times;
@@ -27,6 +27,7 @@ public sealed class TickData
         Start = start;
         End = end;
         Compressed = compressed;
+        StorageStamp = storageStamp;
     }
 
     /// <summary>
@@ -34,6 +35,9 @@ public sealed class TickData
     /// sumado): ver <see cref="Compress"/>.
     /// </summary>
     public bool Compressed { get; }
+
+    /// <summary>Identity captured before reading the original disk-load range; views/compression retain that scope's stamp.</summary>
+    public IbHistoryStamp? StorageStamp { get; }
 
     /// <summary>
     /// Junta las operaciones seguidas al mismo precio, del mismo lado y en el mismo segundo (suma el volumen). Las velas de
@@ -67,7 +71,7 @@ public sealed class TickData
             sides[k] = _sides[i];
         }
 
-        return new TickData(Instrument, times, prices, volumes, sides, 0, n, compressed: true);
+        return new TickData(Instrument, times, prices, volumes, sides, 0, n, compressed: true, storageStamp: StorageStamp);
     }
 
     private bool SameRun(int a, int b) =>
@@ -95,7 +99,7 @@ public sealed class TickData
     public TickData Slice(DateTime fromUtc, DateTime toUtc)
     {
         int a = Lower(fromUtc.Ticks), b = Lower(toUtc.Ticks);
-        return new TickData(Instrument, _times, _prices, _volumes, _sides, a, b, Compressed);
+        return new TickData(Instrument, _times, _prices, _volumes, _sides, a, b, Compressed, StorageStamp);
     }
 
     private int Lower(long t)
@@ -117,6 +121,8 @@ public sealed class TickData
     /// </summary>
     public static TickData Load(string root, Instrument instrument, DateTime fromUtc, DateTime toUtc, IProgress<double>? progress, CancellationToken ct, bool compress = false)
     {
+        using var ibSnapshot = instrument.FeedId == IbBarImport.FeedId ? IbBarStore.OpenSnapshot(root, instrument.Symbol, ct) : null;
+        IbHistoryStamp? storageStamp = ibSnapshot?.GetStamp(fromUtc, toUtc);
         var days = new List<DateOnly>();
         for (var d = DateOnly.FromDateTime(fromUtc); d <= DateOnly.FromDateTime(toUtc); d = d.AddDays(1)) days.Add(d);
 
@@ -128,7 +134,7 @@ public sealed class TickData
         for (int k = 0; k < days.Count; k++)
         {
             ct.ThrowIfCancellationRequested();
-            var list = HistorySources.ReadDay(root, instrument.FeedId, instrument.Symbol, days[k]);
+            var list = ibSnapshot?.ReadDay(days[k], instrument.TickSize) ?? HistorySources.ReadDay(root, instrument.FeedId, instrument.Symbol, days[k]);
             if (list.Count > 0)
             {
                 foreach (var t in list)
@@ -162,7 +168,7 @@ public sealed class TickData
                 }
             }
 
-            progress?.Report((k + 1.0) / days.Count);
+            if (ibSnapshot == null) progress?.Report((k + 1.0) / days.Count);
         }
 
         if (compress && n < times.Length)
@@ -174,7 +180,11 @@ public sealed class TickData
             Array.Resize(ref sides, n);
         }
 
-        return new TickData(instrument, times, prices, volumes, sides, 0, n, compress);
+        var result = new TickData(instrument, times, prices, volumes, sides, 0, n, compress, storageStamp);
+        // Inline progress may read the same history; publish it only after releasing snapshot ownership.
+        ibSnapshot?.Dispose();
+        if (ibSnapshot != null) progress?.Report(1);
+        return result;
     }
 
     /// <summary>Crea datos desde una lista (pruebas y datos sintéticos).</summary>

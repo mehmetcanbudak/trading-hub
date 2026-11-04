@@ -743,20 +743,27 @@ internal static class LabServer
         if (settings.ToUtc <= settings.FromUtc) throw new ArgumentException("to must be later than from.");
 
         // comprimidos (ticks repetidos juntados) para optimizar y validar: la misma historia con muchos menos eventos
-        string key = $"{settings.FeedId}|{settings.Symbol}|{settings.FromUtc:O}|{settings.ToUtc:O}|{(compress ? "c" : "")}";
-        if (_ticks == null || _ticksKey != key)
+        string root = AppPaths.Ticks;
+        string key = $"{root}|{settings.FeedId}|{settings.Symbol}|{settings.FromUtc:O}|{settings.ToUtc:O}|{(compress ? "c" : "")}";
+        TickData? cached = _ticks;
+        if (cached != null && _ticksKey == key)
         {
-            _ticks = null;
-            GC.Collect();
-            var inst = await ResolveInstrumentAsync(settings.FeedId, settings.Symbol);
-            var data = await Task.Run(() => TickData.Load(AppPaths.Ticks, inst, settings.FromUtc, settings.ToUtc, null, CancellationToken.None, compress));
-            if (data.Count == 0)
-                throw new ArgumentException($"No saved ticks for {settings.Symbol} ({settings.FeedId}) in this range. See list_data or download days with download_data.");
-            _ticks = data;
-            _ticksKey = key;
+            if (settings.FeedId != IbBarImport.FeedId) return (settings, cached);
+            if (cached.StorageStamp is { } captured &&
+                captured == await Task.Run(() => IbBarStore.GetStamp(root, settings.Symbol, settings.FromUtc, settings.ToUtc)))
+                return (settings, cached);
         }
 
-        return (settings, _ticks);
+        cached = null; // Do not retain the previous range across the replacement allocation.
+        _ticks = null;
+        GC.Collect();
+        var inst = await ResolveInstrumentAsync(settings.FeedId, settings.Symbol);
+        var data = await Task.Run(() => TickData.Load(root, inst, settings.FromUtc, settings.ToUtc, null, CancellationToken.None, compress));
+        if (data.Count == 0)
+            throw new ArgumentException($"No saved ticks for {settings.Symbol} ({settings.FeedId}) in this range. See list_data or download days with download_data.");
+        _ticks = data;
+        _ticksKey = key;
+        return (settings, data);
     }
 
     // ===================================================================== corridas

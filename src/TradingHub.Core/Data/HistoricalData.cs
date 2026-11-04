@@ -30,6 +30,7 @@ public static class HistoricalData
         if (!Directory.Exists(root)) return result;
         foreach (var feedDir in Directory.EnumerateDirectories(root))
         {
+            if (Path.GetFileName(feedDir) is IbBarImport.FeedId or IbBarStore.BarFolder) continue;
             foreach (var symDir in Directory.EnumerateDirectories(feedDir))
             {
                 var days = new List<DayData>();
@@ -45,12 +46,13 @@ public static class HistoricalData
             }
         }
 
-        // The separate IB bar folder is an implementation detail, never a second selectable market.
-        var ibGroups = result.Where(s => s.FeedId is IbBarImport.FeedId or IbBarStore.BarFolder).GroupBy(s => s.Symbol).ToList();
-        result.RemoveAll(s => s.FeedId is IbBarImport.FeedId or IbBarStore.BarFolder);
-        foreach (var group in ibGroups)
-            result.Add(new SymbolData(IbBarImport.FeedId, group.Key, group.SelectMany(s => s.Days).GroupBy(d => d.Day)
-                .Select(days => new DayData(days.Key, days.First().Path, days.Sum(d => d.Bytes))).OrderBy(d => d.Day).ToList()));
+        // Recover before inspecting either constituent folder; one symbol is one logical dataset.
+        foreach (string symbol in IbHistoryCoordinator.Symbols(root))
+        {
+            using var snapshot = IbBarStore.OpenSnapshot(root, symbol);
+            var days = snapshot.Days();
+            if (days.Count > 0) result.Add(new SymbolData(IbBarImport.FeedId, symbol, days));
+        }
         result.Sort((a, b) => b.Bytes.CompareTo(a.Bytes));
         return result;
     }
@@ -60,15 +62,15 @@ public static class HistoricalData
 
     public static void DeleteDays(string root, string feedId, string symbol, IEnumerable<DateOnly> days)
     {
+        if (feedId == IbBarImport.FeedId)
+        {
+            IbBarStore.DeleteDays(root, symbol, days);
+            return;
+        }
         foreach (var d in days)
         {
             var p = TickFile.DayPath(root, feedId, symbol, d);
             if (File.Exists(p)) File.Delete(p);
-            if (feedId == IbBarImport.FeedId)
-            {
-                var barPath = TickFile.DayPath(root, IbBarStore.BarFolder, symbol, d);
-                if (File.Exists(barPath)) File.Delete(barPath);
-            }
         }
 
         var dir = Path.GetDirectoryName(TickFile.DayPath(root, feedId, symbol, DateOnly.MinValue))!;
@@ -78,6 +80,12 @@ public static class HistoricalData
     /// <summary>Operaciones entre dos instantes (UTC), ordenadas, leyendo día por día (de las fuentes de <see cref="HistorySources"/>).</summary>
     public static IEnumerable<Trade> Read(string root, string feedId, string symbol, DateTime fromUtc, DateTime toUtc)
     {
+        if (feedId == IbBarImport.FeedId)
+        {
+            // Materialize before the first yield so replay never owns the coordinator for its playback lifetime.
+            foreach (var trade in IbBarStore.LoadRange(root, symbol, fromUtc, toUtc)) yield return trade;
+            yield break;
+        }
         for (var d = DateOnly.FromDateTime(fromUtc); d <= DateOnly.FromDateTime(toUtc); d = d.AddDays(1))
         {
             var list = HistorySources.ReadDay(root, feedId, symbol, d);
@@ -94,6 +102,11 @@ public static class HistoricalData
     /// <param name="replace">El día bajado está completo: reemplaza lo grabado en vivo en vez de mezclarlo (no duplica).</param>
     public static void WriteDay(string root, Instrument instrument, DateOnly day, IReadOnlyList<Trade> trades, bool replace = false)
     {
+        if (instrument.FeedId is IbBarImport.FeedId or IbBarStore.BarFolder)
+        {
+            IbBarStore.WriteDay(root, instrument, day, trades, replace);
+            return;
+        }
         var path = TickFile.DayPath(root, instrument.FeedId, instrument.Symbol, day);
         var all = new List<Trade>(trades.Count);
         if (!replace && File.Exists(path)) all.AddRange(TickFile.Read(path));

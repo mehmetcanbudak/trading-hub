@@ -43,6 +43,8 @@ internal sealed class DataView : UserControl, IPage
     private readonly Button _download;
     private readonly Button _cancel;
     private CancellationTokenSource? _cts;
+    private bool _refreshing;
+    private bool _refreshAgain;
 
     public DataView(AppServices svc, Action<string> status, MainWindow main)
     {
@@ -664,7 +666,37 @@ internal sealed class DataView : UserControl, IPage
 
     private void Refresh()
     {
-        _index = HistoricalData.Scan(AppPaths.Ticks);
+        _refreshAgain = true;
+        if (!_refreshing) _ = RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _refreshing = true;
+        try
+        {
+            do
+            {
+                _refreshAgain = false;
+                try { _index = await Task.Run(() => HistoricalData.Scan(AppPaths.Ticks)); }
+                catch (Exception error)
+                {
+                    _index.Clear();
+                    _selected = null;
+                    _symbols.Items.Clear();
+                    _days.Items.Clear();
+                    _totals.Text = "History unavailable";
+                    _status("History could not be loaded: " + error.Message);
+                    continue;
+                }
+                ApplyIndex();
+            } while (_refreshAgain);
+        }
+        finally { _refreshing = false; }
+    }
+
+    private void ApplyIndex()
+    {
         _totals.Text = $"{_index.Count} instruments · {Size(_index.Sum(s => s.Bytes))}";
         RefreshDatabentoSummary();
         var keep = _selected;
@@ -725,22 +757,28 @@ internal sealed class DataView : UserControl, IPage
     private async Task DeleteSelectedAsync()
     {
         var days = SelectedDays();
-        if (_selected == null || days.Count == 0)
+        var selected = _selected;
+        if (selected == null || days.Count == 0)
         {
             _status(Os.IsWindows ? "Select one or more days to delete (Ctrl or Shift for multiselect)." : "Select one or more days to delete (Command or Shift for multiselect).");
             return;
         }
 
-        if (!await ConfirmDialog.ShowAsync(_main, "Delete data", $"Deletes {days.Count} day(s) of {_selected.Symbol} ({Size(days.Sum(d => d.Bytes))}). This cannot be undone.", "Delete", danger: true)) return;
-        HistoricalData.DeleteDays(AppPaths.Ticks, _selected.FeedId, _selected.Symbol, days.Select(d => d.Day));
-        _status($"Deleted {days.Count} day(s) of {_selected.Symbol}");
-        Refresh();
+        if (!await ConfirmDialog.ShowAsync(_main, "Delete data", $"Deletes {days.Count} day(s) of {selected.Symbol} ({Size(days.Sum(d => d.Bytes))}). This cannot be undone.", "Delete", danger: true)) return;
+        try
+        {
+            await Task.Run(() => HistoricalData.DeleteDays(AppPaths.Ticks, selected.FeedId, selected.Symbol, days.Select(d => d.Day)));
+            _status($"Deleted {days.Count} day(s) of {selected.Symbol}");
+            Refresh();
+        }
+        catch (Exception error) { _status("History could not be deleted: " + error.Message); }
     }
 
     private async Task ReplaySelectedAsync()
     {
         var days = SelectedDays();
-        if (_selected == null || days.Count == 0)
+        var selected = _selected;
+        if (selected == null || days.Count == 0)
         {
             _status("Choose the day to replay.");
             return;
@@ -749,31 +787,37 @@ internal sealed class DataView : UserControl, IPage
         var day = days.Min(d => d.Day);
         var lastDay = days.Max(d => d.Day);
         Instrument? inst = null;
-        if (_selected.FeedId == HistorySources.Databento) inst = MarketInfo.FuturesInstrument(_selected.FeedId, _selected.Symbol);
+        if (selected.FeedId == HistorySources.Databento) inst = MarketInfo.FuturesInstrument(selected.FeedId, selected.Symbol);
         else
         {
             try
             {
-                var instruments = await InstrumentPicker.InstrumentsAsync(_svc, _selected.FeedId);
-                inst = instruments.FirstOrDefault(i => i.Symbol == _selected.Symbol);
+                var instruments = await InstrumentPicker.InstrumentsAsync(_svc, selected.FeedId);
+                inst = instruments.FirstOrDefault(i => i.Symbol == selected.Symbol);
             }
             catch (Exception)
             {
                 // sin la conexión: los futuros igual se arman con el catálogo de CME
             }
 
-            if (inst == null && MarketInfo.IsFutures(_selected.FeedId)) inst = MarketInfo.FuturesInstrument(_selected.FeedId, _selected.Symbol);
+            if (inst == null && MarketInfo.IsFutures(selected.FeedId)) inst = MarketInfo.FuturesInstrument(selected.FeedId, selected.Symbol);
         }
 
         if (inst == null)
         {
-            _status($"Could not retrieve instrument details for {_selected.Symbol} (is the connection enabled?).");
+            _status($"Could not retrieve instrument details for {selected.Symbol} (is the connection enabled?).");
             return;
         }
 
         // arranca con el primer dato del día
         var start = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-        var first = HistoricalData.Read(AppPaths.Ticks, _selected.FeedId, _selected.Symbol, start, start.AddDays(1)).FirstOrDefault();
+        Trade first;
+        try { first = await Task.Run(() => HistoricalData.Read(AppPaths.Ticks, selected.FeedId, selected.Symbol, start, start.AddDays(1)).FirstOrDefault()); }
+        catch (Exception error)
+        {
+            _status("Replay history could not be loaded: " + error.Message);
+            return;
+        }
         if (first.Time > start) start = first.Time;
         var end = lastDay.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(1);
         _main.Navigate("trading");

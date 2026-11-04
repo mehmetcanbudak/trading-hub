@@ -117,6 +117,8 @@ internal sealed class LiveTradesPanel : UserControl
     /// <summary>Vuelve a leer las operaciones (y calcula MAE / MFE de las que falten).</summary>
     public void Refresh()
     {
+        ++_computing; // Even an empty refresh invalidates an older asynchronous result.
+        _ex.Clear(); // View state only; LiveCenter owns the economic/source-validated cache.
         var entries = _svc.Live.Entries().Where(e => _scope == null || _scope.Contains(e.Key)).ToList();
         _filling = true;
         var keep = _only;
@@ -137,11 +139,11 @@ internal sealed class LiveTradesPanel : UserControl
 
     private async Task ComputeExcursionsAsync()
     {
-        var missing = _rows.Where(r => !_ex.ContainsKey(r.Id)).Select(r => (r.Entry, r.Trade)).ToList();
-        if (missing.Count == 0) return;
-        int ticket = ++_computing;
+        var items = _rows.Select(r => (r.Entry, r.Trade)).ToList();
+        if (items.Count == 0) return;
+        int ticket = _computing;
         _summary.Text += " · calculating MAE and MFE…";
-        var res = await _svc.Live.ExcursionsAsync(missing);
+        var res = await _svc.Live.ExcursionsAsync(items);
         if (ticket != _computing) return;
         foreach (var (k, v) in res) _ex[k] = v;
         Render();
@@ -213,8 +215,8 @@ internal sealed class LiveTradesPanel : UserControl
         Cell(9, t.Quantity.ToString("0.####", Inv), null, true);
         Cell(10, points.ToString("+0.#####;-0.#####;0", Inv), points >= 0 ? Ui.Up : Ui.Down, true);
         Cell(11, Money(t.NetPnl), t.NetPnl >= 0 ? Ui.Up : Ui.Down, true);
-        Cell(12, hasEx ? Money(ex.Mae) : "—", Ui.Down, true, hasEx ? null : "No saved data for that time");
-        Cell(13, hasEx ? Money(ex.Mfe) : "—", Ui.Up, true, hasEx ? null : "No saved data for that time");
+        Cell(12, hasEx ? Money(ex.Mae) : "—", Ui.Down, true, hasEx ? null : "Saved prices are unavailable or incomplete for this range");
+        Cell(13, hasEx ? Money(ex.Mfe) : "—", Ui.Up, true, hasEx ? null : "Saved prices are unavailable or incomplete for this range");
         Cell(14, hasEx && ex.Mfe > 0 && t.NetPnl > 0 ? $"{Math.Min(100, t.NetPnl / ex.Mfe * 100):0} %" : "—", Ui.Text2, true);
         g.Tapped += async (_, _) =>
         {
