@@ -55,7 +55,7 @@ public sealed class IbFeed : IMarketDataFeed, IBarHistoryFeed, IDataScopeFeed, I
     }
 
     private int ConfigurationGeneration => Volatile.Read(ref _configurationGeneration);
-    private void EnsureCurrent(int generation, CancellationToken ct)
+    internal void EnsureCurrent(int generation, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (generation != ConfigurationGeneration) throw new IOException("IB configuration changed; the pending historical operation was canceled. Request history again.");
@@ -312,7 +312,8 @@ public sealed class IbFeed : IMarketDataFeed, IBarHistoryFeed, IDataScopeFeed, I
     {
         ct.ThrowIfCancellationRequested();
         if (!_settings.Offline) return Task.FromResult<DateTime?>(null); // IB does not promise a complete earliest date.
-        var days = HistorySources.AvailableDays(_root ?? throw new InvalidOperationException("IB storage root is required."), FeedId, instrument.Symbol);
+        using var snapshot = IbBarStore.OpenSnapshot(_root ?? throw new InvalidOperationException("IB storage root is required."), instrument.Symbol, ct);
+        var days = snapshot.AvailableDays();
         return Task.FromResult<DateTime?>(days.Count == 0 ? null : days[0].ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
     }
     public async Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
@@ -323,7 +324,7 @@ public sealed class IbFeed : IMarketDataFeed, IBarHistoryFeed, IDataScopeFeed, I
         if (minutes is not (1 or 5 or 15)) throw new ArgumentOutOfRangeException(nameof(minutes), "IB bar history supports 1, 5 and 15 minute requests.");
         if (_settings.Offline)
         {
-            var rows = IbBarStore.LoadRange(_root ?? throw new InvalidOperationException("IB storage root is required."), instrument.Symbol, fromUtc, toUtc, ct);
+            var rows = IbBarStore.LoadRange(_root ?? throw new InvalidOperationException("IB storage root is required."), instrument.Symbol, fromUtc, toUtc, ct, instrument.TickSize);
             var stored = rows.GroupBy(t => t.Time.Ticks / (TimeSpan.TicksPerMinute * minutes))
                 .Select(g => new Kline(new DateTimeOffset(new DateTime(g.Key * TimeSpan.TicksPerMinute * minutes, DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
                     g.First().Price, g.Max(t => t.Price), g.Min(t => t.Price), g.Last().Price, g.Sum(t => t.Volume), 0, false)).ToList();
@@ -414,9 +415,10 @@ public sealed class IbFeed : IMarketDataFeed, IBarHistoryFeed, IDataScopeFeed, I
     {
         if (_settings.Offline)
         {
-            var days = HistorySources.AvailableDays(_root ?? throw new InvalidOperationException("IB storage root is required."), FeedId, instrument.Symbol);
+            using var snapshot = IbBarStore.OpenSnapshot(_root ?? throw new InvalidOperationException("IB storage root is required."), instrument.Symbol, ct);
+            var days = snapshot.AvailableDays();
             if (days.Count == 0) return null;
-            var rows = HistorySources.ReadDay(_root!, FeedId, instrument.Symbol, days[^1]);
+            var rows = snapshot.ReadDay(days[^1], instrument.TickSize);
             return rows.Count == 0 ? null : rows[^1].Time;
         }
         var now = DateTime.UtcNow;
@@ -425,6 +427,16 @@ public sealed class IbFeed : IMarketDataFeed, IBarHistoryFeed, IDataScopeFeed, I
     }
 
     public async Task<IReadOnlyList<Trade>> LoadBarHistoryAsync(Instrument instrument, DateTime from, DateTime to, CancellationToken ct)
+    {
+        int generation = await EnsureBarHistoryAsync(instrument, from, to, ct).ConfigureAwait(false);
+        var stored = IbBarStore.LoadRange(HistoryRoot, instrument.Symbol, from, to, ct, instrument.TickSize).Where(t => t.Id < 0).ToList();
+        EnsureCurrent(generation, ct);
+        return stored;
+    }
+
+    internal string HistoryRoot => _root ?? throw new InvalidOperationException("IB storage root is required.");
+
+    internal async Task<int> EnsureBarHistoryAsync(Instrument instrument, DateTime from, DateTime to, CancellationToken ct)
     {
         int generation = ConfigurationGeneration;
         ct.ThrowIfCancellationRequested();
@@ -440,9 +452,8 @@ public sealed class IbFeed : IMarketDataFeed, IBarHistoryFeed, IDataScopeFeed, I
                 IbBarStore.MergeBars(_root, instrument, klines, ct);
             }
         }
-        var stored = IbBarStore.LoadRange(_root, instrument.Symbol, from, to, ct).Where(t => t.Id < 0).ToList();
         EnsureCurrent(generation, ct);
-        return stored;
+        return generation;
     }
 
 

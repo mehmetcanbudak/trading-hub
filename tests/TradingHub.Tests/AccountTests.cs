@@ -110,7 +110,12 @@ public class AccountTests
         var settings = new RithmicSettings { Uri = server.Uri, System = "Rithmic Paper Trading", User = "demo", Password = "demo", TimeoutMs = 5000 };
         using var session = new RithmicTradingSession(settings);
         var fills = new List<RithmicFill>();
-        session.FillReceived += f => { lock (fills) fills.Add(f); };
+        var entryFill = new TaskCompletionSource<RithmicFill>(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.FillReceived += f =>
+        {
+            lock (fills) fills.Add(f);
+            if (f.IsBuy) entryFill.TrySetResult(f);
+        };
         session.Start();
         for (int i = 0; i < 200 && !session.IsConnected; i++) await Task.Delay(30);
         Assert.True(session.IsConnected, session.StatusText);
@@ -118,6 +123,10 @@ public class AccountTests
         Assert.Equal(50_000m, session.SummaryFor("ACC1")!.Balance);
 
         await session.PlaceAsync("ACC1", "ESZ6", "CME", true, 2, 2, 0, 0, "t1", CancellationToken.None);
+        // Placement acknowledgement precedes execution; do not move the fake market before the entry actually fills.
+        var entry = await entryFill.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        Assert.Equal(5000m, entry.Price);
+        Assert.Equal(2m, entry.Quantity);
         server.MarketPrice = 5004;
         await session.PlaceAsync("ACC1", "ESZ6", "CME", false, 2, 2, 0, 0, "t2", CancellationToken.None);
         // el saldo (planta de PnL) y las ejecuciones (planta de órdenes) llegan por conexiones distintas: se esperan las dos cosas

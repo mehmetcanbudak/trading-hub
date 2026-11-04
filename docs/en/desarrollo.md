@@ -83,6 +83,10 @@ The number is initial loading seconds. With no scenes, Trading is captured. Asse
 | trading, accounts, strategies, live, data, connections, settings | Navigate and capture the section. |
 | english | English windows/dialogs, safety copy and related localization assertions using isolated fixtures. |
 | safety | Financial-safety and protection-aware quit scenarios, including pending close/cancel acknowledgment and changed Tradovate contexts; fake providers only. |
+| ib-excursions, ib-excursions-import | Actual live excursion consumer after a corrected entry price or same-length/preserved-mtime IB history replacement; owned synthetic bars only. |
+| ib-data-refresh | Actual Data refresh remains responsive while an owned public import holds publication; the UI releases the import and displays the complete new day index. |
+| ib-live-trades | Actual rendered live trade table refresh after a same-length/preserved-mtime IB replacement; its MAE/MFE must match the validated service, not an older per-view result. |
+| ib-recorded-prefix | Actual live excursion consumer under an owned recorder lease: an incomplete prefix is unavailable, then fully drained valid prices establish the closed range. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
 | panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
 | footprint | Footprint text colors and editor. |

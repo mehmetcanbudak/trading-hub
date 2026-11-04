@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/TradingHub.Core/TradingHub.Core.csproj" />
+    <ProjectReference Include="../../src/TradingHub.App/TradingHub.App.csproj" />
+  </ItemGroup>
+</Project>

@@ -327,6 +327,36 @@ foreach (var page in pages)
         continue;
     }
 
+    if (page == "ib-recorded-prefix")
+    {
+        exitCode += IbExcursionScene.RunRecordedPrefix(Pump, outDir);
+        continue;
+    }
+
+    if (page == "ib-live-trades")
+    {
+        exitCode += IbExcursionScene.RunPanel(window, Pump, outDir);
+        continue;
+    }
+
+    if (page == "ib-data-refresh")
+    {
+        exitCode += IbRefreshScene.Run(window, Pump, outDir);
+        continue;
+    }
+
+    if (page == "ib-excursions-import")
+    {
+        exitCode += IbExcursionScene.Run(Pump, outDir, replaceHistory: true);
+        continue;
+    }
+
+    if (page == "ib-excursions")
+    {
+        exitCode += IbExcursionScene.Run(Pump, outDir);
+        continue;
+    }
+
     if (page == "english")
     {
         exitCode += EnglishScene.Run(window, Pump, outDir);

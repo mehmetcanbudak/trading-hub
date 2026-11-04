@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using TradingHub.Feeds;
+using TradingHub.Feeds.InteractiveBrokers;
 using TradingHub.Market;
 
 namespace TradingHub.Data;
@@ -213,6 +214,41 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     /// </summary>
     private async Task<List<Trade>> LoadRangeAsync(DateTime from, DateTime to, long maxIdExclusive, long generation, CancellationToken ct, DateTime? anchor = null)
     {
+        if (Feed is IbFeed ib)
+        {
+            // Fetch/publish first. Recorded and synthetic rows are then captured together, never across a network await.
+            int configuration = await ib.EnsureBarHistoryAsync(Instrument, from, to, ct).ConfigureAwait(false);
+            var all = new List<Trade>();
+            long recordedCount = 0;
+            bool includeRecorded = true;
+            DateTime firstRecorded = DateTime.MaxValue;
+            using (var snapshot = IbBarStore.OpenSnapshot(ib.HistoryRoot, Instrument.Symbol, ct))
+            {
+                foreach (var day in EachDay(from, to).Reverse())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var rows = snapshot.ReadDay(day, Instrument.TickSize);
+                    rows.RemoveAll(t => t.Time < from || t.Time >= to);
+                    int dayRecorded = rows.Count(t => t.Id >= 0 && t.Id < maxIdExclusive);
+                    if (recordedCount > 0 && recordedCount + dayRecorded > MaxDiskTrades) includeRecorded = false;
+                    if (includeRecorded) recordedCount += dayRecorded;
+                    foreach (var trade in rows)
+                    {
+                        if (trade.Id < 0) all.Add(trade);
+                        else if (includeRecorded && trade.Id < maxIdExclusive)
+                        {
+                            all.Add(trade);
+                            if (trade.Time < firstRecorded) firstRecorded = trade.Time;
+                        }
+                    }
+                }
+            }
+            ib.EnsureCurrent(configuration, ct);
+            if (firstRecorded != DateTime.MaxValue)
+                Publish(generation, () => RealTicksFrom = firstRecorded < RealTicksFrom ? firstRecorded : RealTicksFrom);
+            all.Sort(static (a, b) => a.Time != b.Time ? a.Time.CompareTo(b.Time) : a.Id.CompareTo(b.Id));
+            return all;
+        }
         var real = new List<Trade>();
         if (RecordingRoot != null && (Feed.IsLive || Feed is IBarHistoryFeed))
         {
@@ -726,8 +762,13 @@ public sealed class TickRecorder : IDisposable
     {
         _root = root;
         _instrument = instrument;
-        // un solo proceso graba cada instrumento: si otro Trading Hub ya lo graba, este solo lee
-        _lock = TickFile.TryLock(root, instrument.FeedId, instrument.Symbol, recordingWriter: true);
+        if (instrument.FeedId == IbBarImport.FeedId)
+        {
+            // Recover before taking append ownership; the recorder does not retain the snapshot coordinator.
+            using var ownership = IbHistoryCoordinator.Enter(root, instrument.Symbol);
+            _lock = ownership.StartRecorder();
+        }
+        else _lock = TickFile.TryLock(root, instrument.FeedId, instrument.Symbol, recordingWriter: true);
         if (_lock == null) return;
         _thread = new Thread(Run) { IsBackground = true, Name = "recorder-" + instrument.Symbol };
         try { _thread.Start(); }

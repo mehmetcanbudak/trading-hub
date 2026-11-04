@@ -104,7 +104,14 @@ public sealed class ReplayFeed : IMarketDataFeed
     {
         sink.OnStatus(Instrument, FeedStatus.Connected, $"Replay from {Start:dd/MM HH:mm} UTC");
         using var e = HistoricalData.Read(_root, _source.FeedId, _source.Symbol, Start, End).GetEnumerator();
-        bool has = e.MoveNext();
+        bool has;
+        try { has = e.MoveNext(); }
+        catch (Exception error) when (_source.FeedId == IbBarImport.FeedId)
+        {
+            IsFinished = true;
+            sink.OnStatus(Instrument, FeedStatus.Disconnected, "Replay history could not be loaded: " + error.Message);
+            return;
+        }
         var sw = Stopwatch.StartNew();
         double lastMs = 0;
         var batch = new List<Trade>(4096);
