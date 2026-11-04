@@ -149,14 +149,15 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         Period = period;
         Settings = settings ?? new ChartSettings();
         Theme = ChartTheme.With(Settings.Colors);
-        Series = new CandleSeries(data.Instrument, period, 1);
+        Series = new CandleSeries(data.Instrument, period, 1, (data.Feed as TradingHub.Feeds.ISessionSettingsFeed)?.GetSessionSettings(data.Instrument));
         _chartInfo = new ChartInfo(() => (IChartContainer?)LastLayout?.Main ?? EmptyContainer.Instance);
         _depthInfo = new MarketDepthInfo(DepthSnapshotArgs, () => SumDepth(BookSide.Ask), () => SumDepth(BookSide.Bid));
 
         data.TradesAppended += OnTradesAppended;
         data.HistoryLoaded += OnHistoryLoaded;
         data.DepthUpdated += OnDepthUpdated;
-        data.StatusChanged += () => Invalidate();
+        data.StatusChanged += OnStatusChanged;
+        data.OpenInterestChanged += OnOpenInterestChanged;
         Rebuild();
     }
 
@@ -282,8 +283,9 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     public void Rebuild()
     {
         int step = BaseStepFor(Settings.PriceStep);
-        Series = new CandleSeries(Instrument, Period, step);
+        Series = new CandleSeries(Instrument, Period, step, (Data.Feed as TradingHub.Feeds.ISessionSettingsFeed)?.GetSessionSettings(Instrument));
         Series.Rebuild(Data.Trades);
+        Data.OpenInterest.Apply(Series, Data.Feed.Now);
         _wrappers.Clear();
         for (int i = 0; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
         UpdateInfos();
@@ -488,12 +490,32 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         _autoStep = null;
         Rebuild();
     }
+    private void OnStatusChanged() => Invalidate();
+
+    private void OnOpenInterestChanged()
+    {
+        int from = Math.Max(0, Series.Count - 1);
+        if (Data.OpenInterest.ChangedFrom is { } time)
+        {
+            from = Math.Max(0, Series.FindBar(time));
+            // Volume/tick bars can share a trade timestamp; all such intervals must see the correction.
+            while (from > 0 && Series[from - 1].LastTime >= time) from--;
+        }
+        int first = Data.OpenInterest.Apply(Series, Data.Feed.Now, from);
+        foreach (var slot in Indicators)
+        {
+            if (slot.NeedsRecalc) continue;
+            Safe(slot, () => slot.Indicator.HostCalculate(first >= 0 ? first : Math.Max(0, Series.Count - 1)));
+        }
+        Invalidate();
+    }
 
     private void OnTradesAppended(int start, int count)
     {
         var res = Series.Append(Data.Trades);
         for (int i = _wrappers.Count; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
         if (!res.Changed) return;
+        Data.OpenInterest.Apply(Series, Data.Feed.Now, res.FirstChangedBar);
 
         // ticks para los indicadores que los piden
         List<MarketDataArg>? args = null;
@@ -778,8 +800,9 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
             decimal vol = store.GetVolume(i);
             var side = store.GetSide(i);
             long t = store.GetTimeTicks(i);
-            scaled.AddTrade(price, Series.RowOf(price), vol, side, t, i);
-            exact.AddTrade(price, price, vol, side, t, i);
+            bool synthetic = store.GetId(i) < 0;
+            scaled.AddTrade(price, Series.RowOf(price), vol, side, t, i, synthetic);
+            exact.AddTrade(price, price, vol, side, t, i, synthetic);
         }
 
         try
@@ -822,6 +845,8 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         Data.TradesAppended -= OnTradesAppended;
         Data.HistoryLoaded -= OnHistoryLoaded;
         Data.DepthUpdated -= OnDepthUpdated;
+        Data.StatusChanged -= OnStatusChanged;
+        Data.OpenInterestChanged -= OnOpenInterestChanged;
         foreach (var s in Indicators.ToArray())
         {
             try { s.Indicator.HostDetach(); }

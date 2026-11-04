@@ -51,6 +51,7 @@ public sealed class ScriptCompiler
         global using System;
         global using System.Collections.Generic;
         global using System.Linq;
+        global using Q = QuanTAlib;
         global using CrossColor = System.Drawing.Color;
         global using CrossColors = System.Drawing.Color;
         global using CrossKey = Avalonia.Input.Key;
@@ -71,6 +72,13 @@ public sealed class ScriptCompiler
     {
         var refs = new List<MetadataReference>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Explicitly load the pinned dependency before enumerating loaded assemblies.
+        // A cold editor process must not depend on an indicator having run first.
+        foreach (var assembly in new[] { typeof(QuanTAlib.AbstractBase).Assembly, typeof(TradingHub.Strategies.Strategy).Assembly })
+        {
+            if (seen.Add(Path.GetFileName(assembly.Location)))
+                refs.Add(MetadataReference.CreateFromFile(assembly.Location));
+        }
         if (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") is string tpa)
         {
             foreach (var path in tpa.Split(Path.PathSeparator))

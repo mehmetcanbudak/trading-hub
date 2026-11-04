@@ -75,3 +75,11 @@ This is optional irreversible removal, not an update step:
 4. Remove the Applications bundle or uninstall through Windows Settings → Apps; see [Uninstalling](instalacion.md#uninstalling) and [Windows](portar-a-windows.md).
 
 The English upgrade itself does not delete data, rename stable folders or translate personal records in place.
+
+## Optional assistant and research data
+
+Strategy chat defaults to Claude and optionally uses the user's own Codex CLI login, subscription and quota. Prompts, source files read/edited by the CLI and selected Laboratory tool results can reach that engine's provider. Cost/token reporting can be unavailable; null is not zero/free. Histories remain local and engine-bound, but local storage does not prevent provider-side processing/retention.
+
+TradingView research starts off. Explicit app-owned OAuth uses dedicated native secret entries; nonsecret grant/review metadata and schema fingerprints are stored in `tradingview-research.json`. Discovery retrieves paginated metadata; approved calls send arguments to the official remote MCP endpoint and may send returned research into model context. Review/revocation is enforced before calls, but cannot retract data already sent or provider charges already incurred. Essential+ eligibility excludes trials; supported client registration and real account interoperability remain unverified.
+
+No CLI credential scraping or global CLI configuration rewrite is used. A workspace CLI network restriction is not a remote-MCP firewall or an in-process C# sandbox. Do not put secrets in prompts, sources or shared captures; see [assistant boundaries](asistente-claude.md#optional-tradingview-research). IB data requires its own Gateway/entitlements unless explicitly offline; OI uses Binance public observations. Imported bars remain synthetic, not execution records.

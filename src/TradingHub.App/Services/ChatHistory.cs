@@ -9,6 +9,8 @@ public sealed class ChatMessage
     /// <summary>"user", "assistant" o "note" (avisos de la app: errores, archivos tocados).</summary>
     public string Role { get; set; } = "user";
     public string Text { get; set; } = "";
+    public double? ReportedCostUsd { get; set; }
+    public StrategyTokenUsage? TokenUsage { get; set; }
 }
 
 /// <summary>Conversación con Claude: los mensajes y el id de sesión para seguirla donde quedó (--resume).</summary>
@@ -18,6 +20,10 @@ public sealed class ChatConversation
     public string Title { get; set; } = "";
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+    // Missing engine in legacy JSON is Claude; unknown values are never interpreted as Claude.
+    public string Engine { get; set; } = "claude";
+    public string? Model { get; set; }
+    public string? Effort { get; set; }
     public string? SessionId { get; set; }
     public bool Lab { get; set; }
 

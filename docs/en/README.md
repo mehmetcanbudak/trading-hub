@@ -16,3 +16,7 @@ Full English guides for this fork's canonical C# branch, `memoshi`, covering App
 ## Translation progress
 
 See the [localization validation dashboard](TRANSLATION_STATUS.md) for verified checks, compatibility exceptions and untested areas. Use [Upstream synchronization](upstream-sync.md) for daily original-repository monitoring, the reviewed checkpoint and the safe merge/translation checklist.
+
+## Selected non-KVP worktree additions
+
+The [dashboard](TRANSLATION_STATUS.md#unmerged-non-kvp-adoption--2026-11-04) separates unmerged/not-installed work from historical installed evidence. Start with [search/zoom](graficos.md), [additional studies](indicadores.md#selected-additional-native-studies), [IB imports and OI fidelity](datos.md#interactive-brokers-bars-and-offline-history), [optional assistant/research](asistente-claude.md#optional-strategy-chat-engine-and-isolation) and [reproduction](desarrollo.md#selected-non-kvp-reproduction). [Third-party notices](../../THIRD_PARTY_NOTICES.md) retain community provenance and full dependency terms. KVP remains deferred.

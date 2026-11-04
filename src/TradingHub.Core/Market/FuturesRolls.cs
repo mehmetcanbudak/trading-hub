@@ -34,6 +34,14 @@ public static class FuturesRolls
         return symbol[..^1] + (year % 100).ToString("00", System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    /// <summary>Quarterly month selected by the existing calendar boundary, without price adjustment.</summary>
+    public static (int Year, int Month) ContractMonth(DateTime utc)
+    {
+        int year = utc.Year, month = ((utc.Month - 1) / 3 + 1) * 3;
+        if (utc >= Roll(year, month)) { month += 3; if (month > 12) { month = 3; year++; } }
+        return (year, month);
+    }
+
     /// <summary>Símbolo de Rithmic/CME: raíz + mes + último dígito del año (ES, sep 2026 → ESU6).</summary>
     public static string Symbol(string root, int year, int month) => $"{root.ToUpperInvariant()}{Codes[month - 1]}{year % 10}";
 

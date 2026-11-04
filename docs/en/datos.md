@@ -119,3 +119,25 @@ The same applies to Tradovate + Databento / Only Tradovate / Databento. Combined
 History is under `~/Library/Application Support/Trading Hub/Ticks`, then connection (`rithmic`, `databento`, `importado`, etc.), instrument and day. **Open folder** opens Finder. See [Storage](instalacion.md#where-your-data-lives).
 
 Compatibility headers and feed IDs are intentionally retained, including recognized Spanish CSV column aliases and the historical live-trade CSV export column names. Translating identifiers would break existing consumers; new report prose and UI are English.
+
+## Interactive Brokers bars and offline history
+
+The selected data-only IB route supports local CSV minute bars as well as Gateway history. Import preview is immutable and revalidated at commit, with writer leases; changing inputs requires a fresh preview. Default policy preserves recorded real-trade minutes byte-for-byte and fills only uncovered minutes. **Replace covered minutes** is destructive and must be explicit. It preserves backups and a transaction journal; multi-file publication is **not atomic**, recovery may be required after interruption, and backups are not automatically pruned.
+
+Synthetic minute bars are stored separately under `ib-bars`; real recorded minutes take precedence when reading combined history. Imported OHLC is not observed tick execution, including through strategy backtests and footprint aggregation. Do not infer aggressor flow or intrabar execution from it. Active-writer readers can read a committed prefix, but strict import validation remains strict and corruption after the writer is quiescent is not silently hidden. Offline mode never contacts Gateway.
+
+The headless entry point runs before GUI/singleton/credential initialization. From a built App DLL (replace paths with your isolated fixture paths):
+
+```bash
+dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --import-ib /absolute/path/to/csv-folder MNQ --preview
+dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --import-ib /absolute/path/to/csv-folder MNQ
+dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --import-ib /absolute/path/to/csv-folder MNQ --replace
+```
+
+The symbol is optional where the input supplies it. Only `--preview` and `--replace` are accepted import switches; unknown arguments and invalid input print `IB import failed: …` and exit 2. Preview exits 0 without publication. See [Development](desarrollo.md#selected-non-kvp-reproduction) before running: never point a fixture import at personal history.
+
+## Open-interest observation fidelity
+
+**Open interest** is available only for Binance USDⓈ-M Futures, never synthetic OI or a substituted symbol. Live values use server observation time. Historical requests use five-minute observations, at most 500 per page, limited to the latest 30 days. The displayed observation envelope is not continuous coverage.
+
+Lookup never looks ahead. Time bars use a close-exclusive cutoff clamped to the current clock; non-time bars use their actual last-trade time. Range bounds apply, and samples older than ten minutes are unavailable. Zero is a real value, not missing data; signed change requires both adjacent candle cutoffs to be known. Gaps do not become zero or skip across an unknown adjacent bar. A busy recorder warning remains visible: normal/narrow/short charts show readable full consequences; an extremely small chart retains a compact **Not recording** status with full translated pointer/keyboard disclosure. Recovery clears both warning and stale focused disclosure. Retained writer ownership and drain protect this recorder's lifecycle, not stronger market-history or financial-ledger durability guarantees.

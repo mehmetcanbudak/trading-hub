@@ -31,6 +31,8 @@ internal sealed partial class StrategiesView
     private readonly ComboBox _limitMode = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _timeZone = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly NumericUpDown _sessionStart = new() { Value = 0, Minimum = 0, Maximum = 23, Increment = 1, FormatString = "0" };
+    private bool _applyingSessionSettings, _sessionExplicit, _automaticIbSession;
+    private string? _sessionStrategyPath;
     private readonly StackPanel _paramsPanel = new() { Spacing = 12 };
     private Button _runButton = null!;
     private Button _stopButton = null!;
@@ -67,6 +69,8 @@ internal sealed partial class StrategiesView
             _timeZone.Items.Add(new ComboBoxItem { Content = label, Tag = id });
         _timeZone.SelectedIndex = 0;
         _dataSource.SelectionChanged += (_, _) => OnDataSourceChanged();
+        _timeZone.SelectionChanged += (_, _) => SessionEdited();
+        _sessionStart.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) SessionEdited(); };
 
         var periods = new WrapPanel { ItemSpacing = 4, LineSpacing = 4 };
         foreach (var p in new[] { "M1", "M5", "M15", "H1", "H4", "D1", "Tick500", "Range20" })
@@ -282,7 +286,7 @@ internal sealed partial class StrategiesView
 
     /// <summary>De dónde son los datos: el nombre de la conexión o, con Databento, cuál de las tres historias.</summary>
     private string SourceName(SymbolData s) =>
-        s.Combined || s.FeedId == HistorySources.Databento || s.FeedId.EndsWith(HistorySources.OnlySuffix, StringComparison.Ordinal)
+        s.Combined || s.FeedId is HistorySources.Databento or IbBarImport.FeedId || s.FeedId.EndsWith(HistorySources.OnlySuffix, StringComparison.Ordinal)
             ? HistorySources.Describe(s)
             : _svc.Connections.Find(s.FeedId)?.Name ?? TradingHub.Common.EnglishText.Of(s.FeedId);
 
@@ -296,9 +300,40 @@ internal sealed partial class StrategiesView
         _to.SelectedDate = s.Last.ToDateTime(TimeOnly.MinValue);
     }
 
+    private void SessionEdited()
+    {
+        if (_applyingSessionSettings) return;
+        _sessionExplicit = true;
+        _automaticIbSession = false;
+    }
+
+    private void ApplyFreshSessionDefaults(SymbolData source)
+    {
+        if (_sessionExplicit || _state.Settings != null) return;
+        bool previous = _applyingSessionSettings;
+        _applyingSessionSettings = true;
+        try
+        {
+            if (source.FeedId == IbBarImport.FeedId)
+            {
+                _timeZone.SelectedItem = _timeZone.Items.OfType<ComboBoxItem>().First(item => (string)item.Tag! == "America/New_York");
+                _sessionStart.Value = 18;
+                _automaticIbSession = true;
+            }
+            else if (_automaticIbSession)
+            {
+                _timeZone.SelectedIndex = 0;
+                _sessionStart.Value = 0;
+                _automaticIbSession = false;
+            }
+        }
+        finally { _applyingSessionSettings = previous; }
+    }
+
     private void OnDataSourceChanged()
     {
         if (_dataSource.SelectedItem is not ComboBoxItem { Tag: SymbolData s }) return;
+        ApplyFreshSessionDefaults(s);
         string detail = "";
         if (s.Combined)
         {
@@ -306,6 +341,8 @@ internal sealed partial class StrategiesView
             int db = TickFile.AvailableDays(AppPaths.Ticks, HistorySources.Databento, s.Symbol).Count();
             detail = $" · {SourceName(s with { Combined = false })} {own} and Databento {db} (Databento fills gaps)";
         }
+        if (s.FeedId == IbBarImport.FeedId)
+            detail += " · IB synthetic OHLCV: no real aggressor side/footprint; calendar rolls, no adjustment; default New York 18:00 session (DST-aware); commissions remain estimated until confirmed";
 
         _dataInfo.Text = $"{s.Days.Count} saved day(s): {s.First:dd/MM/yyyy} → {s.Last:dd/MM/yyyy} · {s.Bytes / 1024 / 1024.0:0.#} MB{detail}";
         bool crypto = s.FeedId.StartsWith("binance", StringComparison.Ordinal) || s.FeedId.StartsWith("bybit", StringComparison.Ordinal);
@@ -320,23 +357,37 @@ internal sealed partial class StrategiesView
 
     private void ApplySettingsToForm(BacktestSettings? s)
     {
-        RefreshDataSources();
-        if (s == null)
+        // A successful compile refreshes the current form; it is not a new strategy selection.
+        // Bind only after success so a failed first compile cannot consume the fresh defaults.
+        bool freshStrategy = !string.Equals(_sessionStrategyPath, _current?.Path, StringComparison.Ordinal);
+        _sessionStrategyPath = _current?.Path;
+        _applyingSessionSettings = true;
+        if (s != null || freshStrategy)
         {
-            OnDataSourceChanged();
-            return;
+            _sessionExplicit = s != null;
+            _automaticIbSession = false;
         }
-
-        _period.Text = s.Period;
-        if (s.FromUtc > DateTime.MinValue) _from.SelectedDate = s.FromUtc.Date;
-        if (s.ToUtc > DateTime.MinValue) _to.SelectedDate = s.ToUtc.Date.AddDays(-1);
-        _capital.Value = s.InitialCapital;
-        _commPct.Value = s.CommissionPercent;
-        _commUnit.Value = s.CommissionPerUnit;
-        _slippage.Value = s.SlippageTicks;
-        _limitMode.SelectedIndex = s.LimitFill == LimitFillMode.Touch ? 1 : 0;
-        _timeZone.SelectedItem = _timeZone.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag! == (s.TimeZoneId ?? "")) ?? _timeZone.Items[0];
-        _sessionStart.Value = (decimal)s.SessionStart.TotalHours;
+        try
+        {
+            if (s == null && freshStrategy) { _timeZone.SelectedIndex = 0; _sessionStart.Value = 0; }
+            RefreshDataSources();
+            if (s == null)
+            {
+                OnDataSourceChanged();
+                return;
+            }
+            _period.Text = s.Period;
+            if (s.FromUtc > DateTime.MinValue) _from.SelectedDate = s.FromUtc.Date;
+            if (s.ToUtc > DateTime.MinValue) _to.SelectedDate = s.ToUtc.Date.AddDays(-1);
+            _capital.Value = s.InitialCapital;
+            _commPct.Value = s.CommissionPercent;
+            _commUnit.Value = s.CommissionPerUnit;
+            _slippage.Value = s.SlippageTicks;
+            _limitMode.SelectedIndex = s.LimitFill == LimitFillMode.Touch ? 1 : 0;
+            _timeZone.SelectedItem = _timeZone.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag! == (s.TimeZoneId ?? "")) ?? _timeZone.Items[0];
+            _sessionStart.Value = (decimal)s.SessionStart.TotalHours;
+        }
+        finally { _applyingSessionSettings = false; }
     }
 
     private BacktestSettings? ReadSettingsFromForm(bool validate)

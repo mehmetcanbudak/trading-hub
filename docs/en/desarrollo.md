@@ -187,3 +187,30 @@ LiveStrategyRunner.Guard accepts ILiveOrderGuard to inspect exposure-increasing 
 - Validate provider work with fake servers and simulation first.
 - New built-in user-facing text is English. Keep persisted IDs, parser aliases, JSON/CSV contracts, filenames and generated localization keys stable. SDK English overrides belong in Strings.English.cs, not generated Strings.g.cs.
 - Review every non-text change; do not update validation baselines merely to silence a failure. Check the [localization dashboard](TRANSLATION_STATUS.md) and report untested real-broker/hardware behavior explicitly.
+
+## Selected non-KVP reproduction
+
+Work only in the external `feat/non-kvp-adoption` worktree, not canonical/installed/user-data trees. The [dashboard](TRANSLATION_STATUS.md#unmerged-non-kvp-adoption--2026-11-04) records exact receipts and unresolved gates. Before any app, headless import or fake-provider scene, choose a fresh external fixture root:
+
+```bash
+export PATH="$HOME/.dotnet:$PATH"
+export FIXTURE="$(mktemp -d /tmp/tradinghub-nonkvp.XXXXXX)"
+export TRADINGHUB_DATA_DIR="$FIXTURE/data"
+export TRADINGHUB_STRATEGIES_DIR="$FIXTURE/strategies"
+export TRADINGHUB_INDICATORS_DIR="$FIXTURE/indicators"
+export TRADINGHUB_BACKTESTS_DIR="$FIXTURE/backtests"
+export TRADINGHUB_LIVE_DIR="$FIXTURE/live"
+export TRADINGHUB_KEYCHAIN_FILE="$FIXTURE/fake-keychain.json"
+export TRADINGHUB_SLEEP_GUARD=off
+export TRADINGHUB_CLAUDE_CLI=/usr/bin/false
+export TRADINGHUB_CODEX_CLI=/usr/bin/false
+dotnet build TradingHub.slnx -c Release
+dotnet test tests/TradingHub.Tests -c Release
+dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll "$FIXTURE/captures" 4 nonkvp-search-zoom
+```
+
+Other actual-host fake scenes are `nonkvp-studies`, `nonkvp-oi`, `nonkvp-ib`, `nonkvp-assistant` and `nonkvp-tradingview`. Give each an isolated fixture/capture root; keep real orders, recording and automatic resume disabled except scene-owned fake recording. These commands are reproduction instructions, not newly executed receipts. Do not run public providers, paid models or OAuth to satisfy localization gates.
+
+The built App's import syntax is documented in [Data](datos.md#interactive-brokers-bars-and-offline-history). Its research stdio entry is `dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --research-mcp --approval <reviewed-approval-id>`; the ID must be an existing reviewed 32-hex GUID (`N` format), not a token or arbitrary bypass. Missing/invalid approval exits 2; initialization does not grant permission to call tools. Use fake servers for verification, not a real account.
+
+Parent acceptance additionally requires English/source review, source/catalog candidate/template and original 3,300-entry coverage gates, English/safety/Quit and multilingual UI scenes, tracker tests, corrected visuals and research cancellation stress. Build/publish output must contain `LICENSE`, `THIRD_PARTY_NOTICES.md` and every `licenses/` text; inspect actual output and publish trees rather than treating csproj declarations as proof. Existing platform/native/provider release gates still apply.

@@ -12,6 +12,8 @@
     <!-- y los de OANDA, Alpaca, Databento, cTrader y Tradovate -->
     <Compile Include="..\..\tests\TradingHub.Tests\FakeHttpServer.cs" Link="FakeHttpServer.cs" />
     <Compile Include="..\..\tests\TradingHub.Tests\FakeBrokers.cs" Link="FakeBrokers.cs" />
+    <Compile Include="..\..\tests\TradingHub.Tests\FakeIbGateway.cs" Link="FakeIbGateway.cs" />
+    <Compile Include="..\..\tests\TradingHub.Tests\SearchZoomFixture.cs" Link="SearchZoomFixture.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Headless" Version="$(AvaloniaVersion)" />

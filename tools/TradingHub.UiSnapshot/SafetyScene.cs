@@ -276,7 +276,7 @@ internal static partial class SafetyScene
         var model = chart.Model!;
         var inst = model.Instrument;
         // the connection of the fake REAL account: an inert kind (no market data, no network) with real orders allowed
-        var realProfile = new ConnectionProfile { Id = "safety-real", Kind = ConnectionKind.InteractiveBrokers, Name = "Fixture REAL", AllowRealOrders = true, Testnet = false };
+        var realProfile = new ConnectionProfile { Id = "safety-real", Kind = ConnectionKind.Databento, Name = "Fixture REAL", AllowRealOrders = true, Testnet = false };
         svc.Connections.Profiles.Add(realProfile);
         var inner = new SimBroker(model.Data, new Portfolio { AccountID = "SAFETY-REAL", Name = "Fixture REAL", BeginBalance = 10_000m, Balance = 10_000m }, new TradingStatistics()) { Name = "Fixture REAL" };
         var real = new FixtureRealAccount(inner);

@@ -15,7 +15,9 @@ internal static class EnglishLocalizationAudit
     private static readonly Regex Spanish = new(@"[áéíóúñ¿¡]|\b(?:el|los|las|un|una|del|para|por|con|sin|que|su|sus|solo|desde|hasta|hay|tiene|tenés|podés|pudo|pasa|cero|operaciones|velas|vela|datos|cuenta|muestra|rango|tendencia|riesgo|ganancia|guardar|crear|nuevo|nueva|borrar|compilar|compilado|detener|pausada|corriendo|abrir|cerrar|cargando|ninguna|cantidad|seleccionar|anterior|siguiente|reiniciar|probar|todos|todas|mercado|comprar|vender|valor|nombre|fecha|hora|al|en|se|tu|tus|vos|mis|mismo|misma|antes|ahora|resultados|fuera|según|mientras|indicador|indicadores|alerta|agente|volumen|escalera|doble|perfil|celdas|histograma|simulada|simulador|ganadora|prometedora|perdedora|descartada|capturas|laboratorio|estrategias|reportes|calentamiento|prueba|actualizar|puede|suerte|probabilidad|verde|rojo|azul|celeste|amarillo|naranja|violeta|rosa|gris|blanco|cobra|cobran|costo|coste|precio|compra|venta|compró|vendió|deslizamiento|contrato|periodo|largos|cortos|principales|mejores|combinaciones|glosario|medio|opera|estado|paneles|extender|pesos|neto|meses|pedido|barras|dinero|toda|media|grilla|bayesiana|modo|oscuro|claro|continuo|llenados|reglas|propuestas|portafolios|portafolio|negro|grabando|importado)\b|(?-i: o | y )", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private sealed record AllowedLiteral(string Path, string Value, string Reason, bool AllowMentions = false);
-    private sealed record Rules(List<AllowedLiteral> AllowedLiterals, Dictionary<string, string> ApprovedStructure);
+    private sealed record ReviewedDeletion(string BaselineStructure, string Reason);
+    private sealed record Rules(List<AllowedLiteral> AllowedLiterals, Dictionary<string, string> ApprovedStructure,
+        Dictionary<string, ReviewedDeletion>? ReviewedDeletions = null);
 
     private static bool IsText(SyntaxToken token) => token.IsKind(SyntaxKind.StringLiteralToken)
         || token.IsKind(SyntaxKind.InterpolatedStringTextToken)
@@ -134,10 +136,32 @@ internal static class EnglishLocalizationAudit
         var tracked = Git(root, "diff", "--name-only", Baseline, "--", "src").Split('\n');
         var added = Git(root, "ls-files", "--others", "--exclude-standard", "--", "src").Split('\n');
         var baselinePaths = Git(root, "ls-tree", "-r", "--name-only", Baseline, "--", "src").Split('\n').ToHashSet(StringComparer.Ordinal);
+        var deletions = rules.ReviewedDeletions ?? new Dictionary<string, ReviewedDeletion>(StringComparer.Ordinal);
+        var approvedDeletions = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (relative, review) in deletions)
+        {
+            if (!baselinePaths.Contains(relative) || !relative.EndsWith(".cs", StringComparison.Ordinal))
+                Fail(relative + ": deletion review does not name a historical baseline C# path");
+            else if (File.Exists(Path.Combine(root, relative)))
+                Fail(relative + ": stale deletion review for existing source");
+            else if (review is null || string.IsNullOrWhiteSpace(review.Reason))
+                Fail(relative + ": deletion review requires a nonempty reason");
+            else
+            {
+                bool template = relative.EndsWith("/StrategyCatalog.cs", StringComparison.Ordinal) || relative.EndsWith("/UserScripts.cs", StringComparison.Ordinal) || relative.EndsWith("/CodeEditorWindow.cs", StringComparison.Ordinal);
+                if (review.BaselineStructure != Structure(Git(root, "show", Baseline + ":" + relative), template))
+                    Fail(relative + ": deletion review does not match historical baseline structure");
+                else approvedDeletions.Add(relative);
+            }
+        }
         foreach (var relative in tracked.Concat(added).Where(x => x.EndsWith(".cs", StringComparison.Ordinal)).Distinct())
         {
             string path = Path.Combine(root, relative);
-            if (!File.Exists(path)) { Fail(relative + ": source deletion requires explicit review"); continue; }
+            if (!File.Exists(path))
+            {
+                if (!approvedDeletions.Contains(relative)) Fail(relative + ": source deletion requires explicit review");
+                continue;
+            }
             bool template = relative.EndsWith("/StrategyCatalog.cs", StringComparison.Ordinal) || relative.EndsWith("/UserScripts.cs", StringComparison.Ordinal) || relative.EndsWith("/CodeEditorWindow.cs", StringComparison.Ordinal);
             string current = Structure(File.ReadAllText(path), template);
             if (rules.ApprovedStructure.TryGetValue(relative, out var approved))

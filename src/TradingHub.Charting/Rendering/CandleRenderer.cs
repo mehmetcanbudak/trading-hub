@@ -15,6 +15,11 @@ internal sealed class CandleRenderer
         var series = model.Series;
         var t = model.Theme;
         if (series.Count == 0) return;
+        if (layout.BarWidth < 1)
+        {
+            RenderDense(canvas, model, layout, main, style, paintBars);
+            return;
+        }
 
         if (style == ChartStyle.Line)
         {
@@ -91,6 +96,91 @@ internal sealed class CandleRenderer
             _fill.Color = col;
             canvas.DrawRect(new SKRect(left, top, right, bot), _fill);
         }
+    }
+
+    // Streaming aggregation: one drawable OHLC envelope per occupied pixel, no candle snapshot.
+    // Hidden/empty bars contribute nothing. The first visible open, last visible close and
+    // every visible high/low survive. A bucket takes its last visible bar's explicit paint;
+    // otherwise its aggregate direction chooses the color. Analytical candles are unchanged.
+    private void RenderDense(SKCanvas canvas, ChartModel model, ChartLayout layout, PanelLayout main, ChartStyle style, Dictionary<int, SKColor>? paintBars)
+    {
+        var series = model.Series;
+        bool ha = style == ChartStyle.HeikinAshi, line = style == ChartStyle.Line;
+        int first = Math.Max(0, layout.FirstVisible), last = Math.Min(layout.LastVisible, series.Count - 1);
+        int start = Math.Max(0, first - 300);
+        decimal haOpen = 0, haClose = 0;
+        if (ha)
+            for (int i = start; i < first; i++) NextHa(series, i, start, ref haOpen, ref haClose, out _, out _);
+        bool occupied = false, previous = false;
+        int pixel = 0;
+        decimal open = 0, high = 0, low = 0, close = 0, firstClose = 0, minClose = 0, maxClose = 0;
+        float previousX = 0, previousY = 0;
+        SKColor? paint = null;
+        void Flush()
+        {
+            if (!occupied) return;
+            float x = pixel + 0.5f;
+            if (line)
+            {
+                _stroke.Color = model.Theme.DrawingDefault;
+                _stroke.StrokeWidth = 1;
+                if (previous) canvas.DrawLine(previousX, previousY, x, main.Y(firstClose), _stroke);
+                canvas.DrawLine(x, main.Y(maxClose), x, main.Y(minClose), _stroke);
+                previousX = x;
+                previousY = main.Y(close);
+                previous = true;
+                return;
+            }
+            _stroke.Color = paint ?? (close >= open ? model.Theme.UpCandle : model.Theme.DownCandle);
+            _stroke.StrokeWidth = 1;
+            canvas.DrawLine(x, main.Y(high), x, main.Y(low), _stroke);
+            if (style == ChartStyle.Bars)
+            {
+                canvas.DrawLine(x - 0.5f, main.Y(open), x, main.Y(open), _stroke);
+                canvas.DrawLine(x, main.Y(close), x + 0.5f, main.Y(close), _stroke);
+            }
+            else
+            {
+                _fill.Color = _stroke.Color;
+                float top = Math.Min(main.Y(open), main.Y(close)), bottom = Math.Max(main.Y(open), main.Y(close));
+                canvas.DrawRect(pixel, top, 1, Math.Max(1, bottom - top), _fill);
+            }
+        }
+        for (int i = first; i <= last; i++)
+        {
+            var c = series[i];
+            decimal o = series.TicksToPrice(c.OpenTicks), h = series.TicksToPrice(c.HighTicks),
+                l = series.TicksToPrice(c.LowTicks), cl = series.TicksToPrice(c.CloseTicks);
+            if (ha)
+            {
+                NextHa(series, i, start, ref haOpen, ref haClose, out h, out l);
+                o = haOpen;
+                cl = haClose;
+            }
+            SKColor? requested = paintBars != null && paintBars.TryGetValue(i, out var color) ? color : null;
+            if (c.Trades == 0 || requested is { Alpha: 0 }) continue;
+            int nextPixel = (int)MathF.Floor(layout.CenterX(i));
+            if (!occupied || nextPixel != pixel)
+            {
+                Flush();
+                pixel = nextPixel;
+                open = o;
+                high = h;
+                low = l;
+                firstClose = minClose = maxClose = cl;
+                occupied = true;
+            }
+            else
+            {
+                high = Math.Max(high, h);
+                low = Math.Min(low, l);
+                minClose = Math.Min(minClose, cl);
+                maxClose = Math.Max(maxClose, cl);
+            }
+            close = cl;
+            paint = requested;
+        }
+        Flush();
     }
 
     /// <summary>Avanza el cálculo de Heikin Ashi una vela.</summary>

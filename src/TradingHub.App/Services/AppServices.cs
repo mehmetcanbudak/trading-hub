@@ -202,6 +202,12 @@ public sealed class AppSettings
     public double DomWindowWidth { get; set; } = 360;
     public double DomWindowHeight { get; set; } = 720;
 
+    public string StrategyChatEngine { get; set; } = "claude";
+    public string StrategyClaudeModel { get; set; } = "claude-opus-5-5";
+    public string StrategyClaudeEffort { get; set; } = "xhigh";
+    public string StrategyCodexModel { get; set; } = "";
+    public string StrategyCodexEffort { get; set; } = "high";
+
     /// <summary>Chat de Claude en una ventana aparte: posición y tamaño.</summary>
     public int ClaudeWindowX { get; set; } = -1;
     public int ClaudeWindowY { get; set; } = -1;

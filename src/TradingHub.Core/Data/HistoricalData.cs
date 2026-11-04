@@ -45,6 +45,12 @@ public static class HistoricalData
             }
         }
 
+        // The separate IB bar folder is an implementation detail, never a second selectable market.
+        var ibGroups = result.Where(s => s.FeedId is IbBarImport.FeedId or IbBarStore.BarFolder).GroupBy(s => s.Symbol).ToList();
+        result.RemoveAll(s => s.FeedId is IbBarImport.FeedId or IbBarStore.BarFolder);
+        foreach (var group in ibGroups)
+            result.Add(new SymbolData(IbBarImport.FeedId, group.Key, group.SelectMany(s => s.Days).GroupBy(d => d.Day)
+                .Select(days => new DayData(days.Key, days.First().Path, days.Sum(d => d.Bytes))).OrderBy(d => d.Day).ToList()));
         result.Sort((a, b) => b.Bytes.CompareTo(a.Bytes));
         return result;
     }
@@ -58,6 +64,11 @@ public static class HistoricalData
         {
             var p = TickFile.DayPath(root, feedId, symbol, d);
             if (File.Exists(p)) File.Delete(p);
+            if (feedId == IbBarImport.FeedId)
+            {
+                var barPath = TickFile.DayPath(root, IbBarStore.BarFolder, symbol, d);
+                if (File.Exists(barPath)) File.Delete(barPath);
+            }
         }
 
         var dir = Path.GetDirectoryName(TickFile.DayPath(root, feedId, symbol, DateOnly.MinValue))!;

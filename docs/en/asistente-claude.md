@@ -2,7 +2,7 @@
 
 # Claude in Trading Hub
 
-Trading Hub runs **Claude Code** using your own logged-in session and subscription, not a separate Trading Hub/Claude API account. Usage counts against your CLI allowance. Without it, the platform still works except for the assistant, laboratory and risk agent.
+Trading Hub defaults to **Claude Code** using your own logged-in session and subscription, not a separate Trading Hub/Claude API account. Strategy chat can optionally use your own Codex CLI session. Usage counts against the selected provider's allowance; provider availability, pricing and quota still apply. Without either CLI, trading/charting remains available. The risk agent remains Claude-only.
 
 | Location | Capability |
 |---|---|
@@ -24,7 +24,7 @@ The panel displays CLI version/subscription or a not-found message. **Sign in to
 
 - The source defaults to `claude-opus-5-5` with `xhigh` effort (Extra), omitting effort when unsupported. Risk agents can select the configured Opus/Sonnet/Haiku/Fable model options and Low/Medium/High/Extra/Maximum effort. These identifiers are configuration defaults, **not a guarantee your CLI/provider offers them**.
 - Runs noninteractively with `claude -p` in the strategy directory. File editing is permitted in strategy, indicator and laboratory-screenshot folders. Assistant tools are limited to Read, Write, Edit, MultiEdit, Glob and Grep—no terminal or web tool.
-- `--strict-mcp-config` avoids inheriting unrelated MCP servers; laboratory mode exposes Trading Hub's server only. Inherited CLAUDE*/ANTHROPIC* variables are removed so the normal CLI login is used.
+- `--strict-mcp-config` avoids inheriting unrelated MCP servers; laboratory mode exposes Trading Hub's server, and separately approved optional research can add the narrow research proxy. Inherited CLAUDE*/ANTHROPIC* variables are removed so the normal CLI login is used.
 - The risk agent is more restricted: no tools, no saved session, and no user settings/hooks when the CLI supports those restrictions. It receives figures and returns a proposal.
 
 These are process/tool permissions, not a security sandbox for compiled C# or a promise that arbitrary provider/CLI versions enforce identical restrictions.
@@ -92,3 +92,19 @@ Old reports, user-written strategy labels and third-party text are not automatic
 Your prompt, files the CLI reads, tool results (metrics, trades, data summaries, chart images) and requested live-portfolio information can be sent to Anthropic through your CLI/account. Keychain credentials are not exposed by Trading Hub laboratory tools, but do not put secrets into prompts or source files. See [Privacy](privacidad.md).
 
 Prompts request replies and report prose in the selected English/Spanish/Simplified Chinese interface language while generated C# and identifiers stay English. A provider outage, unsupported model, existing conversation context or explicit user request can affect output. Real paid Claude calls are not required for localization regression checks; use fake CLI fixtures. Existing reports/conversations are not rewritten.
+
+## Optional strategy-chat engine and isolation
+
+The strategy panel selects Claude (default) or Codex, with an engine-specific model/effort selection and custom model support. Codex discovery includes its normal user/PATH locations; `TRADINGHUB_CODEX_CLI` selects an explicit executable. A missing executable is a visible failure, not a fallback to a different engine. Conversations are engine-bound: exact session resume stays with the originating engine, and switching engines does not reuse a foreign session. Existing chat paths, detached geometry and `LabSource=claude` persisted identities remain unchanged.
+
+Codex runs `exec` with `--ignore-user-config`, `--ignore-rules`, `--json`, workspace-write sandbox and approval policy never; CLI network access is disabled in that workspace sandbox. Required isolation flags must be advertised by the installed CLI or the request fails. Stop cancels the owned request/process. Token counts and USD cost are nullable: unavailable accounting must not be presented as free usage or a fabricated zero. The finite fake-CLI replay/compile/cancel evidence in the dashboard is not a paid-provider success.
+
+The existing 16 Laboratory tools and sizing proposals do not apply trades. Local child servers receive the six isolated storage overrides plus selected runtime environment values, not arbitrary secret environment variables. `TRADINGHUB_MCP_COMMAND` is a Laboratory fixture override only: the research route always launches the actual application entry point. CLI sandbox network restrictions **do not constrain remote MCP services or compiled in-process C#**.
+
+## Optional TradingView research
+
+Research is **off by default**. The provider requires an eligible Essential-or-higher subscription (trials excluded); this is a provider policy prerequisite, not verified interoperability. Authorization is explicit app-owned OAuth outside chat, using dedicated OS secret-store entries; it neither scrapes CLI credentials nor rewrites global CLI configuration. A local grant ID is not verified remote account identity.
+
+Discovery fetches authenticated, paginated tool **metadata**, not tool results. Review the offered names/descriptions/schema and choose from the fixed 19-tool research intersection. All watchlist and alert tools and unknown tools are denied, even if metadata claims read-only; `get_active_watchlist` is denied because its name does not make its behavior safe. Catalog/schema fingerprints, changed grants, reauthorization, canceled review and revocation invalidate approval before a call; changed metadata requires review again.
+
+Only approved research calls may reach `https://mcp.tradingview.com/mcp`. Queries/arguments and tool results can leave the machine and then enter the selected model context; consider both providers' retention/cost policies. Missing supported application registration fails explicitly; no fabricated hosted client metadata or reused CLI OAuth session is supplied. No real TradingView OAuth/entitlement/account certification is claimed from fake-server tests. See [Privacy](privacidad.md#optional-assistant-and-research-data) and [Development](desarrollo.md#selected-non-kvp-reproduction).

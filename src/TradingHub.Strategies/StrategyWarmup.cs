@@ -20,9 +20,11 @@ public sealed record StrategyWarmup(int Bars, IReadOnlyList<string> Indicators, 
     {
         var names = new List<string>();
         int bars = 0;
+        Strategy? strategy = null;
         try
         {
             var s = (Strategy)Activator.CreateInstance(type)!;
+            strategy = s;
             if (parameters != null) s.SetParameters(parameters);
             var host = new ProbeHost(ChartPeriod.Parse(period));
             s.InternalInit(host);
@@ -40,6 +42,10 @@ public sealed record StrategyWarmup(int Bars, IReadOnlyList<string> Indicators, 
         catch (Exception ex)
         {
             return new StrategyWarmup(bars, names, false, $"{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            strategy?.DisposeIndicators();
         }
     }
 

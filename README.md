@@ -178,6 +178,12 @@ The repository contains an **MIT license with the Commons Clause**. You may use,
 
 See [LICENSE](LICENSE) for the authoritative terms.
 
+Selected community adaptations from PANASV and jjuangutierrez and the five restored library families retain their own attribution and terms in [Third-party notices](THIRD_PARTY_NOTICES.md). Apache/MIT libraries are not relicensed under the application's Commons Clause.
+
+### Unmerged selected capabilities
+
+The external `feat/non-kvp-adoption` worktree adds enabled-profile instrument-search fallback, deep zoom, optional QuanTAlib/flow/OI studies, data-only IB history/import, optional Codex strategy chat and explicitly approved TradingView research. It is **uncommitted, unmerged and not installed**; the [validation dashboard](docs/en/TRANSLATION_STATUS.md#unmerged-non-kvp-adoption--2026-11-04) preserves failed and pending gates. No IB orders, KVP, Intel import, real-provider/OAuth certification or arbitrary-code sandbox guarantee is implied. See the [English guides](docs/en/README.md) for fidelity, cost, privacy and safety limits.
+
 ---
 
 Originally created by [@ralphtradesz](https://x.com/ralphtradesz).

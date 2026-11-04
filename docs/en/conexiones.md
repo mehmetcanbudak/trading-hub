@@ -35,7 +35,7 @@ Passwords, API secrets, tokens and Databento keys use **macOS Keychain** (servic
 | OANDA | Index/commodity CFD and forex data. | API token. | Not implemented. |
 | Alpaca | US stocks and ETFs. | API key ID and secret. | Not implemented. |
 | Databento | Historical CME ticks, including long ranges. | Paid-by-usage API key. | No live data or orders. |
-| Interactive Brokers | Connectivity probe only. | API-enabled TWS or IB Gateway. | Not implemented. |
+| Interactive Brokers | Selected index-futures live/tick/bar data and stored/offline history. | API-enabled TWS or IB Gateway, compatible wire version and data entitlements; offline mode needs local data only. | Not implemented. |
 
 Any supported market-data source can feed the simulated account. Provider eligibility, subscriptions, API approval, retention, free tiers and prices can change; verify them with the provider rather than assuming the original project's advertised allowances still apply.
 
@@ -126,7 +126,11 @@ Historical CME ticks, including aggressor side and long history beyond Rithmic r
 
 ## Interactive Brokers
 
-Enable the API in TWS / IB Gateway (Configure → API → Settings), then enter host, port and Client ID. Common ports are 7497 for TWS paper, 7496 for TWS live and 4002 for Gateway paper. This integration **only tests connectivity**, not data or orders.
+Enable the API in TWS / IB Gateway (Configure → API → Settings), then enter host, port and a distinct Client ID. Common ports are 7497 for TWS paper, 7496 for TWS live and 4002 for Gateway paper. This selected adapter is **data only, never IB order execution**. It negotiates wire version **187 exclusively**, not arbitrary TWS API versions. Account/API approval and market-data entitlements remain provider prerequisites, not verified eligibility.
+
+Supported roots are MNQ, MES, M2K, MYM, NQ, ES, RTY and YM. Same-instrument historical tick requests are paced at 15 seconds. Live trade side is inferred, not exchange-authoritative aggression; depth requires a fresh best bid/offer and reconnect invalidates stale state. Calendar contract rollover is not volume-roll selection or back-adjustment: price discontinuities are not adjusted away.
+
+New chart defaults use the 18:00 America/New_York session; saved and custom sessions are preserved. Stable profile/data scopes keep history associated with the chosen profile and refresh after imports. Deleting a profile retires its retained transport; it does not delete history. Explicit stored/offline mode never connects to Gateway. See [Data](datos.md#interactive-brokers-bars-and-offline-history) for import policy and fidelity; this unmerged capability is not present in the historical installed app described in the [dashboard](TRANSLATION_STATUS.md).
 
 ## Real and test accounts
 

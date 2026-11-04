@@ -108,6 +108,27 @@ public class WindowsIntegrationTests
         Assert.Equal(new[] { @"C:\Users\a\.local\bin\claude.exe", @"C:\Users\a\AppData\Roaming\npm\claude.cmd" },
             ClaudeCodeBridge.ParseWhere("C:\\Users\\a\\.local\\bin\\claude.exe\r\nC:\\Users\\a\\AppData\\Roaming\\npm\\claude\r\nC:\\Users\\a\\AppData\\Roaming\\npm\\claude.cmd\r\n"));
     }
+    [Fact]
+    public void CodexCli_ResolvesNpmShimWithoutLaunchingACommandInterpreter()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "codex shim 'quoted' " + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string script = Path.Combine(root, "node_modules", "@openai", "codex", "bin", "codex.js");
+            Directory.CreateDirectory(Path.GetDirectoryName(script)!);
+            File.WriteAllText(script, "// owned fixture");
+            string shim = Path.Combine(root, "codex.cmd");
+            File.WriteAllText(shim, "@echo off\r\n\"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js\" %*\r\n");
+            var command = ClaudeCodeBridge.WindowsCommand(shim, _ => @"C:\Program Files\nodejs\node.exe");
+            Assert.Equal(@"C:\Program Files\nodejs\node.exe", command.File);
+            Assert.Equal(new[] { Path.GetFullPath(script) }, command.Prefix);
+            // Old npm shims without a quoted target still resolve only the selected engine's known entry point.
+            File.WriteAllText(shim, "@echo off\r\nnode %*\r\n");
+            Assert.Equal(new[] { Path.GetFullPath(script) }, ClaudeCodeBridge.WindowsCommand(shim, _ => "node.exe").Prefix);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
 
     [WindowsFact]
     public async Task ClaudeCli_LoginPreservesPathsWithSpacesAndCmdMetacharacters()

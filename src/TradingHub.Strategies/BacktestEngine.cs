@@ -116,7 +116,7 @@ public sealed class BacktestEngine : IStrategyHost
                 if (_orders.Count > 0) ProcessFills(i, p, t);
 
                 // 3) la operación entra en la vela en formación
-                _builder.Append(t, p, _data.Volume(i), _data.Side(i));
+                _builder.Append(t, p, _data.Volume(i), _data.Side(i), _data.IsSynthetic(i));
                 if (_pos != 0) TrackExcursion(p);
                 if (ticks)
                 {
@@ -146,6 +146,12 @@ public sealed class BacktestEngine : IStrategyHost
         {
             result.Error = $"{ex.GetType().Name}: {ex.Message}";
             _log.Add("ERROR " + ex);
+        }
+        finally
+        {
+            // Release owned streaming buffers on success, cancellation and user-code failures.
+            // This does not invoke OnStop again or change any order lifecycle.
+            _strategy.DisposeIndicators();
         }
 
         result.Trades = _trades;

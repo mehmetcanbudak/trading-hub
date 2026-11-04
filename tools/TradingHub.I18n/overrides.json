@@ -994,5 +994,3257 @@
   "Tradovate order acceptance is unknown; awaiting client-tag reconciliation: {0}": {
     "es": "No se sabe si Tradovate aceptó la orden; se espera la conciliación por etiqueta del cliente: {0}",
     "zh-CN": "Tradovate 委托是否被接受尚未知；正在等待按客户端标签进行核对：{0}"
+  },
+  "\nContract: recommended execution for this size is {0} ({1} {2}); changes only when flat.": {
+    "es": "\nContrato: la ejecución recomendada para este tamaño es {0} ({1} {2}); solo cambia cuando no hay posición.",
+    "zh-CN": "\n合约：此规模的建议执行合约为 {0}（{1} {2}）；仅在空仓时更改。"
+  },
+  "\nContract: {0} {1} × {2} = {3} {4} (equivalent micro-contract exposure).": {
+    "es": "\nContrato: {0} {1} × {2} = {3} {4} (exposición equivalente en microcontratos).",
+    "zh-CN": "\n合约：{0} {1} × {2} = {3} {4}（等效微型合约敞口）。"
+  },
+  "\nContract: {0} {1} × {2} is below 1 contract: submits 1.": {
+    "es": "\nContrato: {0} {1} × {2} es inferior a 1 contrato: envía 1.",
+    "zh-CN": "\n合约：{0} {1} × {2} 不足 1 张合约：提交 1 张。"
+  },
+  "\nOnly covered minutes are replaced. Original files and a recovery journal are preserved; a multi-file publication is not atomic.": {
+    "es": "\nSolo se reemplazan los minutos cubiertos. Se conservan los archivos originales y un diario de recuperación; la publicación de varios archivos no es atómica.",
+    "zh-CN": "\n仅替换覆盖的分钟。保留原始文件和恢复日志；多文件发布不具备原子性。"
+  },
+  "\nRecorded tick files remain byte-identical. Only uncovered minutes are filled.": {
+    "es": "\nLos archivos de ticks registrados permanecen idénticos byte por byte. Solo se completan los minutos sin cobertura.",
+    "zh-CN": "\n已记录的逐笔文件逐字节保持不变。仅填补未覆盖的分钟。"
+  },
+  "   {0} · {1} · long {2} · {3}": {
+    "es": "   {0} · {1} · largo {2} · {3}",
+    "zh-CN": "   {0} · {1} · 多头 {2} · {3}"
+  },
+  "   {0} · {1} · short {2} · {3}": {
+    "es": "   {0} · {1} · corto {2} · {3}",
+    "zh-CN": "   {0} · {1} · 空头 {2} · {3}"
+  },
+  "  current drawdown {0} · worst drawdown {1} · last {2}: PF {3}, average {4}{5}": {
+    "es": "  drawdown actual {0} · peor drawdown {1} · últimas {2}: PF {3}, promedio {4}{5}",
+    "zh-CN": "  当前回撤 {0} · 最大回撤 {1} · 最近 {2}：PF {3}，平均 {4}{5}"
+  },
+  "  {0} trades in {1} days · net {2} · PF {3} · win rate {4} % · average/trade {5} · average profit {6} · average loss {7}": {
+    "es": "  {0} operaciones en {1} días · neto {2} · PF {3} · acierto {4} % · promedio/operación {5} · ganancia media {6} · pérdida media {7}",
+    "zh-CN": "  {1} 天内 {0} 笔交易 · 净收益 {2} · PF {3} · 胜率 {4} % · 每笔平均 {5} · 平均盈利 {6} · 平均亏损 {7}"
+  },
+  "  {0} · {1} {2} · account {3}{4} · {5}{6}": {
+    "es": "  {0} · {1} {2} · cuenta {3}{4} · {5}{6}",
+    "zh-CN": "  {0} · {1} {2} · 账户 {3}{4} · {5}{6}"
+  },
+  " (HTTP {0}).": {
+    "es": " (HTTP {0}).",
+    "zh-CN": "（HTTP {0}）。"
+  },
+  " (incomplete observed contribution)": {
+    "es": " (contribución observada incompleta)",
+    "zh-CN": "（已观测贡献不完整）"
+  },
+  " ({0} working order canceled)": {
+    "es": " ({0} orden activa cancelada)",
+    "zh-CN": "（已撤销 {0} 个活动订单）"
+  },
+  " ({0} working orders canceled)": {
+    "es": " ({0} órdenes activas canceladas)",
+    "zh-CN": "（已撤销 {0} 个活动订单）"
+  },
+  " + estimated OHLC": {
+    "es": " + OHLC estimado",
+    "zh-CN": " + 估算 OHLC"
+  },
+  " + missing bars": {
+    "es": " + velas faltantes",
+    "zh-CN": " + 缺失 K 线"
+  },
+  " Rithmic returned no data for {0}: expired-contract history is not retained, so downloads are available from the last expiry. Downloaded or recorded data stays on your {1} and accumulates over time.": {
+    "es": " Rithmic no devolvió datos para {0}: no conserva el historial de contratos vencidos, por lo que las descargas están disponibles desde el último vencimiento. Los datos descargados o registrados permanecen en tu {1} y se acumulan con el tiempo.",
+    "zh-CN": " Rithmic 未返回 {0} 的数据：不保留到期合约历史，因此仅可下载自最近到期日起的数据。下载或记录的数据保存在你的 {1} 上并逐步积累。"
+  },
+  " Server revocation was not confirmed. ": {
+    "es": " No se confirmó la revocación en el servidor. ",
+    "zh-CN": " 未确认服务器端撤销。 "
+  },
+  " Server revocation was not confirmed. {0}": {
+    "es": " No se confirmó la revocación en el servidor. {0}",
+    "zh-CN": " 未确认服务器端撤销。{0}"
+  },
+  " and closes its position": {
+    "es": " y cierra su posición",
+    "zh-CN": "并平掉其仓位"
+  },
+  " via IB (calendar rolls; NY 18:00; synthetic history has estimated side, live side is inferred; no IB orders)": {
+    "es": " mediante IB (vencimientos por calendario; Nueva York 18:00; el historial sintético estima el lado agresor y en vivo se infiere; sin órdenes de IB)",
+    "zh-CN": "通过 IB（日历换月；纽约 18:00；合成历史的主动买卖方向为估算，实时方向为推断；不发送 IB 订单）"
+  },
+  " · DO NOT change it (locked)": {
+    "es": " · NO cambiar (bloqueado)",
+    "zh-CN": " · 请勿更改（已锁定）"
+  },
+  " · DO NOT change it (stopped)": {
+    "es": " · NO cambiar (detenido)",
+    "zh-CN": " · 请勿更改（已停止）"
+  },
+  " · IB synthetic OHLCV: no real aggressor side/footprint; calendar rolls, no adjustment; default New York 18:00 session (DST-aware); commissions remain estimated until confirmed": {
+    "es": " · OHLCV sintético de IB: sin lado agresor/footprint real; vencimientos por calendario, sin ajuste; sesión predeterminada de Nueva York a las 18:00 (con horario de verano); comisiones estimadas hasta su confirmación",
+    "zh-CN": " · IB 合成 OHLCV：无真实主动买卖方向/足迹数据；日历换月，不复权；默认纽约 18:00 开始交易时段（考虑夏令时）；手续费在确认前均为估算"
+  },
+  " · REAL ACCOUNT{0}": {
+    "es": " · CUENTA REAL{0}",
+    "zh-CN": " · 实盘账户{0}"
+  },
+  " · about {0}": {
+    "es": " · aproximadamente {0}",
+    "zh-CN": " · 约 {0}"
+  },
+  " · currently in «{0}» (moves here)": {
+    "es": " · actualmente en «{0}» (se mueve aquí)",
+    "zh-CN": " · 当前位于“{0}”（移至此处）"
+  },
+  " · laboratory": {
+    "es": " · laboratorio",
+    "zh-CN": " · 实验室"
+  },
+  " · today's PnL {0}": {
+    "es": " · PnL de hoy {0}",
+    "zh-CN": " · 今日盈亏 {0}"
+  },
+  ". Account identity is not asserted.": {
+    "es": ". No se afirma la identidad de la cuenta.",
+    "zh-CN": "。不代表已确认账户身份。"
+  },
+  ". Average profit {0} per trade, but individual trades vary by about ±{1}: among {2} strategies with no edge (the number tested), the luckiest typically shows ~{3} per trade with that variability": {
+    "es": ". Ganancia media de {0} por operación, pero cada operación varía aproximadamente ±{1}: entre {2} estrategias sin ventaja (la cantidad probada), la más afortunada suele mostrar ~{3} por operación con esa variabilidad",
+    "zh-CN": "。每笔平均盈利 {0}，但单笔交易波动约为 ±{1}：在 {2} 个无优势策略（所测试数量）中，最幸运的策略在这种波动下通常每笔获利约 {3}"
+  },
+  ". Run codex login in Terminal.": {
+    "es": ". Ejecuta codex login en Terminal.",
+    "zh-CN": "。请在终端运行 codex login。"
+  },
+  ": new orders are disabled; cancel/close allowed": {
+    "es": ": nuevas órdenes deshabilitadas; se permite cancelar/cerrar",
+    "zh-CN": "：已禁用新订单；允许撤单/平仓"
+  },
+  "; heuristic, not book replenishment / iceberg proof": {
+    "es": "; heurística, no demuestra reposición del libro ni icebergs",
+    "zh-CN": "；启发式结果，并非盘口补单/冰山单证据"
+  },
+  "; unavailable (zero accumulated weight)": {
+    "es": "; no disponible (peso acumulado cero)",
+    "zh-CN": "；不可用（累计权重为零）"
+  },
+  "A closing limit order is already working in the account ({0}): no additional take profit will be placed (review it in Chart Trader)": {
+    "es": "Ya hay una orden límite de cierre activa en la cuenta ({0}): no se colocará otro objetivo de ganancia (revísala en Chart Trader)",
+    "zh-CN": "账户已有活动的平仓限价单（{0}）：不会另设止盈单（请在图表交易中检查）"
+  },
+  "A research bearer token cannot be sent to another resource.": {
+    "es": "No se puede enviar un token bearer de investigación a otro recurso.",
+    "zh-CN": "不能将研究访问令牌发送到其他资源。"
+  },
+  "ATR stop": {
+    "es": "Stop ATR",
+    "zh-CN": "ATR 止损"
+  },
+  "Absorption only (hide neutral)": {
+    "es": "Solo absorción (ocultar neutrales)",
+    "zh-CN": "仅吸收（隐藏中性区域）"
+  },
+  "Actual server schema and metadata (untrusted)": {
+    "es": "Esquema y metadatos reales del servidor (no confiables)",
+    "zh-CN": "服务器实际架构和元数据（不可信）"
+  },
+  "Additional session/week/month profiles with optional chronological composition. Observed rows include Between volume; estimated OHLC is optional. Existing Session volume profile is unchanged.": {
+    "es": "Perfiles adicionales de sesión/semana/mes con composición cronológica opcional. Las filas observadas incluyen volumen intermedio; el OHLC estimado es opcional. El perfil de volumen por sesión existente no cambia.",
+    "zh-CN": "新增交易时段/周/月成交量分布，可选择按时间顺序合并。观测价位包含中间成交量；估算 OHLC 可选。现有交易时段成交量分布保持不变。"
+  },
+  "Adopted {0} kept at the broker: ": {
+    "es": "{0} adoptado y conservado en el bróker: ",
+    "zh-CN": "已接管并保留在经纪商端的{0}："
+  },
+  "Adopted {0} kept at the broker: {1}": {
+    "es": "{0} adoptado y conservado en el bróker: {1}",
+    "zh-CN": "已接管并保留在经纪商端的{0}：{1}"
+  },
+  "Allow estimated OHLC (maximum 200 samples)": {
+    "es": "Permitir OHLC estimado (máximo 200 muestras)",
+    "zh-CN": "允许估算 OHLC（最多 200 个样本）"
+  },
+  "Allow estimated OHLC (threshold x 0.4, maximum 200 buckets)": {
+    "es": "Permitir OHLC estimado (umbral x 0.4, máximo 200 grupos)",
+    "zh-CN": "允许估算 OHLC（阈值 x 0.4，最多 200 个分组）"
+  },
+  "Allow estimated OHLC / aggregate fallback": {
+    "es": "Permitir OHLC estimado / alternativa agregada",
+    "zh-CN": "允许估算 OHLC / 聚合回退"
+  },
+  "Alpaca rejected credentials or your plan does not include these data: {0}": {
+    "es": "Alpaca rechazó las credenciales o tu plan no incluye estos datos: {0}",
+    "zh-CN": "Alpaca 拒绝了凭据，或你的套餐不包含此数据：{0}"
+  },
+  "Already initialized.": {
+    "es": "Ya inicializado.",
+    "zh-CN": "已初始化。"
+  },
+  "An IB feed cannot change its owning profile.": {
+    "es": "Un feed de IB no puede cambiar el perfil al que pertenece.",
+    "zh-CN": "IB 行情源不能更改所属配置。"
+  },
+  "An active data scope is already bound to a different feed instance. Use the stable scoped feed or a new configuration scope.": {
+    "es": "Un ámbito de datos activo ya está vinculado a otra instancia del feed. Usa el feed estable de ese ámbito o un nuevo ámbito de configuración.",
+    "zh-CN": "活动数据作用域已绑定到另一个行情源实例。请使用该作用域的稳定行情源或新的配置作用域。"
+  },
+  "An assistant response is already running.": {
+    "es": "Ya hay una respuesta del asistente en curso.",
+    "zh-CN": "助手已有回复正在生成。"
+  },
+  "An order that could be its stop or target is already working in the account ({0}): no additional stop or target will be placed (review it in Chart Trader)": {
+    "es": "Ya hay una orden activa que podría ser su stop u objetivo en la cuenta ({0}): no se colocarán otros (revísala en Chart Trader)",
+    "zh-CN": "账户已有可能属于此策略的止损或止盈活动订单（{0}）：不会另设止损或止盈（请在图表交易中检查）"
+  },
+  "Anchor": {
+    "es": "Ancla",
+    "zh-CN": "锚点"
+  },
+  "Anchor mode": {
+    "es": "Modo de anclaje",
+    "zh-CN": "锚定模式"
+  },
+  "Anchored Flow VWAP": {
+    "es": "VWAP de flujo anclado",
+    "zh-CN": "锚定订单流 VWAP"
+  },
+  "Another instance may be using it, or Windows may have denied access. No data was opened. ": {
+    "es": "Otra instancia podría estar usándolo o Windows podría haber denegado el acceso. No se abrieron datos. ",
+    "zh-CN": "可能有其他实例正在使用，或 Windows 拒绝了访问。未打开任何数据。 "
+  },
+  "Application executable is unavailable.": {
+    "es": "El ejecutable de la aplicación no está disponible.",
+    "zh-CN": "应用程序可执行文件不可用。"
+  },
+  "Approval failed. ": {
+    "es": "Falló la aprobación. ",
+    "zh-CN": "批准失败。"
+  },
+  "Approval failed. {0}": {
+    "es": "Falló la aprobación. {0}",
+    "zh-CN": "批准失败。{0}"
+  },
+  "Approve selected research tools": {
+    "es": "Aprobar las herramientas de investigación seleccionadas",
+    "zh-CN": "批准所选研究工具"
+  },
+  "Ask assistant to fix errors": {
+    "es": "Pedir al asistente que corrija los errores",
+    "zh-CN": "请助手修复错误"
+  },
+  "Ask for a new strategy or changes to the open strategy…": {
+    "es": "Pide una estrategia nueva o cambios en la estrategia abierta…",
+    "zh-CN": "请求新策略或修改当前策略…"
+  },
+  "Authorization changed before the state update. Review again.": {
+    "es": "La autorización cambió antes de actualizar el estado. Revisa de nuevo.",
+    "zh-CN": "授权在状态更新前已更改。请重新审查。"
+  },
+  "Authorization expired. Reconnect outside chat.": {
+    "es": "La autorización venció. Vuelve a conectar fuera del chat.",
+    "zh-CN": "授权已过期。请在聊天之外重新连接。"
+  },
+  "Authorization failed: {0}": {
+    "es": "Falló la autorización: {0}",
+    "zh-CN": "授权失败：{0}"
+  },
+  "Authorization grant changed.": {
+    "es": "Cambió la autorización concedida.",
+    "zh-CN": "授权许可已更改。"
+  },
+  "Authorization or catalog changed during discovery.": {
+    "es": "La autorización o el catálogo cambió durante el descubrimiento.",
+    "zh-CN": "发现过程中授权或目录已更改。"
+  },
+  "Authorization refused: OAuth issuer/state validation failed. Reconnect outside chat.": {
+    "es": "Autorización rechazada: falló la validación del emisor/estado de OAuth. Vuelve a conectar fuera del chat.",
+    "zh-CN": "授权被拒绝：OAuth 颁发者/状态验证失败。请在聊天之外重新连接。"
+  },
+  "Authorization refused: the server must advertise S256 PKCE support.": {
+    "es": "Autorización rechazada: el servidor debe anunciar compatibilidad con S256 PKCE.",
+    "zh-CN": "授权被拒绝：服务器必须声明支持 S256 PKCE。"
+  },
+  "Authorization was revoked before connection.": {
+    "es": "La autorización se revocó antes de conectar.",
+    "zh-CN": "连接前授权已撤销。"
+  },
+  "Authorizing in your browser, then discovering all tool metadata. No tools are called.": {
+    "es": "Autorizando en tu navegador y luego descubriendo todos los metadatos de herramientas. No se llama a ninguna herramienta.",
+    "zh-CN": "正在浏览器中授权，随后发现全部工具元数据。不会调用任何工具。"
+  },
+  "Automatic: all live strategies without a custom portfolio · ": {
+    "es": "Automático: todas las estrategias en vivo sin portafolio propio · ",
+    "zh-CN": "自动：所有未指定组合的实盘运行策略 · "
+  },
+  "Average period": {
+    "es": "Período del promedio",
+    "zh-CN": "均值周期"
+  },
+  "Bayesian": {
+    "es": "Bayesiana",
+    "zh-CN": "贝叶斯"
+  },
+  "Binance did not report a base asset for {0}.": {
+    "es": "Binance no informó un activo base para {0}.",
+    "zh-CN": "Binance 未提供 {0} 的基础资产。"
+  },
+  "Binance open-interest history retains only the latest month at five-minute resolution.": {
+    "es": "El historial de interés abierto de Binance solo conserva el último mes con resolución de cinco minutos.",
+    "zh-CN": "Binance 持仓量历史仅保留最近一个月，分辨率为五分钟。"
+  },
+  "Binance rejected conditional order {0}{1} (algo status REJECTED, for example a failed margin check)": {
+    "es": "Binance rechazó la orden condicional {0}{1} (estado del algoritmo REJECTED, por ejemplo por falta de margen)",
+    "zh-CN": "Binance 拒绝了条件单 {0}{1}（算法状态为 REJECTED，例如保证金检查失败）"
+  },
+  "Binance rejected operation (code {0}): {1}": {
+    "es": "Binance rechazó la operación (código {0}): {1}",
+    "zh-CN": "Binance 拒绝了操作（代码 {0}）：{1}"
+  },
+  "Binance returned negative open interest.": {
+    "es": "Binance devolvió un interés abierto negativo.",
+    "zh-CN": "Binance 返回了负持仓量。"
+  },
+  "Buyer color": {
+    "es": "Color comprador",
+    "zh-CN": "买方颜色"
+  },
+  "CLI capability inspection failed: ": {
+    "es": "Falló la inspección de capacidades del CLI: ",
+    "zh-CN": "CLI 能力检查失败："
+  },
+  "CLI capability inspection failed: {0}": {
+    "es": "Falló la inspección de capacidades del CLI: {0}",
+    "zh-CN": "CLI 能力检查失败：{0}"
+  },
+  "CLI default model": {
+    "es": "Modelo predeterminado del CLI",
+    "zh-CN": "CLI 默认模型"
+  },
+  "CME (18:00 New York)": {
+    "es": "CME (18:00 Nueva York)",
+    "zh-CN": "CME（纽约 18:00）"
+  },
+  "CSV files contain no nonzero-volume bars.": {
+    "es": "Los archivos CSV no contienen velas con volumen distinto de cero.",
+    "zh-CN": "CSV 文件不包含成交量非零的 K 线。"
+  },
+  "CSV folder": {
+    "es": "Carpeta CSV",
+    "zh-CN": "CSV 文件夹"
+  },
+  "Calculated with {0} and {1} tick(s) slippage per order, matching the backtest. For individual trade details, run the strategy backtest.": {
+    "es": "Calculado con {0} y {1} tick(s) de deslizamiento por orden, igual que el backtest. Para ver cada operación, ejecuta el backtest de la estrategia.",
+    "zh-CN": "按每单 {0} 和 {1} 个最小变动单位滑点计算，与回测一致。要查看逐笔交易明细，请运行策略回测。"
+  },
+  "Camarilla": {
+    "es": "Camarilla",
+    "zh-CN": "卡玛利拉"
+  },
+  "Cancel IB import": {
+    "es": "Cancelar importación IB",
+    "zh-CN": "取消 IB 导入"
+  },
+  "Cancel review": {
+    "es": "Cancelar revisión",
+    "zh-CN": "取消审查"
+  },
+  "Candle high cannot be below candle low.": {
+    "es": "El máximo de la vela no puede ser inferior al mínimo.",
+    "zh-CN": "K 线最高价不能低于最低价。"
+  },
+  "Candle high is below low.": {
+    "es": "El máximo de la vela es inferior al mínimo.",
+    "zh-CN": "K 线最高价低于最低价。"
+  },
+  "Cannot resolve this assistant command shim without altering its arguments. Reinstall the selected CLI using its official installer.": {
+    "es": "No se puede resolver este lanzador del asistente sin alterar sus argumentos. Reinstala el CLI seleccionado con su instalador oficial.",
+    "zh-CN": "无法在不改变参数的情况下解析此助手启动脚本。请使用官方安装程序重新安装所选 CLI。"
+  },
+  "Cannot resume saved conversation: ": {
+    "es": "No se puede reanudar la conversación guardada: ",
+    "zh-CN": "无法恢复已保存的会话："
+  },
+  "Cannot resume saved conversation: {0}": {
+    "es": "No se puede reanudar la conversación guardada: {0}",
+    "zh-CN": "无法恢复已保存的会话：{0}"
+  },
+  "Cannot resume unknown assistant engine '{0}'.": {
+    "es": "No se puede reanudar el motor de asistente desconocido «{0}».",
+    "zh-CN": "无法恢复未知的助手引擎“{0}”。"
+  },
+  "Catalog changed during approval. Review again.": {
+    "es": "El catálogo cambió durante la aprobación. Revisa de nuevo.",
+    "zh-CN": "批准过程中目录已更改。请重新审查。"
+  },
+  "Catalog root": {
+    "es": "Raíz del catálogo",
+    "zh-CN": "目录根代码"
+  },
+  "Change": {
+    "es": "Cambio",
+    "zh-CN": "变化"
+  },
+  "Channel bars": {
+    "es": "Velas del canal",
+    "zh-CN": "通道 K 线数"
+  },
+  "Chart session": {
+    "es": "Sesión del gráfico",
+    "zh-CN": "图表交易时段"
+  },
+  "Claude (Opus, extra effort) reviews each strategy's PnL, streak, drawdown versus history, volatility and correlation to allocate risk: position sizes and risk limits within your bounds. Real-account changes always require approval.": {
+    "es": "Claude (Opus, esfuerzo extra) revisa el PnL, las rachas, el drawdown frente al historial, la volatilidad y la correlación de cada estrategia para asignar riesgo: tamaños de posición y límites dentro de tus márgenes. Los cambios en cuentas reales siempre requieren aprobación.",
+    "zh-CN": "Claude（Opus，额外推理强度）审查每个策略的盈亏、连胜连亏、相对历史的回撤、波动率和相关性，以在你设定的范围内分配仓位和风险限额。实盘账户更改始终需要批准。"
+  },
+  "Claude Code was not found on this {0} (install from claude.com/claude-code).": {
+    "es": "No se encontró Claude Code en este {0} (instálalo desde claude.com/claude-code).",
+    "zh-CN": "在此{0}上未找到 Claude Code（请从 claude.com/claude-code 安装）。"
+  },
+  "Claude Code was not found on this {0}.": {
+    "es": "No se encontró Claude Code en este {0}.",
+    "zh-CN": "在此{0}上未找到 Claude Code。"
+  },
+  "Claude request failed: ": {
+    "es": "Falló la solicitud a Claude: ",
+    "zh-CN": "Claude 请求失败："
+  },
+  "Claude request failed: {0}": {
+    "es": "Falló la solicitud a Claude: {0}",
+    "zh-CN": "Claude 请求失败：{0}"
+  },
+  "Close any other instance and check the directory permissions before retrying.\n\n": {
+    "es": "Cierra cualquier otra instancia y comprueba los permisos del directorio antes de reintentar.\n\n",
+    "zh-CN": "请先关闭其他实例并检查目录权限，然后重试。\n\n"
+  },
+  "Closed bars on each side": {
+    "es": "Velas cerradas a cada lado",
+    "zh-CN": "每侧已收盘 K 线数"
+  },
+  "Closing the window keeps Trading Hub running in the system tray.": {
+    "es": "Cerrar la ventana mantiene Trading Hub en la bandeja del sistema.",
+    "zh-CN": "关闭窗口后 Trading Hub 将继续在系统托盘中运行。"
+  },
+  "Code version: `{0}` (retained in the strategy history).\n": {
+    "es": "Versión del código: `{0}` (conservada en el historial de la estrategia).\n",
+    "zh-CN": "代码版本：`{0}`（保存在策略历史中）。\n"
+  },
+  "Codex CLI was not found. Install Codex and run codex login in Terminal.": {
+    "es": "No se encontró Codex CLI. Instala Codex y ejecuta codex login en Terminal.",
+    "zh-CN": "未找到 Codex CLI。请安装 Codex 并在终端运行 codex login。"
+  },
+  "Codex isolation requires {0}; this CLI does not advertise support. Update Codex before using strategy chat.": {
+    "es": "El aislamiento de Codex requiere {0}; este CLI no anuncia compatibilidad. Actualiza Codex antes de usar el chat de estrategias.",
+    "zh-CN": "Codex 隔离要求 {0}；此 CLI 未声明支持。请先更新 Codex，再使用策略聊天。"
+  },
+  "Codex turn failed.": {
+    "es": "Falló el turno de Codex.",
+    "zh-CN": "Codex 对话轮次失败。"
+  },
+  "Command": {
+    "es": "Comando",
+    "zh-CN": "命令"
+  },
+  "Compose when next POC is inside current value area": {
+    "es": "Componer cuando el siguiente POC esté dentro del área de valor actual",
+    "zh-CN": "下一个 POC 位于当前价值区内时合并"
+  },
+  "Composite Volume Profile": {
+    "es": "Perfil de volumen compuesto",
+    "zh-CN": "复合成交量分布"
+  },
+  "Composite profile ({0}): {1}; POC: 60-profile lookback, up to 10 tested": {
+    "es": "Perfil compuesto ({0}): {1}; POC: historial de 60 perfiles, hasta 10 testeados",
+    "zh-CN": "复合分布（{0}）：{1}；POC：回溯 60 个分布，最多 10 个已测试价位"
+  },
+  "Conditional (algo) orders exist only in USD-M futures": {
+    "es": "Las órdenes condicionales (algo) solo existen en futuros USD-M",
+    "zh-CN": "条件（algo）订单仅用于 USD-M 期货"
+  },
+  "Connect and discover metadata": {
+    "es": "Conectar y descubrir metadatos",
+    "zh-CN": "连接并发现元数据"
+  },
+  "Connect before reviewing metadata.": {
+    "es": "Conecta antes de revisar los metadatos.",
+    "zh-CN": "请先连接再审查元数据。"
+  },
+  "Connect failed. ": {
+    "es": "Falló la conexión. ",
+    "zh-CN": "连接失败。"
+  },
+  "Connect failed. {0}": {
+    "es": "Falló la conexión. {0}",
+    "zh-CN": "连接失败。{0}"
+  },
+  "Connect requested. Authorize in the browser; metadata discovery does not enable any tool.": {
+    "es": "Conexión solicitada. Autoriza en el navegador; descubrir metadatos no habilita ninguna herramienta.",
+    "zh-CN": "已请求连接。请在浏览器授权；发现元数据不会启用任何工具。"
+  },
+  "Connecting to {0}": {
+    "es": "Conectando a {0}",
+    "zh-CN": "正在连接 {0}"
+  },
+  "Connection changed during instrument loading; reopen the picker to refresh.": {
+    "es": "La conexión cambió al cargar instrumentos; vuelve a abrir el selector para actualizar.",
+    "zh-CN": "加载品种时连接已更改；请重新打开选择器以刷新。"
+  },
+  "Connection changed during statistics loading.": {
+    "es": "La conexión cambió al cargar estadísticas.",
+    "zh-CN": "加载统计信息时连接已更改。"
+  },
+  "Connection could not be removed: ": {
+    "es": "No se pudo eliminar la conexión: ",
+    "zh-CN": "无法删除连接："
+  },
+  "Connection could not be removed: {0}": {
+    "es": "No se pudo eliminar la conexión: {0}",
+    "zh-CN": "无法删除连接：{0}"
+  },
+  "Connection could not be saved: ": {
+    "es": "No se pudo guardar la conexión: ",
+    "zh-CN": "无法保存连接："
+  },
+  "Connection could not be saved: {0}": {
+    "es": "No se pudo guardar la conexión: {0}",
+    "zh-CN": "无法保存连接：{0}"
+  },
+  "Connections changed while loading; reopen the picker to refresh.": {
+    "es": "Las conexiones cambiaron durante la carga; vuelve a abrir el selector para actualizar.",
+    "zh-CN": "加载过程中连接已更改；请重新打开选择器以刷新。"
+  },
+  "Connections changed while searching; enter the query again to refresh.": {
+    "es": "Las conexiones cambiaron durante la búsqueda; vuelve a introducir la consulta para actualizar.",
+    "zh-CN": "搜索过程中连接已更改；请重新输入查询以刷新。"
+  },
+  "Contract does not match the target root.": {
+    "es": "El contrato no coincide con la raíz de destino.",
+    "zh-CN": "合约与目标根代码不匹配。"
+  },
+  "Cost not reported by this CLI.": {
+    "es": "Este CLI no informa el costo.",
+    "zh-CN": "此 CLI 未报告费用。"
+  },
+  "Could not complete: {0}": {
+    "es": "No se pudo completar: {0}",
+    "zh-CN": "无法完成：{0}"
+  },
+  "Could not determine Tradovate's active contract: {0}": {
+    "es": "No se pudo determinar el contrato activo de Tradovate: {0}",
+    "zh-CN": "无法确定 Tradovate 的当前合约：{0}"
+  },
+  "Could not determine active contract: {0}": {
+    "es": "No se pudo determinar el contrato activo: {0}",
+    "zh-CN": "无法确定当前合约：{0}"
+  },
+  "Could not estimate: {0}": {
+    "es": "No se pudo estimar: {0}",
+    "zh-CN": "无法估算：{0}"
+  },
+  "Could not export: {0}": {
+    "es": "No se pudo exportar: {0}",
+    "zh-CN": "无法导出：{0}"
+  },
+  "Could not finish assistant response: ": {
+    "es": "No se pudo finalizar la respuesta del asistente: ",
+    "zh-CN": "无法完成助手回复："
+  },
+  "Could not finish assistant response: {0}": {
+    "es": "No se pudo finalizar la respuesta del asistente: {0}",
+    "zh-CN": "无法完成助手回复：{0}"
+  },
+  "Could not generate report: {0}": {
+    "es": "No se pudo generar el reporte: {0}",
+    "zh-CN": "无法生成报告：{0}"
+  },
+  "Could not inspect CLI capabilities.": {
+    "es": "No se pudieron inspeccionar las capacidades del CLI.",
+    "zh-CN": "无法检查 CLI 能力。"
+  },
+  "Could not open Codex sign-in: ": {
+    "es": "No se pudo abrir el inicio de sesión de Codex: ",
+    "zh-CN": "无法打开 Codex 登录："
+  },
+  "Could not open Codex sign-in: {0}. Run codex login in Terminal.": {
+    "es": "No se pudo abrir el inicio de sesión de Codex: {0}. Ejecuta codex login en Terminal.",
+    "zh-CN": "无法打开 Codex 登录：{0}。请在终端运行 codex login。"
+  },
+  "Could not open page: {0}": {
+    "es": "No se pudo abrir la página: {0}",
+    "zh-CN": "无法打开页面：{0}"
+  },
+  "Could not open research access: ": {
+    "es": "No se pudo abrir el acceso de investigación: ",
+    "zh-CN": "无法打开研究访问设置："
+  },
+  "Could not open research access: {0}": {
+    "es": "No se pudo abrir el acceso de investigación: {0}",
+    "zh-CN": "无法打开研究访问设置：{0}"
+  },
+  "Could not prepare assistant request: ": {
+    "es": "No se pudo preparar la solicitud al asistente: ",
+    "zh-CN": "无法准备助手请求："
+  },
+  "Could not prepare assistant request: {0}": {
+    "es": "No se pudo preparar la solicitud al asistente: {0}",
+    "zh-CN": "无法准备助手请求：{0}"
+  },
+  "Could not query: {0}": {
+    "es": "No se pudo consultar: {0}",
+    "zh-CN": "无法查询：{0}"
+  },
+  "Could not read connections: {0}": {
+    "es": "No se pudieron leer las conexiones: {0}",
+    "zh-CN": "无法读取连接：{0}"
+  },
+  "Could not read custom indicators: {0}": {
+    "es": "No se pudieron leer los indicadores personalizados: {0}",
+    "zh-CN": "无法读取自定义指标：{0}"
+  },
+  "Could not read report: {0}": {
+    "es": "No se pudo leer el reporte: {0}",
+    "zh-CN": "无法读取报告：{0}"
+  },
+  "Could not record the orders it kept at the broker in its saved state ({0}): review them in Chart Trader": {
+    "es": "No se pudieron registrar las órdenes conservadas en el bróker en su estado guardado ({0}): revísalas en Chart Trader",
+    "zh-CN": "无法将保留在经纪商端的订单写入保存状态（{0}）：请在图表交易中检查"
+  },
+  "Could not retrieve instruments: {0}": {
+    "es": "No se pudieron obtener instrumentos: {0}",
+    "zh-CN": "无法获取品种：{0}"
+  },
+  "Could not run Claude Code: {0}": {
+    "es": "No se pudo ejecutar Claude Code: {0}",
+    "zh-CN": "无法运行 Claude Code：{0}"
+  },
+  "Could not run {0}: {1}": {
+    "es": "No se pudo ejecutar {0}: {1}",
+    "zh-CN": "无法运行 {0}：{1}"
+  },
+  "Could not save template: {0}": {
+    "es": "No se pudo guardar la plantilla: {0}",
+    "zh-CN": "无法保存模板：{0}"
+  },
+  "Could not start: {0}": {
+    "es": "No se pudo iniciar: {0}",
+    "zh-CN": "无法启动：{0}"
+  },
+  "Could not update recovery journal: ": {
+    "es": "No se pudo actualizar el diario de recuperación: ",
+    "zh-CN": "无法更新恢复日志："
+  },
+  "Could not update recovery journal: {0}": {
+    "es": "No se pudo actualizar el diario de recuperación: {0}",
+    "zh-CN": "无法更新恢复日志：{0}"
+  },
+  "Could not watch indicator directory: {0}": {
+    "es": "No se pudo vigilar el directorio de indicadores: {0}",
+    "zh-CN": "无法监视指标目录：{0}"
+  },
+  "Custom session": {
+    "es": "Sesión personalizada",
+    "zh-CN": "自定义交易时段"
+  },
+  "Custom start hour": {
+    "es": "Hora de inicio personalizada",
+    "zh-CN": "自定义开始小时"
+  },
+  "Custom time zone": {
+    "es": "Zona horaria personalizada",
+    "zh-CN": "自定义时区"
+  },
+  "DATA ONLY: MNQ, MES, M2K, MYM, NQ, ES, RTY, YM. No IB account or order execution. Online mode requires TWS/Gateway socket API and negotiated protocol 187. Common ports: 7497 TWS paper, 7496 TWS real, 4002 Gateway paper. START_API readiness does not establish exchange entitlements. Historical TRADES bars are synthetic (no real footprint); live aggressor side is inferred. Calendar rolls, no price adjustment; session starts at New York 18:00 with DST.": {
+    "es": "SOLO DATOS: MNQ, MES, M2K, MYM, NQ, ES, RTY, YM. Sin cuentas ni ejecución de órdenes de IB. El modo en línea requiere la API de sockets de TWS/Gateway y el protocolo negociado 187. Puertos habituales: 7497 TWS simulado, 7496 TWS real, 4002 Gateway simulado. START_API no confirma permisos de mercado. Las velas históricas TRADES son sintéticas (sin footprint real); el lado agresor en vivo es inferido. Vencimientos por calendario, sin ajuste de precios; sesión desde las 18:00 de Nueva York con horario de verano.",
+    "zh-CN": "仅数据：MNQ、MES、M2K、MYM、NQ、ES、RTY、YM。不提供 IB 账户或订单执行。在线模式要求 TWS/Gateway 套接字 API 以及协商协议 187。常用端口：7497 TWS 模拟、7496 TWS 实盘、4002 Gateway 模拟。START_API 就绪不代表具备交易所数据权限。历史 TRADES K 线为合成数据（无真实足迹）；实时主动买卖方向为推断。按日历换月，不复权；交易时段从纽约 18:00 开始，考虑夏令时。"
+  },
+  "DENIED — watchlist, alert, mutation, unknown or ambiguous side effects": {
+    "es": "DENEGADO — listas de seguimiento, alertas, cambios o efectos desconocidos/ambiguos",
+    "zh-CN": "已拒绝 — 自选列表、警报、修改操作、未知或含糊的副作用"
+  },
+  "Daily limit reached": {
+    "es": "Límite diario alcanzado",
+    "zh-CN": "已达到每日限额"
+  },
+  "Databento history already available: {0}": {
+    "es": "Historial de Databento ya disponible: {0}",
+    "zh-CN": "Databento 历史数据已可用：{0}"
+  },
+  "Describe a strategy: your selected assistant edits files, and Trading Hub compiles the result.": {
+    "es": "Describe una estrategia: el asistente seleccionado edita los archivos y Trading Hub compila el resultado.",
+    "zh-CN": "描述策略：所选助手编辑文件，Trading Hub 编译结果。"
+  },
+  "Detach chart into a window ({0})": {
+    "es": "Separar gráfico en una ventana ({0})",
+    "zh-CN": "将图表分离到窗口（{0}）"
+  },
+  "Detects absorption: strong opposing aggressive volume fails to move the price.": {
+    "es": "Detecta absorción: un fuerte volumen agresivo contrario no consigue mover el precio.",
+    "zh-CN": "检测吸收：大量反向主动成交仍无法推动价格。"
+  },
+  "Discover and review the actual catalog first.": {
+    "es": "Primero descubre y revisa el catálogo real.",
+    "zh-CN": "请先发现并审查实际目录。"
+  },
+  "Discovery only initializes MCP and reads every tools/list page. No model turn or remote tool is used. A local grant ID is not a verified signed-in account name. Server descriptions, schemas and read-only annotations are untrusted metadata; only the reviewed research intersection can be enabled.": {
+    "es": "El descubrimiento solo inicializa MCP y lee todas las páginas de tools/list. No usa el modelo ni herramientas remotas. El ID de autorización local no verifica el nombre de la cuenta conectada. Las descripciones, los esquemas y las anotaciones de solo lectura del servidor son metadatos no confiables; solo se puede habilitar la intersección de investigación revisada.",
+    "zh-CN": "发现仅初始化 MCP 并读取 tools/list 的每一页，不进行模型对话或远程工具调用。本地授权 ID 并非已验证的登录账户名称。服务器描述、架构和只读注释均为不可信元数据；仅可启用经审查的研究工具交集。"
+  },
+  "Distance": {
+    "es": "Distancia",
+    "zh-CN": "距离"
+  },
+  "Distance (× ATR)": {
+    "es": "Distancia (× ATR)",
+    "zh-CN": "距离（× ATR）"
+  },
+  "Donchian channel breakout with an ATR exit.": {
+    "es": "Ruptura del canal de Donchian con salida por ATR.",
+    "zh-CN": "唐奇安通道突破，使用 ATR 离场。"
+  },
+  "Done. {0}. Available in the left-hand list (imported connection) and in backtests.": {
+    "es": "Listo. {0}. Disponible en la lista izquierda (conexión importada) y en backtests.",
+    "zh-CN": "完成。{0}。已可在左侧列表（导入连接）和回测中使用。"
+  },
+  "Done: {0} day(s) of {1} ({2} trades with aggressor side){3}.": {
+    "es": "Listo: {0} día(s) de {1} ({2} operaciones con lado agresor){3}.",
+    "zh-CN": "完成：{0} 天的 {1}（{2} 笔含主动买卖方向的成交）{3}。"
+  },
+  "Done: {0} downloaded day(s) ({1} trades){2}{3}.{4}": {
+    "es": "Listo: {0} día(s) descargados ({1} operaciones){2}{3}.{4}",
+    "zh-CN": "完成：已下载 {0} 天（{1} 笔成交）{2}{3}。{4}"
+  },
+  "Duplicate request id.": {
+    "es": "ID de solicitud duplicado.",
+    "zh-CN": "请求 ID 重复。"
+  },
+  "Duplicate tool names cannot be reviewed safely.": {
+    "es": "No se pueden revisar de forma segura nombres de herramientas duplicados.",
+    "zh-CN": "工具名称重复，无法安全审查。"
+  },
+  "Each trade records the market context at entry, measured using closed bars: trend over the last 24 hours (range, mixed, uptrend or downtrend) and volatility relative to the last month.": {
+    "es": "Cada operación registra el contexto del mercado al entrar, medido con velas cerradas: tendencia de las últimas 24 horas (rango, mixta, alcista o bajista) y volatilidad relativa al último mes.",
+    "zh-CN": "每笔交易记录入场时的市场环境，依据已收盘 K 线测量：最近 24 小时的趋势（震荡、混合、上涨或下跌）以及相对最近一个月的波动率。"
+  },
+  "Effort": {
+    "es": "Esfuerzo",
+    "zh-CN": "推理强度"
+  },
+  "Empty CSV: {0}": {
+    "es": "CSV vacío: {0}",
+    "zh-CN": "CSV 为空：{0}"
+  },
+  "Enabled for {0} explicitly approved research tools; local grant {1}.": {
+    "es": "Habilitado para {0} herramientas de investigación aprobadas explícitamente; autorización local {1}.",
+    "zh-CN": "已启用 {0} 个明确批准的研究工具；本地授权 {1}。"
+  },
+  "End of trading hours": {
+    "es": "Fin del horario de negociación",
+    "zh-CN": "交易时段结束"
+  },
+  "Error stopping {0} to quit": {
+    "es": "Error al detener {0} para salir",
+    "zh-CN": "退出时停止 {0} 失败"
+  },
+  "Estimated OHLC / aggregate": {
+    "es": "OHLC estimado / agregado",
+    "zh-CN": "估算 OHLC / 聚合"
+  },
+  "Example: delta % per bar": {
+    "es": "Ejemplo: delta % por vela",
+    "zh-CN": "示例：每根 K 线的 Delta 百分比"
+  },
+  "Explicitly replace covered recorded minutes (preserved backups)": {
+    "es": "Reemplazar explícitamente minutos registrados cubiertos (con copias de respaldo)",
+    "zh-CN": "明确替换已覆盖的记录分钟（保留备份）"
+  },
+  "Fast average": {
+    "es": "Media rápida",
+    "zh-CN": "快速均线"
+  },
+  "Fast period": {
+    "es": "Período rápido",
+    "zh-CN": "快速周期"
+  },
+  "Fast type": {
+    "es": "Tipo rápido",
+    "zh-CN": "快速类型"
+  },
+  "Fill opacity": {
+    "es": "Opacidad del relleno",
+    "zh-CN": "填充不透明度"
+  },
+  "Fix compilation errors in indicator {0} (in the indicator directory):\n{1}": {
+    "es": "Corrige los errores de compilación del indicador {0} (en el directorio de indicadores):\n{1}",
+    "zh-CN": "修复指标 {0} 的编译错误（位于指标目录）：\n{1}"
+  },
+  "Floor-price bucket size": {
+    "es": "Tamaño del grupo por precio inferior",
+    "zh-CN": "向下取整价格分组大小"
+  },
+  "Flow VWAP": {
+    "es": "VWAP de flujo",
+    "zh-CN": "订单流 VWAP"
+  },
+  "Flow VWAP: ": {
+    "es": "VWAP de flujo: ",
+    "zh-CN": "订单流 VWAP："
+  },
+  "Flow VWAP: {0}": {
+    "es": "VWAP de flujo: {0}",
+    "zh-CN": "订单流 VWAP：{0}"
+  },
+  "Flow bubbles": {
+    "es": "Burbujas de flujo",
+    "zh-CN": "订单流气泡"
+  },
+  "Flow weights must be nonnegative.": {
+    "es": "Los pesos del flujo no pueden ser negativos.",
+    "zh-CN": "订单流权重不能为负。"
+  },
+  "Folder containing one-minute IB CSV files": {
+    "es": "Carpeta con archivos CSV de IB de un minuto",
+    "zh-CN": "包含 IB 一分钟 CSV 文件的文件夹"
+  },
+  "From (local hour)": {
+    "es": "Desde (hora local)",
+    "zh-CN": "起始（本地小时）"
+  },
+  "Had a position (long {0}): waiting for {1} to confirm its position and working orders before trading": {
+    "es": "Tenía una posición (largo {0}): esperando que {1} confirme su posición y órdenes activas antes de operar",
+    "zh-CN": "原有多头仓位 {0}：等待 {1} 确认仓位和活动订单后再交易"
+  },
+  "Had a position (short {0}): waiting for {1} to confirm its position and working orders before trading": {
+    "es": "Tenía una posición (corto {0}): esperando que {1} confirme su posición y órdenes activas antes de operar",
+    "zh-CN": "原有空头仓位 {0}：等待 {1} 确认仓位和活动订单后再交易"
+  },
+  "Heuristic absorption/refill zones from observed footprint or optional estimated OHLC; not proof of book replenishment or icebergs.": {
+    "es": "Zonas heurísticas de absorción/reposición basadas en footprint observado u OHLC estimado opcional; no demuestran reposición del libro ni icebergs.",
+    "zh-CN": "根据已观测足迹或可选估算 OHLC 生成吸收/补单启发式区域；并非盘口补单或冰山单的证据。"
+  },
+  "Highlight threshold (%)": {
+    "es": "Umbral de resaltado (%)",
+    "zh-CN": "高亮阈值（%）"
+  },
+  "Historical PnL, including commissions and slippage · {0} trades{1} · {2}% of capital": {
+    "es": "PnL histórico, con comisiones y deslizamiento · {0} operaciones{1} · {2}% del capital",
+    "zh-CN": "历史盈亏，含手续费和滑点 · {0} 笔交易{1} · 资金的 {2}%"
+  },
+  "Host session period": {
+    "es": "Período de sesión del gráfico anfitrión",
+    "zh-CN": "宿主图表交易时段周期"
+  },
+  "Hourly-close efficiency over the last 24 hours: net change / total path (0 = back and forth, 1 = straight trend; random ≈ 0.2). Range up to 0.15, trend from 0.35; direction follows net movement.": {
+    "es": "Eficiencia de cierres horarios en las últimas 24 horas: cambio neto / recorrido total (0 = ida y vuelta, 1 = tendencia recta; aleatorio ≈ 0.2). Rango hasta 0.15, tendencia desde 0.35; la dirección sigue el movimiento neto.",
+    "zh-CN": "最近 24 小时每小时收盘价效率：净变化 / 总路径（0 = 往返震荡，1 = 直线趋势；随机 ≈ 0.2）。不高于 0.15 为震荡，从 0.35 起为趋势；方向按净变化确定。"
+  },
+  "IB API ready · {0} · awaiting paced subscriptions and market-data entitlements; live aggressor side is inferred": {
+    "es": "API de IB lista · {0} · esperando suscripciones dosificadas y permisos de datos; el lado agresor en vivo es inferido",
+    "zh-CN": "IB API 已就绪 · {0} · 等待节流订阅和行情权限；实时主动买卖方向为推断"
+  },
+  "IB Gateway closed the connection": {
+    "es": "IB Gateway cerró la conexión",
+    "zh-CN": "IB Gateway 已关闭连接"
+  },
+  "IB Gateway disconnected ({0}); reconnecting…": {
+    "es": "IB Gateway desconectado ({0}); reconectando…",
+    "zh-CN": "IB Gateway 已断开（{0}）；正在重新连接…"
+  },
+  "IB Gateway is unavailable at {0}:{1}. Open TWS/Gateway, sign in and enable the socket API.": {
+    "es": "IB Gateway no está disponible en {0}:{1}. Abre TWS/Gateway, inicia sesión y habilita la API de sockets.",
+    "zh-CN": "{0}:{1} 的 IB Gateway 不可用。请打开 TWS/Gateway，登录并启用套接字 API。"
+  },
+  "IB bar history is in use by another writer.": {
+    "es": "Otro escritor está usando el historial de velas de IB.",
+    "zh-CN": "IB K 线历史正被其他写入进程使用。"
+  },
+  "IB bar history supports 1, 5 and 15 minute requests.": {
+    "es": "El historial de velas de IB admite solicitudes de 1, 5 y 15 minutos.",
+    "zh-CN": "IB K 线历史支持 1、5 和 15 分钟请求。"
+  },
+  "IB bar store contains a nonsynthetic trade ID.": {
+    "es": "El almacén de velas de IB contiene un ID de operación no sintético.",
+    "zh-CN": "IB K 线存储包含非合成成交 ID。"
+  },
+  "IB bar store contains nonsynthetic IDs; refusing to overwrite it.": {
+    "es": "El almacén de velas de IB contiene IDs no sintéticos; se rechaza sobrescribirlo.",
+    "zh-CN": "IB K 线存储包含非合成 ID；拒绝覆盖。"
+  },
+  "IB calendar contract rolled; restoring data-only subscriptions.": {
+    "es": "Venció el contrato por calendario de IB; restaurando suscripciones de solo datos.",
+    "zh-CN": "IB 日历合约已换月；正在恢复仅数据订阅。"
+  },
+  "IB cancellation transport closed: ": {
+    "es": "Se cerró el transporte de cancelación de IB: ",
+    "zh-CN": "IB 撤销传输已关闭："
+  },
+  "IB cancellation transport closed: {0}": {
+    "es": "Se cerró el transporte de cancelación de IB: {0}",
+    "zh-CN": "IB 撤销传输已关闭：{0}"
+  },
+  "IB catalog metadata is missing for {0}.": {
+    "es": "Faltan metadatos del catálogo de IB para {0}.",
+    "zh-CN": "缺少 {0} 的 IB 目录元数据。"
+  },
+  "IB client ID {0} is already in use; choose a unique ID in Connections → Interactive Brokers.": {
+    "es": "El ID de cliente de IB {0} ya está en uso; elige uno único en Conexiones → Interactive Brokers.",
+    "zh-CN": "IB 客户端 ID {0} 已被使用；请在连接 → Interactive Brokers 中选择唯一 ID。"
+  },
+  "IB closed during START_API.": {
+    "es": "IB se cerró durante START_API.",
+    "zh-CN": "IB 在 START_API 期间关闭。"
+  },
+  "IB closed while pacing a subscription.": {
+    "es": "IB se cerró durante la dosificación de una suscripción.",
+    "zh-CN": "IB 在订阅节流等待期间关闭。"
+  },
+  "IB configuration changed; the pending historical operation was canceled. Request history again.": {
+    "es": "Cambió la configuración de IB; se canceló la operación histórica pendiente. Vuelve a solicitar el historial.",
+    "zh-CN": "IB 配置已更改；待处理的历史操作已取消。请重新请求历史数据。"
+  },
+  "IB contract unavailable for {0} ({1}).": {
+    "es": "Contrato de IB no disponible para {0} ({1}).",
+    "zh-CN": "{0} 的 IB 合约不可用（{1}）。"
+  },
+  "IB depth reset; waiting for fresh rows with current best bid/ask fallback": {
+    "es": "Profundidad de IB reiniciada; esperando filas nuevas con mejor compra/venta actual como alternativa",
+    "zh-CN": "IB 深度已重置；等待新档位，暂用当前最优买卖报价"
+  },
+  "IB depth row position is outside the current book.": {
+    "es": "La posición de la fila de profundidad de IB está fuera del libro actual.",
+    "zh-CN": "IB 深度档位位置超出当前订单簿。"
+  },
+  "IB depth unavailable ({0}); fresh best bid/ask fallback · inferred aggressor side": {
+    "es": "Profundidad de IB no disponible ({0}); alternativa de mejor compra/venta actual · lado agresor inferido",
+    "zh-CN": "IB 深度不可用（{0}）；使用当前最优买卖报价 · 主动买卖方向为推断"
+  },
+  "IB historical data request timed out.": {
+    "es": "La solicitud de datos históricos de IB agotó el tiempo.",
+    "zh-CN": "IB 历史数据请求超时。"
+  },
+  "IB historical response contains invalid OHLCV.": {
+    "es": "La respuesta histórica de IB contiene OHLCV inválido.",
+    "zh-CN": "IB 历史响应包含无效 OHLCV。"
+  },
+  "IB history has {0} damaged rows; refusing to overwrite: {1}": {
+    "es": "El historial de IB tiene {0} filas dañadas; se rechaza sobrescribir: {1}",
+    "zh-CN": "IB 历史有 {0} 行损坏；拒绝覆盖：{1}"
+  },
+  "IB import canceled before publication. Staging journal: {0}": {
+    "es": "Importación IB cancelada antes de publicar. Diario de preparación: {0}",
+    "zh-CN": "IB 导入在发布前取消。暂存日志：{0}"
+  },
+  "IB import canceled before publication; no history files changed.": {
+    "es": "Importación IB cancelada antes de publicar; no cambió ningún archivo histórico.",
+    "zh-CN": "IB 导入在发布前取消；未更改任何历史文件。"
+  },
+  "IB import failed: ": {
+    "es": "Falló la importación IB: ",
+    "zh-CN": "IB 导入失败："
+  },
+  "IB import failed: {0}": {
+    "es": "Falló la importación IB: {0}",
+    "zh-CN": "IB 导入失败：{0}"
+  },
+  "IB import folder not found: {0}": {
+    "es": "No se encontró la carpeta de importación IB: {0}",
+    "zh-CN": "未找到 IB 导入文件夹：{0}"
+  },
+  "IB import: {0} validated incoming bars, {1} UTC days, {2} files published. Policy: {3}. Backups and journal: {4}": {
+    "es": "Importación IB: {0} velas entrantes validadas, {1} días UTC, {2} archivos publicados. Política: {3}. Copias y diario: {4}",
+    "zh-CN": "IB 导入：已验证 {0} 根待导入 K 线，{1} 个 UTC 日，已发布 {2} 个文件。策略：{3}。备份和日志：{4}"
+  },
+  "IB instrument is recording/in use; stop its live consumers before importing.": {
+    "es": "El instrumento IB está grabando/en uso; detén sus consumidores en vivo antes de importar.",
+    "zh-CN": "IB 品种正在记录/使用中；请先停止其实时使用方再导入。"
+  },
+  "IB live data unavailable for {0}; check real-time exchange entitlements ({1}).": {
+    "es": "Datos en vivo de IB no disponibles para {0}; comprueba los permisos de datos en tiempo real ({1}).",
+    "zh-CN": "{0} 的 IB 实时数据不可用；请检查实时交易所数据权限（{1}）。"
+  },
+  "IB protocol {0} START_API ready; exchange historical/live/depth entitlements are checked only when data is requested. Data only; no orders.": {
+    "es": "Protocolo IB {0} START_API listo; los permisos de datos históricos/en vivo/profundidad se comprueban solo al solicitarlos. Solo datos; sin órdenes.",
+    "zh-CN": "IB 协议 {0} START_API 已就绪；仅在请求数据时检查历史/实时/深度权限。仅数据；不发送订单。"
+  },
+  "IB publication failed; manual recovery required. Backups and journal: {0}": {
+    "es": "Falló la publicación IB; se requiere recuperación manual. Copias y diario: {0}",
+    "zh-CN": "IB 发布失败；需要手动恢复。备份和日志：{0}"
+  },
+  "IB publication failed; original files restored. Backups and journal: {0}": {
+    "es": "Falló la publicación IB; se restauraron los archivos originales. Copias y diario: {0}",
+    "zh-CN": "IB 发布失败；已恢复原始文件。备份和日志：{0}"
+  },
+  "IB quotes unavailable ({0}); trade side uses an inferred tick rule, not exchange aggressor data.": {
+    "es": "Cotizaciones IB no disponibles ({0}); el lado usa una regla de ticks inferida, no datos del agresor de la bolsa.",
+    "zh-CN": "IB 报价不可用（{0}）；成交方向使用推断逐笔规则，并非交易所主动买卖数据。"
+  },
+  "IB quotes unavailable ({0}); trade side uses an inferred tick rule, not exchange aggressor data.{1}": {
+    "es": "Cotizaciones IB no disponibles ({0}); el lado usa una regla de ticks inferida, no datos del agresor de la bolsa.{1}",
+    "zh-CN": "IB 报价不可用（{0}）；成交方向使用推断逐笔规则，并非交易所主动买卖数据。{1}"
+  },
+  "IB recorded history has {0} corrupt rows: {1}": {
+    "es": "Los ticks registrados de IB tienen {0} filas corruptas: {1}",
+    "zh-CN": "IB 已记录历史有 {0} 行损坏：{1}"
+  },
+  "IB recorded ticks + synthetic OHLCV (not real order flow)": {
+    "es": "Ticks registrados de IB + OHLCV sintético (no es flujo de órdenes real)",
+    "zh-CN": "IB 已记录逐笔 + 合成 OHLCV（非真实订单流）"
+  },
+  "IB requires a host, valid TCP port and nonnegative unique client ID.": {
+    "es": "IB requiere un host, un puerto TCP válido y un ID de cliente único no negativo.",
+    "zh-CN": "IB 要求主机、有效 TCP 端口和非负的唯一客户端 ID。"
+  },
+  "IB storage root is required.": {
+    "es": "Se requiere la raíz de almacenamiento de IB.",
+    "zh-CN": "必须指定 IB 存储根目录。"
+  },
+  "IB stored/offline mode never connects to Gateway.": {
+    "es": "El modo almacenado/sin conexión de IB nunca conecta a Gateway.",
+    "zh-CN": "IB 已存储/离线模式绝不连接 Gateway。"
+  },
+  "IB synthesis lost its synthetic provenance.": {
+    "es": "La síntesis de IB perdió su procedencia sintética.",
+    "zh-CN": "IB 合成数据丢失了合成来源标记。"
+  },
+  "IB tick-by-tick subscription limit reached; close another IB chart ({0}).": {
+    "es": "Se alcanzó el límite de suscripciones tick a tick de IB; cierra otro gráfico IB ({0}).",
+    "zh-CN": "已达到 IB 逐笔订阅限制；请关闭另一个 IB 图表（{0}）。"
+  },
+  "IB transport configuration changed during START_API; the old connection was closed.": {
+    "es": "Cambió la configuración del transporte IB durante START_API; se cerró la conexión anterior.",
+    "zh-CN": "START_API 期间 IB 传输配置已更改；旧连接已关闭。"
+  },
+  "IB transport is closed.": {
+    "es": "El transporte IB está cerrado.",
+    "zh-CN": "IB 传输已关闭。"
+  },
+  "IB transport is data-only: account and order-execution messages are not supported.": {
+    "es": "El transporte IB es solo de datos: no admite mensajes de cuentas ni ejecución de órdenes.",
+    "zh-CN": "IB 传输仅支持数据：不支持账户或订单执行消息。"
+  },
+  "IB {0} · {1}:{2} · client {3}": {
+    "es": "IB {0} · {1}:{2} · cliente {3}",
+    "zh-CN": "IB {0} · {1}:{2} · 客户端 {3}"
+  },
+  "Import IB history": {
+    "es": "Importar historial IB",
+    "zh-CN": "导入 IB 历史"
+  },
+  "Import preview is stale; CSV folder membership changed. Preview again before publishing.": {
+    "es": "La vista previa de importación venció; cambió el contenido de la carpeta CSV. Previsualiza de nuevo antes de publicar.",
+    "zh-CN": "导入预览已过期；CSV 文件夹内容已更改。请重新预览后再发布。"
+  },
+  "Import preview is stale; files changed. Preview again before publishing.": {
+    "es": "La vista previa de importación venció; cambiaron los archivos. Previsualiza de nuevo antes de publicar.",
+    "zh-CN": "导入预览已过期；文件已更改。请重新预览后再发布。"
+  },
+  "Import target differs from the previewed storage root.": {
+    "es": "El destino de importación no coincide con la raíz de almacenamiento previsualizada.",
+    "zh-CN": "导入目标与预览的存储根目录不一致。"
+  },
+  "Import uncovered minutes": {
+    "es": "Importar minutos sin cobertura",
+    "zh-CN": "导入未覆盖的分钟"
+  },
+  "Initialize the research boundary first.": {
+    "es": "Primero inicializa el límite de investigación.",
+    "zh-CN": "请先初始化研究边界。"
+  },
+  "Install {0} CLI and sign in in Terminal. No API key is needed here.": {
+    "es": "Instala el CLI de {0} e inicia sesión en Terminal. Aquí no se necesita una clave API.",
+    "zh-CN": "请安装 {0} CLI 并在终端登录。此处不需要 API 密钥。"
+  },
+  "Instrument source timed out.": {
+    "es": "La fuente de instrumentos agotó el tiempo.",
+    "zh-CN": "品种源超时。"
+  },
+  "Interactive Brokers CSV history": {
+    "es": "Historial CSV de Interactive Brokers",
+    "zh-CN": "Interactive Brokers CSV 历史"
+  },
+  "Internal error; unable to process your request. Please try again.": {
+    "es": "Error interno; no se pudo procesar la solicitud. Inténtalo de nuevo.",
+    "zh-CN": "内部错误；无法处理你的请求。请重试。"
+  },
+  "Invalid IB frame length: {0}.": {
+    "es": "Longitud de trama IB inválida: {0}.",
+    "zh-CN": "IB 帧长度无效：{0}。"
+  },
+  "Invalid JSON-RPC request.": {
+    "es": "Solicitud JSON-RPC inválida.",
+    "zh-CN": "JSON-RPC 请求无效。"
+  },
+  "Invalid JSON.": {
+    "es": "JSON inválido.",
+    "zh-CN": "JSON 无效。"
+  },
+  "Invalid OHLCV values.": {
+    "es": "Valores OHLCV inválidos.",
+    "zh-CN": "OHLCV 数值无效。"
+  },
+  "Invalid assistant session ID. Only an exact CLI-issued ID can be resumed.": {
+    "es": "ID de sesión del asistente inválido. Solo se puede reanudar con el ID exacto emitido por el CLI.",
+    "zh-CN": "助手会话 ID 无效。只能使用 CLI 签发的准确 ID 恢复。"
+  },
+  "Invalid callback.": {
+    "es": "Callback inválido.",
+    "zh-CN": "回调无效。"
+  },
+  "Invalid or catalog-mismatched IB history tick metadata; refusing to overwrite: {0}": {
+    "es": "Metadatos de ticks históricos de IB inválidos o incompatibles con el catálogo; se rechaza sobrescribir: {0}",
+    "zh-CN": "IB 历史逐笔元数据无效或与目录不匹配；拒绝覆盖：{0}"
+  },
+  "Invalid overlong tick varint.": {
+    "es": "Varint de ticks excesivamente largo e inválido.",
+    "zh-CN": "逐笔变长整数过长且无效。"
+  },
+  "Invalid tick-file magic: ": {
+    "es": "Firma de archivo de ticks inválida: ",
+    "zh-CN": "逐笔文件标识无效："
+  },
+  "Invalid tick-file magic: {0}": {
+    "es": "Firma de archivo de ticks inválida: {0}",
+    "zh-CN": "逐笔文件标识无效：{0}"
+  },
+  "Invalid tick-size header: ": {
+    "es": "Cabecera de incremento de precio inválida: ",
+    "zh-CN": "最小价格变动头无效："
+  },
+  "Invalid tick-size header: {0}": {
+    "es": "Cabecera de incremento de precio inválida: {0}",
+    "zh-CN": "最小价格变动头无效：{0}"
+  },
+  "It stopped before adopting the orders its previous run kept at the broker: they stay working (review them in Chart Trader)": {
+    "es": "Se detuvo antes de adoptar las órdenes conservadas por la ejecución anterior en el bróker: siguen activas (revísalas en Chart Trader)",
+    "zh-CN": "在接管上次运行保留在经纪商端的订单前已停止：订单仍在工作（请在图表交易中检查）"
+  },
+  "Its ledger has {0} unreadable line: skipped, and the fills after them were read (the file was not changed)": {
+    "es": "Su registro tiene {0} línea ilegible: se omitió y se leyeron las ejecuciones posteriores (no se cambió el archivo)",
+    "zh-CN": "账本有 {0} 行无法读取：已跳过并读取后续成交（文件未更改）"
+  },
+  "Its ledger has {0} unreadable lines: skipped, and the fills after them were read (the file was not changed)": {
+    "es": "Su registro tiene {0} líneas ilegibles: se omitieron y se leyeron las ejecuciones posteriores (no se cambió el archivo)",
+    "zh-CN": "账本有 {0} 行无法读取：已跳过并读取后续成交（文件未更改）"
+  },
+  "Keep mitigated zones": {
+    "es": "Conservar zonas mitigadas",
+    "zh-CN": "保留已缓解区域"
+  },
+  "LONG {0} @ {1}": {
+    "es": "LARGO {0} @ {1}",
+    "zh-CN": "多头 {0} @ {1}"
+  },
+  "Laboratory mode: the selected assistant can download data, run backtests, optimization, walk-forward and Monte Carlo, assess strategies and save reports. Financial changes remain proposals.": {
+    "es": "Modo laboratorio: el asistente seleccionado puede descargar datos, ejecutar backtests, optimización, walk-forward y Monte Carlo, evaluar estrategias y guardar reportes. Los cambios financieros siguen siendo propuestas.",
+    "zh-CN": "实验室模式：所选助手可下载数据、运行回测、优化、滚动验证和蒙特卡洛分析、评估策略并保存报告。财务更改仍仅为提案。"
+  },
+  "Live recording unavailable: another history writer owns this instrument. Market data remains readable, but new ticks are not being saved.": {
+    "es": "Grabación en vivo no disponible: otro escritor controla el historial de este instrumento. Los datos de mercado siguen siendo legibles, pero no se guardan nuevos ticks.",
+    "zh-CN": "实时记录不可用：此品种的历史由另一个写入进程持有。市场数据仍可读取，但不会保存新的逐笔数据。"
+  },
+  "Loading open-interest observations…": {
+    "es": "Cargando observaciones de interés abierto…",
+    "zh-CN": "正在加载持仓量观测…"
+  },
+  "Local grant {0} · Catalog {1}\nSelect the exact offered research tools you approve. All selections initially remain off.": {
+    "es": "Autorización local {0} · Catálogo {1}\nSelecciona las herramientas de investigación ofrecidas que apruebas. Todas empiezan desmarcadas.",
+    "zh-CN": "本地授权 {0} · 目录 {1}\n请选择你批准的具体研究工具。所有选项初始均关闭。"
+  },
+  "Long {0} {1}": {
+    "es": "Largo {0} {1}",
+    "zh-CN": "多头 {0} {1}"
+  },
+  "Long {0} · R:R {1}": {
+    "es": "Largo {0} · R:R {1}",
+    "zh-CN": "多头 {0} · 风险收益比 {1}"
+  },
+  "Lower {0} sigma": {
+    "es": "Inferior {0} sigma",
+    "zh-CN": "下方 {0} 倍标准差"
+  },
+  "MNQ (optional if filenames identify the root)": {
+    "es": "MNQ (opcional si los nombres identifican la raíz)",
+    "zh-CN": "MNQ（如文件名可识别根代码则可选）"
+  },
+  "Malformed IB START_API readiness response.": {
+    "es": "Respuesta de disponibilidad START_API de IB mal formada.",
+    "zh-CN": "IB START_API 就绪响应格式错误。"
+  },
+  "Malformed IB depth mutation.": {
+    "es": "Actualización de profundidad IB mal formada.",
+    "zh-CN": "IB 深度更新格式错误。"
+  },
+  "Malformed IB historical bar count/layout.": {
+    "es": "Cantidad/disposición de velas históricas IB mal formada.",
+    "zh-CN": "IB 历史 K 线数量/布局格式错误。"
+  },
+  "Manual UTC (yyyy-MM-dd HH:mm; empty = loaded history start)": {
+    "es": "UTC manual (yyyy-MM-dd HH:mm; vacío = inicio del historial cargado)",
+    "zh-CN": "手动 UTC（yyyy-MM-dd HH:mm；留空 = 已加载历史起点）"
+  },
+  "Manual anchor must be an explicit UTC date/time (yyyy-MM-dd HH:mm or ISO Z). Empty explicitly means loaded-history start.": {
+    "es": "El ancla manual requiere fecha/hora UTC explícita (yyyy-MM-dd HH:mm o ISO Z). Dejar vacío indica explícitamente el inicio del historial cargado.",
+    "zh-CN": "手动锚点必须指定明确的 UTC 日期/时间（yyyy-MM-dd HH:mm 或 ISO Z）。留空明确表示已加载历史的起点。"
+  },
+  "Market conditions use the same measurements as strategy context filters: trend over the last 24 hours (range, mixed, uptrend or downtrend) and volatility relative to the last month. Each market lists the strategies trading those conditions; the final table shows each strategy's context settings.": {
+    "es": "Las condiciones de mercado usan las mismas medidas que los filtros de contexto de estrategias: tendencia de las últimas 24 horas (rango, mixta, alcista o bajista) y volatilidad relativa al último mes. Cada mercado lista las estrategias que operan esas condiciones; la tabla final muestra los ajustes de contexto de cada estrategia.",
+    "zh-CN": "市场条件使用与策略环境过滤器相同的测量：最近 24 小时趋势（震荡、混合、上涨或下跌）以及相对最近一个月的波动率。每个市场列出在这些条件下交易的策略；最后的表格显示各策略的环境设置。"
+  },
+  "Matches for “{0}” on other connections:": {
+    "es": "Coincidencias para «{0}» en otras conexiones:",
+    "zh-CN": "其他连接中“{0}”的匹配项："
+  },
+  "Maximum bars per trade": {
+    "es": "Máximo de velas por operación",
+    "zh-CN": "每笔交易最多 K 线数"
+  },
+  "Maximum bubble size": {
+    "es": "Tamaño máximo de burbuja",
+    "zh-CN": "最大气泡大小"
+  },
+  "Maximum lifetime (bars; 0 = unlimited)": {
+    "es": "Duración máxima (velas; 0 = ilimitada)",
+    "zh-CN": "最长存续期（K 线数；0 = 不限）"
+  },
+  "Medium period": {
+    "es": "Período medio",
+    "zh-CN": "中速周期"
+  },
+  "Medium type": {
+    "es": "Tipo medio",
+    "zh-CN": "中速类型"
+  },
+  "Method not exposed by the research boundary.": {
+    "es": "Método no expuesto por el límite de investigación.",
+    "zh-CN": "研究边界未开放此方法。"
+  },
+  "Minimum bucket volume": {
+    "es": "Volumen mínimo por grupo",
+    "zh-CN": "分组最低成交量"
+  },
+  "Minimum delta": {
+    "es": "Delta mínimo",
+    "zh-CN": "最小 Delta"
+  },
+  "Minimum delta (% of volume)": {
+    "es": "Delta mínimo (% del volumen)",
+    "zh-CN": "最小 Delta（占成交量 %）"
+  },
+  "Minimum volume": {
+    "es": "Volumen mínimo",
+    "zh-CN": "最低成交量"
+  },
+  "Minimum volume (× average)": {
+    "es": "Volumen mínimo (× promedio)",
+    "zh-CN": "最低成交量（× 均值）"
+  },
+  "Missing CSV field.": {
+    "es": "Falta un campo CSV.",
+    "zh-CN": "缺少 CSV 字段。"
+  },
+  "Missing footprint": {
+    "es": "Footprint faltante",
+    "zh-CN": "足迹缺失"
+  },
+  "Missing footprint (estimation off or zero volume)": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero)",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）"
+  },
+  "Mixed-root folder: {0} identifies {1}, not {2}.": {
+    "es": "Carpeta con raíces mixtas: {0} identifica {1}, no {2}.",
+    "zh-CN": "文件夹混有不同根代码：{0} 标识为 {1}，而非 {2}。"
+  },
+  "Modify failed: the order was canceled but its replacement was not sent (": {
+    "es": "Falló la modificación: se canceló la orden pero no se envió su reemplazo (",
+    "zh-CN": "修改失败：已撤销原订单，但未发送替代订单（"
+  },
+  "Modify failed: the order was canceled but its replacement was not sent ({0})": {
+    "es": "Falló la modificación: se canceló la orden pero no se envió su reemplazo ({0})",
+    "zh-CN": "修改失败：已撤销原订单，但未发送替代订单（{0}）"
+  },
+  "Nearest-price grouping (ties away from zero)": {
+    "es": "Agrupación por precio más cercano (empates alejándose de cero)",
+    "zh-CN": "按最近价格分组（等距时远离零）"
+  },
+  "Negative footprint volume.": {
+    "es": "Volumen de footprint negativo.",
+    "zh-CN": "足迹成交量为负。"
+  },
+  "Negative weighted variance.": {
+    "es": "Varianza ponderada negativa.",
+    "zh-CN": "加权方差为负。"
+  },
+  "No CSV files found.": {
+    "es": "No se encontraron archivos CSV.",
+    "zh-CN": "未找到 CSV 文件。"
+  },
+  "No catalog metadata for {0}.": {
+    "es": "Sin metadatos de catálogo para {0}.",
+    "zh-CN": "没有 {0} 的目录元数据。"
+  },
+  "No matches for “{0}” on other enabled connections.": {
+    "es": "Sin coincidencias para «{0}» en otras conexiones habilitadas.",
+    "zh-CN": "其他已启用连接中没有“{0}”的匹配项。"
+  },
+  "No matches for “{0}” on the connections that could be searched.": {
+    "es": "Sin coincidencias para «{0}» en las conexiones que pudieron buscarse.",
+    "zh-CN": "可搜索的连接中没有“{0}”的匹配项。"
+  },
+  "No open-interest observation at this candle cutoff.": {
+    "es": "No hay observación de interés abierto en el corte de esta vela.",
+    "zh-CN": "此 K 线截止时点没有持仓量观测。"
+  },
+  "No open-interest observations are available in this range.": {
+    "es": "No hay observaciones de interés abierto en este rango.",
+    "zh-CN": "此范围内没有可用的持仓量观测。"
+  },
+  "No open-interest observations are available.": {
+    "es": "No hay observaciones de interés abierto disponibles.",
+    "zh-CN": "没有可用的持仓量观测。"
+  },
+  "No other enabled market-data connections to search.": {
+    "es": "No hay otras conexiones habilitadas de datos de mercado para buscar.",
+    "zh-CN": "没有其他已启用的行情连接可供搜索。"
+  },
+  "No supported server revocation metadata is available. Remove the app grant in TradingView account settings if needed.": {
+    "es": "No hay metadatos compatibles de revocación del servidor. Si hace falta, elimina el permiso de la aplicación en los ajustes de tu cuenta TradingView.",
+    "zh-CN": "没有受支持的服务器撤销元数据。如有需要，请在 TradingView 账户设置中移除此应用授权。"
+  },
+  "None of the orders kept at the broker is working for this position: nothing to adopt": {
+    "es": "Ninguna orden conservada en el bróker está activa para esta posición: no hay nada que adoptar",
+    "zh-CN": "保留在经纪商端的订单均未为此仓位工作：无需接管"
+  },
+  "Observed footprint": {
+    "es": "Footprint observado",
+    "zh-CN": "已观测足迹"
+  },
+  "Observed {0} UTC · {1}": {
+    "es": "Observado {0} UTC · {1}",
+    "zh-CN": "观测时间 {0} UTC · {1}"
+  },
+  "Observed-footprint weighted VWAP with optional estimated OHLC. Confirmed swings are retrospective, not real-time pivot predictions.": {
+    "es": "VWAP ponderado por footprint observado con OHLC estimado opcional. Los swings confirmados son retrospectivos, no predicciones de pivotes en tiempo real.",
+    "zh-CN": "按已观测足迹加权的 VWAP，可选估算 OHLC。已确认摆动点为回溯结果，并非实时枢轴预测。"
+  },
+  "Off by default. Connecting opens TradingView OAuth in your browser. Essential or above is required; trials are excluded. Requests and research arguments are shared with TradingView and results may be sent to your chosen assistant. This connection cannot expose orders, watchlists or alerts.": {
+    "es": "Desactivado por defecto. Conectar abre OAuth de TradingView en tu navegador. Requiere Essential o superior; excluye pruebas. Las solicitudes y argumentos de investigación se comparten con TradingView y los resultados pueden enviarse al asistente elegido. Esta conexión no expone órdenes, listas de seguimiento ni alertas.",
+    "zh-CN": "默认关闭。连接将在浏览器打开 TradingView OAuth。要求 Essential 或更高套餐；不支持试用。请求和研究参数会共享给 TradingView，结果可能发送给你选择的助手。此连接不开放订单、自选列表或警报。"
+  },
+  "Off — dedicated local authorization removed.": {
+    "es": "Desactivado — autorización local dedicada eliminada.",
+    "zh-CN": "已关闭 — 已移除专用本地授权。"
+  },
+  "Off — no TradingView network access.": {
+    "es": "Desactivado — sin acceso de red a TradingView.",
+    "zh-CN": "已关闭 — 不访问 TradingView 网络。"
+  },
+  "Open interest": {
+    "es": "Interés abierto",
+    "zh-CN": "持仓量"
+  },
+  "Open interest is available only for Binance USD-M Futures instruments.": {
+    "es": "El interés abierto solo está disponible para instrumentos de Binance USD-M Futures.",
+    "zh-CN": "持仓量仅适用于 Binance USD-M 期货品种。"
+  },
+  "Open interest is not supported by this instrument/provider.": {
+    "es": "Este instrumento/proveedor no admite interés abierto.",
+    "zh-CN": "此品种/提供商不支持持仓量。"
+  },
+  "Open interest requires a Binance USD-M Futures instrument.": {
+    "es": "El interés abierto requiere un instrumento Binance USD-M Futures.",
+    "zh-CN": "持仓量需要 Binance USD-M 期货品种。"
+  },
+  "Open interest requires a UTC server timestamp and nonnegative quantity.": {
+    "es": "El interés abierto requiere hora UTC del servidor y cantidad no negativa.",
+    "zh-CN": "持仓量要求 UTC 服务器时间戳和非负数量。"
+  },
+  "Open-interest provider error.": {
+    "es": "Error del proveedor de interés abierto.",
+    "zh-CN": "持仓量提供商错误。"
+  },
+  "Operation canceled; research access was not enabled.": {
+    "es": "Operación cancelada; no se habilitó el acceso de investigación.",
+    "zh-CN": "操作已取消；未启用研究访问。"
+  },
+  "Optional TradingView research": {
+    "es": "Investigación opcional de TradingView",
+    "zh-CN": "可选 TradingView 研究"
+  },
+  "Order blocked: ": {
+    "es": "Orden bloqueada: ",
+    "zh-CN": "订单被阻止："
+  },
+  "Order blocked: {0}": {
+    "es": "Orden bloqueada: {0}",
+    "zh-CN": "订单被阻止：{0}"
+  },
+  "Order cancellation is unresolved: waiting for broker confirmation (review working orders in Chart Trader)": {
+    "es": "Cancelación sin resolver: esperando confirmación del bróker (revisa las órdenes activas en Chart Trader)",
+    "zh-CN": "撤单尚未解决：等待经纪商确认（请在图表交易中检查活动订单）"
+  },
+  "Orders kept at the broker for its position are still working ({0}), but the account no longer has the position: review them in Chart Trader": {
+    "es": "Las órdenes conservadas en el bróker para su posición siguen activas ({0}), pero la cuenta ya no tiene la posición: revísalas en Chart Trader",
+    "zh-CN": "为此仓位保留在经纪商端的订单仍在工作（{0}），但账户已无该仓位：请在图表交易中检查"
+  },
+  "POC {0} tested": {
+    "es": "POC {0} testeado",
+    "zh-CN": "POC {0} 已测试"
+  },
+  "POC {0} untested": {
+    "es": "POC {0} sin testear",
+    "zh-CN": "POC {0} 未测试"
+  },
+  "PORTFOLIO (closed trades): net {0} · {1} trades · PF {2} · max drawdown {3} · Sharpe {4} · currently open {5}": {
+    "es": "PORTAFOLIO (operaciones cerradas): neto {0} · {1} operaciones · PF {2} · drawdown máx. {3} · Sharpe {4} · abiertas actualmente {5}",
+    "zh-CN": "组合（已平仓交易）：净收益 {0} · {1} 笔交易 · PF {2} · 最大回撤 {3} · 夏普 {4} · 当前未平仓 {5}"
+  },
+  "PP and H1–H6/L1–L6 from the previous observed session. Initial history may contain a partial session; no levels are invented before the first rollover.": {
+    "es": "PP y H1–H6/L1–L6 de la sesión observada anterior. El historial inicial puede contener una sesión parcial; no se inventan niveles antes del primer cambio de sesión.",
+    "zh-CN": "上一已观测交易时段的 PP 和 H1–H6/L1–L6。初始历史可能包含不完整时段；首次切换时段前不会虚构价位。"
+  },
+  "Partial open-interest coverage.": {
+    "es": "Cobertura parcial de interés abierto.",
+    "zh-CN": "持仓量覆盖不完整。"
+  },
+  "Partial open-interest coverage; Binance retains only the latest month at five-minute resolution.": {
+    "es": "Cobertura parcial de interés abierto; Binance solo conserva el último mes con resolución de cinco minutos.",
+    "zh-CN": "持仓量覆盖不完整；Binance 仅保留最近一个月，分辨率为五分钟。"
+  },
+  "Pending protection cancellation": {
+    "es": "Cancelación de protección pendiente",
+    "zh-CN": "保护单撤销待确认"
+  },
+  "Per-bar volume profile": {
+    "es": "Perfil de volumen por vela",
+    "zh-CN": "每根 K 线成交量分布"
+  },
+  "Preceding volume bars": {
+    "es": "Velas previas de volumen",
+    "zh-CN": "前序成交量 K 线数"
+  },
+  "Preserving {0} recorded minute(s) byte-for-byte; only uncovered minutes are imported. Destructive replacement is refused unless --replace is explicitly supplied.": {
+    "es": "Se conservan {0} minuto(s) registrados byte por byte; solo se importan minutos sin cobertura. Se rechaza el reemplazo destructivo salvo que se indique --replace explícitamente.",
+    "zh-CN": "逐字节保留 {0} 分钟已记录数据；仅导入未覆盖的分钟。除非明确提供 --replace，否则拒绝破坏性替换。"
+  },
+  "Preview and import IB…": {
+    "es": "Previsualizar e importar IB…",
+    "zh-CN": "预览并导入 IB…"
+  },
+  "Price is not aligned with the catalog tick size.": {
+    "es": "El precio no está alineado con el incremento del catálogo.",
+    "zh-CN": "价格不符合目录最小变动单位。"
+  },
+  "Profile count": {
+    "es": "Cantidad de perfiles",
+    "zh-CN": "分布数量"
+  },
+  "Project untested POCs (60-profile lookback)": {
+    "es": "Proyectar POC sin testear (historial de 60 perfiles)",
+    "zh-CN": "延伸未测试 POC（回溯 60 个分布）"
+  },
+  "Project until mitigation": {
+    "es": "Proyectar hasta mitigación",
+    "zh-CN": "延伸至缓解"
+  },
+  "Published {0} file(s). Policy: {1}. Preserved backups and transaction journal: {2}": {
+    "es": "Se publicaron {0} archivo(s). Política: {1}. Copias conservadas y diario de transacción: {2}",
+    "zh-CN": "已发布 {0} 个文件。策略：{1}。保留的备份和事务日志：{2}"
+  },
+  "Qty": {
+    "es": "Cant.",
+    "zh-CN": "数量"
+  },
+  "QuanTAlib Camarilla": {
+    "es": "Camarilla de QuanTAlib",
+    "zh-CN": "QuanTAlib 卡玛利拉"
+  },
+  "QuanTAlib MA ribbon": {
+    "es": "Cinta de medias de QuanTAlib",
+    "zh-CN": "QuanTAlib 均线带"
+  },
+  "QuanTAlib moving average": {
+    "es": "Media móvil de QuanTAlib",
+    "zh-CN": "QuanTAlib 移动平均线"
+  },
+  "QuanTAlib returned a non-finite value.": {
+    "es": "QuanTAlib devolvió un valor no finito.",
+    "zh-CN": "QuanTAlib 返回了非有限值。"
+  },
+  "QuanTAlib {0} returned a non-finite value.": {
+    "es": "QuanTAlib {0} devolvió un valor no finito.",
+    "zh-CN": "QuanTAlib {0} 返回了非有限值。"
+  },
+  "Quits Trading Hub completely, like Alt+F4: while live strategies hold positions it first asks what to do with their stops (previously running strategies resume on startup if enabled in Settings)": {
+    "es": "Cierra Trading Hub por completo, como Alt+F4: si las estrategias en vivo tienen posiciones, primero pregunta qué hacer con sus stops (las estrategias previamente activas se reanudan al iniciar si se habilita en Ajustes)",
+    "zh-CN": "完全退出 Trading Hub，等同 Alt+F4：当运行策略持有仓位时，先询问如何处理止损单（如在设置中启用，先前运行的策略会在启动时恢复）"
+  },
+  "Reading all authenticated metadata pages. Existing approval is disabled while reviewing.": {
+    "es": "Leyendo todas las páginas de metadatos autenticados. La aprobación existente se desactiva durante la revisión.",
+    "zh-CN": "正在读取全部已认证元数据页面。审查期间将禁用现有批准。"
+  },
+  "Refill Zones (heuristic)": {
+    "es": "Zonas de reposición (heurística)",
+    "zh-CN": "补单区域（启发式）"
+  },
+  "Refill: {0}; visible zones: observed {1}, estimated {2}, incomplete {3}; latest labels: at most 8": {
+    "es": "Reposición: {0}; zonas visibles: observadas {1}, estimadas {2}, incompletas {3}; últimas etiquetas: máximo 8",
+    "zh-CN": "补单：{0}；可见区域：观测 {1}，估算 {2}，不完整 {3}；最新标签：最多 8 个"
+  },
+  "Removes \"{0}\" and its secrets from {1}. Saved market data remains unchanged.": {
+    "es": "Elimina «{0}» y sus secretos de {1}. Los datos de mercado guardados no cambian.",
+    "zh-CN": "从 {1} 删除“{0}”及其机密。保存的市场数据保持不变。"
+  },
+  "Repeated tools/list cursor. Discovery is incomplete.": {
+    "es": "Cursor de tools/list repetido. El descubrimiento está incompleto.",
+    "zh-CN": "tools/list 游标重复。发现不完整。"
+  },
+  "Replace IB recorded minutes": {
+    "es": "Reemplazar minutos registrados de IB",
+    "zh-CN": "替换 IB 已记录分钟"
+  },
+  "Replace with backups": {
+    "es": "Reemplazar con copias de respaldo",
+    "zh-CN": "保留备份并替换"
+  },
+  "Report exported: {0} (in your browser: Ctrl+P → Save as PDF)": {
+    "es": "Reporte exportado: {0} (en el navegador: Ctrl+P → Guardar como PDF)",
+    "zh-CN": "报告已导出：{0}（在浏览器中：Ctrl+P → 另存为 PDF）"
+  },
+  "Report exported: {0} (in your browser: File → Export as PDF)": {
+    "es": "Reporte exportado: {0} (en el navegador: Archivo → Exportar como PDF)",
+    "zh-CN": "报告已导出：{0}（在浏览器中：文件 → 导出为 PDF）"
+  },
+  "Reported cost: US${0}": {
+    "es": "Costo informado: US${0}",
+    "zh-CN": "已报告费用：US${0}"
+  },
+  "Request id must be a string or number.": {
+    "es": "El ID de solicitud debe ser texto o número.",
+    "zh-CN": "请求 ID 必须是字符串或数字。"
+  },
+  "Requests may still be awaiting account data or broker acknowledgment. Positions and orders may still be working. Check them at the broker.\n\n": {
+    "es": "Las solicitudes pueden seguir esperando datos de la cuenta o confirmación del bróker. Las posiciones y órdenes podrían seguir activas. Compruébalas en el bróker.\n\n",
+    "zh-CN": "请求可能仍在等待账户数据或经纪商确认。仓位和订单可能仍在运行。请在经纪商端检查。\n\n"
+  },
+  "Research MCP requires --approval <reviewed approval id>.": {
+    "es": "El MCP de investigación requiere --approval <reviewed approval id>.",
+    "zh-CN": "研究 MCP 要求 --approval <reviewed approval id>。"
+  },
+  "Research access": {
+    "es": "Acceso de investigación",
+    "zh-CN": "研究访问"
+  },
+  "Research access changed in another process. Reopen settings to review.": {
+    "es": "El acceso de investigación cambió en otro proceso. Vuelve a abrir los ajustes para revisarlo.",
+    "zh-CN": "研究访问已被其他进程更改。请重新打开设置进行审查。"
+  },
+  "Research access changed. Review and approve access before sending another request.": {
+    "es": "Cambió el acceso de investigación. Revisa y aprueba el acceso antes de enviar otra solicitud.",
+    "zh-CN": "研究访问已更改。请先审查并批准访问，再发送其他请求。"
+  },
+  "Research access is off, revoked or requires a new review.": {
+    "es": "El acceso de investigación está desactivado, revocado o requiere una nueva revisión.",
+    "zh-CN": "研究访问已关闭、已撤销或需要重新审查。"
+  },
+  "Research authorization state is invalid. Turn it off and reconnect.": {
+    "es": "El estado de autorización de investigación es inválido. Desactívalo y vuelve a conectar.",
+    "zh-CN": "研究授权状态无效。请关闭后重新连接。"
+  },
+  "Research authorization state is unavailable. Requests require readable authorization state.": {
+    "es": "El estado de autorización de investigación no está disponible. Las solicitudes requieren un estado de autorización legible.",
+    "zh-CN": "研究授权状态不可用。请求必须有可读取的授权状态。"
+  },
+  "Research candidate — explicit selection required": {
+    "es": "Candidato de investigación — requiere selección explícita",
+    "zh-CN": "研究候选工具 — 需明确选择"
+  },
+  "Research enabled for the saved local grant. Review or turn off below.": {
+    "es": "Investigación habilitada para la autorización local guardada. Revisa o desactiva abajo.",
+    "zh-CN": "已为保存的本地授权启用研究。请在下方审查或关闭。"
+  },
+  "Research metadata unavailable. ": {
+    "es": "Metadatos de investigación no disponibles. ",
+    "zh-CN": "研究元数据不可用。"
+  },
+  "Research metadata unavailable. {0}": {
+    "es": "Metadatos de investigación no disponibles. {0}",
+    "zh-CN": "研究元数据不可用。{0}"
+  },
+  "Research request failed. ": {
+    "es": "Falló la solicitud de investigación. ",
+    "zh-CN": "研究请求失败。"
+  },
+  "Research request failed. {0}": {
+    "es": "Falló la solicitud de investigación. {0}",
+    "zh-CN": "研究请求失败。{0}"
+  },
+  "Resources": {
+    "es": "Recursos",
+    "zh-CN": "资源"
+  },
+  "Response stopped.": {
+    "es": "Respuesta detenida.",
+    "zh-CN": "回复已停止。"
+  },
+  "Return to Trading Hub. Research access still requires explicit tool review and approval.": {
+    "es": "Vuelve a Trading Hub. El acceso de investigación aún requiere revisión y aprobación explícita de herramientas.",
+    "zh-CN": "请返回 Trading Hub。研究访问仍需明确审查并批准工具。"
+  },
+  "Review canceled — research tools remain off.": {
+    "es": "Revisión cancelada — las herramientas de investigación siguen desactivadas.",
+    "zh-CN": "审查已取消 — 研究工具保持关闭。"
+  },
+  "Review current grant": {
+    "es": "Revisar autorización actual",
+    "zh-CN": "审查当前授权"
+  },
+  "Review failed. ": {
+    "es": "Falló la revisión. ",
+    "zh-CN": "审查失败。"
+  },
+  "Review failed. {0}": {
+    "es": "Falló la revisión. {0}",
+    "zh-CN": "审查失败。{0}"
+  },
+  "Review required — local grant ": {
+    "es": "Revisión necesaria — autorización local ",
+    "zh-CN": "需要审查 — 本地授权 "
+  },
+  "Review required — local grant {0}. Account identity is not asserted.": {
+    "es": "Revisión necesaria — autorización local {0}. No se afirma la identidad de la cuenta.",
+    "zh-CN": "需要审查 — 本地授权 {0}。不代表已确认账户身份。"
+  },
+  "Rithmic is not connected yet ({0})": {
+    "es": "Rithmic aún no está conectado ({0})",
+    "zh-CN": "Rithmic 尚未连接（{0}）"
+  },
+  "Rithmic rejected login: {0}": {
+    "es": "Rithmic rechazó el inicio de sesión: {0}",
+    "zh-CN": "Rithmic 拒绝登录：{0}"
+  },
+  "Rithmic rejected order: {0}": {
+    "es": "Rithmic rechazó la orden: {0}",
+    "zh-CN": "Rithmic 拒绝订单：{0}"
+  },
+  "Rithmic returned no active contract: {0}": {
+    "es": "Rithmic no devolvió un contrato activo: {0}",
+    "zh-CN": "Rithmic 未返回当前合约：{0}"
+  },
+  "Runs each combination once over the entire history (repeated ticks combined), selecting the best plateau in each window rather than the highest peak. Measures overfitting with PBO and multiple out-of-sample CPCV paths.": {
+    "es": "Ejecuta cada combinación una sola vez sobre todo el historial (combina los ticks repetidos), eligiendo la mejor meseta de cada ventana en vez del pico más alto. Mide sobreajuste con PBO y varias rutas CPCV fuera de muestra.",
+    "zh-CN": "每个组合在完整历史上仅运行一次（合并重复逐笔），为每个窗口选择最佳平台而非最高峰。使用 PBO 和多条样本外 CPCV 路径衡量过拟合。"
+  },
+  "SHORT {0} @ {1}": {
+    "es": "CORTO {0} @ {1}",
+    "zh-CN": "空头 {0} @ {1}"
+  },
+  "Save an HTML report with embedded charts and open it in your browser (then use Ctrl+P → Save as PDF or Print)": {
+    "es": "Guarda un reporte HTML con gráficos integrados y ábrelo en el navegador (luego Ctrl+P → Guardar como PDF o Imprimir)",
+    "zh-CN": "保存内嵌图表的 HTML 报告并在浏览器打开（然后 Ctrl+P → 另存为 PDF 或打印）"
+  },
+  "Saved TradingView authorization is invalid. Reconnect outside chat.": {
+    "es": "La autorización de TradingView guardada es inválida. Vuelve a conectar fuera del chat.",
+    "zh-CN": "保存的 TradingView 授权无效。请在聊天之外重新连接。"
+  },
+  "Saved authorization was invalid.": {
+    "es": "La autorización guardada era inválida.",
+    "zh-CN": "保存的授权无效。"
+  },
+  "Saved conversation has no CLI session. The next message starts a new session.": {
+    "es": "La conversación guardada no tiene sesión CLI. El siguiente mensaje inicia una sesión nueva.",
+    "zh-CN": "保存的会话没有 CLI 会话。下一条消息将开始新会话。"
+  },
+  "Search incomplete · ": {
+    "es": "Búsqueda incompleta · ",
+    "zh-CN": "搜索不完整 · "
+  },
+  "Search incomplete · {0}": {
+    "es": "Búsqueda incompleta · {0}",
+    "zh-CN": "搜索不完整 · {0}"
+  },
+  "Select one or more days to delete (Ctrl or Shift for multiselect).": {
+    "es": "Selecciona uno o más días para eliminar (Ctrl o Shift para selección múltiple).",
+    "zh-CN": "请选择一个或多个要删除的日期（Ctrl 或 Shift 多选）。"
+  },
+  "Select only offered research candidates. Watchlists, alerts and unknown tools are denied.": {
+    "es": "Selecciona solo candidatos de investigación ofrecidos. Se deniegan listas de seguimiento, alertas y herramientas desconocidas.",
+    "zh-CN": "仅选择提供的研究候选工具。自选列表、警报和未知工具均被拒绝。"
+  },
+  "Seller color": {
+    "es": "Color vendedor",
+    "zh-CN": "卖方颜色"
+  },
+  "Sells extensions above VWAP and buys below; exits at VWAP.": {
+    "es": "Vende extensiones por encima de la VWAP y compra por debajo; sale en la VWAP.",
+    "zh-CN": "在 VWAP 上方偏离时卖出、下方偏离时买入；于 VWAP 离场。"
+  },
+  "Series": {
+    "es": "Series",
+    "zh-CN": "序列"
+  },
+  "Server revocation client authentication is not supported.": {
+    "es": "No se admite la autenticación del cliente para revocación en el servidor.",
+    "zh-CN": "不支持服务器撤销端点的客户端认证。"
+  },
+  "Server revocation endpoint is not HTTPS.": {
+    "es": "El endpoint de revocación del servidor no usa HTTPS.",
+    "zh-CN": "服务器撤销端点未使用 HTTPS。"
+  },
+  "Server revocation metadata issuer could not be validated.": {
+    "es": "No se pudo validar el emisor de los metadatos de revocación del servidor.",
+    "zh-CN": "无法验证服务器撤销元数据的颁发者。"
+  },
+  "Server token revocation completed.": {
+    "es": "Revocación del token en el servidor completada.",
+    "zh-CN": "服务器令牌撤销已完成。"
+  },
+  "Server-observed open interest and signed change between adjacent known candle cutoffs. Gaps are unavailable, not zero; Binance Futures history is five-minute/latest-month only.": {
+    "es": "Interés abierto observado por el servidor y cambio con signo entre cortes de velas conocidos adyacentes. Los huecos no están disponibles, no son cero; el historial de Binance Futures solo abarca el último mes en intervalos de cinco minutos.",
+    "zh-CN": "服务器观测的持仓量及相邻已知 K 线截止点之间的有符号变化。缺口表示不可用，而非零；Binance 期货历史仅有最近一个月的五分钟数据。"
+  },
+  "Server-observed open interest.": {
+    "es": "Interés abierto observado por el servidor.",
+    "zh-CN": "服务器观测的持仓量。"
+  },
+  "Service Unavailable.": {
+    "es": "Servicio no disponible.",
+    "zh-CN": "服务不可用。"
+  },
+  "Session": {
+    "es": "Sesión",
+    "zh-CN": "交易时段"
+  },
+  "Session high cannot be below session low.": {
+    "es": "El máximo de sesión no puede ser inferior al mínimo.",
+    "zh-CN": "交易时段最高价不能低于最低价。"
+  },
+  "Session start must be in [0, 24) hours.": {
+    "es": "El inicio de sesión debe estar en [0, 24) horas.",
+    "zh-CN": "交易时段开始小时必须在 [0, 24) 范围内。"
+  },
+  "Short {0} {1}": {
+    "es": "Corto {0} {1}",
+    "zh-CN": "空头 {0} {1}"
+  },
+  "Short {0} · R:R {1}": {
+    "es": "Corto {0} · R:R {1}",
+    "zh-CN": "空头 {0} · 风险收益比 {1}"
+  },
+  "Show POC labels": {
+    "es": "Mostrar etiquetas POC",
+    "zh-CN": "显示 POC 标签"
+  },
+  "Show tested POCs (latest 10 within lookback)": {
+    "es": "Mostrar POC testeados (últimos 10 del historial)",
+    "zh-CN": "显示已测试 POC（回溯范围内最近 10 个）"
+  },
+  "Show warmup": {
+    "es": "Mostrar calentamiento",
+    "zh-CN": "显示预热"
+  },
+  "Sigma bands": {
+    "es": "Bandas sigma",
+    "zh-CN": "标准差带"
+  },
+  "Sigma multiplier": {
+    "es": "Multiplicador sigma",
+    "zh-CN": "标准差倍数"
+  },
+  "Sign in to {0}": {
+    "es": "Iniciar sesión en {0}",
+    "zh-CN": "登录 {0}"
+  },
+  "Signed OI change": {
+    "es": "Cambio de OI con signo",
+    "zh-CN": "有符号持仓量变化"
+  },
+  "Size multiplies new orders (exits always close only the open quantity). Daily loss blocks entries until the next session. Drawdown stops the strategy. Current drawdown {0}.{1}": {
+    "es": "El tamaño multiplica las nuevas órdenes (las salidas solo cierran la cantidad abierta). La pérdida diaria bloquea entradas hasta la siguiente sesión. El drawdown detiene la estrategia. Drawdown actual {0}.{1}",
+    "zh-CN": "规模系数乘以新订单数量（离场始终只关闭未平仓数量）。每日亏损会阻止入场直到下一交易时段。回撤将停止策略。当前回撤 {0}。{1}"
+  },
+  "Slow average": {
+    "es": "Media lenta",
+    "zh-CN": "慢速均线"
+  },
+  "Slow period": {
+    "es": "Período lento",
+    "zh-CN": "慢速周期"
+  },
+  "Slow type": {
+    "es": "Tipo lento",
+    "zh-CN": "慢速类型"
+  },
+  "Some did not start: {0}": {
+    "es": "Algunas no iniciaron: {0}",
+    "zh-CN": "部分未启动：{0}"
+  },
+  "Space": {
+    "es": "Espacio",
+    "zh-CN": "空格"
+  },
+  "Specify one catalog root, for example MNQ.": {
+    "es": "Indica una raíz de catálogo, por ejemplo MNQ.",
+    "zh-CN": "请指定一个目录根代码，例如 MNQ。"
+  },
+  "Started on {0} with {1} warmup bars{2}{3}": {
+    "es": "Iniciada en {0} con {1} velas de calentamiento{2}{3}",
+    "zh-CN": "已在 {0} 启动，使用 {1} 根预热 K 线{2}{3}"
+  },
+  "Stop distance (ATR multiple)": {
+    "es": "Distancia del stop (múltiplo de ATR)",
+    "zh-CN": "止损距离（ATR 倍数）"
+  },
+  "Stop the active response first.": {
+    "es": "Primero detén la respuesta activa.",
+    "zh-CN": "请先停止当前回复。"
+  },
+  "Stopped: position close is unresolved; waiting for the account and order confirmations": {
+    "es": "Detenida: cierre de posición sin resolver; esperando confirmaciones de cuenta y órdenes",
+    "zh-CN": "已停止：平仓尚未解决；等待账户及订单确认"
+  },
+  "Stopped: {0} working at the broker ({1})": {
+    "es": "Detenida: {0} activo en el bróker ({1})",
+    "zh-CN": "已停止：{0} 仍在经纪商端工作（{1}）"
+  },
+  "Stored/offline mode — never connect to Gateway": {
+    "es": "Modo almacenado/sin conexión — nunca conecta a Gateway",
+    "zh-CN": "已存储/离线模式 — 绝不连接 Gateway"
+  },
+  "Stored/offline or disabled mode: no Gateway connection. Synthetic OHLCV history is not order-flow data.": {
+    "es": "Modo almacenado/sin conexión o deshabilitado: sin conexión a Gateway. El historial OHLCV sintético no es flujo de órdenes.",
+    "zh-CN": "已存储/离线或禁用模式：不连接 Gateway。合成 OHLCV 历史并非订单流数据。"
+  },
+  "Strategy failed: {0}": {
+    "es": "Falló la estrategia: {0}",
+    "zh-CN": "策略失败：{0}"
+  },
+  "Swing kind": {
+    "es": "Tipo de swing",
+    "zh-CN": "摆动类型"
+  },
+  "The account does not have all of the strategy's previous position (long {0}): closed {1} in its ledger at the latest price": {
+    "es": "La cuenta no tiene toda la posición anterior de la estrategia (largo {0}): se cerraron {1} en su registro al último precio",
+    "zh-CN": "账户未持有策略之前的全部多头仓位（{0}）：已按最新价格在账本中关闭 {1}"
+  },
+  "The account does not have all of the strategy's previous position (short {0}): closed {1} in its ledger at the latest price": {
+    "es": "La cuenta no tiene toda la posición anterior de la estrategia (corto {0}): se cerraron {1} en su registro al último precio",
+    "zh-CN": "账户未持有策略之前的全部空头仓位（{0}）：已按最新价格在账本中关闭 {1}"
+  },
+  "The account does not have the strategy's previous position (long {0}): closed {1} in its ledger at the latest price": {
+    "es": "La cuenta no tiene la posición anterior de la estrategia (largo {0}): se cerraron {1} en su registro al último precio",
+    "zh-CN": "账户未持有策略之前的多头仓位（{0}）：已按最新价格在账本中关闭 {1}"
+  },
+  "The account does not have the strategy's previous position (short {0}): closed {1} in its ledger at the latest price": {
+    "es": "La cuenta no tiene la posición anterior de la estrategia (corto {0}): se cerraron {1} en su registro al último precio",
+    "zh-CN": "账户未持有策略之前的空头仓位（{0}）：已按最新价格在账本中关闭 {1}"
+  },
+  "The account's observed closing orders reduced its position by {0}: reconciled its ledger and protection": {
+    "es": "Las órdenes de cierre observadas de la cuenta redujeron su posición en {0}: se conciliaron el registro y la protección",
+    "zh-CN": "观测到账户平仓单使仓位减少 {0}：已核对账本和保护单"
+  },
+  "The adopted order size does not match the position ({0} {1}): it is not replaced while another stop is working (review it in Chart Trader)": {
+    "es": "El tamaño de la orden adoptada no coincide con la posición ({0} {1}): no se reemplaza mientras haya otro stop activo (revísalo en Chart Trader)",
+    "zh-CN": "接管订单数量与仓位不匹配（{0} {1}）：另一止损单工作期间不予替换（请在图表交易中检查）"
+  },
+  "The adopted order size does not match the position ({0} {1}): replaced": {
+    "es": "El tamaño de la orden adoptada no coincide con la posición ({0} {1}): reemplazada",
+    "zh-CN": "接管订单数量与仓位不匹配（{0} {1}）：已替换"
+  },
+  "The assistant process did not start.": {
+    "es": "El proceso del asistente no inició.",
+    "zh-CN": "助手进程未启动。"
+  },
+  "The assistant proposed sizing adjustments awaiting approval": {
+    "es": "El asistente propuso ajustes de tamaño pendientes de aprobación",
+    "zh-CN": "助手提出了等待批准的仓位规模调整"
+  },
+  "The authorization server does not advertise token revocation. Remove the app grant in TradingView account settings if needed.": {
+    "es": "El servidor de autorización no anuncia revocación de tokens. Si hace falta, elimina el permiso de la aplicación en los ajustes de tu cuenta TradingView.",
+    "zh-CN": "授权服务器未声明令牌撤销支持。如有需要，请在 TradingView 账户设置中移除此应用授权。"
+  },
+  "The authorization server does not offer supported application registration. Trading Hub needs an approved client registration or public client metadata document; CLI credentials cannot be reused.": {
+    "es": "El servidor de autorización no ofrece registro de aplicaciones compatible. Trading Hub necesita un registro de cliente aprobado o un documento público de metadatos de cliente; no se pueden reutilizar credenciales CLI.",
+    "zh-CN": "授权服务器不提供受支持的应用注册。Trading Hub 需要已批准的客户端注册或公开客户端元数据文档；不能复用 CLI 凭据。"
+  },
+  "The previous close or order cancellation is still unresolved.": {
+    "es": "El cierre o la cancelación de órdenes anterior sigue sin resolverse.",
+    "zh-CN": "上一次平仓或撤单仍未解决。"
+  },
+  "The provider returned an invalid open-interest observation.": {
+    "es": "El proveedor devolvió una observación de interés abierto inválida.",
+    "zh-CN": "提供商返回了无效持仓量观测。"
+  },
+  "The provider returned invalid open-interest observations.": {
+    "es": "El proveedor devolvió observaciones de interés abierto inválidas.",
+    "zh-CN": "提供商返回了无效持仓量观测。"
+  },
+  "The tool is denied or was not offered in this review.": {
+    "es": "La herramienta se denegó o no fue ofrecida en esta revisión.",
+    "zh-CN": "此工具被拒绝或未在本次审查中提供。"
+  },
+  "Thirteen streaming moving averages. Warmup display is optional; readiness always follows the library IsHot state.": {
+    "es": "Trece medias móviles en streaming. Mostrar calentamiento es opcional; la disponibilidad siempre sigue el estado IsHot de la biblioteca.",
+    "zh-CN": "十三种流式移动平均线。预热显示可选；就绪状态始终遵循库的 IsHot 状态。"
+  },
+  "This connection has no integrated market-data feed.": {
+    "es": "Esta conexión no tiene un feed de datos de mercado integrado.",
+    "zh-CN": "此连接没有集成行情源。"
+  },
+  "This filtered catalog has no additional page.": {
+    "es": "Este catálogo filtrado no tiene otra página.",
+    "zh-CN": "此筛选目录没有后续页面。"
+  },
+  "This is a new backtest using the context filter, not a subset of the prior results: each bar uses only the context available at that time and opens entries only in selected conditions (exits always pass), matching live execution. Selecting conditions after inspecting these results fits the same data; validate with walk-forward or a separate period to establish out-of-sample evidence.": {
+    "es": "Este es un nuevo backtest con el filtro de contexto, no un subconjunto de resultados anteriores: cada vela usa solo el contexto disponible entonces y abre entradas solo en condiciones seleccionadas (las salidas siempre pasan), igual que en vivo. Elegir condiciones tras ver estos resultados ajusta los mismos datos; valida con walk-forward o un período separado para obtener evidencia fuera de muestra.",
+    "zh-CN": "这是使用环境过滤器的新回测，并非之前结果的子集：每根 K 线仅使用当时可用的环境，只在选定条件下入场（始终允许离场），与实时执行一致。查看结果后再选择条件属于拟合相同数据；请通过滚动验证或独立时段建立样本外证据。"
+  },
+  "This process already owns a different data directory.": {
+    "es": "Este proceso ya controla otro directorio de datos.",
+    "zh-CN": "此进程已持有其他数据目录。"
+  },
+  "This review is no longer current. Discover metadata again.": {
+    "es": "Esta revisión ya no está vigente. Descubre los metadatos de nuevo.",
+    "zh-CN": "此审查已过期。请重新发现元数据。"
+  },
+  "This strategy is already running on the selected instrument and account.": {
+    "es": "Esta estrategia ya está activa en el instrumento y la cuenta seleccionados.",
+    "zh-CN": "此策略已在所选品种和账户上运行。"
+  },
+  "Three independently configured moving averages; defaults EMA 9, EMA 60 and WMA 200. Each has independent library warmup.": {
+    "es": "Tres medias móviles configuradas de forma independiente; valores predeterminados EMA 9, EMA 60 y WMA 200. Cada una tiene su propio calentamiento de biblioteca.",
+    "zh-CN": "三条独立配置的移动平均线；默认 EMA 9、EMA 60 和 WMA 200。每条均有独立的库预热状态。"
+  },
+  "Tick metadata differs from the catalog: ": {
+    "es": "Los metadatos de ticks difieren del catálogo: ",
+    "zh-CN": "逐笔元数据与目录不一致："
+  },
+  "Tick metadata differs from the catalog: {0}": {
+    "es": "Los metadatos de ticks difieren del catálogo: {0}",
+    "zh-CN": "逐笔元数据与目录不一致：{0}"
+  },
+  "Time must be a UTC minute boundary (Unix seconds or milliseconds).": {
+    "es": "La hora debe ser un límite de minuto UTC (segundos o milisegundos Unix).",
+    "zh-CN": "时间必须为 UTC 分钟边界（Unix 秒或毫秒）。"
+  },
+  "To (local hour)": {
+    "es": "Hasta (hora local)",
+    "zh-CN": "结束（本地小时）"
+  },
+  "Token is stored in {0}. Trading Hub uses it for data only (no OANDA orders).": {
+    "es": "El token se guarda en {0}. Trading Hub lo usa solo para datos (sin órdenes OANDA).",
+    "zh-CN": "令牌存储在 {0}。Trading Hub 仅将其用于数据（不发送 OANDA 订单）。"
+  },
+  "Tokens: {0} input · {1} cached · {2} output": {
+    "es": "Tokens: {0} entrada · {1} en caché · {2} salida",
+    "zh-CN": "Token：输入 {0} · 缓存 {1} · 输出 {2}"
+  },
+  "Tool arguments must be an object.": {
+    "es": "Los argumentos de la herramienta deben ser un objeto.",
+    "zh-CN": "工具参数必须是对象。"
+  },
+  "Tool denied by the approved research policy.": {
+    "es": "Herramienta denegada por la política de investigación aprobada.",
+    "zh-CN": "工具被已批准的研究策略拒绝。"
+  },
+  "Tool name and object arguments are required.": {
+    "es": "Se requieren nombre de herramienta y argumentos de tipo objeto.",
+    "zh-CN": "必须提供工具名称和对象参数。"
+  },
+  "Tool name missing.": {
+    "es": "Falta el nombre de la herramienta.",
+    "zh-CN": "缺少工具名称。"
+  },
+  "Tool schema missing. Discovery is incomplete.": {
+    "es": "Falta el esquema de la herramienta. El descubrimiento está incompleto.",
+    "zh-CN": "缺少工具架构。发现不完整。"
+  },
+  "Trades in: {0}. Currently {1}{2}: no new entries until the selected market conditions return (see Market for details).": {
+    "es": "Opera en: {0}. Actualmente {1}{2}: sin nuevas entradas hasta que regresen las condiciones elegidas (ver Mercado).",
+    "zh-CN": "交易条件：{0}。当前 {1}{2}：在选定市场条件恢复前不再入场（详见市场）。"
+  },
+  "Trading Hub could not confirm the requested closes or cancellations within {0} seconds. ": {
+    "es": "Trading Hub no pudo confirmar los cierres o cancelaciones solicitados en {0} segundos. ",
+    "zh-CN": "Trading Hub 未能在 {0} 秒内确认请求的平仓或撤单。"
+  },
+  "Trading Hub could not establish exclusive access to its data directory. ": {
+    "es": "Trading Hub no pudo obtener acceso exclusivo a su directorio de datos. ",
+    "zh-CN": "Trading Hub 无法独占访问其数据目录。"
+  },
+  "Trading Hub could not establish exclusive access to its data directory. Another instance may be using it, or Windows may have denied access. No data was opened. Close any other instance and check the directory permissions before retrying.\n\n{0}": {
+    "es": "Trading Hub no pudo obtener acceso exclusivo a su directorio de datos. Otra instancia podría estar usándolo o Windows podría haber denegado el acceso. No se abrieron datos. Cierra cualquier otra instancia y comprueba los permisos del directorio antes de reintentar.\n\n{0}",
+    "zh-CN": "Trading Hub 无法独占访问其数据目录。可能有其他实例正在使用，或 Windows 拒绝了访问。未打开任何数据。请先关闭其他实例并检查目录权限，然后重试。\n\n{0}"
+  },
+  "Trading Hub could not start": {
+    "es": "Trading Hub no pudo iniciar",
+    "zh-CN": "Trading Hub 无法启动"
+  },
+  "Trading Hub's apphost or .NET host is unavailable for the local MCP server.": {
+    "es": "El apphost o host .NET de Trading Hub no está disponible para el servidor MCP local.",
+    "zh-CN": "Trading Hub 的 apphost 或 .NET 主机不可用于本地 MCP 服务器。"
+  },
+  "Trading Hub: show existing instance": {
+    "es": "Trading Hub: mostrar instancia existente",
+    "zh-CN": "Trading Hub：显示现有实例"
+  },
+  "TradingView HTTP request failed": {
+    "es": "Falló la solicitud HTTP de TradingView",
+    "zh-CN": "TradingView HTTP 请求失败"
+  },
+  "TradingView HTTP request failed{0}": {
+    "es": "Falló la solicitud HTTP de TradingView{0}",
+    "zh-CN": "TradingView HTTP 请求失败{0}"
+  },
+  "TradingView Research — explicit tool approval": {
+    "es": "Investigación TradingView — aprobación explícita de herramientas",
+    "zh-CN": "TradingView 研究 — 明确工具批准"
+  },
+  "TradingView authorization and metadata endpoints must use HTTPS without user credentials or fragments.": {
+    "es": "Los endpoints de autorización y metadatos de TradingView deben usar HTTPS sin credenciales de usuario ni fragmentos.",
+    "zh-CN": "TradingView 授权和元数据端点必须使用 HTTPS，且不得包含用户凭据或片段。"
+  },
+  "TradingView authorization grant was revoked.": {
+    "es": "La autorización concedida de TradingView fue revocada.",
+    "zh-CN": "TradingView 授权许可已撤销。"
+  },
+  "TradingView authorization or transport failed. Reconnect or check the service; no fallback data was used.": {
+    "es": "Falló la autorización o el transporte de TradingView. Reconecta o comprueba el servicio; no se usaron datos alternativos.",
+    "zh-CN": "TradingView 授权或传输失败。请重新连接或检查服务；未使用回退数据。"
+  },
+  "TradingView authorization was revoked.": {
+    "es": "La autorización de TradingView fue revocada.",
+    "zh-CN": "TradingView 授权已撤销。"
+  },
+  "TradingView catalog changed during connection. Reconnect to review.": {
+    "es": "El catálogo de TradingView cambió durante la conexión. Reconecta para revisarlo.",
+    "zh-CN": "连接期间 TradingView 目录已更改。请重新连接进行审查。"
+  },
+  "TradingView catalog/schema changed. Explicit review is required again.": {
+    "es": "Cambió el catálogo/esquema de TradingView. Se requiere otra revisión explícita.",
+    "zh-CN": "TradingView 目录/架构已更改。需要再次明确审查。"
+  },
+  "TradingView denied access. Essential or above is required; trials are excluded.": {
+    "es": "TradingView denegó el acceso. Requiere Essential o superior; excluye pruebas.",
+    "zh-CN": "TradingView 拒绝访问。要求 Essential 或更高套餐；不支持试用。"
+  },
+  "TradingView did not issue a supported bearer token.": {
+    "es": "TradingView no emitió un token bearer compatible.",
+    "zh-CN": "TradingView 未签发受支持的访问令牌。"
+  },
+  "TradingView disconnected. Reconnect and review before continuing.": {
+    "es": "TradingView desconectado. Reconecta y revisa antes de continuar.",
+    "zh-CN": "TradingView 已断开。请重新连接并审查后再继续。"
+  },
+  "TradingView rate limit reached (HTTP 429). No fallback data was used.": {
+    "es": "Límite de solicitudes de TradingView alcanzado (HTTP 429). No se usaron datos alternativos.",
+    "zh-CN": "已达到 TradingView 请求速率限制（HTTP 429）。未使用回退数据。"
+  },
+  "TradingView reported a catalog change. Review is required again.": {
+    "es": "TradingView informó un cambio de catálogo. Se requiere otra revisión.",
+    "zh-CN": "TradingView 报告目录更改。需要重新审查。"
+  },
+  "TradingView requires authorization. Reconnect in Research settings, never in chat.": {
+    "es": "TradingView requiere autorización. Reconecta en los ajustes de investigación, nunca en el chat.",
+    "zh-CN": "TradingView 需要授权。请在研究设置中重新连接，切勿在聊天中操作。"
+  },
+  "TradingView research": {
+    "es": "Investigación de TradingView",
+    "zh-CN": "TradingView 研究"
+  },
+  "Tradovate did not cancel order: {0}": {
+    "es": "Tradovate no canceló la orden: {0}",
+    "zh-CN": "Tradovate 未撤销订单：{0}"
+  },
+  "Tradovate did not modify order: {0}": {
+    "es": "Tradovate no modificó la orden: {0}",
+    "zh-CN": "Tradovate 未修改订单：{0}"
+  },
+  "Tradovate did not return an account snapshot.": {
+    "es": "Tradovate no devolvió un estado de cuenta.",
+    "zh-CN": "Tradovate 未返回账户快照。"
+  },
+  "Tradovate ended session {0}": {
+    "es": "Tradovate finalizó la sesión {0}",
+    "zh-CN": "Tradovate 已结束会话 {0}"
+  },
+  "Tradovate ended the session{0}": {
+    "es": "Tradovate finalizó la sesión{0}",
+    "zh-CN": "Tradovate 已结束会话{0}"
+  },
+  "Tradovate rejected order: {0}": {
+    "es": "Tradovate rechazó la orden: {0}",
+    "zh-CN": "Tradovate 拒绝订单：{0}"
+  },
+  "Truncated IB depth route.": {
+    "es": "Ruta de profundidad IB truncada.",
+    "zh-CN": "IB 深度路由被截断。"
+  },
+  "Truncated IB message.": {
+    "es": "Mensaje IB truncado.",
+    "zh-CN": "IB 消息被截断。"
+  },
+  "Truncated or invalid tick record: ": {
+    "es": "Registro de ticks truncado o inválido: ",
+    "zh-CN": "逐笔记录被截断或无效："
+  },
+  "Truncated or invalid tick record: {0}": {
+    "es": "Registro de ticks truncado o inválido: {0}",
+    "zh-CN": "逐笔记录被截断或无效：{0}"
+  },
+  "Truncated tick record: ": {
+    "es": "Registro de ticks truncado: ",
+    "zh-CN": "逐笔记录被截断："
+  },
+  "Truncated tick record: {0}": {
+    "es": "Registro de ticks truncado: {0}",
+    "zh-CN": "逐笔记录被截断：{0}"
+  },
+  "Turn off / revoke": {
+    "es": "Desactivar / revocar",
+    "zh-CN": "关闭 / 撤销"
+  },
+  "Two exponential moving averages with stop and target distances in ticks.": {
+    "es": "Dos medias exponenciales con distancias de stop y objetivo en ticks.",
+    "zh-CN": "两条指数移动平均线，止损和止盈距离以最小变动单位设置。"
+  },
+  "USD-M futures stops are conditional orders: send them with PlaceAlgoOrderAsync": {
+    "es": "Los stops de futuros USD-M son órdenes condicionales: envíalos con PlaceAlgoOrderAsync",
+    "zh-CN": "USD-M 期货止损为条件单：请使用 PlaceAlgoOrderAsync 发送"
+  },
+  "Unique client ID (not shared with another API client)": {
+    "es": "ID de cliente único (no compartido con otro cliente API)",
+    "zh-CN": "唯一客户端 ID（不与其他 API 客户端共享）"
+  },
+  "Unknown IB import argument: {0}": {
+    "es": "Argumento de importación IB desconocido: {0}",
+    "zh-CN": "未知 IB 导入参数：{0}"
+  },
+  "Unknown strategy assistant engine: ": {
+    "es": "Motor de asistente de estrategias desconocido: ",
+    "zh-CN": "未知策略助手引擎："
+  },
+  "Unknown strategy assistant engine: {0}": {
+    "es": "Motor de asistente de estrategias desconocido: {0}",
+    "zh-CN": "未知策略助手引擎：{0}"
+  },
+  "Unprofitable": {
+    "es": "No rentable",
+    "zh-CN": "未盈利"
+  },
+  "Unsupported IB data root.": {
+    "es": "Raíz de datos IB no compatible.",
+    "zh-CN": "不支持的 IB 数据根代码。"
+  },
+  "Unsupported IB protocol version {0}; this adapter requires negotiated version 187.": {
+    "es": "Versión de protocolo IB {0} no compatible; este adaptador requiere la versión negociada 187.",
+    "zh-CN": "不支持 IB 协议版本 {0}；此适配器要求协商版本 187。"
+  },
+  "Unsupported IB root '{0}'. Supported: {1}.": {
+    "es": "Raíz IB «{0}» no compatible. Admitidas: {1}.",
+    "zh-CN": "不支持 IB 根代码“{0}”。支持：{1}。"
+  },
+  "Unsupported OAuth browser redirect. HTTPS authorization and the bound loopback callback are required.": {
+    "es": "Redirección del navegador OAuth no compatible. Se requieren autorización HTTPS y el callback de bucle local vinculado.",
+    "zh-CN": "不支持的 OAuth 浏览器重定向。要求 HTTPS 授权和绑定的本地回环回调。"
+  },
+  "Untested count (0 = all within 60-profile lookback)": {
+    "es": "Cantidad sin testear (0 = todos dentro del historial de 60 perfiles)",
+    "zh-CN": "未测试数量（0 = 回溯 60 个分布内的全部）"
+  },
+  "Upper {0} sigma": {
+    "es": "Superior {0} sigma",
+    "zh-CN": "上方 {0} 倍标准差"
+  },
+  "Use API keys with trading permission only (no withdrawals). The secret is stored in {0}.": {
+    "es": "Usa claves API solo con permisos de negociación (sin retiros). El secreto se guarda en {0}.",
+    "zh-CN": "请仅授予 API 密钥交易权限（不要授予提现权限）。机密存储在 {0}。"
+  },
+  "Use your own CLI account in Terminal; never paste tokens or passwords into this chat.": {
+    "es": "Usa tu propia cuenta CLI en Terminal; nunca pegues tokens ni contraseñas en este chat.",
+    "zh-CN": "请在终端使用你自己的 CLI 账户；切勿在此聊天粘贴令牌或密码。"
+  },
+  "Uses your own {0} CLI session. Files may be edited in the configured strategy and indicator directories. Provider billing may not be reported.": {
+    "es": "Usa tu propia sesión CLI de {0}. Se pueden editar archivos en los directorios configurados de estrategias e indicadores. Es posible que no se informe la facturación del proveedor.",
+    "zh-CN": "使用你自己的 {0} CLI 会话。可编辑配置的策略和指标目录中的文件。可能无法报告提供商费用。"
+  },
+  "Viewing {0}, executes on {1}{2}": {
+    "es": "Visualizando {0}, ejecuta en {1}{2}",
+    "zh-CN": "查看 {0}，在 {1} 执行{2}"
+  },
+  "Volume average period": {
+    "es": "Período del promedio de volumen",
+    "zh-CN": "成交量均值周期"
+  },
+  "Volume spike multiplier": {
+    "es": "Multiplicador de pico de volumen",
+    "zh-CN": "成交量突增倍数"
+  },
+  "Weight (notional = absolute price x volume)": {
+    "es": "Peso (nocional = precio absoluto x volumen)",
+    "zh-CN": "权重（名义金额 = 价格绝对值 x 成交量）"
+  },
+  "What the assistant reviewed (click to enlarge)": {
+    "es": "Lo que revisó el asistente (clic para ampliar)",
+    "zh-CN": "助手审查的内容（点击放大）"
+  },
+  "Width (% of source span)": {
+    "es": "Ancho (% del intervalo de origen)",
+    "zh-CN": "宽度（占源区间 %）"
+  },
+  "all except {0}": {
+    "es": "todas excepto {0}",
+    "zh-CN": "除 {0} 外全部"
+  },
+  "all of ": {
+    "es": "toda ",
+    "zh-CN": "全部"
+  },
+  "assigned to «": {
+    "es": "asignada a «",
+    "zh-CN": "已分配给“"
+  },
+  "assigned to «{0}»": {
+    "es": "asignada a «{0}»",
+    "zh-CN": "已分配给“{0}”"
+  },
+  "buy order": {
+    "es": "orden de compra",
+    "zh-CN": "买单"
+  },
+  "cTrader connection lost ({0})": {
+    "es": "Conexión cTrader perdida ({0})",
+    "zh-CN": "cTrader 连接已断开（{0}）"
+  },
+  "cTrader returned no token: {0}": {
+    "es": "cTrader no devolvió un token: {0}",
+    "zh-CN": "cTrader 未返回令牌：{0}"
+  },
+  "connection {0} is disabled": {
+    "es": "la conexión {0} está deshabilitada",
+    "zh-CN": "连接 {0} 已禁用"
+  },
+  "connection {0} is disabled{1}": {
+    "es": "la conexión {0} está deshabilitada{1}",
+    "zh-CN": "连接 {0} 已禁用{1}"
+  },
+  "does not support dynamic client registration": {
+    "es": "no admite registro dinámico de clientes",
+    "zh-CN": "不支持动态客户端注册"
+  },
+  "explicit loaded-history start": {
+    "es": "inicio explícito del historial cargado",
+    "zh-CN": "明确的已加载历史起点"
+  },
+  "its connection no longer exists": {
+    "es": "su conexión ya no existe",
+    "zh-CN": "其连接已不存在"
+  },
+  "its connection no longer exists{0}": {
+    "es": "su conexión ya no existe{0}",
+    "zh-CN": "其连接已不存在{0}"
+  },
+  "its stop loss and take profit stay": {
+    "es": "su stop loss y take profit permanecen",
+    "zh-CN": "其止损和止盈单保留"
+  },
+  "its {0} stays": {
+    "es": "su {0} permanece",
+    "zh-CN": "其{0}保留"
+  },
+  "long {0} {1} @ {2}": {
+    "es": "largo {0} {1} @ {2}",
+    "zh-CN": "多头 {0} {1} @ {2}"
+  },
+  "manual recovery required": {
+    "es": "se requiere recuperación manual",
+    "zh-CN": "需要手动恢复"
+  },
+  "no portfolio (uses automatic portfolio)": {
+    "es": "sin portafolio (usa el automático)",
+    "zh-CN": "无组合（使用自动组合）"
+  },
+  "order book": {
+    "es": "libro de órdenes",
+    "zh-CN": "订单簿"
+  },
+  "original files restored": {
+    "es": "archivos originales restaurados",
+    "zh-CN": "已恢复原始文件"
+  },
+  "real orders are not allowed for {0}": {
+    "es": "no se permiten órdenes reales para {0}",
+    "zh-CN": "{0} 不允许实盘订单"
+  },
+  "real orders are not allowed for {0}{1}": {
+    "es": "no se permiten órdenes reales para {0}{1}",
+    "zh-CN": "{0} 不允许实盘订单{1}"
+  },
+  "retrospective pivot {0}, confirmed {1}": {
+    "es": "pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "回溯枢轴 {0}，确认于 {1}"
+  },
+  "returned no data": {
+    "es": "no devolvió datos",
+    "zh-CN": "未返回数据"
+  },
+  "sell order": {
+    "es": "orden de venta",
+    "zh-CN": "卖单"
+  },
+  "short {0} {1} @ {2}": {
+    "es": "corto {0} {1} @ {2}",
+    "zh-CN": "空头 {0} {1} @ {2}"
+  },
+  "stop limit": {
+    "es": "stop límite",
+    "zh-CN": "止损限价单"
+  },
+  "the connection {0} changed its keys, system or login after this account was opened": {
+    "es": "la conexión {0} cambió sus claves, sistema o inicio de sesión después de abrir esta cuenta",
+    "zh-CN": "连接 {0} 在此账户打开后更改了密钥、系统或登录"
+  },
+  "the connection {0} changed its keys, system or login after this account was opened{1}": {
+    "es": "la conexión {0} cambió sus claves, sistema o inicio de sesión después de abrir esta cuenta{1}",
+    "zh-CN": "连接 {0} 在此账户打开后更改了密钥、系统或登录{1}"
+  },
+  "the stop loss": {
+    "es": "el stop loss",
+    "zh-CN": "止损单"
+  },
+  "the stop loss and take profit": {
+    "es": "el stop loss y el take profit",
+    "zh-CN": "止损和止盈单"
+  },
+  "the take profit": {
+    "es": "el take profit",
+    "zh-CN": "止盈单"
+  },
+  "time,open,high,low,close,volume[,contract] · Unix UTC seconds/milliseconds · one-minute bars. Validate all files before publishing; real ticks are preserved by default.": {
+    "es": "time,open,high,low,close,volume[,contract] · segundos/milisegundos Unix UTC · velas de un minuto. Valida todos los archivos antes de publicar; por defecto se conservan los ticks reales.",
+    "zh-CN": "time,open,high,low,close,volume[,contract] · Unix UTC 秒/毫秒 · 一分钟 K 线。发布前验证全部文件；默认保留真实逐笔数据。"
+  },
+  "trades in ": {
+    "es": "opera en ",
+    "zh-CN": "交易条件："
+  },
+  "trades in {0}": {
+    "es": "opera en {0}",
+    "zh-CN": "交易条件：{0}"
+  },
+  "waiting for anchor": {
+    "es": "esperando ancla",
+    "zh-CN": "等待锚点"
+  },
+  "{0} % over 24 h": {
+    "es": "{0} % en 24 h",
+    "zh-CN": "24 小时 {0} %"
+  },
+  "{0} CLI is not installed": {
+    "es": "El CLI de {0} no está instalado",
+    "zh-CN": "未安装 {0} CLI"
+  },
+  "{0} CLI was not found. Install it and sign in in Terminal, then retry.": {
+    "es": "No se encontró el CLI de {0}. Instálalo e inicia sesión en Terminal, luego reintenta.",
+    "zh-CN": "未找到 {0} CLI。请安装并在终端登录，然后重试。"
+  },
+  "{0} changed side before the close was sent (now long {1}): nothing was sent; check the position and close it again.": {
+    "es": "{0} cambió de lado antes de enviar el cierre (ahora largo {1}): no se envió nada; comprueba la posición y ciérrala de nuevo.",
+    "zh-CN": "{0} 在发送平仓前方向已改变（当前多头 {1}）：未发送任何订单；请检查仓位并重新平仓。"
+  },
+  "{0} changed side before the close was sent (now short {1}): nothing was sent; check the position and close it again.": {
+    "es": "{0} cambió de lado antes de enviar el cierre (ahora corto {1}): no se envió nada; comprueba la posición y ciérrala de nuevo.",
+    "zh-CN": "{0} 在发送平仓前方向已改变（当前空头 {1}）：未发送任何订单；请检查仓位并重新平仓。"
+  },
+  "{0} closing limit orders are already working in the account ({1}): no additional take profit will be placed (review them in Chart Trader)": {
+    "es": "Ya hay {0} órdenes límite de cierre activas en la cuenta ({1}): no se colocará otro objetivo (revísalas en Chart Trader)",
+    "zh-CN": "账户已有 {0} 个活动平仓限价单（{1}）：不会另设止盈（请在图表交易中检查）"
+  },
+  "{0} exited with code {1}. ": {
+    "es": "{0} finalizó con código {1}. ",
+    "zh-CN": "{0} 已退出，代码 {1}。"
+  },
+  "{0} exited with code {1}. {2}": {
+    "es": "{0} finalizó con código {1}. {2}",
+    "zh-CN": "{0} 已退出，代码 {1}。{2}"
+  },
+  "{0} exited without a response. ": {
+    "es": "{0} finalizó sin respuesta. ",
+    "zh-CN": "{0} 已退出但未回复。"
+  },
+  "{0} exited without a response. {1}": {
+    "es": "{0} finalizó sin respuesta. {1}",
+    "zh-CN": "{0} 已退出但未回复。{1}"
+  },
+  "{0} instruments · Enter opens here · {1} opens a new tab · ★ marks favorites": {
+    "es": "{0} instrumentos · Enter abre aquí · {1} abre una pestaña nueva · ★ marca favoritos",
+    "zh-CN": "{0} 个品种 · Enter 在此打开 · {1} 打开新标签页 · ★ 标记收藏"
+  },
+  "{0} is already flat: nothing needed closing{1}.": {
+    "es": "{0} ya no tiene posición: no hizo falta cerrar{1}.",
+    "zh-CN": "{0} 已空仓：无需平仓{1}。"
+  },
+  "{0} is now {1} but this account was opened as {2}": {
+    "es": "{0} ahora es {1} pero esta cuenta se abrió como {2}",
+    "zh-CN": "{0} 当前为 {1}，但此账户以 {2} 打开"
+  },
+  "{0} is now {1} but this account was opened as {2}{3}": {
+    "es": "{0} ahora es {1} pero esta cuenta se abrió como {2}{3}",
+    "zh-CN": "{0} 当前为 {1}，但此账户以 {2} 打开{3}"
+  },
+  "{0} is working…": {
+    "es": "{0} está trabajando…",
+    "zh-CN": "{0} 正在处理…"
+  },
+  "{0} laboratory: runs tests and saves reports. Financial changes remain proposals for review.": {
+    "es": "Laboratorio de {0}: ejecuta pruebas y guarda reportes. Los cambios financieros siguen siendo propuestas para revisar.",
+    "zh-CN": "{0} 实验室：运行测试并保存报告。财务更改仍为待审查提案。"
+  },
+  "{0} of {1} out-of-sample paths are profitable (cross-validation with {2} groups and {3} embargo day(s)): median {4}, worst {5}{6}": {
+    "es": "{0} de {1} rutas fuera de muestra son rentables (validación cruzada con {2} grupos y {3} día(s) de embargo): mediana {4}, peor {5}{6}",
+    "zh-CN": "{1} 条样本外路径中有 {0} 条盈利（交叉验证使用 {2} 组和 {3} 天隔离期）：中位数 {4}，最差 {5}{6}"
+  },
+  "{0} on {1} op · PF {2} · drawdown {3}": {
+    "es": "{0} en {1} op · PF {2} · drawdown {3}",
+    "zh-CN": "{0}，{1} 笔交易 · PF {2} · 回撤 {3}"
+  },
+  "{0} only {1}% probability that the edge is real (requires ≥ {2}%){3}{4}": {
+    "es": "{0} solo {1}% de probabilidad de ventaja real (requiere ≥ {2}%){3}{4}",
+    "zh-CN": "{0}真实优势概率仅 {1}%（要求 ≥ {2}%）{3}{4}"
+  },
+  "{0} orders that could be its stop or target are already working in the account ({1}): no additional stop or target will be placed (review them in Chart Trader)": {
+    "es": "Ya hay {0} órdenes que podrían ser su stop u objetivo activas en la cuenta ({1}): no se colocarán otros (revísalas en Chart Trader)",
+    "zh-CN": "账户已有 {0} 个可能属于此策略的止损或止盈活动订单（{1}）：不会另设止损或止盈（请在图表交易中检查）"
+  },
+  "{0} requested login.": {
+    "es": "{0} solicitó iniciar sesión.",
+    "zh-CN": "{0} 请求登录。"
+  },
+  "{0} requires sign-in": {
+    "es": "{0} requiere iniciar sesión",
+    "zh-CN": "{0} 需要登录"
+  },
+  "{0} returned a different session while resuming; the response was rejected.": {
+    "es": "{0} devolvió otra sesión al reanudar; se rechazó la respuesta.",
+    "zh-CN": "{0} 在恢复时返回了不同会话；回复已被拒绝。"
+  },
+  "{0} to {1} in steps of {2}": {
+    "es": "de {0} a {1} en pasos de {2}",
+    "zh-CN": "从 {0} 到 {1}，步长 {2}"
+  },
+  "{0} trades · net {1} · {2} % winners · PF {3} · average duration {4}{5}": {
+    "es": "{0} operaciones · neto {1} · {2} % ganadoras · PF {3} · duración media {4}{5}",
+    "zh-CN": "{0} 笔交易 · 净收益 {1} · 胜率 {2} % · PF {3} · 平均时长 {4}{5}"
+  },
+  "{0} windows in {1} s · search {2}: {3} of {4} combinations, each run once{5} · saved to history": {
+    "es": "{0} ventanas en {1} s · búsqueda {2}: {3} de {4} combinaciones, cada una ejecutada una vez{5} · guardado en el historial",
+    "zh-CN": "{1} 秒内 {0} 个窗口 · 搜索 {2}：{4} 个组合中的 {3} 个，每个运行一次{5} · 已保存到历史"
+  },
+  "{0} {1} · {2} — REAL": {
+    "es": "{0} {1} · {2} — REAL",
+    "zh-CN": "{0} {1} · {2} — 实盘"
+  },
+  "{0} · #{1} Long {2} · {3} · {4}": {
+    "es": "{0} · #{1} Largo {2} · {3} · {4}",
+    "zh-CN": "{0} · #{1} 多头 {2} · {3} · {4}"
+  },
+  "{0} · #{1} Short {2} · {3} · {4}": {
+    "es": "{0} · #{1} Corto {2} · {3} · {4}",
+    "zh-CN": "{0} · #{1} 空头 {2} · {3} · {4}"
+  },
+  "{0} · stored/offline mode; no Gateway connection": {
+    "es": "{0} · modo almacenado/sin conexión; sin conexión a Gateway",
+    "zh-CN": "{0} · 已存储/离线模式；不连接 Gateway"
+  },
+  "{0} · strategies": {
+    "es": "{0} · estrategias",
+    "zh-CN": "{0} · 策略"
+  },
+  "{0} · unsaved": {
+    "es": "{0} · sin guardar",
+    "zh-CN": "{0} · 未保存"
+  },
+  "{0} · user CLI session": {
+    "es": "{0} · sesión CLI del usuario",
+    "zh-CN": "{0} · 用户 CLI 会话"
+  },
+  "{0} · {1} (demo)": {
+    "es": "{0} · {1} (demo)",
+    "zh-CN": "{0} · {1}（模拟）"
+  },
+  "{0} · {1} (practice)": {
+    "es": "{0} · {1} (práctica)",
+    "zh-CN": "{0} · {1}（练习）"
+  },
+  "{0} · {1} days of Rithmic ticks · contract{2} {3}{4}{5}": {
+    "es": "{0} · {1} días de ticks de Rithmic · contrato{2} {3}{4}{5}",
+    "zh-CN": "{0} · {1} 天 Rithmic 逐笔 · 合约{2} {3}{4}{5}"
+  },
+  "{0} · {1} days · {2}{3}": {
+    "es": "{0} · {1} días · {2}{3}",
+    "zh-CN": "{0} · {1} 天 · {2}{3}"
+  },
+  "{0} · {1} · REAL": {
+    "es": "{0} · {1} · REAL",
+    "zh-CN": "{0} · {1} · 实盘"
+  },
+  "{0} · {1} · {2} message(s) · laboratory{3}": {
+    "es": "{0} · {1} · {2} mensaje(s) · laboratorio{3}",
+    "zh-CN": "{0} · {1} · {2} 条消息 · 实验室{3}"
+  },
+  "{0} · {1} · {2} message(s){3}": {
+    "es": "{0} · {1} · {2} mensaje(s){3}",
+    "zh-CN": "{0} · {1} · {2} 条消息{3}"
+  },
+  "{0} · {1} · {2} · REAL": {
+    "es": "{0} · {1} · {2} · REAL",
+    "zh-CN": "{0} · {1} · {2} · 实盘"
+  },
+  "{0} · {1} · {2}{3} · launched from {4}{5}": {
+    "es": "{0} · {1} · {2}{3} · iniciada desde {4}{5}",
+    "zh-CN": "{0} · {1} · {2}{3} · 启动来源 {4}{5}"
+  },
+  "{0} · {1} — REAL": {
+    "es": "{0} · {1} — REAL",
+    "zh-CN": "{0} · {1} — 实盘"
+  },
+  "{0}: IB data supports only MNQ, MES, M2K, MYM, NQ, ES, RTY and YM.": {
+    "es": "{0}: los datos IB solo admiten MNQ, MES, M2K, MYM, NQ, ES, RTY y YM.",
+    "zh-CN": "{0}：IB 数据仅支持 MNQ、MES、M2K、MYM、NQ、ES、RTY 和 YM。"
+  },
+  "{0}: buy {1} {2} {3}{4}{5}": {
+    "es": "{0}: compra {1} {2} {3}{4}{5}",
+    "zh-CN": "{0}：买入 {1} {2} {3}{4}{5}"
+  },
+  "{0}: buy {1} {2}{3}": {
+    "es": "{0}: compra {1} {2}{3}",
+    "zh-CN": "{0}：买入 {1} {2}{3}"
+  },
+  "{0}: no new entries until the next session{1}": {
+    "es": "{0}: sin nuevas entradas hasta la siguiente sesión{1}",
+    "zh-CN": "{0}：在下一交易时段前不再入场{1}"
+  },
+  "{0}: required column '{1}' missing.": {
+    "es": "{0}: falta la columna requerida «{1}».",
+    "zh-CN": "{0}：缺少必需列“{1}”。"
+  },
+  "{0}: sell {1} {2} {3}{4}{5}": {
+    "es": "{0}: venta {1} {2} {3}{4}{5}",
+    "zh-CN": "{0}：卖出 {1} {2} {3}{4}{5}"
+  },
+  "{0}: sell {1} {2}{3}": {
+    "es": "{0}: venta {1} {2}{3}",
+    "zh-CN": "{0}：卖出 {1} {2}{3}"
+  },
+  "{0}: timed out": {
+    "es": "{0}: tiempo agotado",
+    "zh-CN": "{0}：超时"
+  },
+  "{0}: {1} incoming bars, {2} stored synthetic minutes, {3} real ticks, {4} conflicting real minutes": {
+    "es": "{0}: {1} velas entrantes, {2} minutos sintéticos guardados, {3} ticks reales, {4} minutos reales en conflicto",
+    "zh-CN": "{0}：{1} 根待导入 K 线，{2} 分钟已存合成数据，{3} 笔真实逐笔，{4} 分钟真实数据冲突"
+  },
+  "{0}: {1} incoming bars, {2} stored synthetic minutes, {3} recorded trades, {4} overlapping real minutes": {
+    "es": "{0}: {1} velas entrantes, {2} minutos sintéticos guardados, {3} operaciones registradas, {4} minutos reales superpuestos",
+    "zh-CN": "{0}：{1} 根待导入 K 线，{2} 分钟已存合成数据，{3} 笔已记录成交，{4} 分钟真实数据重叠"
+  },
+  "{0}: {1} one-minute bars across {2} UTC day(s); {3} recorded minute conflict(s). Default preserves recorded tick files byte-for-byte. Synthetic history has no real aggressor side or footprint.": {
+    "es": "{0}: {1} velas de un minuto en {2} día(s) UTC; {3} conflicto(s) de minutos registrados. Por defecto conserva los archivos de ticks registrados byte por byte. El historial sintético no tiene lado agresor ni footprint real.",
+    "zh-CN": "{0}：{2} 个 UTC 日内有 {1} 根一分钟 K 线；{3} 处已记录分钟冲突。默认逐字节保留已记录逐笔文件。合成历史没有真实主动买卖方向或足迹。"
+  },
+  "{0}: {1}, {2} trades in {3} day(s){4}{5} · price increment {6}": {
+    "es": "{0}: {1}, {2} operaciones en {3} día(s){4}{5} · incremento de precio {6}",
+    "zh-CN": "{0}：{1}，{3} 天内 {2} 笔成交{4}{5} · 最小价格变动 {6}"
+  },
+  "{0}; heuristic, not book replenishment / iceberg proof": {
+    "es": "{0}; heurística, no demuestra reposición del libro ni icebergs",
+    "zh-CN": "{0}；启发式结果，并非盘口补单/冰山单证据"
+  },
+  "{0}LONG {1} · {2}": {
+    "es": "{0}LARGO {1} · {2}",
+    "zh-CN": "{0}多头 {1} · {2}"
+  },
+  "{0}SHORT {1} · {2}": {
+    "es": "{0}CORTO {1} · {2}",
+    "zh-CN": "{0}空头 {1} · {2}"
+  },
+  "{0}{1} strategy/strategies · reference capital {2}{3}": {
+    "es": "{0}{1} estrategia(s) · capital de referencia {2}{3}",
+    "zh-CN": "{0}{1} 个策略 · 参考资金 {2}{3}"
+  },
+  "«{0}» ({1} · {2}) stops{3} and no longer appears in Live. An open position will remain unchanged (close it first if needed).": {
+    "es": "«{0}» ({1} · {2}) se detiene{3} y deja de aparecer en En vivo. Las posiciones abiertas no cambian (ciérralas antes si hace falta).",
+    "zh-CN": "“{0}”（{1} · {2}）将停止{3}并从运行列表移除。未平仓仓位保持不变（如有需要请先平仓）。"
+  },
+  "«{0}» bought {1} {2} at {3}{4} on {5}{6}": {
+    "es": "«{0}» compró {1} {2} a {3}{4} en {5}{6}",
+    "zh-CN": "“{0}”于 {5}{6} 以 {3}{4} 买入 {1} {2}"
+  },
+  "«{0}» sold {1} {2} at {3}{4} on {5}{6}": {
+    "es": "«{0}» vendió {1} {2} a {3}{4} en {5}{6}",
+    "zh-CN": "“{0}”于 {5}{6} 以 {3}{4} 卖出 {1} {2}"
+  },
+  "«{0}» · long {1} {2} · ": {
+    "es": "«{0}» · largo {1} {2} · ",
+    "zh-CN": "“{0}” · 多头 {1} {2} · "
+  },
+  "«{0}» · short {1} {2} · ": {
+    "es": "«{0}» · corto {1} {2} · ",
+    "zh-CN": "“{0}” · 空头 {1} {2} · "
+  },
+  "×{0} = {1} {2} (minimum)": {
+    "es": "×{0} = {1} {2} (mínimo)",
+    "zh-CN": "×{0} = {1} {2}（最小值）"
+  },
+  "Not recording": {
+    "es": "No se está grabando",
+    "zh-CN": "未在记录"
+  },
+  "Missing footprint (estimation off or zero volume); waiting for anchor": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero); esperando ancla",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）；等待锚点"
+  },
+  "Missing footprint (estimation off or zero volume); waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero); esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）；等待锚点；不可用（累计权重为零）"
+  },
+  "Missing footprint (estimation off or zero volume); retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero); pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Missing footprint (estimation off or zero volume); retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero); pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Missing footprint (estimation off or zero volume); explicit loaded-history start": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero); inicio explícito del historial cargado",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）；明确的已加载历史起点"
+  },
+  "Missing footprint (estimation off or zero volume); explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero); inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Missing footprint (estimation off or zero volume); anchor {0}": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero); ancla {0}",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）；锚点 {0}"
+  },
+  "Missing footprint (estimation off or zero volume); anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint faltante (estimación desactivada o volumen cero); ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "足迹缺失（估算关闭或成交量为零）；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Missing footprint (estimation off or zero volume)": {
+    "es": "Comprador Footprint faltante (estimación desactivada o volumen cero)",
+    "zh-CN": "买方 足迹缺失（估算关闭或成交量为零）"
+  },
+  "Seller Missing footprint (estimation off or zero volume)": {
+    "es": "Vendedor Footprint faltante (estimación desactivada o volumen cero)",
+    "zh-CN": "卖方 足迹缺失（估算关闭或成交量为零）"
+  },
+  "Neutral Missing footprint (estimation off or zero volume)": {
+    "es": "Neutral Footprint faltante (estimación desactivada o volumen cero)",
+    "zh-CN": "中性 足迹缺失（估算关闭或成交量为零）"
+  },
+  "Observed footprint; waiting for anchor": {
+    "es": "Footprint observado; esperando ancla",
+    "zh-CN": "已观测足迹；等待锚点"
+  },
+  "Observed footprint; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹；等待锚点；不可用（累计权重为零）"
+  },
+  "Observed footprint; retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint observado; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "已观测足迹；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Observed footprint; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Observed footprint; explicit loaded-history start": {
+    "es": "Footprint observado; inicio explícito del historial cargado",
+    "zh-CN": "已观测足迹；明确的已加载历史起点"
+  },
+  "Observed footprint; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Observed footprint; anchor {0}": {
+    "es": "Footprint observado; ancla {0}",
+    "zh-CN": "已观测足迹；锚点 {0}"
+  },
+  "Observed footprint; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Observed footprint": {
+    "es": "Comprador Footprint observado",
+    "zh-CN": "买方 已观测足迹"
+  },
+  "Seller Observed footprint": {
+    "es": "Vendedor Footprint observado",
+    "zh-CN": "卖方 已观测足迹"
+  },
+  "Neutral Observed footprint": {
+    "es": "Neutral Footprint observado",
+    "zh-CN": "中性 已观测足迹"
+  },
+  "Observed footprint + missing bars": {
+    "es": "Footprint observado + velas faltantes",
+    "zh-CN": "已观测足迹 + 缺失 K 线"
+  },
+  "Observed footprint + missing bars; waiting for anchor": {
+    "es": "Footprint observado + velas faltantes; esperando ancla",
+    "zh-CN": "已观测足迹 + 缺失 K 线；等待锚点"
+  },
+  "Observed footprint + missing bars; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + velas faltantes; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 缺失 K 线；等待锚点；不可用（累计权重为零）"
+  },
+  "Observed footprint + missing bars; retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint observado + velas faltantes; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "已观测足迹 + 缺失 K 线；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Observed footprint + missing bars; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + velas faltantes; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 缺失 K 线；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Observed footprint + missing bars; explicit loaded-history start": {
+    "es": "Footprint observado + velas faltantes; inicio explícito del historial cargado",
+    "zh-CN": "已观测足迹 + 缺失 K 线；明确的已加载历史起点"
+  },
+  "Observed footprint + missing bars; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + velas faltantes; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 缺失 K 线；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Observed footprint + missing bars; anchor {0}": {
+    "es": "Footprint observado + velas faltantes; ancla {0}",
+    "zh-CN": "已观测足迹 + 缺失 K 线；锚点 {0}"
+  },
+  "Observed footprint + missing bars; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + velas faltantes; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 缺失 K 线；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Observed footprint + missing bars": {
+    "es": "Comprador Footprint observado + velas faltantes",
+    "zh-CN": "买方 已观测足迹 + 缺失 K 线"
+  },
+  "Seller Observed footprint + missing bars": {
+    "es": "Vendedor Footprint observado + velas faltantes",
+    "zh-CN": "卖方 已观测足迹 + 缺失 K 线"
+  },
+  "Neutral Observed footprint + missing bars": {
+    "es": "Neutral Footprint observado + velas faltantes",
+    "zh-CN": "中性 已观测足迹 + 缺失 K 线"
+  },
+  "Observed footprint (incomplete observed contribution)": {
+    "es": "Footprint observado (contribución observada incompleta)",
+    "zh-CN": "已观测足迹（已观测贡献不完整）"
+  },
+  "Observed footprint (incomplete observed contribution); waiting for anchor": {
+    "es": "Footprint observado (contribución observada incompleta); esperando ancla",
+    "zh-CN": "已观测足迹（已观测贡献不完整）；等待锚点"
+  },
+  "Observed footprint (incomplete observed contribution); waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado (contribución observada incompleta); esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹（已观测贡献不完整）；等待锚点；不可用（累计权重为零）"
+  },
+  "Observed footprint (incomplete observed contribution); retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint observado (contribución observada incompleta); pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "已观测足迹（已观测贡献不完整）；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Observed footprint (incomplete observed contribution); retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado (contribución observada incompleta); pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹（已观测贡献不完整）；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Observed footprint (incomplete observed contribution); explicit loaded-history start": {
+    "es": "Footprint observado (contribución observada incompleta); inicio explícito del historial cargado",
+    "zh-CN": "已观测足迹（已观测贡献不完整）；明确的已加载历史起点"
+  },
+  "Observed footprint (incomplete observed contribution); explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado (contribución observada incompleta); inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹（已观测贡献不完整）；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Observed footprint (incomplete observed contribution); anchor {0}": {
+    "es": "Footprint observado (contribución observada incompleta); ancla {0}",
+    "zh-CN": "已观测足迹（已观测贡献不完整）；锚点 {0}"
+  },
+  "Observed footprint (incomplete observed contribution); anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado (contribución observada incompleta); ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹（已观测贡献不完整）；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Observed footprint (incomplete observed contribution)": {
+    "es": "Comprador Footprint observado (contribución observada incompleta)",
+    "zh-CN": "买方 已观测足迹（已观测贡献不完整）"
+  },
+  "Seller Observed footprint (incomplete observed contribution)": {
+    "es": "Vendedor Footprint observado (contribución observada incompleta)",
+    "zh-CN": "卖方 已观测足迹（已观测贡献不完整）"
+  },
+  "Neutral Observed footprint (incomplete observed contribution)": {
+    "es": "Neutral Footprint observado (contribución observada incompleta)",
+    "zh-CN": "中性 已观测足迹（已观测贡献不完整）"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars; waiting for anchor": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes; esperando ancla",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线；等待锚点"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线；等待锚点；不可用（累计权重为零）"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars; retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars; explicit loaded-history start": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes; inicio explícito del historial cargado",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线；明确的已加载历史起点"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars; anchor {0}": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes; ancla {0}",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线；锚点 {0}"
+  },
+  "Observed footprint (incomplete observed contribution) + missing bars; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado (contribución observada incompleta) + velas faltantes; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹（已观测贡献不完整） + 缺失 K 线；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Observed footprint (incomplete observed contribution) + missing bars": {
+    "es": "Comprador Footprint observado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "买方 已观测足迹（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Seller Observed footprint (incomplete observed contribution) + missing bars": {
+    "es": "Vendedor Footprint observado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "卖方 已观测足迹（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Neutral Observed footprint (incomplete observed contribution) + missing bars": {
+    "es": "Neutral Footprint observado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "中性 已观测足迹（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Estimated OHLC / aggregate; waiting for anchor": {
+    "es": "OHLC estimado / agregado; esperando ancla",
+    "zh-CN": "估算 OHLC / 聚合；等待锚点"
+  },
+  "Estimated OHLC / aggregate; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合；等待锚点；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate; retrospective pivot {0}, confirmed {1}": {
+    "es": "OHLC estimado / agregado; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "估算 OHLC / 聚合；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Estimated OHLC / aggregate; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate; explicit loaded-history start": {
+    "es": "OHLC estimado / agregado; inicio explícito del historial cargado",
+    "zh-CN": "估算 OHLC / 聚合；明确的已加载历史起点"
+  },
+  "Estimated OHLC / aggregate; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate; anchor {0}": {
+    "es": "OHLC estimado / agregado; ancla {0}",
+    "zh-CN": "估算 OHLC / 聚合；锚点 {0}"
+  },
+  "Estimated OHLC / aggregate; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Estimated OHLC / aggregate": {
+    "es": "Comprador OHLC estimado / agregado",
+    "zh-CN": "买方 估算 OHLC / 聚合"
+  },
+  "Seller Estimated OHLC / aggregate": {
+    "es": "Vendedor OHLC estimado / agregado",
+    "zh-CN": "卖方 估算 OHLC / 聚合"
+  },
+  "Neutral Estimated OHLC / aggregate": {
+    "es": "Neutral OHLC estimado / agregado",
+    "zh-CN": "中性 估算 OHLC / 聚合"
+  },
+  "Estimated OHLC / aggregate + missing bars": {
+    "es": "OHLC estimado / agregado + velas faltantes",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线"
+  },
+  "Estimated OHLC / aggregate + missing bars; waiting for anchor": {
+    "es": "OHLC estimado / agregado + velas faltantes; esperando ancla",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线；等待锚点"
+  },
+  "Estimated OHLC / aggregate + missing bars; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado + velas faltantes; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线；等待锚点；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate + missing bars; retrospective pivot {0}, confirmed {1}": {
+    "es": "OHLC estimado / agregado + velas faltantes; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Estimated OHLC / aggregate + missing bars; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado + velas faltantes; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate + missing bars; explicit loaded-history start": {
+    "es": "OHLC estimado / agregado + velas faltantes; inicio explícito del historial cargado",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线；明确的已加载历史起点"
+  },
+  "Estimated OHLC / aggregate + missing bars; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado + velas faltantes; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate + missing bars; anchor {0}": {
+    "es": "OHLC estimado / agregado + velas faltantes; ancla {0}",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线；锚点 {0}"
+  },
+  "Estimated OHLC / aggregate + missing bars; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado + velas faltantes; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合 + 缺失 K 线；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Estimated OHLC / aggregate + missing bars": {
+    "es": "Comprador OHLC estimado / agregado + velas faltantes",
+    "zh-CN": "买方 估算 OHLC / 聚合 + 缺失 K 线"
+  },
+  "Seller Estimated OHLC / aggregate + missing bars": {
+    "es": "Vendedor OHLC estimado / agregado + velas faltantes",
+    "zh-CN": "卖方 估算 OHLC / 聚合 + 缺失 K 线"
+  },
+  "Neutral Estimated OHLC / aggregate + missing bars": {
+    "es": "Neutral OHLC estimado / agregado + velas faltantes",
+    "zh-CN": "中性 估算 OHLC / 聚合 + 缺失 K 线"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution); waiting for anchor": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta); esperando ancla",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）；等待锚点"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution); waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta); esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）；等待锚点；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution); retrospective pivot {0}, confirmed {1}": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta); pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution); retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta); pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution); explicit loaded-history start": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta); inicio explícito del historial cargado",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）；明确的已加载历史起点"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution); explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta); inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution); anchor {0}": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta); ancla {0}",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）；锚点 {0}"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution); anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta); ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整）；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Estimated OHLC / aggregate (incomplete observed contribution)": {
+    "es": "Comprador OHLC estimado / agregado (contribución observada incompleta)",
+    "zh-CN": "买方 估算 OHLC / 聚合（已观测贡献不完整）"
+  },
+  "Seller Estimated OHLC / aggregate (incomplete observed contribution)": {
+    "es": "Vendedor OHLC estimado / agregado (contribución observada incompleta)",
+    "zh-CN": "卖方 估算 OHLC / 聚合（已观测贡献不完整）"
+  },
+  "Neutral Estimated OHLC / aggregate (incomplete observed contribution)": {
+    "es": "Neutral OHLC estimado / agregado (contribución observada incompleta)",
+    "zh-CN": "中性 估算 OHLC / 聚合（已观测贡献不完整）"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars; waiting for anchor": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes; esperando ancla",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线；等待锚点"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线；等待锚点；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars; retrospective pivot {0}, confirmed {1}": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars; explicit loaded-history start": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes; inicio explícito del historial cargado",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线；明确的已加载历史起点"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars; anchor {0}": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes; ancla {0}",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线；锚点 {0}"
+  },
+  "Estimated OHLC / aggregate (incomplete observed contribution) + missing bars; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "OHLC estimado / agregado (contribución observada incompleta) + velas faltantes; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Estimated OHLC / aggregate (incomplete observed contribution) + missing bars": {
+    "es": "Comprador OHLC estimado / agregado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "买方 估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Seller Estimated OHLC / aggregate (incomplete observed contribution) + missing bars": {
+    "es": "Vendedor OHLC estimado / agregado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "卖方 估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Neutral Estimated OHLC / aggregate (incomplete observed contribution) + missing bars": {
+    "es": "Neutral OHLC estimado / agregado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "中性 估算 OHLC / 聚合（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Observed footprint + estimated OHLC": {
+    "es": "Footprint observado + OHLC estimado",
+    "zh-CN": "已观测足迹 + 估算 OHLC"
+  },
+  "Observed footprint + estimated OHLC; waiting for anchor": {
+    "es": "Footprint observado + OHLC estimado; esperando ancla",
+    "zh-CN": "已观测足迹 + 估算 OHLC；等待锚点"
+  },
+  "Observed footprint + estimated OHLC; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC；等待锚点；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC; retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint observado + OHLC estimado; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "已观测足迹 + 估算 OHLC；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Observed footprint + estimated OHLC; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC; explicit loaded-history start": {
+    "es": "Footprint observado + OHLC estimado; inicio explícito del historial cargado",
+    "zh-CN": "已观测足迹 + 估算 OHLC；明确的已加载历史起点"
+  },
+  "Observed footprint + estimated OHLC; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC; anchor {0}": {
+    "es": "Footprint observado + OHLC estimado; ancla {0}",
+    "zh-CN": "已观测足迹 + 估算 OHLC；锚点 {0}"
+  },
+  "Observed footprint + estimated OHLC; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Observed footprint + estimated OHLC": {
+    "es": "Comprador Footprint observado + OHLC estimado",
+    "zh-CN": "买方 已观测足迹 + 估算 OHLC"
+  },
+  "Seller Observed footprint + estimated OHLC": {
+    "es": "Vendedor Footprint observado + OHLC estimado",
+    "zh-CN": "卖方 已观测足迹 + 估算 OHLC"
+  },
+  "Neutral Observed footprint + estimated OHLC": {
+    "es": "Neutral Footprint observado + OHLC estimado",
+    "zh-CN": "中性 已观测足迹 + 估算 OHLC"
+  },
+  "Observed footprint + estimated OHLC + missing bars": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线"
+  },
+  "Observed footprint + estimated OHLC + missing bars; waiting for anchor": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes; esperando ancla",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线；等待锚点"
+  },
+  "Observed footprint + estimated OHLC + missing bars; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线；等待锚点；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC + missing bars; retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Observed footprint + estimated OHLC + missing bars; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC + missing bars; explicit loaded-history start": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes; inicio explícito del historial cargado",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线；明确的已加载历史起点"
+  },
+  "Observed footprint + estimated OHLC + missing bars; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC + missing bars; anchor {0}": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes; ancla {0}",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线；锚点 {0}"
+  },
+  "Observed footprint + estimated OHLC + missing bars; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado + velas faltantes; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC + 缺失 K 线；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Observed footprint + estimated OHLC + missing bars": {
+    "es": "Comprador Footprint observado + OHLC estimado + velas faltantes",
+    "zh-CN": "买方 已观测足迹 + 估算 OHLC + 缺失 K 线"
+  },
+  "Seller Observed footprint + estimated OHLC + missing bars": {
+    "es": "Vendedor Footprint observado + OHLC estimado + velas faltantes",
+    "zh-CN": "卖方 已观测足迹 + 估算 OHLC + 缺失 K 线"
+  },
+  "Neutral Observed footprint + estimated OHLC + missing bars": {
+    "es": "Neutral Footprint observado + OHLC estimado + velas faltantes",
+    "zh-CN": "中性 已观测足迹 + 估算 OHLC + 缺失 K 线"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution); waiting for anchor": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta); esperando ancla",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）；等待锚点"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution); waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta); esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）；等待锚点；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution); retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta); pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution); retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta); pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution); explicit loaded-history start": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta); inicio explícito del historial cargado",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）；明确的已加载历史起点"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution); explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta); inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution); anchor {0}": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta); ancla {0}",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）；锚点 {0}"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution); anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta); ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整）；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Observed footprint + estimated OHLC (incomplete observed contribution)": {
+    "es": "Comprador Footprint observado + OHLC estimado (contribución observada incompleta)",
+    "zh-CN": "买方 已观测足迹 + 估算 OHLC（已观测贡献不完整）"
+  },
+  "Seller Observed footprint + estimated OHLC (incomplete observed contribution)": {
+    "es": "Vendedor Footprint observado + OHLC estimado (contribución observada incompleta)",
+    "zh-CN": "卖方 已观测足迹 + 估算 OHLC（已观测贡献不完整）"
+  },
+  "Neutral Observed footprint + estimated OHLC (incomplete observed contribution)": {
+    "es": "Neutral Footprint observado + OHLC estimado (contribución observada incompleta)",
+    "zh-CN": "中性 已观测足迹 + 估算 OHLC（已观测贡献不完整）"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars; waiting for anchor": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes; esperando ancla",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线；等待锚点"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars; waiting for anchor; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes; esperando ancla; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线；等待锚点；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars; retrospective pivot {0}, confirmed {1}": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes; pivote retrospectivo {0}, confirmado {1}",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线；回溯枢轴 {0}，确认于 {1}"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars; retrospective pivot {0}, confirmed {1}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes; pivote retrospectivo {0}, confirmado {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线；回溯枢轴 {0}，确认于 {1}；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars; explicit loaded-history start": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes; inicio explícito del historial cargado",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线；明确的已加载历史起点"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars; explicit loaded-history start; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes; inicio explícito del historial cargado; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线；明确的已加载历史起点；不可用（累计权重为零）"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars; anchor {0}": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes; ancla {0}",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线；锚点 {0}"
+  },
+  "Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars; anchor {0}; unavailable (zero accumulated weight)": {
+    "es": "Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes; ancla {0}; no disponible (peso acumulado cero)",
+    "zh-CN": "已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线；锚点 {0}；不可用（累计权重为零）"
+  },
+  "Buyer Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars": {
+    "es": "Comprador Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "买方 已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Seller Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars": {
+    "es": "Vendedor Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "卖方 已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Neutral Observed footprint + estimated OHLC (incomplete observed contribution) + missing bars": {
+    "es": "Neutral Footprint observado + OHLC estimado (contribución observada incompleta) + velas faltantes",
+    "zh-CN": "中性 已观测足迹 + 估算 OHLC（已观测贡献不完整） + 缺失 K 线"
+  },
+  "Swing": {
+    "es": "Pivote",
+    "zh-CN": "摆动点"
+  },
+  "VolumeSpike": {
+    "es": "Pico de volumen",
+    "zh-CN": "成交量突增"
+  },
+  "AbsoluteDelta": {
+    "es": "Delta absoluto",
+    "zh-CN": "Delta 绝对值"
+  },
+  "AbsolutePriceNotional": {
+    "es": "Nocional con precio absoluto",
+    "zh-CN": "价格绝对值名义金额"
+  },
+  "Both": {
+    "es": "Ambos",
+    "zh-CN": "两者"
+  },
+  "PreserveRecorded": {
+    "es": "Conservar lo registrado",
+    "zh-CN": "保留已记录数据"
+  },
+  "ReplaceCoveredMinutes": {
+    "es": "Reemplazar minutos cubiertos",
+    "zh-CN": "替换已覆盖分钟"
+  },
+  "★ My indicators": {
+    "es": "★ Mis indicadores",
+    "zh-CN": "★ 我的指标"
   }
 }

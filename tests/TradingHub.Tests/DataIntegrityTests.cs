@@ -1,4 +1,3 @@
-using System.Reflection;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Market;
@@ -145,14 +144,27 @@ public class DataIntegrityTests
     }
 
     [Fact]
-    public void Un_id_adelantado_no_congela_el_vivo()
+    public async Task Un_id_adelantado_no_congela_el_vivo()
     {
-        var data = new InstrumentData(Btc, new SimulatedFeed());
-        data.Trades.Add(new Trade(100, Day, 84_700m, 1, TradeSide.Buy));
-        data.Trades.Add(new Trade(9_999_999, Day.AddSeconds(1), 84_701m, 1, TradeSide.Buy)); // basura con id del futuro
-        typeof(InstrumentData).GetField("_historyMerged", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(data, true);
-
-        IMarketDataSink sink = data;
+        using var feed = new IntegrityFeed();
+        using var data = new InstrumentData(Btc, feed);
+        data.Start(Day);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (data.IsLoadingHistory)
+        {
+            data.Pump();
+            if (!data.IsLoadingHistory) break;
+            try { await Task.Delay(5, timeout.Token); }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                data.Pump();
+                if (data.IsLoadingHistory)
+                    throw new TimeoutException("The started integrity feed did not publish its initial history.");
+            }
+        }
+        Assert.Null(data.HistoryError);
+        Assert.Equal(2, data.Trades.Count);
+        var sink = Assert.IsAssignableFrom<IMarketDataSink>(feed.Sink);
         sink.OnTrades(Btc, new[]
         {
             new Trade(100, Day, 84_700m, 1, TradeSide.Buy), // repetida: se ignora
@@ -177,5 +189,34 @@ public class DataIntegrityTests
         Assert.Equal(2, series.Count);
         Assert.Equal(Btc.ToTicks(84_710m), series[1].HighTicks);
         Assert.Equal(2m, series[1].Volume);
+    }
+
+    private sealed class IntegrityFeed : IMarketDataFeed
+    {
+        public string Id => "test";
+        public string DisplayName => "Integrity fixture";
+        public bool SupportsHistory => true;
+        public bool IsLive => false;
+        public DateTime Now => Day.AddSeconds(4);
+        public IMarketDataSink? Sink { get; private set; }
+        public Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<Instrument>>(new[] { Btc });
+        public Task LoadTradesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, long? fromId,
+            Func<IReadOnlyList<Trade>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
+        {
+            onBatch(new[]
+            {
+                new Trade(100, Day, 84_700m, 1, TradeSide.Buy),
+                new Trade(9_999_999, Day.AddSeconds(1), 84_701m, 1, TradeSide.Buy)
+            });
+            return Task.CompletedTask;
+        }
+        public IDisposable Subscribe(Instrument instrument, IMarketDataSink sink)
+        {
+            Sink = sink;
+            return new Lease();
+        }
+        public void Dispose() { }
+        private sealed class Lease : IDisposable { public void Dispose() { } }
     }
 }

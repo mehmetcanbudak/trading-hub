@@ -161,6 +161,7 @@ public sealed class ConnectionProfile
     public string IbHost { get; set; } = "127.0.0.1";
     public int IbPort { get; set; } = 7497;
     public int IbClientId { get; set; } = 17;
+    public bool IbOffline { get; set; } = true;
 
     [JsonIgnore] public string SecretAccount => $"{Id}:secret";
 
@@ -185,8 +186,8 @@ public sealed class ConnectionProfile
         _ => "ib",
     };
 
-    /// <summary>Da datos de mercado para gráficos (Databento e IB, no).</summary>
-    [JsonIgnore] public bool HasMarketData => Kind is not (ConnectionKind.InteractiveBrokers or ConnectionKind.Databento);
+    /// <summary>Chart market-data capability; IB remains strictly data-only.</summary>
+    [JsonIgnore] public bool HasMarketData => Kind != ConnectionKind.Databento;
 
     /// <summary>Id por defecto del primer perfil de cada tipo (el mismo de sus datos).</summary>
     public static string DefaultId(ConnectionKind kind) => kind switch
@@ -214,6 +215,8 @@ public sealed class ConnectionManager
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     private readonly Dictionary<string, IMarketDataFeed> _feeds = new();
     private readonly List<IMarketDataFeed> _retiredFeeds = new();
+    // Hub retains consumers; IB scopes stay alive until application shutdown.
+    private readonly Dictionary<string, IbFeed> _ibScopes = new(StringComparer.Ordinal);
 
     // Tradovate shares its feed transport with account management; do not sever a live or unresolved consumer.
     internal Func<IMarketDataFeed, bool>? FeedInUse { get; set; }
@@ -289,6 +292,14 @@ public sealed class ConnectionManager
     /// <summary>Descarta el feed creado (por ejemplo, tras cambiar la configuración).</summary>
     public void Invalidate(ConnectionProfile p)
     {
+        if (p.Kind == ConnectionKind.InteractiveBrokers)
+        {
+            lock (_ibScopes)
+                if (_ibScopes.TryGetValue(p.Id, out var ib))
+                    ib.Reconfigure(new IbSettings(p.IbHost, p.IbPort, p.IbClientId, p.IbOffline || !p.Enabled || !Profiles.Contains(p), p.Id));
+            Reconfigured?.Invoke(p);
+            return;
+        }
         // Rithmic: el mismo feed vuelve a entrar con los datos nuevos. Descartarlo dejaba la sesión vieja andando
         // en los gráficos abiertos y la nueva le cortaba la conexión (Rithmic deja una sola sesión por usuario).
         if (p.IsRithmic && _feeds.TryGetValue(p.Id, out var existing) && existing is RithmicFeed rf)
@@ -314,6 +325,16 @@ public sealed class ConnectionManager
     public IMarketDataFeed GetFeed(string profileId)
     {
         var p = Find(profileId) ?? throw new KeyNotFoundException($"Connection not found: {profileId}");
+        if (p.Kind == ConnectionKind.InteractiveBrokers)
+        {
+            var settings = new IbSettings(p.IbHost, p.IbPort, p.IbClientId, p.IbOffline || !p.Enabled, p.Id);
+            lock (_ibScopes)
+            {
+                if (!_ibScopes.TryGetValue(p.Id, out var ib)) _ibScopes[p.Id] = ib = new IbFeed(settings, AppPaths.Ticks);
+                else ib.Reconfigure(settings);
+                return ib;
+            }
+        }
         if (_feeds.TryGetValue(p.Id, out var f)) return f;
         f = p.Kind switch
         {
@@ -327,7 +348,7 @@ public sealed class ConnectionManager
             ConnectionKind.Oanda => new TradingHub.Feeds.Oanda.OandaFeed(OandaSettingsOf(p)),
             ConnectionKind.Alpaca => new TradingHub.Feeds.Alpaca.AlpacaFeed(AlpacaSettingsOf(p)),
             ConnectionKind.Databento => throw new NotSupportedException("Databento does not provide live data here: use Data to download futures history."),
-            _ => throw new NotSupportedException("Interactive Brokers currently only tests connectivity; no market data integration."),
+            _ => throw new NotSupportedException("This connection has no integrated market-data feed."),
         };
         _feeds[p.Id] = f;
         return f;
@@ -461,7 +482,12 @@ public sealed class ConnectionManager
                     return (ok, ok ? $"Connected to {p.RithmicSystem}. {message}" : message);
                 }
                 case ConnectionKind.InteractiveBrokers:
-                    return await IbProbe.TestAsync(p.IbHost, p.IbPort, ct);
+                {
+                    var feed = (IbFeed)GetFeed(p.Id);
+                    if (!feed.IsLive) return (true, "Stored/offline or disabled mode: no Gateway connection. Synthetic OHLCV history is not order-flow data.");
+                    var client = await feed.ClientAsync(ct);
+                    return (true, $"IB protocol {client.ServerVersion} START_API ready; exchange historical/live/depth entitlements are checked only when data is requested. Data only; no orders.");
+                }
                 case ConnectionKind.Tradovate:
                     return await ((TradingHub.Feeds.Tradovate.TradovateFeed)GetFeed(p.Id)).TestAsync(ct);
                 case ConnectionKind.CTrader:
@@ -505,6 +531,8 @@ public sealed class ConnectionManager
 
     public void DisposeAll()
     {
+        foreach (var ib in _ibScopes.Values) ib.Dispose();
+        _ibScopes.Clear();
         foreach (var f in _feeds.Values)
         {
             try { f.Dispose(); }

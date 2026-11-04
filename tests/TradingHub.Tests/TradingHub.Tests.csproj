@@ -26,6 +26,8 @@
     <!-- lo propio de cada sistema (atajos, claves, Claude Code, bandeja): ver PlatformTests -->
     <ProjectReference Include="..\..\src\TradingHub.App\TradingHub.App.csproj" />
     <ProjectReference Include="..\TradingHub.LedgerCrashFixture\TradingHub.LedgerCrashFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TradingHub.QuantColdFixture\TradingHub.QuantColdFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TradingHub.AssistantCliFixture\TradingHub.AssistantCliFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <Target Name="CopyLedgerCrashFixture" AfterTargets="Build">
@@ -34,5 +36,19 @@
     </ItemGroup>
     <Copy SourceFiles="@(LedgerCrashFixtureFiles)" DestinationFiles="@(LedgerCrashFixtureFiles->'$(OutDir)LedgerCrashFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
+
+  <Target Name="CopyQuantColdFixture" AfterTargets="Build">
+    <ItemGroup>
+      <QuantColdFixtureFiles Include="$(MSBuildProjectDirectory)/../TradingHub.QuantColdFixture/bin/$(Configuration)/$(TargetFramework)/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(QuantColdFixtureFiles)" DestinationFiles="@(QuantColdFixtureFiles->'$(OutDir)QuantColdFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+  <Target Name="CopyAssistantCliFixture" AfterTargets="Build">
+    <ItemGroup>
+      <AssistantCliFixtureFiles Include="$(MSBuildProjectDirectory)/../TradingHub.AssistantCliFixture/bin/$(Configuration)/$(TargetFramework)/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(AssistantCliFixtureFiles)" DestinationFiles="@(AssistantCliFixtureFiles->'$(OutDir)AssistantCliFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
 
 </Project>

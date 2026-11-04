@@ -17,7 +17,9 @@ public sealed class ChartViewport
     public double RightMarginPx { get; set; } = 70;
 
     /// <summary>Barras vacías a la derecha de la última (derivado de RightMarginPx).</summary>
-    public int RightMarginBars => Math.Max(1, (int)Math.Ceiling(RightMarginPx / Math.Max(1, BarWidth)));
+    public int RightMarginBars => Math.Max(1, (int)Math.Min(int.MaxValue, Math.Ceiling(
+        (double.IsFinite(RightMarginPx) ? Math.Max(0, RightMarginPx) : 70) /
+        (double.IsFinite(BarWidth) ? Math.Clamp(BarWidth, MinBarWidth, MaxBarWidth) : 90))));
 
     /// <summary>Escala de precios automática.</summary>
     public bool AutoScale { get; set; } = true;
@@ -26,7 +28,7 @@ public sealed class ChartViewport
     public double PriceTop { get; set; }
     public double PriceBottom { get; set; }
 
-    public const double MinBarWidth = 1.5;
+    public const double MinBarWidth = 0.1;
     public const double MaxBarWidth = 400;
 
     public int BarSpacing => BarWidth >= 40 ? Math.Max(3, (int)(BarWidth * 0.06)) : BarWidth >= 5 ? Math.Max(1, (int)(BarWidth * 0.22)) : 0;
