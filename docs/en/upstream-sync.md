@@ -13,7 +13,7 @@ This fork tracks `ralphtradesz/trading-hub:main` while maintaining its canonical
 - The bot replaces only its marked report section. Keep notes and checklist progress outside that section; they are preserved. Recheck completed items when another upstream tip arrives. A closed tracker reopens while unreviewed work remains.
 - [Translation status](TRANSLATION_STATUS.md) records actual build, compatibility and UI evidence. [English validation](../../.github/workflows/english-translation-validation.yml) runs for pull requests into the English branch as well as pushes.
 
-The fork's default branch is `memoshi` so GitHub can run its schedule there; historical `main`, English, safety and sync refs are retained for rollback, not parallel development bases. The monitor's token has read-only contents and issue-write permissions, not code-write or merge permissions. It fetches upstream Git objects but never checks out or executes upstream code.
+The fork's default branch is `memoshi` so GitHub can run its schedule there. The 2026-11-04 authorized consolidation permits pruning obsolete local/remote C# development refs and clean obsolete C# worktrees only after preservation; retained historical notes about rollback refs describe earlier checkpoints, not a requirement to keep every old branch indefinitely. Literal historical `main` at baseline `9ee74a4`, Rust/Swift branches/worktrees/oracle pins and the upstream ledger remain protected. See the [canonical integration checkpoint](TRANSLATION_STATUS.md#canonical-non-kvp-integration--2026-11-04) for actual preservation/cleanup evidence. The monitor's token has read-only contents and issue-write permissions, not code-write or merge permissions. It fetches upstream Git objects but never checks out or executes upstream code.
 
 ## Check now without writing GitHub issues
 
@@ -70,7 +70,7 @@ If upstream rewrites history or the ledger is invalid, investigate it. **Do not 
    Read the diff and macOS/Windows checks; finish missing translations and resolve failures. Merge only after human review. There is no automatic merge. Do not open a PR against the original upstream or include Rust/Swift work unintentionally.
 8. The next monitor run sees the advanced checkpoint and reports remaining work or **Up to date**. A successful merge does not replace the installed app: update separately using the installation guide, with a backup and a fully quit app.
 
-`memoshi` is the C# reference for future port work. Existing Rust/Swift branches, dirty work and pinned oracles remain untouched during this consolidation. Each port's agents must review the applicable runtime/safety/UI changes, validate them in that port and record the exact adopted `memoshi` SHA separately; do not silently use a moving branch tip as a reproducible oracle.
+`memoshi` is the C# reference for future port review, not authorization to resume implementation. Existing Rust/Swift branches, dirty work and pinned oracles remain untouched during this consolidation. Each port must review an exact canonical SHA, assess applicable runtime/safety/UI changes and separately record any later explicitly authorized adoption and validation. Never automatically rebase source, advance an oracle pin, resume implementation or use a moving branch tip. See the [non-KVP handoff](../research/non-kvp-canonical-handoff.md); C# source/fake-fixture evidence does not satisfy a port's native-platform or real-provider gates.
 
 ## Maintain the English-source catalogs
 

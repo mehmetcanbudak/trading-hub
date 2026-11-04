@@ -1,14 +1,41 @@
 # Trading Hub — English localization validation
 
-**Reviewed:** 2026-11-03
-**Branch:** `memoshi`; **reviewed runtime:** `9d5791a`; **installed Mac source:** `c27e5aa`; **PR #5 merge:** `265d60f`.
+**Reviewed:** 2026-11-04
+**Branch:** `memoshi`; **merged source:** `b730d4c144b69f4a2695b5bdefd572dab6014369`; **installed Mac source:** `c27e5aa`; **historical PR #5 merge:** `265d60f`.
 **Implementation:** canonical English-first C# reference with the consolidated English, reviewed safety, Windows v1.1 and multilingual v1.2 histories. The approved integration includes latest upstream `1d5a774`, process-crash-consistent ledger replay and broker-acknowledged protection hardening. Existing English installations, persistent identities and real-account controls remain intact. The separately authorized personal Mac update is installed and accepted below. Rust/Swift branches/worktrees/pins remain untouched. Public releases remain explicitly deferred.
 
 **Review:** [PR #5](https://github.com/mehmetcanbudak/trading-hub/pull/5) merged at `265d60f93f7a99aaa287c459f9fcf5d8dc827627` after the user approved integration for personal Mac use with documented release/provider/native-Windows limits. [Integration PR #4](https://github.com/mehmetcanbudak/trading-hub/pull/4) and safety PR #3 retain the earlier history; the original safety source was corrected, not accepted unchanged. The later normal-profile installation required separate user authorization; neither action publishes a release or authorizes a port rebase.
 
+## Canonical non-KVP integration — 2026-11-04
+
+Selected feature commit `041b4a886e9232f9126bd913522b27fc0c97bd1d` is merged into `memoshi` at `b730d4c144b69f4a2695b5bdefd572dab6014369` and published to `origin/memoshi`. This supersedes the **uncommitted/unmerged** candidate state recorded below, not its historical receipts or failures. Fresh canonical gates passed as recorded here; the final documentation-only descendant is recorded separately, not represented as the tested source SHA. The installed app remains the separately accepted `c27e5aa`; no replacement or new installation acceptance occurred.
+
+The selected PANASV/Jjuan scope is described below. TradeDock's actual 28-commit translation lineage was already inherited. Dham screenshots and hash/signature/source manifests are optional documentation/evidence tooling, not missing runtime features; no Dham runtime was imported. No KVP code was imported. Historical `main`/audit baseline `9ee74a4`, upstream ledger `1d5a774`, persistent identities, user stores and Rust/Swift worktrees/branches/oracle pins remain unchanged.
+
+Before the feature commit, trailing whitespace and an extra fixture EOF blank were normalized without behavioral source changes. The canonical Logging/DI notice preserves all 1,417 nonterminal rows, internal blank lines and copyright/license prose; comparison after CRLF normalization showed exactly one additional terminal empty row in the vendor payload. The external CRLF-only notice receipt below describes its earlier copy, not this normalized canonical copy. Fresh canonical proof confirms all ten notice files are byte-identical across source, build and publish, and the published App assembly matches the build.
+
+Authorized obsolete C# consolidation is complete: four auxiliary worktrees (follow-up, safety, detached external checkout and adoption) and five merged-only local branches (English, safety, two syncs and adoption) were removed. The atomic source push also deleted exactly remote `feat/english-localization`, `fix/live-order-safety`, `imgbot`, `sync/upstream-1d5a774` and `sync/upstream-c28900e` with explicit old-SHA leases. Remaining worktrees are canonical, Rust and Swift; local branches are `memoshi`, historical `main`, `rust_port` and `swift_port`. The verified pre-cleanup all-refs bundle preserves 28 refs at `/Volumes/TradingHub-upstream-a861ab10ae/evidence/non-kvp-adoption-17dec28/canonical-consolidation-2026-11-04/pre-cleanup-refs.bundle`; adoption history remains reachable through the merge. See the [exact-SHA port handoff](../research/non-kvp-canonical-handoff.md). No manual CI dispatch occurred; a normal push may trigger existing workflows, but no hosted readiness result is claimed.
+
+### Fresh canonical gates
+
+Receipts are relative to `/Volumes/TradingHub-upstream-a861ab10ae/evidence/non-kvp-adoption-17dec28/canonical-consolidation-2026-11-04`. These exercise source `b730d4c144b69f4a2695b5bdefd572dab6014369`, separately from the historical external-worktree evidence below.
+
+| Gate | Observed canonical result | Receipt |
+|---|---|---|
+| Restore / tracker | 14 projects restored in 22.38 seconds; 13 fake-only tracker tests passed in 1.364 seconds | `restore-and-tracker.receipt.json` |
+| Release build | Zero warnings/errors; 6:02.81 elapsed, 363.02 seconds wall | `release-build.receipt.json` |
+| Complete suite | **656 passed, 0 failed, 7 existing Windows-only skipped, 663 total**; 1m37s test time, 103.12 seconds wall; actual canonical runtime/SSD fixtures, no filters or watchdog/assertion/concurrency changes | `full-tests.receipt.json` |
+| Actual isolated UI | Eight sequential processes exited 0 in 202.62 seconds: 50k search/zoom; six-study settings (185 checks); OI hover/keyboard/focused recovery; fake Gateway IB import/session/compiled backtest/deletion; Codex edited-strategy compilation (42); research (17, one fake call); English (120); safety (96) and Quit (42). Actual study settings, estimated-month/three fidelity footers and warning/recovery were visually inspected | `ui-smoke.receipt.json` |
+| English/source/docs | Unmodified full checker passed: 22 docs, 231 local links, 16 guide sections; 216 source files, 13,165 tokens, 111 exceptions, zero failures; 16.78 seconds | `english-source-docs.receipt.json` |
+| Catalogs | 5,534 entries per Spanish/Chinese catalog; original 3,300-entry provenance and current-candidate gates passed with zero missing/untranslated/template mismatches; 6.34 seconds | `catalog-gates.receipt.json` |
+| Actual publish / notices | No-build publish passed in 18.20 seconds; all ten notice files byte-identical across source/build/publish, App assembly matches; vendor text normalization bounded above | `publish-notices.receipt.json` |
+| Research documentation / visuals | All three research documents' reference/local targets/anchors passed; not an all-HTTP-links claim | `documentation-and-visuals.receipt.json` |
+
+These finite C# source/fake-fixture gates are not installation, native-port/Windows, real-provider/model/OAuth, signing/notarization, distribution, power-loss/exactly-once or arbitrary-code sandbox certification. Historical failures and stronger release gates remain visible below.
+
 ## Unmerged non-KVP adoption — 2026-11-04
 
-**Not release-accepted.** The separate external worktree `/Volumes/TradingHub-upstream-a861ab10ae/non-kvp-adoption-17dec28-streamed`, branch `feat/non-kvp-adoption`, base `17dec28f0edbe4f1204b9c9a5d99ea1a6840342c`, is uncommitted, unmerged and **not installed**. The header and installation history above/below describe canonical/installed historical checkpoints, not this worktree's runtime. Canonical source, main, installed app, Rust/Swift worktrees and user stores remain untouched. Historical audit baseline `9ee74a4` and upstream integrated checkpoint are unchanged.
+**Historical candidate checkpoint; superseded by the canonical integration above.** At completion of the separate external worktree `/Volumes/TradingHub-upstream-a861ab10ae/non-kvp-adoption-17dec28-streamed`, branch `feat/non-kvp-adoption`, base `17dec28f0edbe4f1204b9c9a5d99ea1a6840342c`, the work was uncommitted, unmerged and **not installed**. The following table retains those external-worktree results; it is not fresh canonical verification. Historical audit baseline `9ee74a4` and upstream integrated checkpoint remain unchanged.
 
 Selected adoption covers search/deep zoom, QuanTAlib/flow/OI studies, data-only IB import/history, optional Codex strategy chat and explicitly approved TradingView research. PANASV pin `cdb84ea16eee7ac8d6c1b74136d2eeacedadf834` and jjuangutierrez pin `8ceaf4c43e50edb29e96bfc17ae5c8f19b7e17d9` attribution and five restored dependency families are indexed in [Third-party notices](../../THIRD_PARTY_NOTICES.md). TradeDock is inherited; Dham runtime and Intel imports are unselected; KVP remains last/deferred.
 
@@ -46,7 +73,7 @@ Research's feature-owned FileSystemWatcher was replaced by one nonoverlapping 25
 
 The final catalogs include the actual app-owned composed Spanish My indicators caption; persistent IDs/custom names are unchanged. Parent inspected Spanish study names/editors/month fidelity footers; English, Spanish and Chinese each passed the same 185-check actual six-study settings-consumer scene. The final post-documentation full English checker passed as recorded above, superseding the earlier 13,162-token checkpoint. Individual final source-review hash reasons and deletion guard remain unchanged. Owned SSD runtime/fake fixtures were removed only after identity checks, the complete 663-test suite and three-language proofs, with exact owner marker/no-active-process checks; external TRX, PNGs, receipts and publish output remain. The owned aborted partial checkout was exact-baseline-verified and removed without altering the active worktree or registry.
 
-These are selected unmerged **C#-only** adoption results, not release approval or installed-app evidence. Actual publish is not signing, notarization, installation or distribution certification. No real provider/model/OAuth, native broker/Windows, power-loss/exactly-once or arbitrary-code sandbox certification follows from fake fixtures. Those release boundaries remain intentionally open; KVP stays deferred. [Reproduce safely](desarrollo.md#selected-non-kvp-reproduction).
+These historical external-worktree **C#-only** adoption results are not release approval or installed-app evidence; the source is now merged as recorded above. Actual publish is not signing, notarization, installation or distribution certification. No real provider/model/OAuth, native broker/Windows, power-loss/exactly-once or arbitrary-code sandbox certification follows from fake fixtures. Those release boundaries remain intentionally open; KVP stays deferred. [Reproduce safely](desarrollo.md#selected-non-kvp-reproduction).
 
 ## Scope and provenance
 
