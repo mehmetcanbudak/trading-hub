@@ -311,6 +311,22 @@ if (Environment.GetEnvironmentVariable("TRADINGHUB_SNAP_DEBUG") == "1")
 int exitCode = 0;
 foreach (var page in pages)
 {
+    int? nonKvpResult = page switch
+    {
+        "nonkvp-search-zoom" => NonKvpSearchZoomScene.Run(window, Pump, outDir),
+        "nonkvp-studies" => NonKvpStudiesScene.Run(window, Pump, outDir),
+        "nonkvp-oi" => NonKvpOpenInterestScene.Run(window, Pump, outDir),
+        "nonkvp-ib" => NonKvpIbDataScene.Run(window, Pump, outDir),
+        "nonkvp-assistant" => NonKvpAssistantScene.Run(window, Pump, outDir),
+        "nonkvp-tradingview" => NonKvpTradingViewScene.Run(window, Pump, outDir),
+        _ => null,
+    };
+    if (nonKvpResult is { } result)
+    {
+        exitCode += result;
+        continue;
+    }
+
     if (page == "english")
     {
         exitCode += EnglishScene.Run(window, Pump, outDir);

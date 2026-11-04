@@ -13,6 +13,9 @@ public sealed class TickData
     private readonly long[] _prices;
     private readonly double[] _volumes;
     private readonly byte[] _sides;
+    // Side occupies the low bits; the high bit preserves aggregate/synthetic origin without an ID array.
+    private const byte SyntheticFlag = 0x80;
+    private static byte EncodeSide(TradeSide side, bool synthetic) => (byte)((byte)side | (synthetic ? SyntheticFlag : 0));
 
     private TickData(Instrument instrument, long[] times, long[] prices, double[] volumes, byte[] sides, int start, int end, bool compressed = false)
     {
@@ -81,9 +84,12 @@ public sealed class TickData
     public long TimeTicks(int i) => _times[i];
     public long PriceTicks(int i) => _prices[i];
     public decimal Volume(int i) => (decimal)_volumes[i];
-    public TradeSide Side(int i) => (TradeSide)_sides[i];
+    public TradeSide Side(int i) => (TradeSide)(_sides[i] & ~SyntheticFlag);
+    /// <summary>True for bar-derived proxy events, not observed individual trades. Views and compression preserve this flag.</summary>
+    public bool IsSynthetic(int i) => (_sides[i] & SyntheticFlag) != 0;
 
-    public Trade Get(int i) => new(i, new DateTime(_times[i], DateTimeKind.Utc), Instrument.FromTicks(_prices[i]), (decimal)_volumes[i], (TradeSide)_sides[i]);
+    /// <summary>Derived event identity; its sign preserves provenance, not the original provider's trade ID.</summary>
+    public Trade Get(int i) => new(IsSynthetic(i) ? -1L - i : i, new DateTime(_times[i], DateTimeKind.Utc), Instrument.FromTicks(_prices[i]), (decimal)_volumes[i], Side(i));
 
     /// <summary>Sub-rango por tiempo (sin copiar).</summary>
     public TickData Slice(DateTime fromUtc, DateTime toUtc)
@@ -141,7 +147,7 @@ public sealed class TickData
                     long ticks = t.Time.Ticks;
                     if (n > 0 && ticks < times[n - 1]) ticks = times[n - 1];
                     long price = instrument.ToTicks(t.Price);
-                    byte side = (byte)t.Side;
+                    byte side = EncodeSide(t.Side, KlineHistory.IsSynthetic(t.Id));
                     if (compress && n > 0 && prices[n - 1] == price && sides[n - 1] == side && times[n - 1] / TimeSpan.TicksPerSecond == ticks / TimeSpan.TicksPerSecond)
                     {
                         volumes[n - 1] += (double)t.Volume;
@@ -185,7 +191,7 @@ public sealed class TickData
             times[i] = store.GetTimeTicks(i);
             prices[i] = store.GetPriceTicks(i);
             volumes[i] = (double)store.GetVolume(i);
-            sides[i] = (byte)store.GetSide(i);
+            sides[i] = EncodeSide(store.GetSide(i), KlineHistory.IsSynthetic(store.GetId(i)));
         }
 
         return new TickData(store.Instrument, times, prices, volumes, sides, 0, n);
@@ -203,7 +209,7 @@ public sealed class TickData
             times[i] = trades[i].Time.Ticks;
             prices[i] = instrument.ToTicks(trades[i].Price);
             volumes[i] = (double)trades[i].Volume;
-            sides[i] = (byte)trades[i].Side;
+            sides[i] = EncodeSide(trades[i].Side, KlineHistory.IsSynthetic(trades[i].Id));
         }
 
         return new TickData(instrument, times, prices, volumes, sides, 0, n);

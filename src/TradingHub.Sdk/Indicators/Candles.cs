@@ -74,6 +74,16 @@ namespace TradingHub.Indicators
         public decimal OI => _c.OI;
         public decimal MaxOI => _c.MaxOI;
         public decimal MinOI => _c.MinOI;
+        public bool HasOpenInterest => _c.HasOpenInterest;
+        public bool HasOpenInterestRange => _c.HasOpenInterestRange;
+        public DateTime? OpenInterestTime => _c.OpenInterestTime;
+        public bool HasOpenInterestChange => _c.HasOpenInterestChange;
+        public decimal OpenInterestChange => _c.OpenInterestChange;
+        public string? OpenInterestStatus => _c.OpenInterestStatus;
+        /// <summary>At least one observed footprint row; mixed aggregate history may also be present.</summary>
+        public bool HasObservedFootprint => !_c.Levels.IsEmpty;
+        /// <summary>All contributions in this candle came from observed trades, not aggregate bars.</summary>
+        public bool IsFootprintComplete => _c.HasRealTrades && !_c.HasSyntheticTrades;
         public bool IsCandleFinished => _c.IsClosed;
         public decimal MaxTradeVolume => _c.MaxTradeVolume;
 

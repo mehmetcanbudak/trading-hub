@@ -47,6 +47,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private BarBuilder _builder = null!;
     private bool _warmup;
     private long _nextId = 1, _lastId = long.MinValue;
+    private int _lastSyntheticIndex = -1;
     private long _timeTicks, _priceTicks;
     private decimal _lastPos;
     private StrategyOrder? _sl, _tp;
@@ -588,8 +589,16 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     {
         var store = _data.Trades;
         long id = store.GetId(i);
-        if (id <= _lastId) return;
-        _lastId = id;
+        if (KlineHistory.IsSynthetic(id))
+        {
+            if (i <= _lastSyntheticIndex) return;
+            _lastSyntheticIndex = i;
+        }
+        else
+        {
+            if (id <= _lastId) return;
+            _lastId = id;
+        }
         long t = store.GetTimeTicks(i), p = store.GetPriceTicks(i);
         _timeTicks = t;
         var closed = _builder.Roll(t, p);
@@ -615,7 +624,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         }
 
         _priceTicks = p;
-        _builder.Append(t, p, store.GetVolume(i), store.GetSide(i));
+        _builder.Append(t, p, store.GetVolume(i), store.GetSide(i), KlineHistory.IsSynthetic(store.GetId(i)));
         if (_warmup) return;
         Trail(store.GetPrice(i));
         if (_strategy.WantsTicks) _strategy.InternalTick(store.Get(i));

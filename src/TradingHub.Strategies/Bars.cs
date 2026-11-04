@@ -14,22 +14,29 @@ public sealed class Bar
     public decimal Low { get; internal set; }
     public decimal Close { get; internal set; }
     public decimal Volume { get; internal set; }
+    public bool HasRealTrades { get; internal set; }
+    public bool HasSyntheticTrades { get; internal set; }
+    public bool IsSynthetic => HasSyntheticTrades && !HasRealTrades;
+    public bool HasObservedPoc { get; internal set; }
+    public bool HasObservedFootprint => _levels is { Count: > 0 };
 
-    /// <summary>Volumen de compradores agresivos (pegaron al ask).</summary>
+    /// <summary>Source-reported/inferred buy volume; includes estimated allocations when HasSyntheticTrades is true.</summary>
     public decimal BuyVolume { get; internal set; }
 
-    /// <summary>Volumen de vendedores agresivos (pegaron al bid).</summary>
+    /// <summary>Source-reported/inferred sell volume; includes estimated allocations when HasSyntheticTrades is true.</summary>
     public decimal SellVolume { get; internal set; }
 
+    /// <summary>Aggregate side balance; includes synthetic allocation estimates when HasSyntheticTrades is true.</summary>
     public decimal Delta => BuyVolume - SellVolume;
     public decimal MaxDelta { get; internal set; }
     public decimal MinDelta { get; internal set; }
+    /// <summary>Input event count; synthetic bars contribute proxy events, not an observed exchange trade count.</summary>
     public int Trades { get; internal set; }
 
-    /// <summary>Precio con más volumen de la vela (POC).</summary>
+    /// <summary>Observed footprint POC when HasObservedPoc; otherwise first real-trade fallback, or zero for synthetic-only bars.</summary>
     public decimal PocPrice { get; internal set; }
 
-    /// <summary>Volumen por precio (solo si la estrategia activa <c>UseFootprint</c>).</summary>
+    /// <summary>Observed trades only, when UseFootprint is enabled. Synthetic aggregates never create levels.</summary>
     public IReadOnlyDictionary<decimal, (decimal Buy, decimal Sell)> Levels => _levels ?? Empty;
 
     public bool IsBullish => Close > Open;
@@ -102,11 +109,17 @@ internal sealed class BarBuilder
     }
 
     /// <summary>Agrega la operación a la vela en formación (la crea si hace falta).</summary>
-    public void Append(long timeTicks, long priceTicks, decimal volume, TradeSide side)
+    public void Append(long timeTicks, long priceTicks, decimal volume, TradeSide side, bool synthetic)
     {
         if (_current == null) Start(timeTicks, priceTicks);
         var b = _current!;
         decimal price = _instrument.FromTicks(priceTicks);
+        if (synthetic) b.HasSyntheticTrades = true;
+        else
+        {
+            if (!b.HasRealTrades) b.PocPrice = price;
+            b.HasRealTrades = true;
+        }
         if (priceTicks > _highT)
         {
             _highT = priceTicks;
@@ -128,7 +141,7 @@ internal sealed class BarBuilder
         if (d < b.MinDelta) b.MinDelta = d;
         b.Trades++;
         b.CloseTime = new DateTime(timeTicks, DateTimeKind.Utc);
-        if (_footprint)
+        if (_footprint && !synthetic)
         {
             b._levels ??= new Dictionary<decimal, (decimal Buy, decimal Sell)>();
             b._levels.TryGetValue(price, out var lv);
@@ -138,6 +151,7 @@ internal sealed class BarBuilder
             {
                 _pocVolume = lv.Buy + lv.Sell;
                 b.PocPrice = price;
+                b.HasObservedPoc = true;
             }
         }
     }
@@ -175,13 +189,13 @@ internal sealed class BarBuilder
         }
 
         decimal price = _instrument.FromTicks(priceTicks);
-        _current = new Bar { Index = _index++, Time = open, CloseTime = open, Open = price, High = price, Low = price, Close = price, PocPrice = price };
+        _current = new Bar { Index = _index++, Time = open, CloseTime = open, Open = price, High = price, Low = price, Close = price };
         _highT = _lowT = priceTicks;
         _pocVolume = 0;
     }
 
     private static void Finish(Bar b)
     {
-        if (b.PocPrice == 0) b.PocPrice = b.Close;
+        if (b.HasRealTrades && b.PocPrice == 0) b.PocPrice = b.Close;
     }
 }

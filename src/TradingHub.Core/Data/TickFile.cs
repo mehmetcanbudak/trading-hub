@@ -103,9 +103,12 @@ public static class TickFile
 
         public void Dispose()
         {
-            _bs.Flush();
-            _bs.Dispose();
-            _fs.Dispose();
+            try { _bs.Flush(); }
+            finally
+            {
+                try { _bs.Dispose(); }
+                finally { _fs.Dispose(); }
+            }
         }
     }
 
@@ -139,13 +142,20 @@ public static class TickFile
     /// imposible hasta el keyframe siguiente al último, así no queda basura "creíble" en el medio.
     /// Lo que falte se vuelve a pedir al exchange al cargar (los huecos se rellenan solos).
     /// </summary>
-    public static List<Trade> Read(string path, out int dropped)
+    public static List<Trade> Read(string path, out int dropped, bool requireComplete = false) =>
+        ReadCore(path, out dropped, requireComplete, allowIncompleteHeader: false);
+
+    /// <summary>Read an append snapshot only while the caller has established another writer owns the instrument lease.</summary>
+    internal static List<Trade> ReadAppendPrefix(string path, out int dropped, decimal? expectedTickSize = null) =>
+        ReadCore(path, out dropped, requireComplete: false, allowIncompleteHeader: true, expectedTickSize);
+
+    private static List<Trade> ReadCore(string path, out int dropped, bool requireComplete, bool allowIncompleteHeader, decimal? expectedTickSize = null)
     {
         dropped = 0;
         var result = new List<Trade>();
         if (!File.Exists(path)) return result;
         byte[] data;
-        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
         {
             data = new byte[fs.Length];
             int read = 0;
@@ -157,12 +167,22 @@ public static class TickFile
             }
         }
 
-        if (data.Length < 5 || !data.AsSpan(0, 4).SequenceEqual(Magic)) return result;
+        if (allowIncompleteHeader)
+        {
+            int prefix = Math.Min(data.Length, Magic.Length);
+            if (!data.AsSpan(0, prefix).SequenceEqual(Magic.AsSpan(0, prefix)))
+                throw new InvalidDataException("Invalid tick-file magic: " + path);
+            if (data.Length < 5) return result; // A real writer has not flushed its complete initial header yet.
+        }
+        else if (data.Length < 5 || !data.AsSpan(0, 4).SequenceEqual(Magic)) return result;
         int pos = 4;
         int tsLen = data[pos++];
+        if (allowIncompleteHeader && tsLen == 0) throw new InvalidDataException("Invalid tick-size header: " + path);
         if (pos + tsLen > data.Length) return result;
         var tickSize = decimal.Parse(Encoding.UTF8.GetString(data, pos, tsLen), CultureInfo.InvariantCulture);
         pos += tsLen;
+        if (allowIncompleteHeader && tickSize <= 0) throw new InvalidDataException("Invalid tick-size header: " + path);
+        if (expectedTickSize.HasValue && tickSize != expectedTickSize) throw new InvalidDataException("Tick metadata differs from the catalog: " + path);
 
         // el archivo es de un día UTC: un tiempo fuera de ese día es basura
         long minMs = long.MinValue, maxMs = long.MaxValue;
@@ -187,21 +207,25 @@ public static class TickFile
                 long id, ms, price, dId = 1, dPrice = 0;
                 if (key)
                 {
-                    id = (long)ReadVarint(data, ref pos);
-                    ms = (long)ReadVarint(data, ref pos);
-                    price = UnZigZag(ReadVarint(data, ref pos));
+                    id = (long)ReadVarint(data, ref pos, allowIncompleteHeader);
+                    ms = (long)ReadVarint(data, ref pos, allowIncompleteHeader);
+                    price = UnZigZag(ReadVarint(data, ref pos, allowIncompleteHeader));
                 }
                 else
                 {
-                    dId = UnZigZag(ReadVarint(data, ref pos));
+                    dId = UnZigZag(ReadVarint(data, ref pos, allowIncompleteHeader));
                     id = prevId + dId;
-                    ms = prevMs + (long)ReadVarint(data, ref pos);
-                    dPrice = UnZigZag(ReadVarint(data, ref pos));
+                    ms = prevMs + (long)ReadVarint(data, ref pos, allowIncompleteHeader);
+                    dPrice = UnZigZag(ReadVarint(data, ref pos, allowIncompleteHeader));
                     price = prevPrice + dPrice;
                 }
 
-                ulong mant = ReadVarint(data, ref pos);
-                if (pos > data.Length) break; // registro truncado (corte de luz, etc.)
+                ulong mant = ReadVarint(data, ref pos, allowIncompleteHeader);
+                if (pos > data.Length)
+                {
+                    if (requireComplete) throw new InvalidDataException("Truncated tick record: " + path);
+                    break;
+                }
 
                 if (firstId < 0) firstId = id;
 
@@ -230,6 +254,7 @@ public static class TickFile
         }
         catch (IndexOutOfRangeException)
         {
+            if (requireComplete) throw new InvalidDataException("Truncated or invalid tick record: " + path);
             // último registro incompleto: se ignora
         }
 
@@ -354,21 +379,55 @@ public static class TickFile
     /// Permiso exclusivo para grabar un instrumento: un solo proceso escribe sus archivos (dos escritores
     /// mezclan los registros y dañan el archivo). Devuelve null si otro ya lo tiene; se libera al cerrar.
     /// </summary>
-    public static FileStream? TryLock(string root, string feedId, string symbol)
+    public static FileStream? TryLock(string root, string feedId, string symbol, bool failOnNonSharingError = false, bool recordingWriter = false)
     {
         var dir = Path.Combine(root, Sanitize(feedId), Sanitize(symbol));
         try
         {
             Directory.CreateDirectory(dir);
+            if (recordingWriter)
+                return new RecordingLease(Path.Combine(dir, ".grabando.lock"), Path.Combine(dir, ".recording-active.lock"));
             return new FileStream(Path.Combine(dir, ".grabando.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         }
-        catch (IOException)
+        catch (IOException error) when (!failOnNonSharingError || IsSharingViolation(error))
         {
             return null;
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException) when (!failOnNonSharingError)
         {
             return null;
+        }
+    }
+
+    // Win32 sharing/lock violations; POSIX EAGAIN/EWOULDBLOCK on Linux and Darwin.
+    private static bool IsSharingViolation(IOException error) => (error.HResult & 0xFFFF) is 11 or 35 or 32 or 33;
+
+    /// <summary>Cross-process proof of an actual append recorder, not merely an import/replacement lease.</summary>
+    internal static bool HasActiveRecordingWriter(string root, string feedId, string symbol)
+    {
+        string path = Path.Combine(root, Sanitize(feedId), Sanitize(symbol), ".recording-active.lock");
+        try
+        {
+            using var probe = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            return false;
+        }
+        catch (IOException error) when (IsSharingViolation(error)) { return true; }
+    }
+
+    private sealed class RecordingLease : FileStream
+    {
+        private readonly FileStream? _marker;
+        public RecordingLease(string primary, string marker)
+            : base(primary, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)
+        {
+            try { _marker = new FileStream(marker, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch { base.Dispose(true); throw; }
+        }
+        protected override void Dispose(bool disposing)
+        {
+            // Writer closes first in its owner. Marker lifetime must be strictly inside primary ownership.
+            try { if (disposing) _marker?.Dispose(); }
+            finally { base.Dispose(disposing); }
         }
     }
 
@@ -432,7 +491,7 @@ public static class TickFile
         return n;
     }
 
-    private static ulong ReadVarint(byte[] data, ref int pos)
+    private static ulong ReadVarint(byte[] data, ref int pos, bool rejectMalformed = false)
     {
         ulong result = 0;
         int shift = 0;
@@ -442,7 +501,11 @@ public static class TickFile
             result |= (ulong)(b & 0x7F) << shift;
             if ((b & 0x80) == 0) break;
             shift += 7;
-            if (shift > 63) throw new IndexOutOfRangeException();
+            if (shift > 63)
+            {
+                if (rejectMalformed) throw new InvalidDataException("Invalid overlong tick varint.");
+                throw new IndexOutOfRangeException();
+            }
         }
 
         return result;

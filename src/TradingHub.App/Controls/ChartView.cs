@@ -1,5 +1,7 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Threading;
 using SkiaSharp;
 using TradingHub.Charting;
 using TradingHub.Charting.Rendering;
@@ -14,6 +16,9 @@ public sealed class ChartView : SkiaView
     private readonly ChartRenderState _state = new();
     private ChartModel? _model;
     private ChartController? _controller;
+    private readonly TextBlock _recordingWarningTip = new() { FontSize = 13, MaxWidth = 420, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private bool _recordingWarningTipActive, _recordingWarningAttached;
+    private int _recordingWarningTipGeneration;
 
     public ChartModel? Model
     {
@@ -21,7 +26,12 @@ public sealed class ChartView : SkiaView
         set
         {
             if (ReferenceEquals(_model, value)) return;
+            if (_recordingWarningAttached && _model != null) _model.Invalidated -= RecordingWarningInvalidated;
             _model = value;
+            if (_recordingWarningAttached && _model != null) _model.Invalidated += RecordingWarningInvalidated;
+            _state.CompactRecordingWarning = null;
+            _state.CompactRecordingWarningBounds = null;
+            ClearRecordingWarningTip();
             _controller = value != null ? new ChartController(value, _state) : null;
             if (_controller != null) _controller.ToolFinished += () => ToolFinished?.Invoke();
             if (_controller != null) _controller.DrawingsChanged += () => DrawingsChanged?.Invoke();
@@ -98,11 +108,113 @@ public sealed class ChartView : SkiaView
     {
         if (_model == null)
         {
+            ClearRecordingWarningTip();
             canvas.Clear(new SKColor(6, 10, 20));
             return;
         }
 
         _renderer.Render(canvas, _model, width, height, _state);
+        UpdateRecordingWarningTip();
+    }
+
+    private void ClearRecordingWarningTip()
+    {
+        _recordingWarningTipGeneration++;
+        bool ownsTip = ReferenceEquals(ToolTip.GetTip(this), _recordingWarningTip);
+        if (!_recordingWarningTipActive && !ownsTip) return;
+        _recordingWarningTipActive = false;
+        if (ownsTip)
+        {
+            ToolTip.SetIsOpen(this, false);
+            ToolTip.SetTip(this, null);
+        }
+        _recordingWarningTip.Text = null;
+    }
+
+    private string? CurrentRecordingWarningDisclosure()
+    {
+        // Render state supplies geometry, not recording authority. Recovery/loading can
+        // invalidate the model before the next picture is recorded, including while focused.
+        if (!_recordingWarningAttached || _model == null || _model.Data.IsLoadingHistory ||
+            _model.Series.Count == 0 || _state.Message != null) return null;
+        string? warning = _model.Data.RecordingWarning;
+        if (warning == null || warning != _state.CompactRecordingWarning) return null;
+        bool hovering = _state.CompactRecordingWarningBounds is { } bounds &&
+            _state.MouseX is { } x && _state.MouseY is { } y && bounds.Contains(x, y);
+        return IsFocused || hovering ? warning : null;
+    }
+
+    private void RecordingWarningInvalidated()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(RecordingWarningInvalidated);
+            return;
+        }
+        // Close obsolete disclosure immediately, without reopening from cached geometry
+        // or reacting to transient render-state reset while a picture is being recorded.
+        if (!_recordingWarningAttached || _model == null || _model.Data.IsLoadingHistory ||
+            _model.Series.Count == 0 || _state.Message != null ||
+            _model.Data.RecordingWarning is not { } warning ||
+            (_recordingWarningTipActive && _recordingWarningTip.Text != UiText.Tr(warning)))
+            ClearRecordingWarningTip();
+    }
+
+    private void UpdateRecordingWarningTip()
+    {
+        string? warning = CurrentRecordingWarningDisclosure();
+        if (warning == null)
+        {
+            ClearRecordingWarningTip();
+            return;
+        }
+        string text = UiText.Tr(warning);
+        if (_recordingWarningTipActive && _recordingWarningTip.Text == text) return;
+        _recordingWarningTip.Text = text;
+        _recordingWarningTipActive = true;
+        int generation = ++_recordingWarningTipGeneration;
+        var model = _model;
+        ToolTip.SetTip(this, _recordingWarningTip);
+        // Drawing records on the UI thread; create the popup after that recording completes.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (generation != _recordingWarningTipGeneration) return;
+            if (!_recordingWarningTipActive || !ReferenceEquals(_model, model) ||
+                !ReferenceEquals(ToolTip.GetTip(this), _recordingWarningTip) ||
+                CurrentRecordingWarningDisclosure() != warning || UiText.Tr(warning) != text)
+            {
+                ClearRecordingWarningTip();
+                return;
+            }
+            ToolTip.SetIsOpen(this, true);
+        });
+    }
+
+    protected override void OnGotFocus(GotFocusEventArgs e)
+    {
+        base.OnGotFocus(e);
+        UpdateRecordingWarningTip();
+    }
+
+    protected override void OnLostFocus(Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        base.OnLostFocus(e);
+        UpdateRecordingWarningTip();
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _recordingWarningAttached = true;
+        if (_model != null) _model.Invalidated += RecordingWarningInvalidated;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        _recordingWarningAttached = false;
+        if (_model != null) _model.Invalidated -= RecordingWarningInvalidated;
+        ClearRecordingWarningTip();
+        base.OnDetachedFromVisualTree(e);
     }
 
     private static InputModifiers Mods(KeyModifiers k)
@@ -151,6 +263,7 @@ public sealed class ChartView : SkiaView
         var mods = Mods(e.KeyModifiers);
         if (_controller.HasPending) _controller.HoverPending((float)p.X, (float)p.Y, mods);
         _controller.MouseMove((float)p.X, (float)p.Y, mods);
+        UpdateRecordingWarningTip();
         UpdateCursor();
         InvalidateVisual();
         RaiseCrosshair(p);
@@ -180,6 +293,7 @@ public sealed class ChartView : SkiaView
     {
         base.OnPointerExited(e);
         _controller?.Leave();
+        UpdateRecordingWarningTip();
         InvalidateVisual();
         CrosshairMoved?.Invoke(null, null);
     }

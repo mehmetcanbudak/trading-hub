@@ -41,6 +41,11 @@ public static class HistorySources
             var path = TickFile.DayPath(root, folder, symbol, day);
             if (File.Exists(path) && new FileInfo(path).Length > 16) files.Add(path);
         }
+            if (feedId == IbBarImport.FeedId)
+            {
+                var barPath = TickFile.DayPath(root, IbBarStore.BarFolder, symbol, day);
+                if (File.Exists(barPath)) files.Add(barPath);
+            }
 
         return files;
     }
@@ -54,6 +59,8 @@ public static class HistorySources
         foreach (var folder in Folders(feedId))
             foreach (var d in TickFile.AvailableDays(root, folder, symbol))
                 days.Add(d);
+        if (feedId == IbBarImport.FeedId)
+            foreach (var day in TickFile.AvailableDays(root, IbBarStore.BarFolder, symbol)) days.Add(day);
         return days.ToList();
     }
 
@@ -74,6 +81,7 @@ public static class HistorySources
     /// </summary>
     public static List<Trade> ReadDay(string root, string feedId, string symbol, DateOnly day)
     {
+        if (feedId == IbBarImport.FeedId) return IbBarStore.ReadDay(root, symbol, day);
         var files = DayFiles(root, feedId, symbol, day);
         if (files.Count == 0) return new List<Trade>();
         var main = TickFile.SortAndDedupe(TickFile.Read(files[0]));
@@ -153,6 +161,7 @@ public static class HistorySources
     public static string Describe(SymbolData s)
     {
         if (s.FeedId == Databento) return "Databento";
+        if (s.FeedId == IbBarImport.FeedId) return "IB recorded ticks + synthetic OHLCV (not real order flow)";
         if (s.FeedId.EndsWith(OnlySuffix, StringComparison.Ordinal)) return "only " + Pretty(Folder(s.FeedId));
         return s.Combined ? $"{Pretty(s.FeedId)} + Databento" : Pretty(s.FeedId);
     }

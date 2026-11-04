@@ -145,7 +145,12 @@ internal sealed class SeriesRenderer
         }
     }
 
-    private static bool IsEmpty(decimal v, ValueDataSeries vs, bool isPrice) => v == 0 && (isPrice || !vs.ShowZeroValue);
+    private static bool IsEmpty(decimal v, ValueDataSeries vs, bool isPrice, int bar) =>
+        vs is IValueDataSeriesAvailability availability ? !availability.IsAvailable(bar) : v == 0 && (isPrice || !vs.ShowZeroValue);
+
+    private static bool IsHistogramEmpty(decimal v, ValueDataSeries vs, bool isPrice, int bar) =>
+        vs is IValueDataSeriesAvailability availability ? !availability.IsAvailable(bar) :
+        v == vs.ZeroValue && !vs.ShowZeroValue || isPrice && v == 0;
 
     /// <summary>Y de un precio de nivel (centro de su fila) o de un precio cualquiera.</summary>
     private static float YLevel(PanelLayout panel, decimal price) =>
@@ -174,7 +179,7 @@ internal sealed class SeriesRenderer
                 for (int i = first; i <= last; i++)
                 {
                     var v = vs[i];
-                    if (IsEmpty(v, vs, panel.IsPrice))
+                    if (IsEmpty(v, vs, panel.IsPrice, i))
                     {
                         hasPrev = false;
                         continue;
@@ -217,8 +222,7 @@ internal sealed class SeriesRenderer
                 for (int i = first; i <= last; i++)
                 {
                     var v = vs[i];
-                    if (v == vs.ZeroValue && !vs.ShowZeroValue) continue;
-                    if (panel.IsPrice && v == 0) continue;
+                    if (IsHistogramEmpty(v, vs, panel.IsPrice, i)) continue;
                     float x = layout.CenterX(i), y = panel.Y(v);
                     _fill.Color = vs.Colors.Has(i) ? vs.Colors[i].ToSk() : baseColor;
                     _fill.IsAntialias = false;
@@ -239,7 +243,7 @@ internal sealed class SeriesRenderer
                 for (int i = first; i <= last; i++)
                 {
                     var v = vs[i];
-                    if (IsEmpty(v, vs, panel.IsPrice)) continue;
+                    if (IsEmpty(v, vs, panel.IsPrice, i)) continue;
                     float x = layout.CenterX(i), y = panel.Y(v);
                     _stroke.Color = vs.Colors.Has(i) ? vs.Colors[i].ToSk() : baseColor;
                     canvas.DrawLine(x - half, y, x + half, y, _stroke);
@@ -262,7 +266,7 @@ internal sealed class SeriesRenderer
             if (lastBar >= 0)
             {
                 var v = vs[lastBar];
-                if (!(panel.IsPrice && v == 0))
+                if (vs is IValueDataSeriesAvailability availability ? availability.IsAvailable(lastBar) : !(panel.IsPrice && v == 0))
                 {
                     float y = panel.Y(v);
                     if (y >= panel.Rect.Top && y <= panel.Rect.Bottom)
@@ -290,7 +294,7 @@ internal sealed class SeriesRenderer
         for (int i = first; i <= last; i++)
         {
             var v = vs[i];
-            if (IsEmpty(v, vs, panel.IsPrice)) continue;
+            if (IsEmpty(v, vs, panel.IsPrice, i)) continue;
             float x = layout.CenterX(i), y = panel.Y(v);
             var col = vs.Colors.Has(i) ? vs.Colors[i].ToSk() : baseColor;
             _fill.Color = col;
@@ -599,7 +603,9 @@ internal sealed class SeriesRenderer
                         for (int i = first; i <= last && i < vs.Count; i++)
                         {
                             var v = vs[i];
-                            if (v == 0 && (isPrice || !vs.ShowZeroValue)) continue;
+                            if (vs.VisualType == VisualMode.Histogram
+                                ? IsHistogramEmpty(v, vs, isPrice, i)
+                                : IsEmpty(v, vs, isPrice, i)) continue;
                             Take(v);
                         }
 

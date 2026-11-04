@@ -315,8 +315,16 @@ internal sealed class ConnectionsView : UserControl, IPage
             try
             {
                 _svc.Connections.ClearSecrets(p);
-                _svc.Connections.Invalidate(p);
-                _svc.Connections.Profiles.Remove(p);
+                if (p.Kind == ConnectionKind.InteractiveBrokers)
+                {
+                    _svc.Connections.Profiles.Remove(p);
+                    _svc.Connections.Invalidate(p);
+                }
+                else
+                {
+                    _svc.Connections.Invalidate(p);
+                    _svc.Connections.Profiles.Remove(p);
+                }
                 _svc.Connections.Save();
                 _selected = null;
                 FillList();
@@ -872,16 +880,22 @@ internal sealed class ConnectionsView : UserControl, IPage
         var host = new TextBox { Text = p.IbHost };
         var port = new NumericUpDown { Value = p.IbPort, Minimum = 1, Maximum = 65535, FormatString = "0" };
         var client = new NumericUpDown { Value = p.IbClientId, Minimum = 0, Maximum = 999, FormatString = "0" };
+        var offline = new CheckBox { Content = "Stored/offline mode — never connect to Gateway", IsChecked = p.IbOffline };
+        void Mode() { host.IsEnabled = port.IsEnabled = client.IsEnabled = offline.IsChecked != true; }
+        offline.IsCheckedChanged += (_, _) => Mode();
+        Mode();
         apply.Add(() =>
         {
             p.IbHost = string.IsNullOrWhiteSpace(host.Text) ? "127.0.0.1" : host.Text.Trim();
             p.IbPort = (int)(port.Value ?? 7497);
             p.IbClientId = (int)(client.Value ?? 17);
+            p.IbOffline = offline.IsChecked == true;
         });
         return Ui.V(14,
             Ui.H2("Interactive Brokers (TWS / IB Gateway)"),
-            Note(MaterialIconKind.InformationOutline, "Open TWS or IB Gateway and enable API access (Configure → API → Settings). Common ports: 7497 TWS paper, 7496 TWS real, 4002 Gateway paper. Trading Hub currently only tests connectivity."),
+            Note(MaterialIconKind.InformationOutline, "DATA ONLY: MNQ, MES, M2K, MYM, NQ, ES, RTY, YM. No IB account or order execution. Online mode requires TWS/Gateway socket API and negotiated protocol 187. Common ports: 7497 TWS paper, 7496 TWS real, 4002 Gateway paper. START_API readiness does not establish exchange entitlements. Historical TRADES bars are synthetic (no real footprint); live aggressor side is inferred. Calendar rolls, no price adjustment; session starts at New York 18:00 with DST."),
+            offline,
             TwoColumns(Ui.Field("Host", host), Ui.Field("Port", port)),
-            Ui.Field("Client ID", client));
+            Ui.Field("Unique client ID (not shared with another API client)", client));
     }
 }

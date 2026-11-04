@@ -6,35 +6,27 @@ using Avalonia.Threading;
 
 namespace TradingHub.App.Services;
 
-/// <summary>Resultado de un pedido a Claude Code.</summary>
-public sealed record ClaudeResult(bool IsError, string Text, double CostUsd, double Seconds, bool NeedsLogin);
-
 /// <summary>
 /// Runs the user's subscription-authenticated Claude Code CLI on macOS or Windows, restricted to the
 /// requested workspace, and streams its response. No provider API credentials are required.
 /// </summary>
-public sealed class ClaudeCodeBridge
+public sealed class ClaudeCodeBridge : StrategyChatProcess
 {
+    public ClaudeCodeBridge(TradingViewResearchService? research = null) : base(research) { }
     private static string? _helpText;
     private static string? _helpCli;
 
     /// <summary>¿La CLI instalada conoce esta opción? (se lee una vez su --help)</summary>
-    public static async Task<Func<string, bool>> SupportsAsync(string cli)
+    public static async Task<Func<string, bool>> SupportsAsync(string cli, CancellationToken cancellationToken = default)
     {
         if (_helpText == null || !PathComparer.Equals(_helpCli, cli))
         {
             string text = "";
             try
             {
-                var psi = Prepare(cli, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-                psi.ArgumentList.Add("--help");
-                using var p = Process.Start(psi)!;
-                p.StandardInput.Close();
-                var read = p.StandardOutput.ReadToEndAsync();
-                if (await Task.WhenAny(read, Task.Delay(15000)) == read) text = (await read).Replace("\r\n", "\n");
-                else p.Kill(true);
+                text = (await HelpAsync(cli, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cancellationToken, "--help")).Replace("\r\n", "\n");
             }
-            catch
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
             {
                 // sin ayuda: solo las opciones básicas
             }
@@ -47,29 +39,6 @@ public sealed class ClaudeCodeBridge
         return flag => help.Contains(flag + " ", StringComparison.Ordinal) || help.Contains(flag + ",", StringComparison.Ordinal) || help.Contains(flag + "\n", StringComparison.Ordinal);
     }
 
-    private Process? _proc;
-    private bool _streamedText;
-
-    /// <summary>Id de la conversación (para seguirla con --resume).</summary>
-    public string? SessionId { get; private set; }
-
-    public bool IsRunning => _proc is { HasExited: false };
-
-    /// <summary>Texto de Claude a medida que lo escribe.</summary>
-    public event Action<string>? Text;
-
-    /// <summary>Claude usó una herramienta (leyó, creó o editó un archivo).</summary>
-    public event Action<string, string?>? ToolUsed;
-
-    /// <summary>Terminó una herramienta (por ejemplo, ya se escribió el archivo).</summary>
-    public event Action? ToolFinished;
-
-    public event Action<ClaudeResult>? Finished;
-
-    public void NewConversation() => SessionId = null;
-
-    /// <summary>Sigue una conversación guardada (el próximo mensaje va con --resume a esa sesión).</summary>
-    public void Resume(string? sessionId) => SessionId = sessionId;
 
     private static string? _best;
     private static DateTime _bestAt;
@@ -86,7 +55,7 @@ public sealed class ClaudeCodeBridge
     public static string? FindCli()
     {
         var custom = Environment.GetEnvironmentVariable("TRADINGHUB_CLAUDE_CLI");
-        if (!string.IsNullOrEmpty(custom) && File.Exists(custom)) return custom;
+        if (!string.IsNullOrEmpty(custom)) return File.Exists(custom) ? custom : null;
         lock (Versions)
         {
             if (_best != null && File.Exists(_best) && (DateTime.UtcNow - _bestAt).TotalMinutes < 10) return _best;
@@ -241,7 +210,8 @@ public sealed class ClaudeCodeBridge
                 // The known npm entry point may still be readable.
             }
 
-            target ??= @"node_modules\@anthropic-ai\claude-code\cli.js";
+            target ??= Path.GetFileNameWithoutExtension(cli).Equals("codex", StringComparison.OrdinalIgnoreCase)
+                ? @"node_modules\@openai\codex\bin\codex.js" : @"node_modules\@anthropic-ai\claude-code\cli.js";
             var dir = Path.GetDirectoryName(Path.GetFullPath(current))!;
             var full = Path.GetFullPath(Path.Combine(dir, target.Replace('\\', Path.DirectorySeparatorChar)));
             if (!File.Exists(full)) break;
@@ -260,7 +230,7 @@ public sealed class ClaudeCodeBridge
         }
 
         if (!IsBatch(current)) return (current, Array.Empty<string>());
-        throw new InvalidOperationException("Cannot resolve the Claude Code command shim without altering its arguments. Reinstall Claude Code using the official Windows installer.");
+        throw new InvalidOperationException("Cannot resolve this assistant command shim without altering its arguments. Reinstall the selected CLI using its official installer.");
     }
 
     internal static string? CmdShimTarget(string content)
@@ -422,15 +392,13 @@ public sealed class ClaudeCodeBridge
     /// <summary>Config MCP que levanta Trading Hub en modo laboratorio (el mismo ejecutable con --mcp).</summary>
     internal static string WriteLabConfig()
     {
-        // TRADINGHUB_MCP_COMMAND: otro ejecutable de Trading Hub (para pruebas); si no, este mismo
-        var exe = Environment.GetEnvironmentVariable("TRADINGHUB_MCP_COMMAND") is { Length: > 0 } custom ? custom : Environment.ProcessPath ?? "TradingHub";
-        var env = new Dictionary<string, string>();
-        if (Environment.GetEnvironmentVariable("DOTNET_ROOT") is { Length: > 0 } root) env["DOTNET_ROOT"] = root;
+        var launch = StrategyMcpProcess.LabCommand();
+        var env = StrategyMcpProcess.ChildEnvironment();
         var config = new Dictionary<string, object>
         {
             ["mcpServers"] = new Dictionary<string, object>
             {
-                ["tradinghub"] = new Dictionary<string, object> { ["type"] = "stdio", ["command"] = exe, ["args"] = new[] { "--mcp" }, ["env"] = env },
+                ["tradinghub"] = new Dictionary<string, object> { ["type"] = "stdio", ["command"] = launch.Command, ["args"] = launch.Arguments, ["env"] = env },
             },
         };
         Directory.CreateDirectory(AppPaths.Root);
@@ -439,216 +407,84 @@ public sealed class ClaudeCodeBridge
         return path;
     }
 
-    /// <summary>Manda un pedido. Los eventos llegan en el hilo de UI. Con <paramref name="lab"/> Claude puede correr pruebas.</summary>
-    public async Task SendAsync(string prompt, string workDir, string systemPrompt, bool lab = false, IReadOnlyList<string>? extraDirs = null)
+    public override string Engine => "claude";
+    protected override string? FindExecutable() => FindCli();
+    private bool _streamedText;
+    protected override void ResetParser() => _streamedText = false;
+    protected override string Input(StrategyChatRequest request) => request.Prompt;
+
+    protected override async Task<ProcessStartInfo> BuildStartAsync(string cli, StrategyChatRequest request, CancellationToken token)
     {
-        if (IsRunning) return;
-        var cli = FindCli();
-        if (cli == null)
+        var psi = Prepare(cli, request.WorkDirectory);
+        psi.StandardInputEncoding = new UTF8Encoding(false);
+        Add(psi, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+            "--tools", "Read,Write,Edit,MultiEdit,Glob,Grep", "--permission-mode", "acceptEdits", "--strict-mcp-config");
+        Add(psi, "--append-system-prompt", request.SystemPrompt + Localization.Lang.ForClaude);
+        var supports = await SupportsAsync(cli, token);
+        token.ThrowIfCancellationRequested();
+        if (!string.IsNullOrWhiteSpace(request.Model)) Add(psi, "--model", request.Model);
+        if (!string.IsNullOrWhiteSpace(request.Effort) && supports("--effort")) Add(psi, "--effort", request.Effort);
+        foreach (var dir in request.ExtraDirectories)
+            if (Directory.Exists(dir) && supports("--add-dir")) Add(psi, "--add-dir", dir);
+        var servers = new Dictionary<string, JsonElement>();
+        if (request.Laboratory)
         {
-            Post(() => Finished?.Invoke(new ClaudeResult(true, $"Claude Code was not found on this {Os.Device}. Install it from claude.com/claude-code and retry.", 0, 0, false)));
-            return;
+            using var lab = JsonDocument.Parse(File.ReadAllText(WriteLabConfig()));
+            foreach (var property in lab.RootElement.GetProperty("mcpServers").EnumerateObject()) servers.Add(property.Name, property.Value.Clone());
         }
+        if (request.TradingView != null)
+        {
+            using var research = JsonDocument.Parse(request.TradingView.CreateMcpConfigJson());
+            foreach (var property in research.RootElement.GetProperty("mcpServers").EnumerateObject()) servers.Add(property.Name, property.Value.Clone());
+        }
+        // Inline config is non-secret; strict mode excludes every inherited MCP server, including when off.
+        Add(psi, "--mcp-config", JsonSerializer.Serialize(new { mcpServers = servers }));
+        var allowed = new List<string>();
+        if (request.Laboratory) allowed.AddRange(LabTools.Select(t => "mcp__tradinghub__" + t));
+        if (request.TradingView != null) allowed.AddRange(request.TradingView.ApprovedToolNames.Select(t => "mcp__tradingview_research__" + t));
+        if (allowed.Count != 0) Add(psi, "--allowedTools", string.Join(",", allowed));
+        if (SessionId != null) Add(psi, "--resume", SessionId);
+        return psi;
+    }
 
-        ProcessStartInfo psi;
-        try
+    protected override void Parse(JsonElement root)
+    {
+        if (Value(root, "session_id") is { Length: > 0 } id) ObserveSession(id);
+        switch (Value(root, "type"))
         {
-            psi = Prepare(cli, workDir);
-        }
-        catch (Exception ex)
-        {
-            Post(() => Finished?.Invoke(new ClaudeResult(true, "Could not run Claude Code: " + ex.Message, 0, 0, false)));
-            return;
-        }
-        foreach (var a in new[]
-                 {
-                     "-p", prompt,
-                     "--output-format", "stream-json",
-                     "--verbose",
-                     "--include-partial-messages",
-                     "--append-system-prompt", systemPrompt + Localization.Lang.ForClaude,
-                     "--tools", "Read,Write,Edit,MultiEdit,Glob,Grep",
-                     "--permission-mode", "acceptEdits",
-                     "--strict-mcp-config",
-                 })
-            psi.ArgumentList.Add(a);
-        // Opus 5.5 con esfuerzo extra (las opciones que esta CLI no conoce se omiten)
-        var supports = await SupportsAsync(cli);
-        if (!string.IsNullOrWhiteSpace(Model))
-        {
-            psi.ArgumentList.Add("--model");
-            psi.ArgumentList.Add(Model);
-        }
-
-        if (!string.IsNullOrWhiteSpace(Effort) && supports("--effort"))
-        {
-            psi.ArgumentList.Add("--effort");
-            psi.ArgumentList.Add(Effort);
-        }
-
-        // otras carpetas donde puede escribir (por ejemplo la de indicadores)
-        foreach (var dir in extraDirs ?? Array.Empty<string>())
-        {
-            if (!Directory.Exists(dir) || !supports("--add-dir")) continue;
-            psi.ArgumentList.Add("--add-dir");
-            psi.ArgumentList.Add(dir);
-        }
-
-        if (lab)
-        {
-            // laboratorio: Trading Hub como servidor MCP (backtest, optimización, walk-forward, reportes)
-            psi.ArgumentList.Add("--mcp-config");
-            psi.ArgumentList.Add(WriteLabConfig());
-            psi.ArgumentList.Add("--allowedTools");
-            psi.ArgumentList.Add(string.Join(",", LabTools.Select(t => "mcp__tradinghub__" + t)));
-            // una optimización o un walk-forward pueden tardar varios minutos
-            psi.Environment["MCP_TOOL_TIMEOUT"] = "3600000";
-            psi.Environment["MCP_TIMEOUT"] = "60000";
-        }
-
-        if (SessionId != null)
-        {
-            psi.ArgumentList.Add("--resume");
-            psi.ArgumentList.Add(SessionId);
-        }
-
-        var sw = Stopwatch.StartNew();
-        var finalText = new StringBuilder();
-        var stderr = new StringBuilder();
-        bool isError = false, gotResult = false;
-        double cost = 0;
-        try
-        {
-            var stdinPrompt = MovePromptToStdinIfTooLong(psi);
-            _proc = Process.Start(psi)!;
-            var feed = FeedStdinAsync(_proc, stdinPrompt);
-            _proc.ErrorDataReceived += (_, e) =>
-            {
-                if (e.Data != null) stderr.AppendLine(e.Data);
-            };
-            _proc.BeginErrorReadLine();
-            string? line;
-            while ((line = await _proc.StandardOutput.ReadLineAsync()) != null)
-            {
-                if (line.Length == 0 || line[0] != '{') continue;
-                try
+            case "stream_event":
+                if (!root.TryGetProperty("event", out var ev)) break;
+                if (Value(ev, "type") == "message_start") _streamedText = false;
+                if (Value(ev, "type") == "content_block_delta" && ev.TryGetProperty("delta", out var delta) && Value(delta, "type") == "text_delta")
+                { _streamedText = true; EmitText(Value(delta, "text")); }
+                break;
+            case "assistant":
+                if (!root.TryGetProperty("message", out var message) || !message.TryGetProperty("content", out var blocks) || blocks.ValueKind != JsonValueKind.Array) break;
+                foreach (var block in blocks.EnumerateArray())
                 {
-                    using var doc = JsonDocument.Parse(line);
-                    var root = doc.RootElement;
-                    string type = root.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
-                    if (root.TryGetProperty("session_id", out var sid) && sid.ValueKind == JsonValueKind.String) SessionId = sid.GetString();
-                    switch (type)
+                    if (Value(block, "type") == "text" && !_streamedText) EmitText(Value(block, "text"));
+                    else if (Value(block, "type") == "tool_use")
                     {
-                        case "stream_event":
-                            HandleStreamEvent(root);
-                            break;
-                        case "assistant":
-                            HandleAssistant(root);
-                            break;
-                        case "user":
-                            Post(() => ToolFinished?.Invoke());
-                            break;
-                        case "result":
-                            gotResult = true;
-                            isError = root.TryGetProperty("is_error", out var ie) && ie.ValueKind == JsonValueKind.True;
-                            if (root.TryGetProperty("result", out var r) && r.ValueKind == JsonValueKind.String) finalText.Append(r.GetString());
-                            if (root.TryGetProperty("total_cost_usd", out var c) && c.ValueKind == JsonValueKind.Number) cost = c.GetDouble();
-                            break;
+                        string? file = null;
+                        if (block.TryGetProperty("input", out var input)) file = Value(input, "file_path") is { Length: > 0 } path ? path : Value(input, "pattern");
+                        EmitTool(Value(block, "name"), file);
                     }
                 }
-                catch (JsonException)
-                {
-                    // línea que no es JSON: se ignora
-                }
-            }
-
-            await _proc.WaitForExitAsync();
-            await feed;
-            if (!gotResult)
-            {
-                isError = true;
-                finalText.Append(stderr.Length > 0 ? stderr.ToString().Trim() : $"Claude Code exited without a response (code {_proc.ExitCode}).");
-            }
-        }
-        catch (Exception ex)
-        {
-            isError = true;
-            finalText.Append("Could not run Claude Code: " + ex.Message);
-        }
-        finally
-        {
-            _proc?.Dispose();
-            _proc = null;
-        }
-
-        string text = finalText.ToString();
-        bool needsLogin = isError && (text.Contains("authenticate", StringComparison.OrdinalIgnoreCase) || text.Contains("/login", StringComparison.OrdinalIgnoreCase) || text.Contains("not logged in", StringComparison.OrdinalIgnoreCase) || text.Contains("OAuth", StringComparison.OrdinalIgnoreCase));
-        var result = new ClaudeResult(isError, text, cost, sw.Elapsed.TotalSeconds, needsLogin);
-        Post(() => Finished?.Invoke(result));
-    }
-
-    private void HandleStreamEvent(JsonElement root)
-    {
-        if (!root.TryGetProperty("event", out var ev)) return;
-        string evType = ev.TryGetProperty("type", out var et) ? et.GetString() ?? "" : "";
-        if (evType == "message_start") _streamedText = false;
-        if (evType != "content_block_delta" || !ev.TryGetProperty("delta", out var delta)) return;
-        if (delta.TryGetProperty("type", out var dt) && dt.GetString() == "text_delta" && delta.TryGetProperty("text", out var txt))
-        {
-            _streamedText = true;
-            string s = txt.GetString() ?? "";
-            Post(() => Text?.Invoke(s));
+                _streamedText = false;
+                break;
+            case "user": EmitToolFinished(); break;
+            case "result":
+                Terminal = true;
+                Failed = root.TryGetProperty("is_error", out var error) && error.ValueKind == JsonValueKind.True;
+                FinalText = Value(root, "result");
+                if (Failed && FinalText.Length == 0)
+                    FinalText = root.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array
+                        ? string.Join("\n", errors.EnumerateArray().Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() : e.GetRawText()))
+                        : "Claude request failed: " + Value(root, "subtype");
+                if (root.TryGetProperty("total_cost_usd", out var cost) && cost.ValueKind == JsonValueKind.Number) ReportedCost = cost.GetDouble();
+                break;
         }
     }
-
-    private void HandleAssistant(JsonElement root)
-    {
-        if (!root.TryGetProperty("message", out var msg) || !msg.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return;
-        foreach (var block in content.EnumerateArray())
-        {
-            string bt = block.TryGetProperty("type", out var b) ? b.GetString() ?? "" : "";
-            if (bt == "text" && !_streamedText && block.TryGetProperty("text", out var txt))
-            {
-                string s = txt.GetString() ?? "";
-                Post(() => Text?.Invoke(s));
-            }
-            else if (bt == "tool_use")
-            {
-                string name = block.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                string? file = null;
-                if (block.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object)
-                {
-                    if (input.TryGetProperty("file_path", out var fp)) file = fp.GetString();
-                    else if (input.TryGetProperty("pattern", out var pat)) file = pat.GetString();
-                    else if (name.StartsWith("mcp__", StringComparison.Ordinal))
-                    {
-                        // laboratorio: estrategia, instrumento y rango
-                        string S(string k) => input.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
-                        var parts = new[] { S("file"), S("symbol"), S("from").Length > 0 ? $"{S("from")} → {S("to")}" : "", S("title") }.Where(x => x.Length > 0);
-                        file = string.Join(" · ", parts);
-                    }
-                }
-
-                Post(() => ToolUsed?.Invoke(name, file));
-            }
-        }
-
-        _streamedText = false;
-    }
-
-    public void Cancel()
-    {
-        try
-        {
-            if (_proc is { HasExited: false }) _proc.Kill(entireProcessTree: true);
-        }
-        catch
-        {
-            // ya terminó
-        }
-    }
-
-    private static void Post(Action a) => Dispatcher.UIThread.Post(a);
 
     /// <summary>Método de trabajo del laboratorio (se suma a las instrucciones de estrategias).</summary>
     public const string LabSystemPrompt = """

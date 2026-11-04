@@ -13,7 +13,26 @@ namespace TradingHub.App.Views;
 /// <summary>Panel de Claude Code dentro de la pestaña Código: pedís estrategias y ves el código en el editor.</summary>
 internal sealed partial class StrategiesView
 {
-    private readonly ClaudeCodeBridge _claude = new();
+    private IStrategyChatBridge _claude = new ClaudeCodeBridge();
+    private Action? _unhookChat;
+    private long _chatBinding;
+    private bool _chatBusy;
+    private ChatTurn? _activeChatTurn;
+    private bool _chatTornDown;
+    private sealed class ChatTurn(IStrategyChatBridge bridge, long binding, ChatConversation conversation)
+    {
+        public IStrategyChatBridge Bridge { get; } = bridge;
+        public long Binding { get; } = binding;
+        public ChatConversation Conversation { get; } = conversation;
+        public CancellationTokenSource Cancellation { get; } = new();
+        public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+    private bool _selectingEngine;
+    private readonly ComboBox _chatEngine = new() { ItemsSource = new[] { "claude", "codex" }, MinWidth = 95 };
+    private readonly TextBox _chatModel = new() { Watermark = "CLI default model", MinWidth = 135, MaxWidth = 230 };
+    private readonly TextBox _chatEffort = new() { Watermark = "Effort", Width = 75 };
+    private readonly TextBlock _chatTitle = new() { FontWeight = FontWeight.SemiBold, FontSize = 14 };
+    private string EngineTitle => _claude.Engine == "codex" ? "Codex" : "Claude";
     private readonly StackPanel _chat = new() { Spacing = 10, Margin = new Thickness(14, 12) };
     private readonly ScrollViewer _chatScroll = new() { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
     private readonly TextBox _prompt = new()
@@ -22,7 +41,7 @@ internal sealed partial class StrategiesView
         TextWrapping = TextWrapping.Wrap,
         MinHeight = 64,
         MaxHeight = 160,
-        Watermark = "Ask Claude for a new strategy or changes to the open strategy…",
+        Watermark = "Ask for a new strategy or changes to the open strategy…",
     };
     private readonly TextBlock _claudeStatus = new() { Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis };
     private Button _sendButton = null!;
@@ -50,9 +69,12 @@ internal sealed partial class StrategiesView
     {
         var newChat = Ui.IconButton(MaterialIconKind.ChatPlusOutline, "New conversation", () =>
         {
-            if (_claude.IsRunning) return;
+            if (_chatBusy) return;
+            ChatHistory.Save(_conv);
             _claude.NewConversation();
-            _conv = new ChatConversation();
+            _conv = new ChatConversation { Engine = _claude.Engine };
+            _unhookChat?.Invoke();
+            HookChatBridge();
             _chat.Children.Clear();
             ShowSuggestions();
         }, 17);
@@ -60,11 +82,31 @@ internal sealed partial class StrategiesView
         ToolTip.SetTip(history, "Conversation history (resume where you left off)");
         history.Click += (_, _) => ShowHistoryMenu(history);
         _claudeDetach = Ui.IconButton(MaterialIconKind.OpenInNew, "Detach chat into a window", ToggleClaudeWindow, 17);
-        var title = Ui.V(1, Ui.H(8, Ui.Icon(MaterialIconKind.Creation, 18, Ui.Accent), new TextBlock { Text = "Claude", FontWeight = FontWeight.SemiBold, FontSize = 14 }), _claudeStatus);
+        var settings = App.Services.Settings;
+        string initial = StrategyChatEngines.IsKnown(settings.StrategyChatEngine) ? settings.StrategyChatEngine : "claude";
+        _claude = StrategyChatEngines.Create(initial);
+        _conv.Engine = initial;
+        _selectingEngine = true;
+        _chatEngine.SelectedItem = initial;
+        _selectingEngine = false;
+        LoadChatOptions();
+        _chatEngine.SelectionChanged += (_, _) =>
+        {
+            if (!_selectingEngine && _chatEngine.SelectedItem is string engine) SwitchChatEngine(engine);
+        };
+        _chatModel.LostFocus += (_, _) => SaveChatOptions();
+        _chatEffort.LostFocus += (_, _) => SaveChatOptions();
+        var research = Ui.Button("Research access", MaterialIconKind.CogOutline, async () =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner) return;
+            try { await TradingViewResearchService.Default.ConfigureAsync(owner); }
+            catch (Exception ex) { AddNote(MaterialIconKind.AlertCircleOutline, "Could not open research access: " + ex.Message, Ui.Down); }
+        });
+        var title = Ui.V(3, Ui.H(8, _chatTitle, _chatEngine), _claudeStatus, Ui.H(4, _chatModel, _chatEffort, research));
         // laboratorio: Claude corre backtests, optimizaciones y walk-forward por su cuenta
         _labToggle.Content = Ui.H(6, Ui.Icon(MaterialIconKind.FlaskOutline, 15), new TextBlock { Text = "Laboratory", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
         _labToggle.Padding = new Thickness(8, 4);
-        ToolTip.SetTip(_labToggle, "Laboratory mode: Claude can download data, run backtests, optimization, walk-forward and Monte Carlo, assess the strategy and save a report in Reports.");
+        ToolTip.SetTip(_labToggle, "Laboratory mode: the selected assistant can download data, run backtests, optimization, walk-forward and Monte Carlo, assess strategies and save reports. Financial changes remain proposals.");
         _labToggle.IsCheckedChanged += (_, _) => UpdateClaudeHint();
         var headRight = Ui.H(6, _labToggle, history, newChat, _claudeDetach);
         var head = new DockPanel { Margin = new Thickness(14, 10, 10, 10) };
@@ -100,32 +142,126 @@ internal sealed partial class StrategiesView
         root.Children.Add(input);
         root.Children.Add(_chatScroll);
 
-        _claude.Text += OnClaudeText;
-        _claude.ToolUsed += OnClaudeTool;
-        _claude.ToolFinished += ReloadIfChangedOnDisk;
-        _claude.Finished += r => _ = OnClaudeFinishedAsync(r);
+        HookChatBridge();
+        DetachedFromVisualTree += (_, _) => TearDownChat();
         _ = DetectClaudeAsync();
         ShowSuggestions();
         return new Border { Child = root, Background = Ui.Bg1, BorderBrush = Ui.Line, BorderThickness = new Thickness(1, 0, 0, 0) };
     }
+    private void HookChatBridge()
+    {
+        var bridge = _claude;
+        long binding = ++_chatBinding;
+        void Text(string text) { if (binding == _chatBinding && ReferenceEquals(bridge, _claude) && _activeChatTurn is { } turn && IsCurrentChatTurn(turn)) OnClaudeText(text); }
+        void Tool(string tool, string? file) { if (binding == _chatBinding && ReferenceEquals(bridge, _claude) && _activeChatTurn is { } turn && IsCurrentChatTurn(turn)) OnClaudeTool(tool, file); }
+        void ToolFinished() { if (binding == _chatBinding && ReferenceEquals(bridge, _claude) && _activeChatTurn is { } turn && IsCurrentChatTurn(turn)) ReloadIfChangedOnDisk(); }
+        bridge.Text += Text; bridge.ToolUsed += Tool; bridge.ToolFinished += ToolFinished;
+        _unhookChat = () => { bridge.Text -= Text; bridge.ToolUsed -= Tool; bridge.ToolFinished -= ToolFinished; };
+    }
+    private bool IsCurrentChatTurn(ChatTurn turn) =>
+        !_chatTornDown && !turn.Cancellation.IsCancellationRequested && ReferenceEquals(turn, _activeChatTurn)
+        && turn.Binding == _chatBinding && ReferenceEquals(turn.Bridge, _claude) && ReferenceEquals(turn.Conversation, _conv);
+
+    private async Task CompleteChatTurnAsync(ChatTurn turn, StrategyChatResult result)
+    {
+        try
+        {
+            if (!IsCurrentChatTurn(turn)) return;
+            _stopButton2.IsVisible = false;
+            await OnClaudeFinishedAsync(result, turn);
+        }
+        catch (Exception ex)
+        {
+            if (IsCurrentChatTurn(turn)) AddNote(MaterialIconKind.AlertCircleOutline, "Could not finish assistant response: " + ex.Message, Ui.Down);
+        }
+        finally { turn.Completion.TrySetResult(true); }
+    }
+
+    private void TearDownChat()
+    {
+        if (_chatTornDown) return;
+        _chatTornDown = true;
+        ++_chatBinding;
+        _unhookChat?.Invoke();
+        if (_activeChatTurn is not { } turn) return;
+        turn.Conversation.SessionId = turn.Bridge.SessionId ?? turn.Conversation.SessionId;
+        ChatHistory.Save(turn.Conversation);
+        try
+        {
+            turn.Cancellation.Cancel();
+            turn.Bridge.Cancel();
+        }
+        finally { turn.Completion.TrySetResult(true); }
+    }
+
+
+    private void SetChatOptionsEnabled(bool enabled)
+    {
+        _chatEngine.IsEnabled = enabled; _chatModel.IsEnabled = enabled; _chatEffort.IsEnabled = enabled; _labToggle.IsEnabled = enabled;
+    }
+
+    private void SaveChatOptions()
+    {
+        var settings = App.Services.Settings;
+        settings.StrategyChatEngine = _claude.Engine;
+        if (_claude.Engine == "codex") { settings.StrategyCodexModel = _chatModel.Text?.Trim() ?? ""; settings.StrategyCodexEffort = _chatEffort.Text?.Trim() ?? ""; }
+        else { settings.StrategyClaudeModel = _chatModel.Text?.Trim() ?? ""; settings.StrategyClaudeEffort = _chatEffort.Text?.Trim() ?? ""; }
+        settings.Save();
+    }
+
+    private void LoadChatOptions()
+    {
+        var settings = App.Services.Settings;
+        _chatModel.Text = _claude.Engine == "codex" ? settings.StrategyCodexModel : settings.StrategyClaudeModel;
+        _chatEffort.Text = _claude.Engine == "codex" ? settings.StrategyCodexEffort : settings.StrategyClaudeEffort;
+        _chatTitle.Text = EngineTitle;
+        if (_claudeWindow != null) _claudeWindow.Title = $"{EngineTitle} · strategies";
+    }
+
+    private void SwitchChatEngine(string engine)
+    {
+        if (_chatBusy || !StrategyChatEngines.IsKnown(engine))
+        {
+            _selectingEngine = true; _chatEngine.SelectedItem = _claude.Engine; _selectingEngine = false;
+            return;
+        }
+        if (engine == _claude.Engine) return;
+        SaveChatOptions();
+        ChatHistory.Save(_conv);
+        _unhookChat?.Invoke();
+        _claude = StrategyChatEngines.Create(engine);
+        _conv = new ChatConversation { Engine = engine };
+        HookChatBridge();
+        _selectingEngine = true; _chatEngine.SelectedItem = engine; _selectingEngine = false;
+        LoadChatOptions();
+        SaveChatOptions();
+        _chat.Children.Clear();
+        _currentReply = null;
+        UpdateClaudeHint();
+        ShowSuggestions();
+        _ = DetectClaudeAsync();
+    }
+
 
     private void UpdateClaudeHint()
     {
         bool lab = _labToggle.IsChecked == true;
         _claudeHint.Text = lab
-            ? "Laboratory: Claude runs tests autonomously (may take several minutes) and saves a report in Reports."
-            : "Uses your Claude Code subscription. It may only read and edit files in the strategies directory.";
+            ? $"{EngineTitle} laboratory: runs tests and saves reports. Financial changes remain proposals for review."
+            : $"Uses your own {EngineTitle} CLI session. Files may be edited in the configured strategy and indicator directories. Provider billing may not be reported.";
         _claudeHint.Foreground = lab ? Ui.Accent : null;
         _prompt.Watermark = lab ? "Example: evaluate and optimize this strategy with 60 days of BTCUSDT history; report the outcome" : "Ask for a strategy or a change…";
     }
 
     private async Task DetectClaudeAsync()
     {
-        var v = await ClaudeCodeBridge.VersionAsync();
-        _claudeStatus.Text = v != null ? $"Claude Code {v.Replace("(Claude Code)", "").Trim()} · your subscription" : "Claude Code is not installed";
-        _sendButton.IsEnabled = v != null;
-        if (v == null)
-            AddNote(MaterialIconKind.AlertCircleOutline, $"Claude Code was not found on this {Os.Device}. Install it from claude.com/claude-code, sign in and reopen Trading Hub.", Ui.Warn);
+        var bridge = _claude;
+        bool found = bridge.Engine == "codex" ? CodexBridge.FindCli() != null : ClaudeCodeBridge.FindCli() != null;
+        await Task.CompletedTask;
+        if (!ReferenceEquals(bridge, _claude)) return;
+        _claudeStatus.Text = found ? $"{EngineTitle} · user CLI session" : $"{EngineTitle} CLI is not installed";
+        _sendButton.IsEnabled = found;
+        if (!found) AddNote(MaterialIconKind.AlertCircleOutline, $"Install {EngineTitle} CLI and sign in in Terminal. No API key is needed here.", Ui.Warn);
     }
 
     private void ShowSuggestions()
@@ -133,7 +269,7 @@ internal sealed partial class StrategiesView
         if (_chat.Children.Count > 0) return;
         var intro = new TextBlock
         {
-            Text = "Describe a strategy and Claude writes it here: code appears in the editor and Trading Hub compiles it when finished.",
+            Text = "Describe a strategy: your selected assistant edits files, and Trading Hub compiles the result.",
             Classes = { "muted", "small" },
             TextWrapping = TextWrapping.Wrap,
         };
@@ -195,7 +331,49 @@ internal sealed partial class StrategiesView
     private async Task SendToClaudeAsync(string text)
     {
         text = text.Trim();
-        if (text.Length == 0 || _claude.IsRunning) return;
+        if (text.Length == 0 || _chatBusy || _chatTornDown) return;
+        var turn = new ChatTurn(_claude, _chatBinding, _conv);
+        _activeChatTurn = turn;
+        try
+        {
+            await SendChatRequestAsync(text, turn);
+        }
+        catch (Exception ex)
+        {
+            if (IsCurrentChatTurn(turn))
+            {
+                RemoveWorkingNote();
+                AddNote(MaterialIconKind.AlertCircleOutline, "Could not prepare assistant request: " + ex.Message, Ui.Down);
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(turn, _activeChatTurn))
+            {
+                bool restore = IsCurrentChatTurn(turn);
+                _activeChatTurn = null;
+                _chatBusy = false;
+                if (restore)
+                {
+                    SetChatOptionsEnabled(true);
+                    _editor.IsReadOnly = false;
+                    _sendButton.IsVisible = true;
+                    _stopButton2.IsVisible = false;
+                }
+            }
+            turn.Completion.TrySetResult(true);
+            turn.Cancellation.Dispose();
+        }
+    }
+
+    private async Task SendChatRequestAsync(string text, ChatTurn turn)
+    {
+        SaveChatOptions();
+        _chatBusy = true;
+        SetChatOptionsEnabled(false);
+        _conv.Engine = _claude.Engine;
+        _conv.Model = _chatModel.Text;
+        _conv.Effort = _chatEffort.Text;
         if (_editor.IsDirty) Save();
         _prompt.Text = "";
         AddBubble(text, user: true);
@@ -229,9 +407,17 @@ internal sealed partial class StrategiesView
         _editor.IsReadOnly = true;
         bool lab = _labToggle.IsChecked == true;
         _reportsBefore = Lab.ReportStore.List().Select(r => r.Path).ToHashSet();
-        _workingNote = AddNote(MaterialIconKind.ProgressClock, "Claude is working…");
-        await _claude.SendAsync(prompt, AppPaths.Strategies, ClaudeCodeBridge.StrategySystemPrompt + ClaudeCodeBridge.IndicatorSystemPrompt + (lab ? ClaudeCodeBridge.LabSystemPrompt : ""), lab,
-            new[] { AppPaths.UserIndicators, Directory.CreateDirectory(Lab.LabServer.CapturesDir).FullName });
+        _workingNote = AddNote(MaterialIconKind.ProgressClock, $"{EngineTitle} is working…");
+        var result = await turn.Bridge.SendAsync(new StrategyChatRequest(prompt, AppPaths.Strategies,
+            ClaudeCodeBridge.StrategySystemPrompt + ClaudeCodeBridge.IndicatorSystemPrompt + (lab ? ClaudeCodeBridge.LabSystemPrompt : ""), lab,
+            new[] { AppPaths.UserIndicators, Directory.CreateDirectory(Lab.LabServer.CapturesDir).FullName },
+            _chatModel.Text, _chatEffort.Text, TradingViewResearchService.Default.CaptureAccess()), turn.Cancellation.Token);
+        if (IsCurrentChatTurn(turn))
+        {
+            // Queue after all streamed events, then await the actual editor/compiler consumer, not just CLI exit.
+            Dispatcher.UIThread.Post(() => _ = CompleteChatTurnAsync(turn, result));
+            await turn.Completion.Task;
+        }
     }
 
     /// <summary>Las capturas del gráfico que miró Claude en este pedido, en el chat (tocás una y se abre grande).</summary>
@@ -247,7 +433,7 @@ internal sealed partial class StrategiesView
                 var img = new Image { Source = bmp, MaxWidth = 420, Stretch = Stretch.Uniform, Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand) };
                 var path = f.FullName;
                 img.PointerReleased += (_, _) => TradingHub.App.Windows.Shell.Open(path);
-                ToolTip.SetTip(img, "What Claude reviewed (click to enlarge)");
+                ToolTip.SetTip(img, "What the assistant reviewed (click to enlarge)");
                 _chat.Children.Add(Ui.V(6, Ui.H(8, Ui.Icon(MaterialIconKind.ChartBoxOutline, 15, Ui.Accent), new TextBlock { Text = "Chart screenshot inspected", Classes = { "small" } }),
                     new Border { Child = img, CornerRadius = new CornerRadius(8), ClipToBounds = true, BorderBrush = Ui.Line, BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Left }));
             }
@@ -280,7 +466,7 @@ internal sealed partial class StrategiesView
         {
             string detail = string.Join("\n", (errors.Count > 0 ? errors : res?.Diagnostics.Where(d => d.Severity == "error").ToList() ?? new()).Take(12)
                 .Select(d => $"- {Path.GetFileName(d.File)} line {d.Line}: {d.Message} ({d.Id})"));
-            var fix = Ui.Button("Ask Claude to fix errors", MaterialIconKind.AutoFix, () => _ = SendToClaudeAsync($"Fix compilation errors in indicator {names} (in the indicator directory):\n{detail}"), "primary");
+            var fix = Ui.Button("Ask assistant to fix errors", MaterialIconKind.AutoFix, () => _ = SendToClaudeAsync($"Fix compilation errors in indicator {names} (in the indicator directory):\n{detail}"), "primary");
             fix.Padding = new Thickness(10, 4);
             int count = errors.Count > 0 ? errors.Count : res?.Diagnostics.Count(d => d.Severity == "error") ?? 0;
             _chat.Children.Add(Ui.V(8, Ui.H(8, Ui.Icon(MaterialIconKind.CloseCircle, 15, Ui.Down),
@@ -357,24 +543,26 @@ internal sealed partial class StrategiesView
         UpdateFileInfo();
     }
 
-    private async Task OnClaudeFinishedAsync(ClaudeResult r)
+    private async Task OnClaudeFinishedAsync(StrategyChatResult r, ChatTurn turn)
     {
         _conv.SessionId = _claude.SessionId ?? _conv.SessionId;
-        if (r.IsError) _conv.Messages.Add(new ChatMessage { Role = "note", Text = r.NeedsLogin ? "Claude Code requested login." : r.Text.Length > 400 ? r.Text[..400] + "…" : r.Text });
-        else if (!_gotReplyText && !string.IsNullOrWhiteSpace(r.Text)) _conv.Messages.Add(new ChatMessage { Role = "assistant", Text = r.Text });
+        if (r.IsError) _conv.Messages.Add(new ChatMessage { Role = "note", Text = r.NeedsLogin ? $"{EngineTitle} requested login." : r.Text.Length > 400 ? r.Text[..400] + "…" : r.Text });
+        else if (!_gotReplyText && !string.IsNullOrWhiteSpace(r.Text)) _conv.Messages.Add(new ChatMessage { Role = "assistant", Text = r.Text, ReportedCostUsd = r.CostUsd, TokenUsage = r.Usage });
+        else if (_conv.Messages.LastOrDefault() is { Role: "assistant" } last) { last.ReportedCostUsd = r.CostUsd; last.TokenUsage = r.Usage; }
         ChatHistory.Save(_conv);
         RemoveWorkingNote();
-        _sendButton.IsVisible = true;
-        _stopButton2.IsVisible = false;
-        _editor.IsReadOnly = false;
         if (r.IsError)
         {
             if (r.NeedsLogin)
             {
-                var login = Ui.Button("Sign in to Claude Code", MaterialIconKind.Login, ClaudeCodeBridge.OpenLoginTerminal, "primary");
+                var login = Ui.Button($"Sign in to {EngineTitle}", MaterialIconKind.Login, () =>
+                {
+                    if (_claude.Engine == "claude") ClaudeCodeBridge.OpenLoginTerminal();
+                    else if (CodexBridge.OpenLoginTerminal() is { } error) AddNote(MaterialIconKind.AlertCircleOutline, error, Ui.Down);
+                }, "primary");
                 var card = Ui.Card(Ui.V(8,
-                    new TextBlock { Text = "Claude Code requires you to sign in", FontWeight = FontWeight.SemiBold },
-                    new TextBlock { Text = (Os.IsWindows ? "A command window opens Claude Code" : "Terminal opens Claude Code") + ": choose your Claude subscription account and follow the browser sign-in steps, then return here and retry.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap },
+                    new TextBlock { Text = $"{EngineTitle} requires sign-in", FontWeight = FontWeight.SemiBold },
+                    new TextBlock { Text = "Use your own CLI account in Terminal; never paste tokens or passwords into this chat.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap },
                     login), 12);
                 _chat.Children.Add(card);
             }
@@ -399,6 +587,7 @@ internal sealed partial class StrategiesView
             ReloadIfChangedOnDisk();
             await CompileAsync(silent: true);
         }
+        if (!IsCurrentChatTurn(turn)) return;
 
         var res = _current?.LastCompile;
         int errors = res?.Diagnostics.Count(d => d.Severity == "error") ?? 0;
@@ -415,7 +604,7 @@ internal sealed partial class StrategiesView
         }
         else if (errors > 0)
         {
-            var fix = Ui.Button("Ask Claude to fix errors", MaterialIconKind.AutoFix, () => _ = SendToClaudeAsync("Fix the compilation errors in the open file."), "primary");
+            var fix = Ui.Button("Ask assistant to fix errors", MaterialIconKind.AutoFix, () => _ = SendToClaudeAsync("Fix the compilation errors in the open file."), "primary");
             fix.Padding = new Thickness(10, 4);
             _chat.Children.Add(Ui.V(8, Ui.H(8, Ui.Icon(MaterialIconKind.CloseCircle, 15, Ui.Down), new TextBlock { Text = $"{errors} compilation error(s)", Classes = { "small" }, Foreground = Ui.Down }), fix));
         }
@@ -446,9 +635,11 @@ internal sealed partial class StrategiesView
                 (main.Page("live") as LiveView)?.Select("proposals");
             }, "primary");
             review.Padding = new Thickness(10, 4);
-            _chat.Children.Add(Ui.V(8, Ui.H(8, Ui.Icon(MaterialIconKind.ScaleBalance, 15, Ui.Accent), new TextBlock { Text = "Claude proposed sizing adjustments awaiting approval", Classes = { "small" }, TextWrapping = TextWrapping.Wrap, MaxWidth = 300 }), review));
+            _chat.Children.Add(Ui.V(8, Ui.H(8, Ui.Icon(MaterialIconKind.ScaleBalance, 15, Ui.Accent), new TextBlock { Text = "The assistant proposed sizing adjustments awaiting approval", Classes = { "small" }, TextWrapping = TextWrapping.Wrap, MaxWidth = 300 }), review));
         }
         if (r.Seconds > 0) AddNote(MaterialIconKind.TimerOutline, r.Seconds >= 120 ? $"{r.Seconds / 60:0.#} min" : $"{r.Seconds:0} s");
+        AddNote(MaterialIconKind.InformationOutline, r.CostUsd is { } cost ? $"Reported cost: US${cost:0.00}" : "Cost not reported by this CLI.");
+        if (r.Usage is { } usage) AddNote(MaterialIconKind.InformationOutline, $"Tokens: {usage.InputTokens} input · {usage.CachedInputTokens} cached · {usage.OutputTokens} output");
         ScrollChatToEnd();
     }
 
@@ -467,7 +658,7 @@ internal sealed partial class StrategiesView
             var title = new TextBlock { Text = string.IsNullOrWhiteSpace(conv.Title) ? "(untitled)" : conv.Title, TextTrimming = TextTrimming.CharacterEllipsis, FontSize = 12.5, FontWeight = ReferenceEquals(conv.Id, _conv.Id) || conv.Id == _conv.Id ? FontWeight.SemiBold : FontWeight.Normal };
             var meta = new TextBlock
             {
-                Text = $"{Ui.Ago(conv.UpdatedUtc)} · {conv.Messages.Count(m => m.Role == "user")} message(s){(conv.Lab ? " · laboratory" : "")}{(conv.Strategy != null ? " · " + conv.Strategy : "")}",
+                Text = $"{conv.Engine} · {Ui.Ago(conv.UpdatedUtc)} · {conv.Messages.Count(m => m.Role == "user")} message(s){(conv.Lab ? " · laboratory" : "")}{(conv.Strategy != null ? " · " + conv.Strategy : "")}",
                 Classes = { "faint", "small" },
                 TextTrimming = TextTrimming.CharacterEllipsis,
             };
@@ -479,9 +670,8 @@ internal sealed partial class StrategiesView
             };
             var delete = Ui.IconButton(MaterialIconKind.Close, "Delete this conversation from history", () =>
             {
-                ChatHistory.Delete(conv.Id);
+                DeleteConversation(conv);
                 flyout.Hide();
-                if (conv.Id == _conv.Id) _conv = new ChatConversation { Title = _conv.Title, Lab = _conv.Lab };
             }, 14);
             var row = new DockPanel();
             DockPanel.SetDock(delete, Dock.Right);
@@ -492,13 +682,44 @@ internal sealed partial class StrategiesView
 
         flyout.ShowAt(anchor);
     }
+    private void DeleteConversation(ChatConversation conversation)
+    {
+        if (_chatBusy) return;
+        ChatHistory.Delete(conversation.Id);
+        if (conversation.Id != _conv.Id) return;
+        _claude.NewConversation();
+        _conv = new ChatConversation { Engine = _claude.Engine };
+        _unhookChat?.Invoke();
+        HookChatBridge();
+        _chat.Children.Clear();
+        _currentReply = null;
+        ShowSuggestions();
+    }
+
 
     /// <summary>Muestra una conversación guardada y la deja lista para seguirla (Claude retoma su sesión).</summary>
     private void LoadConversation(ChatConversation conv)
     {
-        if (_claude.IsRunning) return;
+        if (_chatBusy) return;
+        if (!StrategyChatEngines.IsKnown(conv.Engine))
+        {
+            AddNote(MaterialIconKind.AlertCircleOutline, $"Cannot resume unknown assistant engine '{conv.Engine}'.", Ui.Down);
+            return;
+        }
+        ChatHistory.Save(_conv);
+        SwitchChatEngine(conv.Engine);
+        _unhookChat?.Invoke();
+        try { _claude.Resume(conv.SessionId); }
+        catch (ArgumentException ex)
+        {
+            HookChatBridge();
+            AddNote(MaterialIconKind.AlertCircleOutline, "Cannot resume saved conversation: " + ex.Message, Ui.Down);
+            return;
+        }
         _conv = conv;
-        _claude.Resume(conv.SessionId);
+        HookChatBridge();
+        if (conv.Model != null) _chatModel.Text = conv.Model;
+        if (conv.Effort != null) _chatEffort.Text = conv.Effort;
         _labToggle.IsChecked = conv.Lab;
         _chat.Children.Clear();
         foreach (var m in conv.Messages)
@@ -510,7 +731,7 @@ internal sealed partial class StrategiesView
         _currentReply = null;
         AddNote(MaterialIconKind.History, conv.SessionId != null
             ? "Conversation resumed: continue with the existing context."
-            : "Saved conversation without an active Claude session: your next message starts a new session.");
+            : "Saved conversation has no CLI session. The next message starts a new session.");
         ScrollChatToEnd();
     }
 
@@ -531,7 +752,7 @@ internal sealed partial class StrategiesView
         if (_claudeSplit != null) _claudeSplit.IsVisible = false;
         var w = new Window
         {
-            Title = "Claude · strategies",
+            Title = $"{EngineTitle} · strategies",
             Width = Math.Clamp(s.ClaudeWindowWidth, 320, 1600),
             Height = Math.Clamp(s.ClaudeWindowHeight, 360, 2400),
             MinWidth = 320,

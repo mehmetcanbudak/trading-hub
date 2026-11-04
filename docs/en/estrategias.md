@@ -246,3 +246,9 @@ The C# editor highlights code and lists clickable diagnostics. Controls: Save (�
 Describe a strategy, for example an opening 30-minute range breakout with an ATR stop. Claude creates/edits the strategy file; compilation follows. Successful compilation offers **Test in backtest**; errors offer **Ask Claude to fix**. Laboratory mode additionally runs tests/optimizations/walk-forward and creates a report. See [Claude](asistente-claude.md).
 
 Imported C# executes in-process without a security sandbox. Review untrusted strategies/indicators before compiling or running them.
+
+## Optional QuanTAlib strategy series
+
+`Qt(QuanTAlib.AbstractBase indicator, PriceSource source = PriceSource.Close)` transfers ownership to the host, which updates it on closed bars and disposes it. For example, inside strategy initialization: `var average = Qt(new Q.Jma(20));` (`Q` is the compiler's QuanTAlib alias). Store the series in a field when consuming later. `IsReady` follows library `IsHot`, not merely the requested period; `AvailableValue` distinguishes unavailable input from real zero/negative results.
+
+`Camarilla()` uses the host session; `Camarilla("America/New_York", 18)` explicitly selects CME-style rollover. Check `IsReady` or nullable `Levels` before using PP/H1–H6/L1–L6; the primary series value is H3. Levels come from the previous observed session, whose initial history can be partial. These optional APIs do not replace existing moving-average helpers or authorize live trades. [Indicator documentation](indicadores.md#selected-additional-native-studies) explains display/warmup and retrospective flow limits.

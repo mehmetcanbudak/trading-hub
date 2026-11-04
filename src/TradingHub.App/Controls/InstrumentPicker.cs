@@ -33,10 +33,21 @@ public sealed class InstrumentPicker : Button
     private readonly StackPanel _chips = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
     private readonly ListBox _list = new() { Height = 430 };
     private readonly TextBlock _hint = new() { Classes = { "faint", "small" } };
+    private readonly StackPanel _elsewhere = new() { Spacing = 5, IsVisible = false };
     private readonly Flyout _flyout;
 
     private static readonly Dictionary<string, IReadOnlyList<Instrument>> InstrumentCache = new();
     private static readonly Dictionary<string, (DateTime At, IReadOnlyDictionary<string, TickerStats> Stats)> StatsCache = new();
+    private static readonly object CacheLock = new();
+    private static readonly Dictionary<string, long> CacheVersions = new();
+    private static long _cacheEpoch;
+    private static long _cacheRevision;
+    private static long CacheRevision { get { lock (CacheLock) return _cacheRevision; } }
+    private CancellationTokenSource? _loadCancellation;
+    private CancellationTokenSource? _suggestionCancellation;
+    private int _loadVersion, _suggestionVersion;
+    private bool _open, _loading;
+    private string? _loadError;
     private string _profileId = "";
     private string _filterQuote = "";
     private bool _favoritesOnly;
@@ -110,16 +121,28 @@ public sealed class InstrumentPicker : Button
                 _chips,
                 new Border { Height = 1, Background = Ui.Line },
                 header,
+                _elsewhere,
                 _list,
                 _hint,
             },
         };
         _flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft, ShowMode = FlyoutShowMode.Standard };
         _symbol.Text = "Choose instrument…";
-        _flyout.Opened += (_, _) =>
+        _flyout.Opened += async (_, _) =>
         {
+            _open = true;
             _search.Text = "";
-            Dispatcher.UIThread.Post(() => _search.Focus(), DispatcherPriority.Input);
+            BuildConnectionTabs();
+            await LoadAsync(_profileId);
+            if (_open) Dispatcher.UIThread.Post(() => _search.Focus(), DispatcherPriority.Input);
+        };
+        _flyout.Closed += (_, _) => CancelPending();
+        AttachedToVisualTree += (_, _) => _svc.Connections.Changed += ConnectionsChanged;
+        DetachedFromVisualTree += (_, _) =>
+        {
+            _svc.Connections.Changed -= ConnectionsChanged;
+            CancelPending();
+            _flyout.Hide();
         };
         Flyout = _flyout;
     }
@@ -131,6 +154,11 @@ public sealed class InstrumentPicker : Button
 
     public void SetCurrent(string profileId, Instrument? instrument)
     {
+        if (_profileId != profileId)
+        {
+            CancelRequests();
+            if (_open) _ = LoadAsync(profileId);
+        }
         _profileId = profileId;
         _symbol.Text = instrument?.Symbol ?? "Choose…";
         // el ancho mínimo se fija al cambiar de instrumento (no en cada tick)
@@ -153,19 +181,41 @@ public sealed class InstrumentPicker : Button
 
     public void Open() => _flyout.ShowAt(this);
 
-    protected override async void OnClick()
+    private void ConnectionsChanged()
     {
-        base.OnClick();
-        try
+        ClearCache();
+        Dispatcher.UIThread.Post(async () =>
         {
+            if (!_open) return;
             BuildConnectionTabs();
             await LoadAsync(_profileId);
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Write(ex);
-            _hint.Text = "Could not load the list: " + ex.Message;
-        }
+        });
+    }
+
+    private void CancelSuggestions()
+    {
+        _suggestionVersion++;
+        _suggestionCancellation?.Cancel();
+        _suggestionCancellation?.Dispose();
+        _suggestionCancellation = null;
+        _elsewhere.Children.Clear();
+        _elsewhere.IsVisible = false;
+    }
+
+    private void CancelRequests()
+    {
+        _loadVersion++;
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+        _loadCancellation = null;
+        CancelSuggestions();
+    }
+
+    private void CancelPending()
+    {
+        _open = false;
+        _loading = false;
+        CancelRequests();
     }
 
     private void BuildConnectionTabs()
@@ -193,59 +243,56 @@ public sealed class InstrumentPicker : Button
 
     private async Task LoadAsync(string profileId)
     {
+        CancelRequests();
+        int version = _loadVersion;
+        var cancellation = _loadCancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        long revision = CacheRevision;
         if (!_favoritesOnly) _profileId = profileId;
         foreach (var b in _connTabs.Children.OfType<ToggleButton>())
             b.IsChecked = b.Tag == null ? _favoritesOnly : (!_favoritesOnly && Equals(b.Tag, _profileId));
+        _loading = true;
+        _loadError = null;
+        _rows.Clear();
+        _list.ItemsSource = null;
         _hint.Text = "Loading instruments…";
         var rows = new List<Row>();
-        var profiles = _favoritesOnly
+        var errors = new List<string>();
+        var profiles = (_favoritesOnly
             ? _svc.Connections.Enabled.Where(p => p.HasMarketData && _svc.Settings.Favorites.Any(f => f.StartsWith(p.Id + ":", StringComparison.Ordinal)))
-            : _svc.Connections.Enabled.Where(p => p.HasMarketData && p.Id == _profileId);
+            : _svc.Connections.Enabled.Where(p => p.HasMarketData && p.Id == _profileId)).ToArray();
 
         foreach (var p in profiles)
         {
             try
             {
-                var feed = _svc.Connections.GetFeed(p.Id);
-                if (!InstrumentCache.TryGetValue(p.Id, out var instruments))
-                {
-                    instruments = await feed.GetInstrumentsAsync(CancellationToken.None);
-                    InstrumentCache[p.Id] = instruments;
-                }
-
+                var instruments = await CachedInstrumentsAsync(_svc, p.Id, token, TimeSpan.FromSeconds(10));
+                if (token.IsCancellationRequested || version != _loadVersion || !_open) return;
                 IReadOnlyDictionary<string, TickerStats>? stats = null;
-                if (feed is ITickerStatsProvider sp)
+                if (_svc.Connections.GetFeed(p.Id) is ITickerStatsProvider sp)
                 {
-                    if (!StatsCache.TryGetValue(p.Id, out var cached) || (DateTime.UtcNow - cached.At).TotalSeconds > 30)
-                    {
-                        try
-                        {
-                            cached = (DateTime.UtcNow, await sp.GetTickerStatsAsync(CancellationToken.None));
-                            StatsCache[p.Id] = cached;
-                        }
-                        catch
-                        {
-                            // sin estadísticas: se ordena por nombre
-                        }
-                    }
-
-                    stats = StatsCache.TryGetValue(p.Id, out var c2) ? c2.Stats : null;
+                    try { stats = await CachedStatsAsync(p.Id, sp, token); }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+                    catch { /* Optional statistics must not hide a usable instrument list. */ }
                 }
-
                 foreach (var i in instruments)
                 {
-                    string key = $"{p.Id}:{i.Symbol}";
-                    bool fav = _svc.Settings.Favorites.Contains(key);
-                    if (_favoritesOnly && !fav) continue;
-                    rows.Add(new Row(i, stats != null && stats.TryGetValue(i.Symbol, out var st) ? st : null, fav, p.Id));
+                    bool favorite = _svc.Settings.Favorites.Contains($"{p.Id}:{i.Symbol}");
+                    if (_favoritesOnly && !favorite) continue;
+                    rows.Add(new Row(i, stats != null && stats.TryGetValue(i.Symbol, out var st) ? st : null, favorite, p.Id));
                 }
             }
-            catch (Exception ex)
-            {
-                _hint.Text = $"Could not load instruments from {p.Name}: {ex.Message}";
-            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+            catch (Exception ex) { errors.Add($"Could not load instruments from {p.Name}: {ex.Message}"); }
         }
-
+        if (token.IsCancellationRequested || version != _loadVersion || !_open) return;
+        if (revision != CacheRevision)
+        {
+            rows.Clear();
+            errors.Add("Connections changed while loading; reopen the picker to refresh.");
+        }
+        _loading = false;
+        _loadError = errors.Count == 0 ? null : string.Join(" · ", errors);
         _rows = rows.OrderByDescending(r => r.Favorite).ThenByDescending(r => r.Stats?.QuoteVolume ?? 0).ThenBy(r => r.Instrument.Symbol).ToList();
         BuildQuoteChips();
         Refill();
@@ -282,7 +329,82 @@ public sealed class InstrumentPicker : Button
             filtered = filtered.OrderByDescending(r => r.Instrument.Symbol.StartsWith(q, StringComparison.OrdinalIgnoreCase)).ThenByDescending(r => r.Stats?.QuoteVolume ?? 0).ToList();
         _list.ItemsSource = filtered;
         _list.SelectedIndex = filtered.Count > 0 ? 0 : -1;
+        CancelSuggestions();
         _hint.Text = $"{filtered.Count} instruments · Enter opens here · {Keys.Label("Enter")} opens a new tab · ★ marks favorites";
+        if (_loadError != null) _hint.Text = _loadError;
+        if (_open && !_loading && q.Length > 0 && filtered.Count == 0 && !_favoritesOnly)
+        {
+            var cancellation = _suggestionCancellation = new CancellationTokenSource();
+            _ = FindElsewhereAsync(q, _suggestionVersion, cancellation.Token);
+        }
+    }
+
+    private static bool Matches(Instrument instrument, string query) =>
+        instrument.Symbol.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        instrument.Description.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private async Task FindElsewhereAsync(string query, int version, CancellationToken token)
+    {
+        try
+        {
+            // A short debounce prevents every keystroke from starting another source request.
+            await Task.Delay(180, token);
+            var profiles = _svc.Connections.Enabled.Where(p => p.HasMarketData && p.Id != _profileId).ToArray();
+            long revision = CacheRevision;
+            var found = new List<(ConnectionProfile Profile, string Symbols)>();
+            var unavailable = new List<string>();
+            foreach (var profile in profiles)
+            {
+                try
+                {
+                    var instruments = await CachedInstrumentsAsync(_svc, profile.Id, token, TimeSpan.FromSeconds(3));
+                    var hits = instruments.Where(i => Matches(i, query))
+                        .OrderByDescending(i => i.Symbol.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+                        .ThenBy(i => i.Symbol.Length).Take(3).Select(i => i.Symbol).ToArray();
+                    if (hits.Length > 0) found.Add((profile, string.Join(", ", hits)));
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+                catch (TimeoutException) { unavailable.Add($"{profile.Name}: timed out"); }
+                catch (Exception ex) { unavailable.Add($"{profile.Name}: {ex.Message}"); }
+                if (token.IsCancellationRequested || version != _suggestionVersion || !_open) return;
+            }
+            if (token.IsCancellationRequested || version != _suggestionVersion || !_open) return;
+            if (revision != CacheRevision)
+            {
+                found.Clear();
+                unavailable.Add("Connections changed while searching; enter the query again to refresh.");
+            }
+            _elsewhere.Children.Clear();
+            _elsewhere.Children.Add(new TextBlock
+            {
+                Text = found.Count > 0 ? $"Matches for “{query}” on other connections:" :
+                    profiles.Length == 0 ? "No other enabled market-data connections to search." :
+                    unavailable.Count == 0 ? $"No matches for “{query}” on other enabled connections." :
+                    $"No matches for “{query}” on the connections that could be searched.",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Ui.Text2,
+            });
+            foreach (var (profile, symbols) in found)
+            {
+                var button = new Button { Content = $"{profile.Name} · {symbols}", HorizontalAlignment = HorizontalAlignment.Left };
+                button.Click += async (_, _) =>
+                {
+                    if (!_open || version != _suggestionVersion) return;
+                    _favoritesOnly = false;
+                    _filterQuote = "";
+                    await LoadAsync(profile.Id);
+                };
+                _elsewhere.Children.Add(button);
+            }
+            if (unavailable.Count > 0) _elsewhere.Children.Add(new TextBlock
+            {
+                Text = "Search incomplete · " + string.Join(" · ", unavailable),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Ui.Text2,
+            });
+            _elsewhere.IsVisible = true;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
 
     private Control BuildRow(Row r)
@@ -336,27 +458,98 @@ public sealed class InstrumentPicker : Button
         Picked?.Invoke(r.ProfileId, r.Instrument, newTab);
     }
 
-    /// <summary>Olvida el caché (por ejemplo, tras cambiar una conexión).</summary>
+    /// <summary>Invalidates cached rows and rejects results from requests started before the invalidation.</summary>
     public static void ClearCache(string? profileId = null)
     {
-        if (profileId == null)
+        lock (CacheLock)
         {
-            InstrumentCache.Clear();
-            StatsCache.Clear();
-        }
-        else
-        {
-            InstrumentCache.Remove(profileId);
-            StatsCache.Remove(profileId);
+            _cacheRevision++;
+            if (profileId == null)
+            {
+                _cacheEpoch++;
+                InstrumentCache.Clear();
+                StatsCache.Clear();
+                CacheVersions.Clear();
+            }
+            else
+            {
+                CacheVersions[profileId] = CacheVersions.GetValueOrDefault(profileId) + 1;
+                InstrumentCache.Remove(profileId);
+                StatsCache.Remove(profileId);
+            }
         }
     }
 
-    /// <summary>Instrumentos de una conexión (con caché).</summary>
-    public static async Task<IReadOnlyList<Instrument>> InstrumentsAsync(AppServices svc, string profileId)
+    /// <summary>Instruments for a connection, sharing the picker's invalidation-safe cache.</summary>
+    public static Task<IReadOnlyList<Instrument>> InstrumentsAsync(AppServices svc, string profileId) =>
+        CachedInstrumentsAsync(svc, profileId, CancellationToken.None, TimeSpan.FromSeconds(10));
+
+    private static async Task<IReadOnlyList<Instrument>> CachedInstrumentsAsync(AppServices svc, string profileId, CancellationToken token, TimeSpan timeout)
     {
-        if (InstrumentCache.TryGetValue(profileId, out var list)) return list;
-        list = await svc.Connections.GetFeed(profileId).GetInstrumentsAsync(CancellationToken.None);
-        InstrumentCache[profileId] = list;
+        long epoch, version;
+        lock (CacheLock)
+        {
+            if (InstrumentCache.TryGetValue(profileId, out var cached)) return cached;
+            epoch = _cacheEpoch;
+            version = CacheVersions.GetValueOrDefault(profileId);
+        }
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token);
+        bounded.CancelAfter(timeout);
+        IReadOnlyList<Instrument> list;
+        try { list = await svc.Connections.GetFeed(profileId).GetInstrumentsAsync(bounded.Token).WaitAsync(timeout, token); }
+        catch (OperationCanceledException)
+        {
+            // WaitAsync can resume before the caller token reaches this linked source.
+            // Cancel the transport before disposing its link or publishing cancellation.
+            bounded.Cancel();
+            if (!token.IsCancellationRequested) throw new TimeoutException("Instrument source timed out.");
+            throw;
+        }
+        catch (TimeoutException)
+        {
+            bounded.Cancel();
+            throw;
+        }
+        token.ThrowIfCancellationRequested();
+        lock (CacheLock)
+        {
+            if (epoch != _cacheEpoch || version != CacheVersions.GetValueOrDefault(profileId))
+                throw new InvalidOperationException("Connection changed during instrument loading; reopen the picker to refresh.");
+            InstrumentCache[profileId] = list;
+        }
         return list;
+    }
+
+    private static async Task<IReadOnlyDictionary<string, TickerStats>> CachedStatsAsync(string profileId, ITickerStatsProvider provider, CancellationToken token)
+    {
+        long epoch, version;
+        lock (CacheLock)
+        {
+            if (StatsCache.TryGetValue(profileId, out var cached) && (DateTime.UtcNow - cached.At).TotalSeconds <= 30) return cached.Stats;
+            epoch = _cacheEpoch;
+            version = CacheVersions.GetValueOrDefault(profileId);
+        }
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token);
+        bounded.CancelAfter(TimeSpan.FromSeconds(3));
+        IReadOnlyDictionary<string, TickerStats> stats;
+        try { stats = await provider.GetTickerStatsAsync(bounded.Token).WaitAsync(TimeSpan.FromSeconds(3), token); }
+        catch (OperationCanceledException)
+        {
+            bounded.Cancel();
+            throw;
+        }
+        catch (TimeoutException)
+        {
+            bounded.Cancel();
+            throw;
+        }
+        token.ThrowIfCancellationRequested();
+        lock (CacheLock)
+        {
+            if (epoch != _cacheEpoch || version != CacheVersions.GetValueOrDefault(profileId))
+                throw new InvalidOperationException("Connection changed during statistics loading.");
+            StatsCache[profileId] = (DateTime.UtcNow, stats);
+        }
+        return stats;
     }
 }

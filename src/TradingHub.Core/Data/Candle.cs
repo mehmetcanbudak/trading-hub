@@ -27,6 +27,12 @@ public sealed class Candle
     public decimal OI;
     public decimal MaxOI;
     public decimal MinOI;
+    public bool HasOpenInterest;
+    public bool HasOpenInterestRange;
+    public DateTime? OpenInterestTime;
+    public bool HasOpenInterestChange;
+    public decimal OpenInterestChange;
+    public string? OpenInterestStatus;
 
     public int FirstTradeIndex = -1;
     public int LastTradeIndex = -1;
@@ -45,8 +51,9 @@ public sealed class Candle
 
     /// <summary>Tiene al menos una operación real (no armada a partir de velas del exchange).</summary>
     public bool HasRealTrades;
+    public bool HasSyntheticTrades;
 
-    /// <summary>Vela armada solo con historia en velas de 1 minuto: OHLC, volumen y delta reales, sin footprint.</summary>
+    /// <summary>Only aggregate bar history: OHLCV, possibly estimated side/delta, and no observed footprint.</summary>
     public bool IsSynthetic => Trades > 0 && !HasRealTrades;
 
     public decimal Delta => Ask - Bid;
@@ -55,6 +62,7 @@ public sealed class Candle
     public void AddTrade(long priceTicks, long row, decimal volume, TradeSide side, long timeTicks, int tradeIndex, bool synthetic = false)
     {
         if (!synthetic) HasRealTrades = true;
+        else HasSyntheticTrades = true;
         if (Trades == 0)
         {
             OpenTicks = HighTicks = LowTicks = priceTicks;
@@ -75,7 +83,7 @@ public sealed class Candle
 
         if (synthetic)
         {
-            // historia en velas: suma al OHLC, volumen y delta, pero no inventa niveles de footprint
+            // Aggregate history contributes OHLCV/side estimates but never invents observed footprint rows.
             switch (side)
             {
                 case TradeSide.Buy: Ask += volume; break;

@@ -13,7 +13,7 @@ namespace TradingHub.Feeds.Binance;
 /// históricas por REST y, en vivo por WebSocket, el tape (aggTrade) y el libro (depth @100ms)
 /// sincronizado con su foto inicial según el procedimiento oficial.
 /// </summary>
-public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHistory
+public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHistory, IOpenInterestProvider
 {
     public const string FuturesId = "binance-futures";
     public const string SpotId = "binance-spot";
@@ -23,11 +23,19 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
     private readonly SemaphoreSlim _rate = new(1, 1);
     private int _usedWeight;
     private DateTime _weightMinute = DateTime.UtcNow;
+    private readonly Uri? _restOrigin;
+    private readonly Func<DateTime> _utcNow;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly CancellationTokenSource _lifetime = new();
 
-    public BinanceFeed(bool futures)
+    public BinanceFeed(bool futures, HttpMessageHandler? handler = null, Uri? restOrigin = null,
+        Func<DateTime>? utcNow = null, Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _futures = futures;
-        _http = new HttpClient(new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.All, PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
+        _restOrigin = restOrigin;
+        _utcNow = utcNow ?? (() => DateTime.UtcNow);
+        _delay = delay ?? ((duration, ct) => Task.Delay(duration, ct));
+        _http = new HttpClient(handler ?? new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.All, PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
         {
             Timeout = TimeSpan.FromSeconds(20),
         };
@@ -39,7 +47,7 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
     public bool SupportsHistory => true;
     public bool IsLive => true;
 
-    private string RestBase => _futures ? "https://fapi.binance.com/fapi/v1" : "https://api.binance.com/api/v3";
+    private string RestBase => (_restOrigin?.GetLeftPart(UriPartial.Authority) ?? (_futures ? "https://fapi.binance.com" : "https://api.binance.com")) + (_futures ? "/fapi/v1" : "/api/v3");
 
     private IEnumerable<string> WsBases => _futures
         ? new[] { "wss://fstream.binance.com/market", "wss://fstream.binance.com" }
@@ -51,18 +59,19 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
 
     // ======================================================================= REST
 
-    private async Task<JsonDocument> GetAsync(string pathAndQuery, int weight, CancellationToken ct)
+    private async Task<JsonDocument> GetAsync(string pathAndQuery, int weight, CancellationToken ct, bool rootPath = false)
     {
         for (int attempt = 0; ; attempt++)
         {
             await ThrottleAsync(weight, ct).ConfigureAwait(false);
-            using var resp = await _http.GetAsync(RestBase + pathAndQuery, ct).ConfigureAwait(false);
+            string origin = _restOrigin?.GetLeftPart(UriPartial.Authority) ?? "https://fapi.binance.com";
+            using var resp = await _http.GetAsync((rootPath ? origin : RestBase) + pathAndQuery, ct).ConfigureAwait(false);
             if (resp.Headers.TryGetValues("X-MBX-USED-WEIGHT-1M", out var vals) && int.TryParse(vals.FirstOrDefault(), out var w))
                 _usedWeight = w;
             if ((int)resp.StatusCode is 429 or 418)
             {
                 var retry = resp.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(30);
-                await Task.Delay(retry, ct).ConfigureAwait(false);
+                await _delay(retry, ct).ConfigureAwait(false);
                 continue;
             }
 
@@ -71,7 +80,7 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
                 var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 if (attempt < 2 && (int)resp.StatusCode >= 500)
                 {
-                    await Task.Delay(1000 * (attempt + 1), ct).ConfigureAwait(false);
+                    await _delay(TimeSpan.FromMilliseconds(1000 * (attempt + 1)), ct).ConfigureAwait(false);
                     continue;
                 }
 
@@ -99,7 +108,7 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
             if (_usedWeight + weight > WeightLimit)
             {
                 var wait = TimeSpan.FromSeconds(61 - now.Second);
-                await Task.Delay(wait, ct).ConfigureAwait(false);
+                await _delay(wait, ct).ConfigureAwait(false);
                 _usedWeight = 0;
                 _weightMinute = DateTime.UtcNow;
             }
@@ -589,5 +598,9 @@ public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineH
         return last;
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _http.Dispose();
+    }
 }

@@ -155,3 +155,9 @@ Add saved runs across strategies/instruments. Choose Equal, Equal risk (inverse 
 ## Reports
 
 History and Portfolio **Report** actions, or Claude's laboratory, create Markdown reports with metrics, tables and charts in the selected English, Spanish or Simplified Chinese interface language. Claude can add analysis and a verdict; generated C# remains English. Files live in the Documents known folder under `Trading Hub/Estrategias/Reportes` (`~/Documents/Trading Hub/Estrategias/Reportes` on a standard Mac). The report reader's PDF/HTML export opens a browser for printing or saving PDF. Existing reports are not rewritten. See [Claude](asistente-claude.md).
+
+## Additional data and assistant fidelity
+
+IB imported minute bars remain synthetic/non-observed through backtests and footprint aggregation; real recorded minutes take precedence. They cannot establish observed intrabar fills, true aggressor footprint or equivalence to tick replay. OI has finite five-minute/latest-30-day history and ten-minute freshness; unavailable cutoffs are not zero. Retrospective closed-confirmed swing anchors are not contemporaneous forecasts. See [Data](datos.md#interactive-brokers-bars-and-offline-history) and [studies](indicadores.md#selected-additional-native-studies).
+
+Optional Codex strategy chat uses a separate engine-bound history; Claude remains the default and risk-agent engine. The existing Laboratory tools produce runs/reports/proposals, not applied trades. [Research](asistente-claude.md#optional-tradingview-research) requires separate explicit metadata approval and may incur provider/model costs; fake-CLI evidence is not paid-model or real-OAuth certification.

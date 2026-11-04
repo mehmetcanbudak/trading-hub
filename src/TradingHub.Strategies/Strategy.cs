@@ -301,6 +301,19 @@ public abstract class Strategy
     protected Vwap Vwap() => Add(new Vwap(t => Host.Session.SessionDate(t)));
     protected CumulativeDelta CumulativeDelta(bool resetEachSession = true) => Add(new CumulativeDelta(resetEachSession ? t => Host.Session.SessionDate(t) : null));
 
+    /// <summary>Owns a single-value QuanTAlib indicator; readiness follows its IsHot state, not the requested period.</summary>
+    protected QtSeries Qt(QuanTAlib.AbstractBase indicator, PriceSource source = PriceSource.Close) => Add(new QtSeries(indicator, source));
+
+    /// <summary>Previous observed session Camarilla levels. No arguments uses the host's actual session.</summary>
+    protected CamarillaSeries Camarilla(string? timeZoneId = null, double? sessionStartHour = null)
+    {
+        if (timeZoneId == null && sessionStartHour == null)
+            return Add(new CamarillaSeries(t => Host.Session.SessionDate(t)));
+        var session = CamarillaSessions.Create(timeZoneId ?? Host.Session.TimeZone.Id,
+            sessionStartHour ?? Host.Session.Start.TotalHours);
+        return Add(new CamarillaSeries(session.SessionDate));
+    }
+
     /// <summary>Serie propia calculada en cada vela (por ejemplo, la diferencia entre dos medias).</summary>
     protected CustomSeries Custom(string name, Func<BarSeries, decimal> calc) => Add(new CustomSeries(name, calc));
 
@@ -415,11 +428,17 @@ public abstract class Strategy
     internal void InternalInit(IStrategyHost host)
     {
         Host = host;
+        DisposeIndicators();
         _indicators.Clear();
         Context = new MarketContextTracker(host.Period.IsTimeBased && host.Period.ApproxDuration >= TimeSpan.FromHours(1));
         Canvas.Clear();
         WantsTicks = UsesTicks(GetType());
-        OnInit();
+        try { OnInit(); }
+        catch
+        {
+            DisposeIndicators();
+            throw;
+        }
     }
 
     internal void InternalBar(Bar bar)
@@ -432,7 +451,17 @@ public abstract class Strategy
     internal void InternalTick(in Trade t) => OnTick(t);
     internal void InternalFilled(StrategyOrder o) => OnOrderFilled(o);
     internal void InternalSession(DateOnly d) => OnSessionStart(d);
-    internal void InternalStop() => OnStop();
+    internal void InternalStop()
+    {
+        try { OnStop(); }
+        finally { DisposeIndicators(); }
+    }
+
+    internal void DisposeIndicators()
+    {
+        foreach (var indicator in _indicators)
+            if (indicator is QtSeries owned) owned.Dispose();
+    }
 
     // ----------------------------------------------------------------- metadatos
 

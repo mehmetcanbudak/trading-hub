@@ -7,6 +7,17 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (args.Contains("--import-ib"))
+        {
+            Environment.ExitCode = Services.IbImportCommand.Run(args, Console.Out, Console.Error);
+            return;
+        }
+        if (args.Contains("--research-mcp"))
+        {
+            Environment.ExitCode = Services.TradingViewResearchMcp.RunAsync(args).GetAwaiter().GetResult();
+            return;
+        }
+
         bool headless = args.Contains("--mcp");
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog.Write(e.ExceptionObject as Exception);

@@ -27,11 +27,17 @@
     <PackageReference Include="Material.Icons.Avalonia" Version="2.3.1" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="11.4.1" />
     <PackageReference Include="AvaloniaEdit.TextMate" Version="11.4.1" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.3.1" />
   </ItemGroup>
   <ItemGroup>
     <None Remove="Assets/**" />
     <AvaloniaResource Include="Assets/**" Exclude="Assets/*.icns;Assets/icon-512.png" />
     <!-- traducciones de la interfaz (las arma tools/TradingHub.I18n) -->
     <EmbeddedResource Include="Localization/*.json" LogicalName="TradingHub.App.Localization.%(Filename)%(Extension)" WithCulture="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../licenses/**/*" Link="licenses/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

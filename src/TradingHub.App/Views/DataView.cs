@@ -118,7 +118,7 @@ internal sealed class DataView : UserControl, IPage
         grid.Children.Add(daysCard);
 
         // a la derecha: bajar (exchanges y Rithmic) e importar archivos (CFDs, forex…)
-        var right = new ScrollViewer { Content = Ui.V(16, Ui.Card(BuildDownloadPanel(), 16), Ui.Card(BuildDatabentoPanel(), 16), Ui.Card(BuildImportPanel(), 16)) };
+        var right = new ScrollViewer { Content = Ui.V(16, Ui.Card(BuildDownloadPanel(), 16), Ui.Card(BuildDatabentoPanel(), 16), Ui.Card(BuildIbImportPanel(), 16), Ui.Card(BuildImportPanel(), 16)) };
         Grid.SetColumn(right, 4);
         grid.Children.Add(right);
 
@@ -236,6 +236,50 @@ internal sealed class DataView : UserControl, IPage
             _importStatus,
             Note(MaterialIconKind.InformationOutline, "CFDs have no centralized traded volume here: each quote counts as one tick, with aggressor direction inferred from price changes. Price bars and price-based backtests are usable, but footprint and delta are approximate."));
     }
+
+    private readonly TextBox _ibFolder = new() { Watermark = "Folder containing one-minute IB CSV files" };
+    private readonly TextBox _ibSymbol = new() { Watermark = "MNQ (optional if filenames identify the root)" };
+    private readonly CheckBox _ibReplace = new() { Content = "Explicitly replace covered recorded minutes (preserved backups)" };
+    private readonly TextBlock _ibOutcome = new() { TextWrapping = TextWrapping.Wrap, Classes = { "muted", "small" } };
+    private readonly ProgressBar _ibProgress = new() { Minimum = 0, Maximum = 1, Height = 6, IsVisible = false };
+    private CancellationTokenSource? _ibCts;
+
+    private Control BuildIbImportPanel() => Ui.V(12,
+        Ui.H2("Interactive Brokers CSV history"),
+        Ui.Muted("time,open,high,low,close,volume[,contract] · Unix UTC seconds/milliseconds · one-minute bars. Validate all files before publishing; real ticks are preserved by default."),
+        Ui.Field("CSV folder", _ibFolder), Ui.Field("Catalog root", _ibSymbol), _ibReplace,
+        Ui.H(8, Ui.Button("Preview and import IB…", MaterialIconKind.FileImportOutline, () => _ = ImportIbAsync()),
+            Ui.Button("Cancel IB import", MaterialIconKind.Close, () => _ibCts?.Cancel())),
+        _ibProgress, _ibOutcome);
+
+    private async Task ImportIbAsync()
+    {
+        if (_ibCts != null) return;
+        using var cts = new CancellationTokenSource();
+        _ibCts = cts;
+        _ibProgress.IsVisible = true;
+        try
+        {
+            string folder = _ibFolder.Text?.Trim() ?? "";
+            string? symbol = string.IsNullOrWhiteSpace(_ibSymbol.Text) ? null : _ibSymbol.Text.Trim();
+            var preview = await Task.Run(() => IbBarImport.PreviewFolder(folder, AppPaths.Ticks, symbol, cts.Token));
+            _ibOutcome.Text = preview.Description + "\n" + string.Join("\n", preview.Days.Select(d => $"{d.Day:yyyy-MM-dd}: {d.Bars} incoming bars, {d.StoredSyntheticMinutes} stored synthetic minutes, {d.RecordedTrades} real ticks, {d.CoveredRealMinutes} conflicting real minutes"));
+            bool replace = _ibReplace.IsChecked == true;
+            if (!await ConfirmDialog.ShowAsync(_main, replace ? "Replace IB recorded minutes" : "Import IB history",
+                    _ibOutcome.Text + (replace ? "\nOnly covered minutes are replaced. Original files and a recovery journal are preserved; a multi-file publication is not atomic." : "\nRecorded tick files remain byte-identical. Only uncovered minutes are filled."),
+                    replace ? "Replace with backups" : "Import uncovered minutes", danger: replace, cancelByDefault: true)) return;
+            var progress = new Progress<double>(value => _ibProgress.Value = value);
+            var result = await Task.Run(() => IbBarImport.Commit(preview, AppPaths.Ticks,
+                replace ? IbBarImport.ImportPolicy.ReplaceCoveredMinutes : IbBarImport.ImportPolicy.PreserveRecorded, progress, cts.Token));
+            _ibOutcome.Text = $"IB import: {result.Bars} validated incoming bars, {result.Days} UTC days, {result.FilesWritten} files published. Policy: {result.Policy}. Backups and journal: {result.BackupDirectory}";
+            _svc.Connections.Save();
+            Refresh();
+        }
+        catch (OperationCanceledException) { _ibOutcome.Text = "IB import canceled before publication; no history files changed."; }
+        catch (Exception error) { _ibOutcome.Text = "IB import failed: " + error.Message; }
+        finally { _ibCts = null; _ibProgress.IsVisible = false; }
+    }
+
 
     // ===================================================================== Databento (futuros de CME, historia larga)
 

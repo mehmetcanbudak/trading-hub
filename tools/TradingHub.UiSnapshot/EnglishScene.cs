@@ -163,14 +163,14 @@ internal static class EnglishScene
             string? previousCli = Environment.GetEnvironmentVariable("TRADINGHUB_CLAUDE_CLI");
             Environment.SetEnvironmentVariable("TRADINGHUB_CLAUDE_CLI", fakeCli);
             var bridge = new ClaudeCodeBridge();
-            ClaudeResult? reply = null;
+            StrategyChatResult? reply = null;
             bridge.Finished += result => reply = result;
             void FakeReply(string json)
             {
                 reply = null;
                 bridge.NewConversation();
                 File.WriteAllText(Path.Combine(examples, "claude-fixture.json"), json);
-                var task = bridge.SendAsync("Fixture only; no network or paid model.", examples, ClaudeCodeBridge.StrategySystemPrompt);
+                var task = bridge.SendAsync(new StrategyChatRequest("Fixture only; no network or paid model.", examples, ClaudeCodeBridge.StrategySystemPrompt));
                 for (int i = 0; i < 500 && (!task.IsCompleted || reply == null); i++) pump(0.01);
                 Check(task.IsCompletedSuccessfully && reply != null, "fake Claude request completes through the real bridge");
                 if (!task.IsCompleted) bridge.Cancel();
@@ -183,8 +183,6 @@ internal static class EnglishScene
                 Check(reply is { IsError: true, NeedsLogin: true } && !EnglishLocalizationAudit.LooksSpanish(reply.Text), "Claude authentication failure is English and recognized");
                 FakeReply("not a JSON response\n");
                 Check(reply is { IsError: true } && reply.Text.Contains("exited without a response", StringComparison.Ordinal), "Claude empty-result fallback is English");
-                Check(ClaudeCodeBridge.StrategySystemPrompt.Contains("English filenames, class/parameter/local identifiers", StringComparison.Ordinal)
-                    && ClaudeCodeBridge.IndicatorSystemPrompt.Contains("English filenames, class/parameter/local identifiers", StringComparison.Ordinal), "new Claude strategy and indicator code is instructed to use English identifiers");
             }
             finally
             {

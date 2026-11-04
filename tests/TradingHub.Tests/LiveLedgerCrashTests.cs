@@ -218,38 +218,205 @@ public sealed class LiveLedgerCrashTests : IDisposable
 
     private async Task CrashAt(string checkpoint, string operation = "write")
     {
+        var elapsed = Stopwatch.StartNew();
         using var writer = Start(operation, checkpoint);
+        var stderrText = new System.Text.StringBuilder();
+        bool stderrTruncated = false;
+        Task stderr = DrainWriterError();
+        string? line = null;
+        DateTime? startedAt = null;
+        string state = "not observed";
+        string sample = "Native sample not requested.";
+        bool checkpointTimedOut = false;
+        Exception? failure = null;
         try
         {
-            Assert.Equal("checkpoint", await writer.StandardOutput.ReadLineAsync().WaitAsync(Watchdog));
+            startedAt = writer.StartTime;
+            try { line = await writer.StandardOutput.ReadLineAsync().WaitAsync(Watchdog); }
+            catch (TimeoutException) { checkpointTimedOut = true; throw; }
+            Assert.Equal("checkpoint", line);
         }
-        finally
+        catch (Exception ex)
+        {
+            failure = ex;
+            state = writer.HasExited ? $"exited with code {writer.ExitCode}" : "still running";
+        }
+
+        // A sample explains a failed deadline; it must never turn a late checkpoint into a pass.
+        if (checkpointTimedOut && OperatingSystem.IsMacOS() && !writer.HasExited && startedAt.HasValue)
+        {
+            try { sample = await SampleWriter(startedAt.Value); }
+            catch (Exception ex)
+            {
+                failure = new AggregateException(failure!, ex);
+                sample = "Native sampling failed; capture diagnostics are retained in the inner exception.";
+            }
+        }
+        try
         {
             if (!writer.HasExited) writer.Kill(entireProcessTree: true);
             await writer.WaitForExitAsync().WaitAsync(Watchdog);
         }
-        Assert.NotEqual(0, writer.ExitCode);
+        catch (Exception ex)
+        {
+            failure = failure == null ? ex : new AggregateException(failure, ex);
+        }
+        try { await stderr.WaitAsync(Watchdog); }
+        catch (Exception ex)
+        {
+            failure = failure == null ? ex : new AggregateException(failure, ex);
+        }
+        if (failure == null)
+        {
+            try { Assert.NotEqual(0, writer.ExitCode); }
+            catch (Exception ex)
+            {
+                failure = ex;
+                state = $"exited with code {writer.ExitCode}";
+            }
+        }
+        if (failure != null)
+        {
+            string error;
+            lock (stderrText) error = stderrText.ToString() + (stderrTruncated ? "\n<stderr limited to 65,536 characters>" : "");
+            throw new InvalidOperationException(
+                $"Ledger writer '{operation}' checkpoint '{checkpoint}' (PID {writer.Id}, started {startedAt:O}) failed after {elapsed.Elapsed}; child was {state}.\n" +
+                $"stdout checkpoint: {line ?? "<none>"}\nstderr:\n{error}\nnative sample:\n{sample}", failure);
+        }
+
+        async Task DrainWriterError()
+        {
+            var buffer = new char[4096];
+            int count;
+            while ((count = await writer.StandardError.ReadAsync(buffer.AsMemory())) != 0)
+            {
+                lock (stderrText)
+                {
+                    int keep = Math.Min(count, 65_536 - stderrText.Length);
+                    stderrText.Append(buffer, 0, keep);
+                    stderrTruncated |= keep != count;
+                }
+            }
+        }
+
+        async Task<string> SampleWriter(DateTime expectedStart)
+        {
+            // Recheck this exact child identity immediately before capture; never find a process by name.
+            using var live = Process.GetProcessById(writer.Id);
+            if (writer.HasExited || live.StartTime != expectedStart)
+                throw new InvalidOperationException("The owned writer exited or changed identity before sampling.");
+            string reportPath = Path.Combine(_root, $"writer-{writer.Id}.sample.txt");
+            var start = new ProcessStartInfo("/usr/bin/sample")
+            {
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                WorkingDirectory = _root,
+            };
+            start.ArgumentList.Add(writer.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            start.ArgumentList.Add("1");
+            start.ArgumentList.Add("-mayDie");
+            start.ArgumentList.Add("-file");
+            start.ArgumentList.Add(reportPath);
+            using var sampler = Process.Start(start) ?? throw new IOException("Could not start the native writer sampler.");
+            Task<string> output = sampler.StandardOutput.ReadToEndAsync();
+            Task<string> error = sampler.StandardError.ReadToEndAsync();
+            var captureLimit = TimeSpan.FromSeconds(5);
+            Exception? captureFailure = null;
+            try
+            {
+                await sampler.WaitForExitAsync().WaitAsync(captureLimit);
+                if (sampler.ExitCode != 0) throw new IOException($"Native sampler exited with code {sampler.ExitCode}.");
+            }
+            catch (Exception ex) { captureFailure = ex; }
+            try
+            {
+                if (!sampler.HasExited) sampler.Kill(entireProcessTree: true);
+                await sampler.WaitForExitAsync().WaitAsync(captureLimit);
+            }
+            catch (Exception ex)
+            {
+                captureFailure = captureFailure == null ? ex : new AggregateException(captureFailure, ex);
+            }
+            string helperOutput = "<sampler pipes incomplete>";
+            try
+            {
+                await Task.WhenAll(output, error).WaitAsync(captureLimit);
+                string stdout = await output, stderrOutput = await error;
+                helperOutput = $"stdout: {stdout[..Math.Min(stdout.Length, 4096)]}\nstderr: {stderrOutput[..Math.Min(stderrOutput.Length, 4096)]}";
+            }
+            catch (Exception ex)
+            {
+                captureFailure = captureFailure == null ? ex : new AggregateException(captureFailure, ex);
+            }
+            string report = "<no native report>";
+            try
+            {
+                using var reader = new StreamReader(reportPath);
+                var buffer = new char[65_536];
+                int count = await reader.ReadBlockAsync(buffer.AsMemory()).AsTask().WaitAsync(captureLimit);
+                report = new string(buffer, 0, count) + (count == buffer.Length ? "\n<sample limited to 65,536 characters>" : "");
+            }
+            catch (Exception ex)
+            {
+                captureFailure = captureFailure == null ? ex : new AggregateException(captureFailure, ex);
+            }
+            string diagnostic = $"Owned writer PID {writer.Id}, started {expectedStart:O}; 1-second native sample.\n{helperOutput}\n{report}";
+            if (captureFailure != null) throw new InvalidOperationException(diagnostic, captureFailure);
+            return diagnostic;
+        }
     }
 
     private async Task<Snapshot> ReadInFreshProcess(string operation = "read")
     {
         using var reader = Start(operation);
+        // Drain from launch, not after exit: fixture diagnostics must never fill a redirected pipe.
+        Task<string> stderr = reader.StandardError.ReadToEndAsync();
+        var elapsed = Stopwatch.StartNew();
+        string phase = "startup";
+        string? started = null, json = null;
+        Snapshot? snapshot = null;
+        Exception? failure = null;
+        string state = "not observed";
         try
         {
-            Assert.Equal("started", await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog));
-            string? json = await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
+            started = await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
+            Assert.Equal("started", started);
+            phase = "snapshot";
+            json = await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
+            phase = "exit";
             await reader.WaitForExitAsync().WaitAsync(Watchdog);
-            Assert.True(reader.ExitCode == 0, await reader.StandardError.ReadToEndAsync());
-            return JsonSerializer.Deserialize<Snapshot>(json!)!;
+            Assert.True(reader.ExitCode == 0, $"Fixture exited with code {reader.ExitCode}.");
+            phase = "snapshot decoding";
+            snapshot = JsonSerializer.Deserialize<Snapshot>(json!)!;
         }
-        finally
+        catch (Exception ex)
         {
-            if (!reader.HasExited)
-            {
-                reader.Kill(entireProcessTree: true);
-                await reader.WaitForExitAsync().WaitAsync(Watchdog);
-            }
+            failure = ex;
+            state = reader.HasExited ? $"exited with code {reader.ExitCode}" : "still running";
         }
+
+        try
+        {
+            if (!reader.HasExited) reader.Kill(entireProcessTree: true);
+            await reader.WaitForExitAsync().WaitAsync(Watchdog);
+        }
+        catch (Exception ex)
+        {
+            failure = failure == null ? ex : new AggregateException(failure, ex);
+        }
+
+        string error;
+        try { error = await stderr.WaitAsync(Watchdog); }
+        catch (Exception ex)
+        {
+            failure = failure == null ? ex : new AggregateException(failure, ex);
+            error = "The fixture stderr pipe did not finish draining.";
+        }
+        if (failure != null)
+            throw new InvalidOperationException(
+                $"Ledger fixture '{operation}' (PID {reader.Id}) failed during {phase} after {elapsed.Elapsed}; child was {state}.\n" +
+                $"stdout startup: {started ?? "<none>"}\nstdout snapshot: {json ?? "<none>"}\nstderr:\n{error}", failure);
+        return snapshot!;
     }
 
     private Process Start(string operation, string? checkpoint = null)
