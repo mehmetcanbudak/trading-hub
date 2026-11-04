@@ -159,6 +159,20 @@ Diagnostics: TRADINGHUB_SNAP_INDICATORS="Name|Other" adds selected studies; TRAD
 - Built-in study: an Indicator subclass in Indicators.Native with parameterless constructor, DisplayName and category metadata. The assembly is scanned at startup. Custom studies need only the user indicator folder.
 - Laboratory tool: schema in LabServer.Tools, dispatch in LabServer.CallAsync, and allowlisted name in ClaudeCodeBridge.LabTools. Keep JSON keys stable.
 
+## Custom-indicator monitoring
+
+On macOS, custom C# indicators use one cancellable, nonoverlapping 250 ms content scan instead of activating `FileSystemWatcher`, whose .NET macOS implementation calls global POSIX `sync()`. Other platforms retain native watching. Recursive sources exclude `bin`/`obj`; compilation and catalog publication remain on the UI dispatcher after the existing 600 ms debounce. Captured source contents, rather than a second read of mutable paths, are compiler inputs. Invalid or unreadable sources retain the last-good catalog and recover after a later successful read.
+
+Only actual application exit disposes the script monitor. Closing to the menu bar keeps hot reload active; disposal rejects queued, debounced and in-progress compilation results.
+
+After building Release, run the actual compiler/dispatcher fixture:
+
+```bash
+dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll --check-script-monitor
+```
+
+It creates six fresh temporary storage overrides before app-path initialization, uses no providers, personal scripts or model CLI, and prints its retained fixture directory. Both platform CI jobs run it. This fixture does not replace native packaged startup/quit verification.
+
 ## Validation from code
 
 ValidationGate.Evaluate applies the [Backtesting](backtesting.md#deflated-sharpe-and-validation) rules. RobustnessTests contains complete examples. Given existing walkForward and optimization results:
@@ -190,7 +204,7 @@ LiveStrategyRunner.Guard accepts ILiveOrderGuard to inspect exposure-increasing 
 
 ## Selected non-KVP reproduction
 
-Work only in the external `feat/non-kvp-adoption` worktree, not canonical/installed/user-data trees. The [dashboard](TRANSLATION_STATUS.md#unmerged-non-kvp-adoption--2026-11-04) records exact receipts and unresolved gates. Before any app, headless import or fake-provider scene, choose a fresh external fixture root:
+The selected work is now integrated into `memoshi`; the former external `feat/non-kvp-adoption` checkout is historical. Reproduce from a review branch in an isolated source worktree, never the installed app or personal data directories. The [dashboard](TRANSLATION_STATUS.md#canonical-non-kvp-integration--2026-11-04) distinguishes canonical results from earlier external receipts and remaining release gates. Before any app, headless import or fake-provider scene, choose a fresh fixture root:
 
 ```bash
 export PATH="$HOME/.dotnet:$PATH"

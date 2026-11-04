@@ -13,11 +13,16 @@ public sealed class UserScripts : IDisposable
     public const string Source = "Mis indicadores";
     private readonly IndicatorCatalog _catalog;
     private readonly ScriptCompiler _compiler = new();
-    private readonly FileSystemWatcher? _watcher;
+    private readonly IScriptDirectoryMonitor? _monitor;
     private readonly DispatcherTimer _debounce;
+    private readonly object _publicationGate = new();
+    private long _compiledVersion = -1;
+    private int _notificationQueued;
+    private int _disposed;
 
     public UserScripts(IndicatorCatalog catalog)
     {
+        Dispatcher.UIThread.VerifyAccess();
         _catalog = catalog;
         Folder = AppPaths.UserIndicators;
         Directory.CreateDirectory(Folder);
@@ -26,16 +31,15 @@ public sealed class UserScripts : IDisposable
         _debounce.Tick += (_, _) =>
         {
             _debounce.Stop();
-            CompileAll();
+            if (!IsDisposed) CompileAll();
         };
 
         try
         {
-            _watcher = new FileSystemWatcher(Folder, "*.cs") { IncludeSubdirectories = true, EnableRaisingEvents = true };
-            _watcher.Changed += (_, _) => Dispatcher.UIThread.Post(Restart);
-            _watcher.Created += (_, _) => Dispatcher.UIThread.Post(Restart);
-            _watcher.Deleted += (_, _) => Dispatcher.UIThread.Post(Restart);
-            _watcher.Renamed += (_, _) => Dispatcher.UIThread.Post(Restart);
+            _monitor = OperatingSystem.IsMacOS()
+                ? new ContentScriptDirectoryMonitor(Folder, QueueChange,
+                    ex => this.LogWarn("Could not read custom indicators: " + ex.Message))
+                : new NativeScriptDirectoryMonitor(Folder, QueueChange);
         }
         catch (Exception ex)
         {
@@ -49,51 +53,97 @@ public sealed class UserScripts : IDisposable
     /// <summary>Se dispara después de cada compilación (con éxito o con errores).</summary>
     public event Action<ScriptCompileResult>? Compiled;
 
+    private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+    private void QueueChange()
+    {
+        if (IsDisposed || Interlocked.Exchange(ref _notificationQueued, 1) != 0) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            Interlocked.Exchange(ref _notificationQueued, 0);
+            if (!IsDisposed && _monitor?.Version != _compiledVersion) Restart();
+        });
+    }
+
     private void Restart()
     {
+        if (IsDisposed) return;
         _debounce.Stop();
         _debounce.Start();
     }
 
     public ScriptCompileResult? CompileAll()
     {
-        var files = Directory.EnumerateFiles(Folder, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains("/bin/") && !f.Contains("/obj/"))
-            .OrderBy(f => f)
-            .ToList();
-        if (files.Count == 0)
-        {
-            _catalog.RemoveSource(Source);
-            return null;
-        }
-
+        Dispatcher.UIThread.VerifyAccess();
+        if (IsDisposed) return LastResult;
+        _debounce.Stop();
         ScriptCompileResult res;
+        int fileCount;
+        long version;
         try
         {
-            res = _compiler.Compile(files, "TradingHubUserIndicators");
+            // These owned bytes remain stable even if a live path changes or vanishes during compilation.
+            // This is a versioned scan, not an atomic filesystem snapshot.
+            var snapshot = _monitor?.Capture() ?? new ScriptDirectorySnapshot(0, ScriptDirectoryFiles.Capture(Folder));
+            version = snapshot.Version;
+            fileCount = snapshot.Sources.Count;
+            if (IsDisposed) return LastResult;
+            if (fileCount == 0)
+            {
+                lock (_publicationGate)
+                {
+                    if (IsDisposed) return LastResult;
+                    _compiledVersion = version;
+                    _catalog.RemoveSource(Source);
+                    return null;
+                }
+            }
+            res = _compiler.CompileSources(snapshot.DecodeSources(), "TradingHubUserIndicators");
+            if (_monitor != null && _monitor.Version != version)
+            {
+                // A later observed version owns the next compilation; unchanged polls reuse captured inputs.
+                Restart();
+                return LastResult;
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // un archivo a medio guardar o que se movió: se reintenta con el próximo cambio de la carpeta
-            this.LogWarn("Could not read custom indicators: " + ex.Message);
-            Restart();
+            // A partial save/unreadable tree must retain the last-good catalog and retry without another edit.
+            if (!IsDisposed)
+            {
+                this.LogWarn("Could not read custom indicators: " + ex.Message);
+                Restart();
+            }
             return LastResult;
         }
+        catch (OperationCanceledException) when (IsDisposed) { return LastResult; }
 
-        LastResult = res;
-        if (res.Success && res.Assembly != null)
+        lock (_publicationGate)
         {
-            _catalog.RemoveSource(Source);
-            _catalog.Scan(res.Assembly, Source);
-            this.LogInfo($"Custom indicators compiled ({files.Count} files, {res.Elapsed.TotalMilliseconds:0} ms)");
-        }
-        else
-        {
-            foreach (var d in res.Diagnostics.Where(d => d.Severity == "error").Take(20)) this.LogWarn(d.ToString());
-        }
+            // Disposal can reject an active compiler's result without waiting for the UI or Roslyn.
+            if (IsDisposed) return LastResult;
+            _compiledVersion = version;
+            LastResult = res;
+            if (res.Success && res.Assembly != null)
+            {
+                _catalog.RemoveSource(Source);
+                if (IsDisposed) return LastResult; // catalog subscribers can dispose reentrantly
+                _catalog.Scan(res.Assembly, Source);
+                if (IsDisposed) return LastResult;
+                this.LogInfo($"Custom indicators compiled ({fileCount} files, {res.Elapsed.TotalMilliseconds:0} ms)");
+            }
+            else
+            {
+                foreach (var d in res.Diagnostics.Where(d => d.Severity == "error").Take(20)) this.LogWarn(d.ToString());
+            }
 
-        Compiled?.Invoke(res);
-        return res;
+            foreach (var handler in Delegate.EnumerateInvocationList(Compiled))
+            {
+                if (IsDisposed) break;
+                handler(res);
+            }
+            return res;
+        }
     }
 
     private void WriteExampleIfEmpty()
@@ -140,5 +190,12 @@ public sealed class UserScripts : IDisposable
         }
         """;
 
-    public void Dispose() => _watcher?.Dispose();
+    public void Dispose()
+    {
+        lock (_publicationGate) Interlocked.Exchange(ref _disposed, 1);
+        if (Dispatcher.UIThread.CheckAccess()) _debounce.Stop();
+        else Dispatcher.UIThread.Post(_debounce.Stop);
+        // No publication/scan lock is held while draining; the worker never awaits UI work.
+        _monitor?.Dispose();
+    }
 }

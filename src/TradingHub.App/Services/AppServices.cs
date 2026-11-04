@@ -774,5 +774,10 @@ public sealed class AppServices
         {
             this.LogError("Error closing", ex);
         }
+        finally
+        {
+            // Only a true application exit owns script shutdown; hiding to the tray keeps hot reload alive.
+            Scripts?.Dispose();
+        }
     }
 }

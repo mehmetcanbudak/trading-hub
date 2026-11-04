@@ -12,6 +12,9 @@ public sealed record ScriptDiagnostic(string File, int Line, int Column, string 
     public override string ToString() => $"{Path.GetFileName(File)}({Line},{Column}): {Severity} {Id}: {Message}";
 }
 
+/// <summary>A captured source input; its diagnostic path need not still exist on disk.</summary>
+public readonly record struct ScriptSource(string Path, string Text);
+
 public sealed class ScriptCompileResult
 {
     public bool Success { get; init; }
@@ -98,25 +101,36 @@ public sealed class ScriptCompiler
     }
 
     /// <summary>Compila archivos .cs en un ensamblado cargado en memoria (descargable).</summary>
-    public ScriptCompileResult Compile(IReadOnlyList<string> files, string assemblyName)
+    public ScriptCompileResult Compile(IReadOnlyList<string> files, string assemblyName) =>
+        CompileCore(ReadSources(files), assemblyName);
+
+    /// <summary>Compiles captured text without reopening its diagnostic paths.</summary>
+    public ScriptCompileResult CompileSources(IReadOnlyList<ScriptSource> sources, string assemblyName) =>
+        CompileCore(sources, assemblyName);
+
+    private static IEnumerable<ScriptSource> ReadSources(IReadOnlyList<string> files)
+    {
+        foreach (string file in files)
+        {
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                continue; // preserve the file-based caller's vanished-file behavior
+            }
+            yield return new(file, text);
+        }
+    }
+
+    private static ScriptCompileResult CompileCore(IEnumerable<ScriptSource> sources, string assemblyName)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var parse = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: new[] { "CROSS_PLATFORM", "TRADINGHUB" });
         var trees = new List<SyntaxTree> { CSharpSyntaxTree.ParseText(GlobalUsings, parse, path: "GlobalUsings.g.cs", encoding: System.Text.Encoding.UTF8) };
-        foreach (var f in files)
+        foreach (var source in sources)
         {
-            string source;
-            try
-            {
-                source = File.ReadAllText(f);
-            }
-            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-            {
-                continue; // se borró entre que se listó la carpeta y se leyó: queda afuera (quien vigila la carpeta vuelve a compilar)
-            }
-
-            var text = Preprocess(source);
-            trees.Add(CSharpSyntaxTree.ParseText(text, parse, path: f, encoding: System.Text.Encoding.UTF8));
+            var text = Preprocess(source.Text);
+            trees.Add(CSharpSyntaxTree.ParseText(text, parse, path: source.Path, encoding: System.Text.Encoding.UTF8));
         }
 
         var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,

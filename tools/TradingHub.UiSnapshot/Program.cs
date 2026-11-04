@@ -8,6 +8,9 @@ using Avalonia.VisualTree;
 using TradingHub.App;
 using TradingHub.App.Windows;
 
+if (args is ["--check-script-monitor"])
+    return TradingHub.UiSnapshot.UserScriptsScene.Run();
+
 if (args is ["--check-english", var sourceRoot])
     return TradingHub.UiSnapshot.EnglishLocalizationAudit.Run(sourceRoot);
 
