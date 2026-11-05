@@ -243,7 +243,11 @@ internal sealed partial class LiveCenter
                 {
                     if (cs.Runner is { Persist: true } r && seen.Add(r.Key))
                     {
-                        list.Add(new LiveEntry { Key = r.Key, Source = "chart", Info = r.Info(), Runner = r, Chart = chart, ChartStrategy = cs, Ledger = r.Ledger });
+                        var runnerInfo = r.Info();
+                        string? runnerLedgerError = null;
+                        var runnerLedger = r.IsRunning || r.IsClosing || r.HasWorkingOrders
+                            ? r.Ledger : LedgerOf(r.Key, runnerInfo.PointValue, out runnerLedgerError);
+                        list.Add(new LiveEntry { Key = r.Key, Source = "chart", Info = runnerInfo, Runner = r, Chart = chart, ChartStrategy = cs, Ledger = runnerLedger, LedgerError = runnerLedgerError });
                         continue;
                     }
 
@@ -277,7 +281,11 @@ internal sealed partial class LiveCenter
         {
             if (!r.IsRunning && !r.IsClosing && !r.HasWorkingOrders && !includeStopped) continue;
             if (!seen.Add(r.Key)) continue;
-            list.Add(new LiveEntry { Key = r.Key, Source = r.Source == "chart" ? "panel" : r.Source, Info = r.Info(), Runner = r, Ledger = r.Ledger });
+            var runnerInfo = r.Info();
+            string? runnerLedgerError = null;
+            var runnerLedger = r.IsRunning || r.IsClosing || r.HasWorkingOrders
+                ? r.Ledger : LedgerOf(r.Key, runnerInfo.PointValue, out runnerLedgerError);
+            list.Add(new LiveEntry { Key = r.Key, Source = r.Source == "chart" ? "panel" : r.Source, Info = runnerInfo, Runner = r, Ledger = runnerLedger, LedgerError = runnerLedgerError });
         }
 
 

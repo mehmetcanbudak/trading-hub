@@ -63,6 +63,8 @@ FakeRithmicServer and FakeHttpServer/FakeBrokers model provider messages for OAN
 
 EnglishLocalizationTests additionally checks SDK defaults/overrides, legacy display mapping, unchanged parameter keys, footprint serialization, old/new report recognition and chart-period aliases/labels. Existing legacy drawing JSON and simulated-account ledger recovery tests remain compatibility guards.
 
+Execution regressions cover native client-ID reuse, accepted-versus-unsent replacement lineage, current-child adoption, interrupted first native-index publication, corrected prices/fees, durable deduplication and restart projection. `AccountSnapshot` captures fills, analysis and `HistoryRevision` from one journal snapshot; view caches must use that revision rather than execution count. An inactive runner with no close/order work uses the committed ledger for display without replacing an active runner's book. Fake-venue and owned-filesystem proofs are not authenticated provider or physical power-loss certification.
+
 ```bash
 dotnet test tests/TradingHub.Tests --filter FullyQualifiedName~SmartWalkForward
 python3 tools/check_english_translation.py
@@ -88,6 +90,9 @@ The number is initial loading seconds. With no scenes, Trading is captured. Asse
 | ib-live-trades | Actual rendered live trade table refresh after a same-length/preserved-mtime IB replacement; its MAE/MFE must match the validated service, not an older per-view result. |
 | ib-recorded-prefix | Actual live excursion consumer under an owned recorder lease: an incomplete prefix is unavailable, then fully drained valid prices establish the closed range. |
 | live-financial | Actual simulator execution charges in the live portfolio KPI; saves the rendered surface and independent accounting receipt. Requires an explicit isolated live-store override. |
+| live-stopped-correction | Actual simulator round trip revised after stopping: durable and rendered portfolio net change from 94 to 53 while the detached runner remains at 94. Uses an owned explicit portfolio. |
+| account-journal-revision | Same execution correction with two effective fills: Account analysis, summary, Trades, Statistics and chart marks/links must change from net 500 to 400. Requires a fresh explicit application-store override. |
+| live-excursions | Actual excursion service recalculates MAE/MFE from owned raw history after correcting the same entry execution; no broker data or model calls. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
 | panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
 | footprint | Footprint text colors and editor. |

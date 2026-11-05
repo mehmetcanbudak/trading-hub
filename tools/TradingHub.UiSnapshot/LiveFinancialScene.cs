@@ -38,10 +38,15 @@ internal static class LiveFinancialScene
         var strategy = new EntryStrategy();
         using var runner = new LiveStrategyRunner(strategy, data, broker, ChartPeriod.M1);
         var service = App.Services;
+        string portfolioId = "execution-accounting-" + Guid.NewGuid().ToString("N");
         try
         {
             runner.Start();
             service.Runners.Add(runner);
+            service.Live.SavePortfolio(new LivePortfolioDef
+            {
+                Id = portfolioId, Name = "Execution accounting fixture", Members = new() { runner.Key },
+            });
             strategy.BuyAt(100m, 2m);
             feed.Emit(new Trade(2, Start.AddMinutes(1), 100m, 2m, TradeSide.Sell));
             data.Pump();
@@ -92,7 +97,8 @@ internal static class LiveFinancialScene
             string evidence = JsonSerializer.Serialize(new
             {
                 actualSimulatorPosition = broker.Position?.Volume,
-                realizedExecutionCosts = runner.Ledger.NetRealized,
+                retainedRunnerNet = runner.Ledger.NetRealized,
+                durableNet = LiveStore.LoadLedger(runner.Key, Contract.PointValue).NetRealized,
                 openGross = runner.Ledger.KnownOpenPnL(100m),
                 expectedPortfolioTotal = expectedTotal, expectedDisplay = expected, actualDisplay = displayed,
                 passed = correct, authority = "Actual Avalonia live portfolio surface with simulator executions; no broker/model calls",
@@ -105,6 +111,7 @@ internal static class LiveFinancialScene
         {
             runner.Stop(flatten: false);
             service.Runners.Remove(runner);
+            service.Live.DeletePortfolio(portfolioId);
             LiveStore.RemoveRunner(runner.Key, deleteFills: true);
             window.Navigate("trading");
         }

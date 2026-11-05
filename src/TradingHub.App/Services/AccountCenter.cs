@@ -38,6 +38,7 @@ public sealed class AccountSnapshot
     public List<PositionLine> Positions { get; } = new();
     public List<OrderLine> Orders { get; } = new();
     public IReadOnlyList<AccountFill> Fills { get; set; } = Array.Empty<AccountFill>();
+    public long HistoryRevision { get; init; }
     public RoundTripResult Analysis { get; set; } = RoundTrips.Analyze(Array.Empty<AccountFill>());
 }
 
@@ -139,7 +140,7 @@ public sealed class AccountCenter
     public AccountSnapshot Snapshot(AccountEntry a)
     {
         var journal = _svc.Journal.SnapshotOf(a.Id);
-        var s = new AccountSnapshot { Account = a, Fills = journal.Fills, Analysis = Analysis(a.Id, journal) };
+        var s = new AccountSnapshot { Account = a, Fills = journal.Fills, HistoryRevision = journal.Revision, Analysis = Analysis(a.Id, journal) };
         s.TradesToday = s.Analysis.Trades.Count(t => IsToday(t.CloseTime));
         decimal realizedToday = s.Analysis.Realized.Where(x => IsToday(x.Time)).Sum(x => x.Net);
         if (a.Kind == AccountKind.Sim) FillSim(s, realizedToday);

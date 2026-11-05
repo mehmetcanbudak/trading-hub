@@ -59,7 +59,9 @@ public sealed class AccountsView : UserControl
     private readonly WrapPanel _periodChips = new();
     private string _period = "all";
     private string _selected = AccountCenter.SimId;
-    private string _chipsKey = "", _listsKey = "", _statsKey = "";
+    private string _chipsKey = "";
+    private (string AccountId, long Revision)? _listsKey;
+    private (string AccountId, long Revision, string Period, DateTime Day)? _statsKey;
     private AccountEntry? _entry;
     private bool _syncing;
 
@@ -237,7 +239,7 @@ public sealed class AccountsView : UserControl
             {
                 _period = id;
                 foreach (var c in _periodChips.Children.OfType<ToggleButton>()) c.IsChecked = (string)c.Tag! == id;
-                _statsKey = "";
+                _statsKey = null;
                 Refresh();
             };
             _periodChips.Children.Add(b);
@@ -272,7 +274,8 @@ public sealed class AccountsView : UserControl
         }
 
         _svc.Statistics.HistoryMyTrades.Clear();
-        _listsKey = _statsKey = "";
+        _listsKey = null;
+        _statsKey = null;
         _status($"Simulated account reset: balance {_svc.Settings.SimStartBalance:N2}.");
         Refresh();
     }
@@ -318,7 +321,8 @@ public sealed class AccountsView : UserControl
                 _positions.Children.Clear();
                 _orderRows.Clear();
                 _orders.Children.Clear();
-                _listsKey = _statsKey = "";
+                _listsKey = null;
+                _statsKey = null;
             }
 
             _entry = entry;
@@ -556,7 +560,7 @@ public sealed class AccountsView : UserControl
 
     private void UpdateLists(AccountSnapshot s)
     {
-        string key = s.Account.Id + "#" + s.Fills.Count;
+        var key = (s.Account.Id, s.HistoryRevision);
         if (key == _listsKey) return;
         _listsKey = key;
         _fills.ItemsSource = s.Fills.Reverse().ToList();
@@ -565,12 +569,12 @@ public sealed class AccountsView : UserControl
 
     private void UpdateStats(AccountSnapshot s)
     {
-        string key = s.Account.Id + "#" + s.Fills.Count + "#" + _period + "#" + _svc.AccountCenter.ToLocal(DateTime.UtcNow).Date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        var center = _svc.AccountCenter;
+        var today = center.ToLocal(DateTime.UtcNow).Date;
+        var key = (s.Account.Id, s.HistoryRevision, _period, today);
         if (key == _statsKey) return;
         _statsKey = key;
 
-        var center = _svc.AccountCenter;
-        var today = center.ToLocal(DateTime.UtcNow).Date;
         var trades = s.Analysis.Trades.Where(t => _period switch
         {
             "today" => center.ToLocal(t.CloseTime).Date == today,
