@@ -580,6 +580,9 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
     private readonly object _gate = new();
     private readonly CancellationTokenSource _cts = new();
     private bool _disposed;
+    private bool _ownershipNotificationPending;
+    private readonly Queue<OwnedOrderQuantity> _quantityNotifications = new();
+    private bool _publishingQuantities;
     private readonly Dictionary<long, Order> _byId = new();
     private readonly List<Order> _pending = new();
     private readonly Dictionary<string, Order> _byClientId = new(StringComparer.Ordinal);
@@ -723,12 +726,14 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                 }
                 if (!(intent.NativeOrders ?? Array.Empty<NativeOrderIdentity>()).Contains(orderIdentity))
                 {
-                    if (!intent.DispatchUncertain || intent.ClientOrderId != native.ClientOrderId)
+                    if (!TradingHub.Trading.OrderContext.CanRecoverNativeIdentity(intent, orderIdentity) ||
+                        intent.ClientOrderId != native.ClientOrderId)
                     {
                         lock (_gate) _executionUnowned.Add(id);
                         continue;
                     }
                     var bindingError = PersistNativeBinding(new PreparedOrderIntent(OrderContext, intent), orderIdentity);
+                    PublishOwnershipNotification();
                     if (bindingError != null) throw new IOException(bindingError);
                 }
                 lock (_gate)
@@ -1158,6 +1163,8 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                 }
             _active = active;
         }
+        PublishOwnershipNotification();
+        PublishQuantityNotifications();
 
         if (cancellations != null)
             foreach (var order in cancellations) _ = CancelBoundAsync(order);
@@ -1492,7 +1499,56 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
 
     private string? PersistNativeBinding(PreparedOrderIntent intent, NativeOrderIdentity native)
     {
-        lock (_gate) return _disposed ? null : OrderContext.BindNative(intent, native);
+        lock (_gate)
+        {
+            if (_disposed) return null;
+            var error = OrderContext.BindNative(intent, native, notify: false);
+            if (error == null) _ownershipNotificationPending = true;
+            return error;
+        }
+    }
+
+    private void PublishOwnershipNotification()
+    {
+        lock (_gate)
+        {
+            if (!_ownershipNotificationPending) return;
+            _ownershipNotificationPending = false;
+        }
+        // Persistence is admitted under the disposal gate, but consumers may query any sibling facade.
+        OrderContext.NotifyOwnershipChanged();
+    }
+
+    private void PublishQuantityNotifications()
+    {
+        lock (_gate)
+        {
+            if (_publishingQuantities) return;
+            _publishingQuantities = true;
+        }
+        try
+        {
+            while (true)
+            {
+                OwnedOrderQuantity observation;
+                lock (_gate)
+                {
+                    if (_quantityNotifications.Count == 0)
+                    {
+                        _publishingQuantities = false;
+                        return;
+                    }
+                    observation = _quantityNotifications.Dequeue();
+                }
+                // Captures admitted before disposal remain ordered, even while a consumer is held.
+                OrderContext.NotifyQuantityChanged(observation);
+            }
+        }
+        catch
+        {
+            lock (_gate) _publishingQuantities = false;
+            throw;
+        }
     }
 
     private void ObserveNativeQuantity(Order order, decimal previousFilled, OrderStates previousState, OrderStatus previousStatus)
@@ -1500,7 +1556,11 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         lock (_gate)
         {
             if (_disposed || (order.Filled == previousFilled && order.State == previousState && order.Status == previousStatus)) return;
-            try { OrderContext.ObserveQuantity(order, Instrument.Symbol, Instrument.PointValue); }
+            try
+            {
+                if (OrderContext.CaptureQuantityObservation(order, Instrument.Symbol, Instrument.PointValue) is { } observation)
+                    _quantityNotifications.Enqueue(observation);
+            }
             catch (Exception ex) { _ownershipFault = "Tradovate native quantity projection is unresolved: " + ex.Message; }
         }
     }
@@ -1533,6 +1593,8 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
             _session.NativeFillChanged -= QueueExecution;
             OrderContext.OwnershipChanged -= QueueUnownedExecutions;
         }
+        PublishOwnershipNotification();
+        PublishQuantityNotifications();
         if (Executions is ExecutionLog log) log.SetProducerAvailability(_executionProducer, null);
     }
 }

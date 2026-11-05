@@ -861,6 +861,11 @@ public sealed class BracketManager : IDisposable
         intent.Phase is ExitPhase.CancelPending or ExitPhase.Replacing ||
         (intent.Current is { } owned && Account is ITrackedOrderReplacement tracked && tracked.IsReplacementPending(owned.Handle));
 
+    private bool ExecutingStopChild(ExitIntent exit, Order order) =>
+        exit.Role == BracketRole.StopLoss && exit.Quantity > 0 && exit.Generation == _generation &&
+        exit.Side == Math.Sign(Volume) && order.Direction == ExitDirection &&
+        Account.OrderContext.FindExecutingProtection(order, Account.OrderContext.ManualOwner) != null;
+
     private void ReconcileExits(bool allowPlacement)
     {
         // Optional tracked replacements preserve native amendments and broker-owned cancel/replace sequencing.
@@ -871,7 +876,8 @@ public sealed class BracketManager : IDisposable
             var order = Current(owned);
             if (Terminal(order)) continue;
             if (intent.Phase == ExitPhase.Replacing && intent.Quantity > 0) continue;
-            bool change = intent.Quantity != order.Unfilled || intent.Price != PriceOf(order);
+            bool change = intent.Quantity != order.Unfilled ||
+                (intent.Price != PriceOf(order) && !ExecutingStopChild(intent, order));
             if (intent.Phase != ExitPhase.CancelPending && !change) continue;
             if (intent.Phase != ExitPhase.CancelPending)
             {
@@ -883,11 +889,12 @@ public sealed class BracketManager : IDisposable
                 {
                     if (tracked.IsReplacementPending(owned.Handle)) continue;
                     decimal total = order.Filled + intent.Quantity;
-                    if (intent.FailedTotal == total && intent.FailedPrice == intent.Price) continue;
+                    decimal price = order.Type == OrderTypes.Market ? 0 : intent.Price;
+                    if (intent.FailedTotal == total && intent.FailedPrice == price) continue;
                     intent.RequestedTotal = total;
-                    intent.RequestedPrice = intent.Price;
+                    intent.RequestedPrice = price;
                     intent.Phase = ExitPhase.Replacing;
-                    OrderActions.Replace(Account, order, intent.Price, intent.Quantity);
+                    OrderActions.Replace(Account, order, price, intent.Quantity);
                     _syncAgain = true;
                     continue;
                 }

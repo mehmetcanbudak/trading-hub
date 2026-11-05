@@ -225,7 +225,8 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
         // Same public manual reduction used by Flatten, with no working siblings left to cancel.
         var flatten = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell,
             filledQuantity, comment: "Close", reduceOnly: true);
-        await Until(() => broker.Position.Volume == 0 || flatten.Status == OrderStatus.Rejected);
+        // PnL and order acknowledgments use independent native streams; flat exposure is not a fill barrier.
+        await Until(() => broker.Position.Volume == 0 && flatten.Filled == filledQuantity || flatten.Status == OrderStatus.Rejected);
         Assert.Equal(0m, broker.Position.Volume);
         Assert.Equal(0, server.Position);
         Assert.Equal(filledQuantity, flatten.Filled);

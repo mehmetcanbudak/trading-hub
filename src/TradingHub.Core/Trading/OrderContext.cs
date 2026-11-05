@@ -602,6 +602,11 @@ public sealed class OrderContext
         lock (_gate) return _journal?.RecoverableNativeSubmissions(instrument, type) ?? Array.Empty<OwnedOrderIntent>();
     }
 
+    internal static bool CanRecoverNativeIdentity(OwnedOrderIntent? intent, NativeOrderIdentity native) =>
+        intent?.NativeOrders?.Contains(native) == true ||
+        (intent != null && !intent.Adopted && intent.DispatchUncertain &&
+            intent.Rejection == null && intent.NativeOrders is not { Length: > 0 });
+
     /// <summary>Recover an accepted identity from its exact durable native claim or uncertain client dispatch; never resend it.
     /// Claim-only recovery lets a provider validate an existing adoption before considering original wire-type rules.</summary>
     public PreparedOrderIntent? RecoverNativeOrder(Order order, string clientOrderId, NativeOrderIdentity native,
@@ -617,9 +622,7 @@ public sealed class OrderContext
             var client = string.IsNullOrEmpty(clientOrderId) ? null : _journal?.FindClient(clientOrderId);
             // Client IDs may be reused after settlement. Only a still-uncertain, unacknowledged
             // local dispatch is client-only recovery authority; accepted claims require their native identity.
-            if (claim == null && client?.NativeOrders?.Contains(native) != true &&
-                (client == null || client.Adopted || !client.DispatchUncertain ||
-                    client.Rejection != null || client.NativeOrders is { Length: > 0 })) return null;
+            if (claim == null && !CanRecoverNativeIdentity(client, native)) return null;
             // A native adoption is an existing accepted claim, not an uncertain original submission.
             // An exact subsequent operation may share that native identity, but never override another owner.
             var data = claim != null && client != null && client.Owner == claim.Owner &&
@@ -733,6 +736,40 @@ public sealed class OrderContext
     private bool ExactBinding(Order order, OwnedOrderIntent data) =>
         order.ContextId == Descriptor.Id && data.ContextId == Descriptor.Id && data.Generation == Descriptor.Generation &&
         order.OwnerId == data.Owner.Id && order.IntentId == data.Id && order.LogicalOrderId == data.LogicalOrderId;
+
+    /// <summary>Returns the exact current owned executing protection, retaining historical conditional evidence
+    /// separately from an explicitly dispatched MARKET successor. This grants no dispatch permission.</summary>
+    public OwnedOrderIntent? FindExecutingProtection(Order order, OrderOwner expectedOwner)
+    {
+        lock (_gate)
+        {
+            if (order.Type != OrderTypes.Market || order.State != OrderStates.Active || order.Canceled ||
+                !order.ReduceOnly || order.Unfilled <= 0 || order.NativeIdentity is not { } native) return null;
+            var data = FindBoundOrder(order);
+            if (data == null || !ExactBinding(order, data) || data.Owner != expectedOwner ||
+                data.Request.Instrument != order.Security.SecurityId || data.Request.Direction != order.Direction ||
+                !data.Request.ReduceOnly || data.WorkingOrder is not { Type: OrderTypes.Market } working ||
+                working.NativeInstrument != data.NativeInstrument || working.NativeExchange != data.NativeExchange ||
+                data.NativeOrders?.Contains(native) != true || data.TerminalOrder?.Native == native) return null;
+            var ids = _journal?.FindNative(native) ??
+                (_ephemeralNative.TryGetValue(NativeKey(native), out var known) ? known : null);
+            var current = ids is { Count: > 0 } ? Find(ids[^1]) : null;
+            if (current == null || current.Id != data.Id || current.ContextId != data.ContextId || current.Generation != data.Generation ||
+                current.Owner != data.Owner || current.LogicalOrderId != data.LogicalOrderId) return null;
+            if (data.Request.Type == OrderTypes.Stop)
+                return working.Child == native && data.NativeOrders.Contains(working.Parent) ? data : null;
+            if (data.Request.Type != OrderTypes.Market || data.PredecessorId == null) return null;
+
+            var predecessor = Find(data.PredecessorId);
+            return predecessor != null && predecessor.ContextId == data.ContextId && predecessor.Generation == data.Generation &&
+                predecessor.Owner == data.Owner && predecessor.LogicalOrderId == data.LogicalOrderId &&
+                predecessor.Request.Type is OrderTypes.Stop or OrderTypes.Market && predecessor.Request.ReduceOnly &&
+                predecessor.Request.Instrument == data.Request.Instrument && predecessor.Request.Direction == data.Request.Direction &&
+                predecessor.NativeInstrument == data.NativeInstrument && predecessor.NativeExchange == data.NativeExchange &&
+                predecessor.WorkingOrder == working && predecessor.TerminalOrder is { } terminal &&
+                predecessor.NativeOrders?.Contains(terminal.Native) == true ? data : null;
+        }
+    }
 
 
     public void RecordRejected(PreparedOrderIntent intent, string reason)

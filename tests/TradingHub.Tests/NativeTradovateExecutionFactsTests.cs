@@ -23,6 +23,287 @@ public class NativeTradovateExecutionFactsTests
     };
 
     [Fact]
+    public async Task NativeBindingNotificationAllowsSiblingReplayCancellationAndDisposalToProgress()
+    {
+        using var root = new OwnedLiveRoot();
+        using var fake = new FakeTradovate();
+        using var orders = new NativeOrderTestFixture();
+        var normalHttp = fake.Server.OnHttp!;
+        var canceled = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.Server.OnHttp = request =>
+        {
+            if (!request.Headers.GetValueOrDefault("Authorization", "").StartsWith("Bearer AT", StringComparison.Ordinal))
+                return normalHttp(request);
+            if (request.Route == "/v1/contract/find" && request.Query("name").StartsWith("NQ", StringComparison.Ordinal))
+                return (200, new JsonObject { ["id"] = 556, ["name"] = request.Query("name"), ["contractMaturityId"] = 1 }.ToJsonString());
+            if (request.Route == "/v1/order/placeorder")
+                return (200, "{\"failureReason\":\"Success\",\"orderId\":7101}");
+            if (request.Route == "/v1/order/cancelorder")
+            {
+                canceled.TrySetResult(JsonNode.Parse(request.Body)!["orderId"]!.GetValue<long>());
+                return (200, "{\"failureReason\":\"Success\",\"commandId\":7102}");
+            }
+            return normalHttp(request);
+        };
+        using var market = new FixtureMarket();
+        using var esData = new InstrumentData(Es, market) { RecordLive = false };
+        var nq = new Instrument
+        {
+            Symbol = "NQ", FeedId = TradovateFeed.FeedId, Exchange = "CME",
+            TickSize = 0.25m, VolumeStep = 1m, PointValue = 20m, QuoteAsset = "USD"
+        };
+        using var nqData = new InstrumentData(nq, market) { RecordLive = false };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        var context = new OrderContext(new AccountContextDescriptor(
+            Guid.NewGuid().ToString("N"), "Tradovate", "futures", fake.Server.Http + "/v1",
+            "owned-tradovate-binding-progress", "fixture-generation"), root.Path);
+        using var first = orders.Tradovate(esData, session, Assert.Single(session.Accounts), "ES", context);
+        using var sibling = orders.Tradovate(nqData, session, Assert.Single(session.Accounts), "NQ", context);
+        await Until(() => first.OrdersReady && sibling.OrdersReady);
+        var siblingNative = NativeOrder(7102, 101, "external-nq", buy: true);
+        siblingNative["contractId"] = 556;
+        await ReceiveProps(feed.Connection, "order", siblingNative, fake.PublishOrder);
+        var siblingOrder = Assert.Single(sibling.ActiveOrders);
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int notifications = 0, releaseTimedOut = 0;
+        void HoldFirstNotification()
+        {
+            if (Interlocked.Increment(ref notifications) != 1) return;
+            entered.TrySetResult();
+            try
+            {
+                if (!release.Wait(TimeSpan.FromSeconds(20))) Interlocked.Exchange(ref releaseTimedOut, 1);
+            }
+            finally { returned.TrySetResult(); }
+        }
+        context.OwnershipChanged += HoldFirstNotification;
+        Task progress = Task.CompletedTask, replay = Task.CompletedTask, cancelAndDispose = Task.CompletedTask;
+        bool completed = false;
+        try
+        {
+            var intent = context.Prepare(context.ManualOwner,
+                new OrderRequest(Es.Key, OrderDirections.Buy, OrderTypes.Limit, 2m, 4990m));
+            Assert.Null(intent.Error);
+            var order = first.Submit(intent);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(8));
+            // Keep a real ownership consumer paused while another thread uses each public facade.
+            // No monitor/reflection hooks are used, and finally always releases the consumer.
+            progress = Task.Run(() =>
+            {
+                Assert.True(first.OrdersReady);
+                Assert.Same(order, Assert.Single(first.ActiveOrders));
+            });
+            replay = ReceiveProps(feed.Connection, "order", siblingNative, fake.PublishOrder);
+            cancelAndDispose = Task.Run(async () =>
+            {
+                sibling.Cancel(siblingOrder);
+                Assert.Equal(7102L, await canceled.Task.WaitAsync(TimeSpan.FromSeconds(8)));
+                sibling.Dispose();
+            });
+            await progress.WaitAsync(TimeSpan.FromSeconds(8));
+            await Task.WhenAll(replay, cancelAndDispose).WaitAsync(TimeSpan.FromSeconds(8));
+            Assert.Equal(0, Volatile.Read(ref releaseTimedOut));
+            Assert.Equal(new NativeOrderIdentity("tradovate:order", "7101"), order.NativeIdentity);
+            completed = true;
+        }
+        finally
+        {
+            release.Set();
+            context.OwnershipChanged -= HoldFirstNotification;
+            // Preserve the first public-progress failure if a concurrently blocked delivery also times out.
+            try { await Task.WhenAll(progress, replay, cancelAndDispose).WaitAsync(TimeSpan.FromSeconds(8)); }
+            catch (TimeoutException) when (!completed) { }
+            if (entered.Task.IsCompleted) await returned.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        }
+    }
+
+    [Fact]
+    public async Task NativeQuantityNotificationAllowsPublicProgressAndPreservesOrderedAdmittedQuantities()
+    {
+        using var root = new OwnedLiveRoot();
+        using var fake = new FakeTradovate();
+        using var orders = new NativeOrderTestFixture();
+        var normalHttp = fake.Server.OnHttp!;
+        fake.Server.OnHttp = request =>
+        {
+            if (request.Headers.GetValueOrDefault("Authorization", "").StartsWith("Bearer AT", StringComparison.Ordinal))
+            {
+                if (request.Route == "/v1/order/placeorder")
+                    return (200, "{\"failureReason\":\"Success\",\"orderId\":7101}");
+                if (request.Route == "/v1/fillFee/deps") return (200, "[]");
+            }
+            return normalHttp(request);
+        };
+        using var market = new FixtureMarket();
+        using var data = new InstrumentData(Es, market) { RecordLive = false };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        var context = new OrderContext(new AccountContextDescriptor(
+            Guid.NewGuid().ToString("N"), "Tradovate", "futures", fake.Server.Http + "/v1",
+            "owned-tradovate-quantity-notification", "fixture-generation"), root.Path);
+        using var broker = orders.Tradovate(data, session, Assert.Single(session.Accounts), "DEMO101", context);
+        await Until(() => broker.OrdersReady);
+        const string key = "owned-tradovate-quantity-notification";
+        var owner = context.LedgerOwner(key, LiveStore.CaptureLedgerGeneration(root.Path, key));
+        _ = AccountExecutionProjector.For(broker.Executions, context);
+        var order = OrderActions.Place(broker, owner, OrderTypes.Limit, OrderDirections.Buy, 3m, 4990m);
+        await Until(() => order.NativeIdentity != null);
+        var version = NativeVersion(7201, 7101, 4990m);
+        version["orderQty"] = 3;
+        await ReceiveProps(feed.Connection, "orderVersion", version, fake.PublishVersion);
+        await ReceiveProps(feed.Connection, "order", NativeOrder(7101, 101, order.ClientOrderId!, buy: true), fake.PublishOrder);
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observed = new System.Collections.Concurrent.ConcurrentQueue<decimal>();
+        int releaseTimedOut = 0;
+        void HoldFirstQuantity(OwnedOrderQuantity observation)
+        {
+            observed.Enqueue(observation.CumulativeQuantity);
+            if (observation.CumulativeQuantity == 2m) secondObserved.TrySetResult();
+            if (observation.CumulativeQuantity != 1m) return;
+            entered.TrySetResult();
+            try
+            {
+                if (!release.Wait(TimeSpan.FromSeconds(20))) Interlocked.Exchange(ref releaseTimedOut, 1);
+            }
+            finally { returned.TrySetResult(); }
+        }
+        context.QuantityChanged += HoldFirstQuantity;
+        Task progress = Task.CompletedTask, delivery = Task.CompletedTask;
+        bool completed = false;
+        try
+        {
+            try
+            {
+                var firstFill = NativeFill(8101, 7101, buy: true, price: 5000.25m, T0);
+                firstFill["qty"] = 1;
+                delivery = ReceiveProps(feed.Connection, "fill", firstFill, fake.PublishFill);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(8));
+                progress = Task.Run(() =>
+                {
+                    Assert.True(broker.OrdersReady);
+                    Assert.Same(order, Assert.Single(broker.ActiveOrders));
+                    Assert.Equal(1m, order.Filled);
+                });
+                await progress.WaitAsync(TimeSpan.FromSeconds(8));
+                Assert.Equal(0, Volatile.Read(ref releaseTimedOut));
+                completed = true;
+            }
+            finally
+            {
+                release.Set();
+                try { await Task.WhenAll(progress, delivery).WaitAsync(TimeSpan.FromSeconds(8)); }
+                catch (TimeoutException) when (!completed) { }
+                if (entered.Task.IsCompleted) await returned.Task.WaitAsync(TimeSpan.FromSeconds(8));
+            }
+            var secondFill = NativeFill(8102, 7101, buy: true, price: 5001.25m, T0.AddSeconds(1));
+            secondFill["qty"] = 1;
+            await ReceiveProps(feed.Connection, "fill", secondFill, fake.PublishFill);
+            await Until(() => context.Find(order.IntentId)!.QuantityProjected == 2m &&
+                LiveStore.LoadLedger(root.Path, key, 50m).AveragePrice == 5000.75m);
+            await secondObserved.Task.WaitAsync(TimeSpan.FromSeconds(8));
+            Assert.Equal(new[] { 1m, 2m }, observed.ToArray());
+            var ledger = LiveStore.LoadLedger(root.Path, key, 50m);
+            Assert.Equal(2m, ledger.Position);
+            Assert.Equal(5000.75m, ledger.AveragePrice);
+            Assert.False(ledger.HasPendingPrices);
+            broker.Dispose();
+            var lateFill = NativeFill(8103, 7101, buy: true, price: 5002.25m, T0.AddSeconds(2));
+            lateFill["qty"] = 1;
+            await ReceiveProps(feed.Connection, "fill", lateFill, fake.PublishFill);
+            Assert.Equal(3, session.FillsOf(101).Count);
+            Assert.Equal(2m, context.Find(order.IntentId)!.QuantityProjected);
+            Assert.Equal(2m, LiveStore.LoadLedger(root.Path, key, 50m).Position);
+            Assert.Equal(new[] { 1m, 2m }, observed.ToArray());
+        }
+        finally { context.QuantityChanged -= HoldFirstQuantity; }
+    }
+
+    [Fact]
+    public async Task AcceptedNativeIdentityRejectsReusedClientTagWhileLostAcceptanceStillRecovers()
+    {
+        using var root = new OwnedLiveRoot();
+        using var fake = new FakeTradovate();
+        using var orders = new NativeOrderTestFixture();
+        var normalHttp = fake.Server.OnHttp!;
+        var recoveredFeeObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.Server.OnHttp = request =>
+        {
+            if (request.Route == "/v1/fillFee/deps" &&
+                request.Headers.GetValueOrDefault("Authorization", "").StartsWith("Bearer AT", StringComparison.Ordinal))
+            {
+                if (request.Query("masterid") == "8103") recoveredFeeObserved.TrySetResult();
+                return (200, "[]");
+            }
+            return normalHttp(request);
+        };
+        var context = new OrderContext(new AccountContextDescriptor(
+            Guid.NewGuid().ToString("N"), "Tradovate", "futures", fake.Server.Http + "/v1",
+            "owned-tradovate-reused-client", "fixture-generation"), root.Path);
+        const string originalKey = "owned-tradovate-accepted-original";
+        var originalOwner = context.LedgerOwner(originalKey, LiveStore.CaptureLedgerGeneration(root.Path, originalKey));
+        var original = context.Prepare(originalOwner,
+            new OrderRequest(Es.Key, OrderDirections.Buy, OrderTypes.Limit, 2m, 4990m, StrategyQuantity: 2m));
+        Assert.Null(original.Error);
+        Assert.Null(context.StartDispatch(original, fake.Contract));
+        var acceptedNative = new NativeOrderIdentity("tradovate:order", "7101");
+        Assert.Null(context.BindNative(original, acceptedNative));
+        const string recoveredKey = "owned-tradovate-lost-acceptance";
+        var recoveredOwner = context.LedgerOwner(recoveredKey, LiveStore.CaptureLedgerGeneration(root.Path, recoveredKey));
+        var uncertain = context.Prepare(recoveredOwner,
+            new OrderRequest(Es.Key, OrderDirections.Buy, OrderTypes.Limit, 2m, 5000m, StrategyQuantity: 2m));
+        Assert.Null(uncertain.Error);
+        Assert.Null(context.StartDispatch(uncertain, fake.Contract));
+        using var market = new FixtureMarket();
+        using var data = new InstrumentData(Es, market) { RecordLive = false };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady);
+        using var broker = orders.Tradovate(data, session, Assert.Single(session.Accounts), "DEMO101", context);
+        _ = AccountExecutionProjector.For(broker.Executions, context);
+        await Until(() => broker.OrdersReady);
+        await ReceiveProps(feed.Connection, "order", NativeOrder(7101, 101, original.ClientOrderId, buy: true, filled: true), fake.PublishOrder);
+        await ReceiveProps(feed.Connection, "fill", NativeFill(8101, 7101, buy: true, price: 5000.25m, T0), fake.PublishFill);
+        await Until(() => LiveStore.LoadLedger(root.Path, originalKey, 50m).AveragePrice == 5000.25m);
+
+        // This is another native order on the same account and exact contract, but its reused
+        // client tag is not authority to extend the already accepted original native lineage.
+        await ReceiveProps(feed.Connection, "order", NativeOrder(7102, 101, original.ClientOrderId, buy: true, filled: true), fake.PublishOrder);
+        await ReceiveProps(feed.Connection, "fill", NativeFill(8102, 7102, buy: true, price: 6000m, T0.AddSeconds(1)), fake.PublishFill);
+        // A genuinely unacknowledged dispatch still recovers without an orderVersion or success reply.
+        await ReceiveProps(feed.Connection, "order", NativeOrder(7103, 101, uncertain.ClientOrderId, buy: true, filled: true), fake.PublishOrder);
+        await ReceiveProps(feed.Connection, "fill", NativeFill(8103, 7103, buy: true, price: 5010.25m, T0.AddSeconds(2)), fake.PublishFill);
+        await Until(() => LiveStore.LoadLedger(root.Path, recoveredKey, 50m).AveragePrice == 5010.25m);
+        // The single producer loop reaches this later owned fee request only after its prior
+        // attribution work; a transient absence immediately after socket delivery is not the assertion.
+        await recoveredFeeObserved.Task.WaitAsync(TimeSpan.FromSeconds(8));
+
+        Assert.Equal(acceptedNative, Assert.Single(context.Find(original.Id)!.NativeOrders!));
+        var originalLedger = LiveStore.LoadLedger(root.Path, originalKey, 50m);
+        Assert.Equal(2m, originalLedger.Position);
+        Assert.Equal(5000.25m, originalLedger.AveragePrice);
+        Assert.Equal("8101", Assert.Single(originalLedger.Fills).ExecutionId!.Id);
+        var recoveredLedger = LiveStore.LoadLedger(root.Path, recoveredKey, 50m);
+        Assert.Equal(2m, recoveredLedger.Position);
+        Assert.Equal(5010.25m, recoveredLedger.AveragePrice);
+        Assert.Equal("8103", Assert.Single(recoveredLedger.Fills).ExecutionId!.Id);
+        Assert.Equal(new NativeOrderIdentity("tradovate:order", "7103"),
+            Assert.Single(context.Find(uncertain.Id)!.NativeOrders!));
+        Assert.Equal(new[] { "8101", "8103" }, broker.Executions.Capture(ExecutionCursor.Start).Changes
+            .Select(report => report.Identity.Id).Distinct().OrderBy(id => id));
+    }
+
+    [Fact]
     public async Task EarlyNativeFillResolvesExactAccountAndRevisableFeeComponentsWithoutDuplicatingPosition()
     {
         using var root = new OwnedLiveRoot();

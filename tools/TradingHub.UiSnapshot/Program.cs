@@ -372,6 +372,18 @@ foreach (var page in pages)
         continue;
     }
 
+    if (page == "live-stopped-open")
+    {
+        exitCode += LiveFinancialScene.Run(window, Pump, outDir, stoppedOpen: true);
+        continue;
+    }
+
+    if (page == "live-stopped-chart-revision")
+    {
+        exitCode += LiveFinancialScene.RunStoppedChartRevision(window, Pump, outDir);
+        continue;
+    }
+
     if (page == "account-journal-revision")
     {
         exitCode += LiveFinancialScene.RunJournalRevision(window, Pump, outDir);

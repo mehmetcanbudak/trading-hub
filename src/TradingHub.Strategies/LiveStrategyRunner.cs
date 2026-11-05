@@ -65,6 +65,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         || (MaxDrawdown > 0 && AvailableCurrentDrawdown == null);
     private bool FinancialRiskBlocked => OwnershipRiskBlocked
         || (Ledger != null && Ledger.HasPendingPrices) || ConfiguredValuationBlocked
+        || NativeExitAwaitingAcknowledgment
         || _projectionSubscription?.HasPendingUpdates == true
         || (_owner != null && _account.OrderContext.HasUnprojectedQuantity(_owner));
     // Ready may precede this runner consuming already-published execution facts. Pending prices hold
@@ -1367,12 +1368,6 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             {
                 if (!owned.ExecutionBaselineKnown || owned.PriorExecutions?.ContainsKey(report.Identity) == true) continue;
                 _executionReports.TryGetValue(report.Identity, out var previous);
-                decimal reported = owned.QuantityBaseline + owned.Quantity + report.Quantity - (previous?.Quantity ?? 0);
-                if (reported > owned.Order.Booked)
-                {
-                    Book(owned.Order, reported - owned.Order.Booked);
-                    owned.Order.Booked = reported;
-                }
                 if (previous != null) { owned.Quantity -= previous.Quantity; owned.Value -= previous.Quantity * previous.Price; }
                 else (owned.Reports ??= new()).Add(report.Identity);
                 _executionReports[report.Identity] = report;
@@ -1500,6 +1495,9 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private void UpdateProtection(bool target = true)
     {
         decimal pos = LocalPosition;
+        bool awaitingNativeTerminal = pos == 0 && _sl is { Live: Order executing } currentStop &&
+            !_cancelPending.Contains(executing) && IsCurrentExecutingStop(currentStop) &&
+            LatestIdentifiedQuantity(currentStop, executing) >= executing.QuantityToFill;
         int side = Math.Sign(pos);
         if (_refreshStopBound is { } pendingBound && pendingBound.Side != side) _refreshStopBound = null;
         if (side != 0 && _sl is { IsActive: true } previousStop &&
@@ -1515,8 +1513,9 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
                 _refreshStopBound = (side, bound);
             }
         }
-        var prices = ProtectionPrices(pos);
-        bool keepStop = pos != 0 && prices.Stop > 0 && MatchesProtection(_sl, pos, prices.Stop, stop: true);
+        (decimal Stop, decimal Target) prices = awaitingNativeTerminal ? default : ProtectionPrices(pos);
+        bool keepStop = awaitingNativeTerminal ||
+            (pos != 0 && prices.Stop > 0 && MatchesProtection(_sl, pos, prices.Stop, stop: true));
         bool keepTarget = pos != 0 && target && prices.Target > 0 && MatchesProtection(_tp, pos, prices.Target, stop: false);
         _protectionRefresh = true;
         _refreshTarget = target;
@@ -1542,12 +1541,39 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         }
     }
 
+    private bool NativeExitAwaitingAcknowledgment
+    {
+        get
+        {
+            if (_owner == null || Ledger == null || LocalPosition != 0) return false;
+            foreach (var order in _orders)
+                if (IsCurrentExecutingStop(order)) return true;
+            return false;
+        }
+    }
+
+    private bool IsCurrentExecutingStop(StrategyOrder? order) =>
+        order is { IsActive: true, IsProtective: true, Type: StrategyOrderType.Stop, Live: Order live } &&
+        live.Type == OrderTypes.Market &&
+        live.Direction == (order.Side == OrderSide.Sell ? OrderDirections.Sell : OrderDirections.Buy) &&
+        _account.OrderContext.FindExecutingProtection(live, _owner) != null;
+
+    private decimal LatestIdentifiedQuantity(StrategyOrder order, Order live) =>
+        _executionOrders.TryGetValue(live.Id, out var owned) && ReferenceEquals(owned.Order, order) && owned.ExecutionBaselineKnown
+            ? owned.QuantityBaseline + owned.Quantity : live.Filled;
+
     private bool MatchesProtection(StrategyOrder? strategyOrder, decimal position, decimal price, bool stop)
     {
         if (strategyOrder is not { IsActive: true, Live: Order live } ||
             live.State != OrderStates.Active || live.Canceled || _cancelPending.Contains(live)) return false;
-        if (live.Direction != (position > 0 ? OrderDirections.Sell : OrderDirections.Buy) ||
-            live.Unfilled != Math.Abs(position)) return false;
+        if (live.Direction != (position > 0 ? OrderDirections.Sell : OrderDirections.Buy)) return false;
+        if (stop && live.Type == OrderTypes.Market)
+        {
+            // This lead is revocable: same-ID revisions replace the identified total, never the native high-water mark.
+            decimal remaining = live.Unfilled - Math.Max(0, LatestIdentifiedQuantity(strategyOrder, live) - live.Filled);
+            return remaining == Math.Abs(position) && IsCurrentExecutingStop(strategyOrder);
+        }
+        if (live.Unfilled != Math.Abs(position)) return false;
         if (stop ? live.Type is not (OrderTypes.Stop or OrderTypes.StopLimit) : live.Type != OrderTypes.Limit) return false;
         decimal nativePrice = stop && live.TriggerPrice > 0 ? live.TriggerPrice : live.Price;
         return nativePrice == ExecInstrument.RoundPrice(price);
@@ -1557,23 +1583,24 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     {
         if (pos == 0) { _localProtectionPrices = null; return default; }
         int side = Math.Sign(pos);
-        if (ForeignOpenContext)
+        if (ForeignOpenContext || Ledger.AveragePrice <= 0)
         {
-            // Shared financial history and a mixed account average cannot price this owned lot.
-            // Prefer its acknowledged native legs, then the prices established before the conflict.
+            // Neither another context nor a blended account average can price this owned lot.
+            // Keep acknowledged/local provisional protection until its own execution basis is available.
             var retained = _localProtectionPrices is { } local && local.Side == side ? local : default;
             decimal retainedStop = AcknowledgedProtectionPrice(_sl, pos, stop: true);
             decimal retainedTarget = AcknowledgedProtectionPrice(_tp, pos, stop: false);
             if (retainedStop <= 0) retainedStop = retained.Stop;
             if (retainedTarget <= 0) retainedTarget = retained.Target;
-            _localProtectionPrices = (side, retainedStop, retainedTarget);
-            return (retainedStop, retainedTarget);
+            if (ForeignOpenContext || retainedStop > 0 || retainedTarget > 0)
+            {
+                _localProtectionPrices = (side, retainedStop, retainedTarget);
+                return (retainedStop, retainedTarget);
+            }
         }
-        var accountPosition = _account.Position;
         decimal avg = Ledger.AveragePrice;
         if (avg <= 0)
-            avg = accountPosition is { AveragePrice: > 0 } ? accountPosition.AveragePrice
-                : _account.LastPrice > 0 ? _account.LastPrice : _data.LastPrice;
+            avg = _account.LastPrice > 0 ? _account.LastPrice : _data.LastPrice;
         if (avg <= 0) return default;
         var inst = _data.Instrument;
         int stopTicks = _strategy.StopLossTicks > 0 ? _strategy.StopLossTicks : _strategy.TrailingStopTicks;
@@ -1644,7 +1671,8 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private void Trail(decimal price)
     {
         if (ForeignOpenContext) return; // Do not re-anchor local trailing protection from conflicted financial prices.
-        if (_strategy.TrailingStopTicks <= 0 || _sl is not { IsActive: true } || _sl.Live is not Order o) return;
+        if (_strategy.TrailingStopTicks <= 0 || _sl is not { IsActive: true } || _sl.Live is not Order o ||
+            o.Type == OrderTypes.Market) return;
         decimal pos = LocalPosition;
         decimal dist = _strategy.TrailingStopTicks * _data.Instrument.TickSize;
         decimal? target = null;

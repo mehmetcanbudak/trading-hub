@@ -385,7 +385,7 @@ public sealed partial class TradingView
     /// Marcas de cada estrategia: las operaciones históricas y las nuevas (de su cuenta), con la posición abierta si hay.
     /// Se llama unas veces por segundo; solo se rehace si cambió algo.
     /// </summary>
-    private void UpdateStrategySignals(ChartTab chart)
+    private void UpdateStrategySignals(ChartTab chart, ref List<LiveEntry>? committedEntries)
     {
         if (chart.Model is not { } model || chart.Strategies.Count == 0) return;
         foreach (var cs in chart.Strategies)
@@ -403,6 +403,12 @@ public sealed partial class TradingView
 
             UpdateStrategyDrawings(model, cs);
             var ledger = cs.Runner?.Ledger ?? cs.SavedLedger;
+            if (cs.Live && cs.Runner is not ({ IsRunning: true } or { IsClosing: true } or { HasWorkingOrders: true }))
+            {
+                committedEntries ??= _svc.Live.Entries();
+                ledger = committedEntries.FirstOrDefault(entry => ReferenceEquals(entry.ChartStrategy, cs))?.Ledger;
+                cs.SavedLedger = ledger;
+            }
             // la visual todavía no tomó la posición de la historia (por ejemplo, sin precio en vivo): se dibuja la de la historia
             var historyOpen = !cs.Live && cs.HistoryOpen != null && (ledger == null || ledger.Fills.Count == 0) ? cs.HistoryOpen : null;
             string key = $"{cs.History.Count}|{ledger?.Revision ?? 0}|{ledger?.Position ?? 0}|{historyOpen?.EntryTime.Ticks ?? 0}";

@@ -236,13 +236,13 @@ internal sealed partial class LiveView : UserControl, IPage
 
         _kpis.Children.Clear();
         bool complete = entries.All(e => e.Ledger is { HasPendingFinancials: false });
-        decimal? net = complete ? entries.Sum(e => e.Net) : null;
+        decimal? net = complete && entries.All(e => e.Net != null) ? entries.Sum(e => e.Net) : null;
         decimal? open = running.All(e => e.OpenPnL != null) ? running.Sum(e => e.OpenPnL) : null;
         decimal? today = running.All(e => e.Runner!.AvailableTodayPnL != null) ? running.Sum(e => e.Runner!.AvailableTodayPnL) : null;
         int? trades = complete ? entries.Sum(e => e.Ledger!.Trades.Count) : null;
         int paused = running.Count(e => e.Paused || e.Runner!.DailyLimitActive);
         int pending = LiveStore.LoadProposals().Sum(p => p.Items.Count(i => i.Status == "pending"));
-        _kpis.Children.Add(Kpi("PnL", Money(net), complete ? $"open {Money(open)} · {((entries.Any(e => e.Ledger?.FinancialQuality == LiveFinancialQuality.Estimated)) ? "includes estimates" : "reported executions")}" : "Accounting unavailable or pending", net == null ? Ui.Warn : net >= 0 ? Ui.Up : Ui.Down));
+        _kpis.Children.Add(Kpi("PnL", Money(net), net != null ? $"open {Money(open)} · {((entries.Any(e => e.Ledger?.FinancialQuality == LiveFinancialQuality.Estimated)) ? "includes estimates" : "reported executions")}" : "Accounting unavailable or pending", net == null ? Ui.Warn : net >= 0 ? Ui.Up : Ui.Down));
         _kpis.Children.Add(Kpi("Today", Money(today), "closed + open PnL of running strategies", today >= 0 ? Ui.Up : Ui.Down));
         _kpis.Children.Add(Kpi("Live", running.Count.ToString(Inv), paused > 0 ? $"{paused} paused or risk-stopped" : $"Total strategies: {entries.Count}", running.Count > 0 ? Ui.Accent : null));
         _kpis.Children.Add(Kpi("Closed trades", trades?.ToString(Inv) ?? "—", complete ? "click to view all trade details" : "History unavailable", null, () => OpenTrades(), "All trades with MAE, MFE, size and more; select a trade to view it on the chart"));

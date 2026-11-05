@@ -22,7 +22,7 @@ internal static class LiveFinancialScene
         Symbol = "FINANCIAL-UI", FeedId = "test", TickSize = 1m, VolumeStep = 1m, PointValue = 10m,
     };
 
-    public static int Run(MainWindow window, Action<double> pump, string output, bool correctAfterStop = false)
+    public static int Run(MainWindow window, Action<double> pump, string output, bool correctAfterStop = false, bool stoppedOpen = false)
     {
         string? isolated = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR");
         if (string.IsNullOrWhiteSpace(isolated) || Path.GetFullPath(isolated) != Path.GetFullPath(LiveStore.Root))
@@ -58,7 +58,7 @@ internal static class LiveFinancialScene
             }
             if (broker.Position?.Volume != 2m || runner.Ledger.NetRealized != -3m || runner.Ledger.KnownOpenPnL(100m) != 0m)
                 throw new InvalidOperationException($"Actual simulator control failed: broker={broker.Position?.Volume}, ledger={runner.Ledger.Position}, net={runner.Ledger.NetRealized}, quality={runner.Ledger.FinancialQuality}, open={runner.Ledger.KnownOpenPnL(100m)}.");
-            decimal expectedTotal = -3m;
+            decimal? expectedTotal = -3m;
             if (correctAfterStop)
             {
                 strategy.SellAt(105m, 2m);
@@ -81,19 +81,33 @@ internal static class LiveFinancialScene
                     throw new InvalidOperationException("The account projector did not persist the stopped correction: expected60gross minus7fees.");
                 expectedTotal = 53m;
             }
+            else if (stoppedOpen)
+            {
+                runner.Stop(flatten: false);
+                expectedTotal = null; // Complete executions are not a current valuation of stopped exposure.
+            }
 
             window.Navigate("live");
             pump(0.1);
             var view = window.GetVisualDescendants().OfType<LiveView>().Single(v => v.IsEffectivelyVisible);
-            view.Select("portfolios");
+            view.Select(stoppedOpen ? "strategies" : "portfolios");
             pump(0.2);
-            var label = view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.IsEffectivelyVisible && t.Text == "PnL");
+            var label = view.GetVisualDescendants().OfType<TextBlock>().Single(t =>
+                t.IsEffectivelyVisible && t.Text == TradingHub.App.Localization.Lang.T("PnL"));
             var card = (StackPanel)label.Parent!;
             string? displayed = card.Children.OfType<TextBlock>().ElementAt(1).Text;
-            string expected = expectedTotal.ToString("+#,##0.00;-#,##0.00;0.00", UiCulture.Current);
-            using var frame = window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Portfolio surface did not render.");
-            frame.Save(Path.Combine(output, correctAfterStop ? "live_financial_stopped_correction.png" : "live_financial_open_entry_fee.png"));
+            string expected = expectedTotal?.ToString("+#,##0.00;-#,##0.00;0.00", UiCulture.Current) ?? "—";
+            string scene = stoppedOpen ? "live-stopped-open" : correctAfterStop ? "live-stopped" : "live-financial";
+            using var frame = window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Financial surface did not render.");
+            frame.Save(Path.Combine(output, stoppedOpen ? "live_stopped_open.png" : correctAfterStop ? "live_financial_stopped_correction.png" : "live_financial_open_entry_fee.png"));
             bool correct = displayed == expected;
+            if (stoppedOpen)
+            {
+                var countLabel = view.GetVisualDescendants().OfType<TextBlock>()
+                    .Single(text => text.IsEffectivelyVisible && text.Text == TradingHub.App.Localization.Lang.T("Closed trades"));
+                string? count = ((StackPanel)countLabel.Parent!).Children.OfType<TextBlock>().ElementAt(1).Text;
+                correct &= count == "0"; // Missing marks must not hide a known closed-trade count.
+            }
             string evidence = JsonSerializer.Serialize(new
             {
                 actualSimulatorPosition = broker.Position?.Volume,
@@ -101,9 +115,9 @@ internal static class LiveFinancialScene
                 durableNet = LiveStore.LoadLedger(runner.Key, Contract.PointValue).NetRealized,
                 openGross = runner.Ledger.KnownOpenPnL(100m),
                 expectedPortfolioTotal = expectedTotal, expectedDisplay = expected, actualDisplay = displayed,
-                passed = correct, authority = "Actual Avalonia live portfolio surface with simulator executions; no broker/model calls",
+                stoppedOpen, passed = correct, authority = "Actual Avalonia live financial surface with simulator executions; no broker/model calls",
             }, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(Path.Combine(output, correctAfterStop ? "live-stopped-evidence.json" : "live-financial-evidence.json"), evidence);
+            File.WriteAllText(Path.Combine(output, scene + "-evidence.json"), evidence);
             Console.WriteLine(evidence);
             return correct ? 0 : 1;
         }
@@ -219,6 +233,80 @@ internal static class LiveFinancialScene
             model.Settings.ShowTradeMarks = oldMarks;
             model.Viewport.PriceTop = oldTop;
             model.Viewport.PriceBottom = oldBottom;
+        }
+    }
+
+    public static int RunStoppedChartRevision(MainWindow window, Action<double> pump, string output)
+    {
+        string? isolated = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR");
+        if (string.IsNullOrWhiteSpace(isolated) || Path.GetFullPath(isolated) != Path.GetFullPath(LiveStore.Root))
+            throw new InvalidOperationException("Chart revision proof requires its explicit isolated live store.");
+        window.Navigate("trading");
+        pump(0.2);
+        var chart = window.Trading.ActiveTab ?? throw new InvalidOperationException("The fixture chart did not open.");
+        var model = chart.Model ?? throw new InvalidOperationException("The fixture chart has no rendered model.");
+        const string key = "stopped-chart-revision-fixture";
+        const string strategyId = "StoppedChartRevisionFixture";
+        var cs = new ChartStrategy
+        {
+            StrategyId = strategyId, Live = true, Paused = true, AccountId = AccountCenter.SimId,
+            HistoryFrom = model.Data.HistoryFrom,
+        };
+        cs.Overlay.Name = "Stopped chart revision fixture";
+        cs.Overlay.Color = new SkiaSharp.SKColor(180, 120, 255);
+        var scope = new ExecutionScope("fixture", "sim", "paper", Contract.Key, "stopped-chart-revision");
+        var entry = new LiveFill(Start, true, 2m, 100m)
+        {
+            Kind = LiveFillKind.Execution, OrderId = "entry", ExecutionId = new(scope, "entry"),
+            Fees = new[] { new ExecutionFee(3m, "USD") }, FeesComplete = true, Currency = "USD",
+        };
+        try
+        {
+            if (LiveStore.AppendFill(key, entry) is { } entryError) throw new IOException(entryError);
+            if (LiveStore.AppendFill(key, new LiveFill(Start.AddMinutes(1), false, 2m, 105m)
+            {
+                Kind = LiveFillKind.Execution, OrderId = "exit", ExecutionId = new(scope, "exit"),
+                Fees = new[] { new ExecutionFee(3m, "USD") }, FeesComplete = true, Currency = "USD",
+            }) is { } exitError) throw new IOException(exitError);
+            LiveStore.SaveRunners(LiveStore.LoadRunners().Where(info => info.Key != key).Append(new LiveRunnerInfo
+            {
+                Key = key, Strategy = cs.Overlay.Name, StrategyId = strategyId, Source = "chart",
+                FeedId = model.Instrument.FeedId, Symbol = chart.Symbol, Period = model.Period.Code,
+                Account = "sim", AccountId = AccountCenter.SimId, PointValue = 10m, Paused = true,
+            }));
+            cs.SavedLedger = LiveStore.LoadLedger(key, 10m);
+            chart.Strategies.Add(cs);
+            model.Strategies.Add(cs.Overlay);
+            pump(0.6);
+            decimal beforeEntry = cs.Overlay.Signals.Single(signal => signal.Entry).Price;
+            decimal beforeNet = cs.Overlay.Links.Single().Pnl;
+            if (beforeEntry != 100m || beforeNet != 94m)
+                throw new InvalidOperationException($"Restored chart baseline failed: entry={beforeEntry}, net={beforeNet}.");
+
+            if (LiveStore.AppendFill(key, entry with { Price = 102m, Fees = new[] { new ExecutionFee(4m, "USD") } }) is { } correctionError)
+                throw new IOException(correctionError);
+            pump(0.6);
+            decimal afterEntry = cs.Overlay.Signals.Single(signal => signal.Entry).Price;
+            decimal afterNet = cs.Overlay.Links.Single().Pnl;
+            using var frame = window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Restored chart did not render.");
+            frame.Save(Path.Combine(output, "live_stopped_chart_revision.png"));
+            bool correct = afterEntry == 102m && afterNet == 53m && cs.SavedLedger?.Fills.Count == 2;
+            string evidence = JsonSerializer.Serialize(new
+            {
+                before = new { entry = beforeEntry, net = beforeNet },
+                after = new { entry = afterEntry, net = afterNet },
+                expectedAfter = new { entry = 102m, net = 53m, effectiveExecutions = 2 },
+                passed = correct, authority = "Actual restored paused chart overlay after a committed same-identity price/fee correction; private history only",
+            }, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(Path.Combine(output, "live-stopped-chart-evidence.json"), evidence);
+            Console.WriteLine(evidence);
+            return correct ? 0 : 1;
+        }
+        finally
+        {
+            chart.Strategies.Remove(cs);
+            model.Strategies.Remove(cs.Overlay);
+            LiveStore.RemoveRunner(key, deleteFills: true);
         }
     }
 

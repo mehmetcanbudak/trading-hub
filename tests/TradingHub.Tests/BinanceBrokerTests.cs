@@ -663,13 +663,13 @@ public class BinanceBrokerTests : IDisposable
         string entryId = Assert.Single(fake.Sent).ExchangeId;
         fake.Fill(entryId, 1m);
         fake.HideOwnedOrders = false;
-        await Until(() => runner.Ledger.Position == 1m);
+        await Until(() => runner.Ledger.Position == 1m && !runner.Ledger.HasPendingFinancials);
         Assert.Equal(1m, runner.Ledger.Position);
         Assert.Same(entry, Assert.Single(broker.ActiveOrders));
         await Polls(fake, 3);
         Assert.Single(runner.Ledger.Fills);
         fake.Fill(entryId, 1m);
-        await Until(() => runner.Ledger.Position == 2m);
+        await Until(() => runner.Ledger.Position == 2m && !runner.Ledger.HasPendingFinancials);
         Assert.Equal(2m, runner.Ledger.Position);
         Assert.Equal(2, runner.Ledger.Fills.Count);
         await Until(() => broker.OrdersReady);
@@ -685,7 +685,7 @@ public class BinanceBrokerTests : IDisposable
         string exitId = fake.Sent[1].ExchangeId;
         fake.Fill(exitId, 2m);
         fake.HideOwnedOrders = false;
-        await Until(() => runner.Ledger.Position == 0m && runner.Ledger.Realized == 20m);
+        await Until(() => runner.Ledger.Position == 0m && runner.Ledger.Realized == 20m && !runner.Ledger.HasPendingFinancials);
         await Polls(fake, 4);
         Assert.Equal(0m, runner.Ledger.Position);
         Assert.Equal(20m, runner.Ledger.Realized);
@@ -2019,11 +2019,11 @@ internal sealed class FakeBinance : IDisposable
     }
 
     /// <summary>A conditional order placed outside Trading Hub; <paramref name="price"/> is the limit of STOP and TAKE_PROFIT.</summary>
-    public long AddExternalAlgo(string side, string type, decimal qty, decimal triggerPrice, decimal price = 0, string clientId = "")
+    public long AddExternalAlgo(string side, string type, decimal qty, decimal triggerPrice, decimal price = 0, string clientId = "", bool reduceOnly = false)
     {
         lock (_gate)
         {
-            var a = new FakeBinanceAlgoOrder(++_nextAlgoId, "BTCUSDT", side, type, qty, triggerPrice, price, false, External: true) { ClientId = clientId };
+            var a = new FakeBinanceAlgoOrder(++_nextAlgoId, "BTCUSDT", side, type, qty, triggerPrice, price, reduceOnly, External: true) { ClientId = clientId };
             _algo[a.AlgoId] = a;
             return a.AlgoId;
         }

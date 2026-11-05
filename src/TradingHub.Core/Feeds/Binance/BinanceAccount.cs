@@ -686,6 +686,10 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     unrealizedPnl = 0m;
                 }
 
+                (string? Error, bool NativeComplete) protection = (null, true);
+                if (lookupError == null)
+                    protection = await RefreshExecutingProtectionAsync(_cts.Token).ConfigureAwait(false);
+
                 _cts.Token.ThrowIfCancellationRequested();
                 // Native order/position replay authorizes bounded reductions independently of priced history.
                 lock (_gate)
@@ -695,10 +699,11 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     Position.AveragePrice = averagePrice;
                     Position.UnrealizedPnL = unrealizedPnl;
                     PositionReady = true;
-                    OrdersReady = lookupError == null && !HasUnknownSubmission();
+                    OrdersReady = lookupError == null && protection.Error == null && !HasUnknownSubmission();
+                    _nativeOrdersReady &= protection.NativeComplete;
                     _nativeReplayReady = _nativeOrdersReady;
                     _lastError = null;
-                    _nativeError = lookupError;
+                    _nativeError = lookupError ?? protection.Error;
                     UpdateProducerAvailability();
                 }
                 _initialNativeReplay.TrySetResult();
@@ -906,7 +911,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     lock (_gate)
                     {
                         if (_disposed) return null;
-                        RecoverRegularOrder(order, out _);
+                        RecoverRegularOrder(order, out _, report);
                     }
                     PublishOwnershipObservations();
                     owner = OrderContext.Resolve(report);
@@ -959,6 +964,76 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         }
         PublishOwnershipObservations();
         return metadataError == null ? null : "Binance accounting currency remains unknown: " + metadataError;
+    }
+
+    private async Task<(string? Error, bool NativeComplete)> RefreshExecutingProtectionAsync(CancellationToken ct)
+    {
+        if (!_settings.Futures) return (null, true);
+        const string pending = "Binance protection is synchronizing with identified executions.";
+        List<(Tracked Handle, long Id, string IntentId)>? candidates = null;
+        lock (_gate)
+        {
+            if (_disposed) return (null, false);
+            foreach (var tracked in _byOrder.Values)
+            {
+                if (tracked.Busy > 0 || tracked.ReplacementPending || tracked.BaselinePending ||
+                    tracked.SubmissionUnknown || tracked.CancelRequested || tracked.QueuedReprice != null ||
+                    tracked.Order.Type != OrderTypes.Market) continue;
+                var bound = OrderContext.Find(tracked.Order.IntentId);
+                if (bound == null) continue;
+                var authority = OrderContext.FindExecutingProtection(tracked.Order, bound.Owner);
+                if (authority == null ||
+                    authority.QuantityBaseline + _pricedQuantities.GetValueOrDefault(authority.LogicalOrderId) <= tracked.Order.Filled)
+                    continue;
+                (candidates ??= new()).Add((tracked, tracked.Id, authority.Id));
+            }
+        }
+        if (candidates == null) return (null, true);
+
+        string? error = null;
+        bool nativeComplete = true;
+        foreach (var (tracked, id, intentId) in candidates)
+        {
+            BinanceOpenOrder? snapshot;
+            try { snapshot = await _client.GetOrderAsync(Instrument.Symbol, id, ct).ConfigureAwait(false); }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                error ??= ex.Message;
+                nativeComplete = false;
+                continue;
+            }
+            lock (_gate)
+            {
+                if (_disposed) return (null, false);
+                if (tracked.Id != id || tracked.Order.IntentId != intentId ||
+                    !_byId.TryGetValue(id, out var current) || !ReferenceEquals(current, tracked) ||
+                    !_byOrder.TryGetValue(tracked.Order, out current) || !ReferenceEquals(current, tracked) ||
+                    tracked.Busy > 0 || tracked.ReplacementPending || tracked.BaselinePending ||
+                    tracked.SubmissionUnknown || tracked.CancelRequested || tracked.QueuedReprice != null)
+                {
+                    error ??= pending;
+                    nativeComplete = false;
+                    continue;
+                }
+                var bound = OrderContext.Find(intentId);
+                var authority = bound == null ? null : OrderContext.FindExecutingProtection(tracked.Order, bound.Owner);
+                if (authority == null || authority.Id != intentId || snapshot == null || snapshot.OrderId != id ||
+                    snapshot.Symbol != Instrument.Symbol || snapshot.Type != "MARKET" || snapshot.Status.Length == 0 ||
+                    snapshot.Side != (tracked.Order.Direction == OrderDirections.Buy ? "BUY" : "SELL") ||
+                    snapshot.ReduceOnly != tracked.Order.ReduceOnly)
+                {
+                    error ??= pending;
+                    nativeComplete = false;
+                    continue;
+                }
+
+                // A fresh exact native response, not the revocable history total, supplies working/terminal facts.
+                Apply(tracked, snapshot);
+                if (authority.QuantityBaseline + _pricedQuantities.GetValueOrDefault(authority.LogicalOrderId) > tracked.Order.Filled)
+                    error ??= pending;
+            }
+        }
+        return (error, nativeComplete);
     }
 
     private static long CaptureTradePage(IReadOnlyList<BinanceTrade> page, long fromId, Dictionary<long, BinanceTrade> captured)
@@ -1622,11 +1697,11 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     // Called under the disposal fence. Only Core can recover an exact persisted dispatched client identity.
     private Tracked RecoverRegular(BinanceOpenOrder native)
     {
-        var order = RecoverRegularOrder(native, out var intent);
+        var order = RecoverRegularOrder(native, out var intent, null);
         return RecoveredHandle(order, intent);
     }
 
-    private Order RecoverRegularOrder(BinanceOpenOrder native, out PreparedOrderIntent? intent)
+    private Order RecoverRegularOrder(BinanceOpenOrder native, out PreparedOrderIntent? intent, ExecutionReport? execution)
     {
         var order = new Order
         {
@@ -1639,6 +1714,32 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         if (!_disposed && native.OrderId > 0 && native.Symbol == Instrument.Symbol && (native.Side is "BUY" or "SELL"))
         {
             var identity = new NativeOrderIdentity("binance:order", native.Symbol + ":" + native.OrderId.ToString(CultureInfo.InvariantCulture));
+            if (execution != null && execution.IntentId == null && execution.Identity.Scope == _executionScope &&
+                execution.ContextId == OrderContext.Descriptor.Id && execution.NativeOrder == identity &&
+                execution.Symbol == native.Symbol && execution.Buy == (native.Side == "BUY") &&
+                native.Type == "MARKET" && _byId.TryGetValue(native.OrderId, out var followed) &&
+                followed.Id == native.OrderId && followed.AlgoId == 0 &&
+                followed.Busy == 0 && !followed.ReplacementPending && !followed.BaselinePending &&
+                followed.ConditionalParent is { } parent && followed.Order.NativeIdentity == identity &&
+                followed.Order.Type == OrderTypes.Stop && followed.Order.State == OrderStates.Active && !followed.Order.Canceled &&
+                native.Side == (followed.Order.Direction == OrderDirections.Buy ? "BUY" : "SELL") &&
+                native.ReduceOnly == followed.Order.ReduceOnly &&
+                _byOrder.TryGetValue(followed.Order, out var current) && ReferenceEquals(current, followed) &&
+                OrderContext.Resolve(execution) is { } claim && claim.Id == followed.Order.IntentId &&
+                claim.ContextId == OrderContext.Descriptor.Id && claim.Generation == OrderContext.Descriptor.Generation &&
+                claim.Owner.Id == followed.Order.OwnerId && claim.LogicalOrderId == followed.Order.LogicalOrderId &&
+                claim.Request.Type == OrderTypes.Stop && claim.Request.Instrument == Instrument.Key &&
+                claim.Request.Direction == followed.Order.Direction && claim.Request.ReduceOnly == native.ReduceOnly &&
+                (claim.NativeInstrument == native.Symbol || (claim.Adopted && claim.NativeInstrument == null)) &&
+                (claim.NativeExchange == "" || (claim.Adopted && claim.NativeExchange == null)) &&
+                claim.NativeOrders?.Contains(parent) == true && claim.NativeOrders.Contains(identity) &&
+                claim.TerminalOrder?.Native != identity)
+            {
+                // The financial lookup returned this already-followed child's actual native working facts.
+                // Install them before strict recovery, not by weakening the frozen STOP dispatch contract.
+                Apply(followed, native);
+                _accountChanged = true;
+            }
             intent = OrderContext.RecoverNativeOrder(order, native.ClientOrderId, identity, Instrument.Key, native.Symbol,
                 notify: false, allowClientRecovery: native.Type is "LIMIT" or "MARKET" ||
                     (!_settings.Futures && native.Type == "STOP_LOSS"));
@@ -1996,7 +2097,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
 
     private static void ConfirmReplacement(Tracked t, decimal total, decimal price)
     {
-        if (!t.ReplacementPending || t.Busy > 0 || t.SubmissionUnknown || t.ReplaceFailure != null || t.CancelRequested || total <= 0 || price <= 0) return;
+        if (!t.ReplacementPending || t.Busy > 0 || t.SubmissionUnknown || t.ReplaceFailure != null || t.CancelRequested ||
+            total <= 0 || price < 0 || (price == 0 && t.Order.Type != OrderTypes.Market)) return;
         if (!t.RestoreReplacement && (total != t.ReplacementTotal || price != t.ReplacementPrice)) return;
         t.ReplacementPending = false;
         t.RestoreReplacement = false;
@@ -2065,8 +2167,9 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             RecordRejected(intent, bindingError);
             return;
         }
-        var type = order.Type == OrderTypes.Stop ? OrderTypes.Stop : OrderTypes.Limit;
-        decimal price = BinanceAccountClient.NormalizeWireNumber(Instrument.RoundPrice(intent.Request.Price));
+        var type = order.Type;
+        decimal price = type == OrderTypes.Market ? 0
+            : BinanceAccountClient.NormalizeWireNumber(Instrument.RoundPrice(intent.Request.Price));
         decimal remaining = BinanceAccountClient.NormalizeWireNumber(intent.IsPriceOnlyReplacement ? order.Unfilled : intent.Request.Quantity);
         decimal total = order.Filled + remaining;
         tracked.ReplacementPending = true;

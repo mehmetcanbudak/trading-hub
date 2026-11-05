@@ -1385,11 +1385,12 @@ public sealed partial class TradingView : UserControl
 
         if (slowFrame)
         {
+            List<LiveEntry>? committedEntries = null;
             foreach (var c in AllCharts)
             {
                 if (c.Trader != null && (c.Window != null || mainVisible)) c.Trader.Refresh();
                 UpdateTradeMarks(c);
-                UpdateStrategySignals(c);
+                UpdateStrategySignals(c, ref committedEntries);
             }
 
             if ((mainVisible || _panelWindows.ContainsKey("ticket")) && _dockedTrader is { IsEffectivelyVisible: true } docked) docked.Refresh();

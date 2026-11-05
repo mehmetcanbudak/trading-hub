@@ -281,6 +281,9 @@ internal static class EnglishScene
         HistoricalData.WriteDay(AppPaths.Ticks, instrument, day, new[] { new Trade(1, day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), 100, 1, TradeSide.Buy) }, replace: true);
         data.GetType().GetMethod("Refresh", BindingFlags.Public | Private)!.Invoke(data, null);
         var symbols = Field<ListBox>(data, "_symbols");
+        var indexDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (!symbols.Items.OfType<ListBoxItem>().Any(i => i.Tag is SymbolData d && d.FeedId == instrument.FeedId)
+            && DateTime.UtcNow < indexDeadline) pump(0.01);
         symbols.SelectedItem = symbols.Items.OfType<ListBoxItem>().First(i => i.Tag is SymbolData d && d.FeedId == instrument.FeedId);
         pump(0.1);
         var days = Field<ListBox>(data, "_days");

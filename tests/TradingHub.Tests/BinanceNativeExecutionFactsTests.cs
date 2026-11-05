@@ -2168,6 +2168,910 @@ public sealed class BinanceNativeExecutionFactsTests
         });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Triggered_partial_market_stop_remains_current_while_sibling_capacity_reconciles(bool strategyProtection)
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Executing protection consumer", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var strategy = new PassiveLimits { StopLossTicks = 5, TakeProfitTicks = 100 };
+            using var runner = strategyProtection ? new LiveStrategyRunner(strategy, data, broker, ChartPeriod.M1) : null;
+            if (runner != null)
+            {
+                runner.Start();
+                strategy.BuyAt(59990m, 3m);
+            }
+            else OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => broker.ActiveOrders.Any(order => order.Direction == OrderDirections.Buy && order.ExchangeOrderId.Length > 0), broker, fake);
+            var opening = Assert.Single(broker.ActiveOrders, order => order.Direction == OrderDirections.Buy);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m && (runner == null || runner.OwnPosition == 3m), broker, fake);
+            using var brackets = strategyProtection ? null : new BracketManager(broker);
+            if (brackets != null)
+            {
+                brackets.SetStopLoss(59000m);
+                brackets.AddTarget(61000m);
+            }
+            await ConditionalState(() => broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order => order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var stop = Assert.Single(broker.ActiveOrders, order => order.Type == OrderTypes.Stop);
+            var originalIntent = stop.IntentId;
+            var originalParent = Assert.IsType<NativeOrderIdentity>(stop.NativeIdentity);
+            long parentId = Assert.Single(fake.PlacedAlgo).AlgoId;
+            long childId = fake.Trigger(parentId, fill: 1m);
+            Assert.Equal(childId, fake.AlgoOrder(parentId).ActualOrderId);
+            Assert.Equal("MARKET", fake.Order(childId).Type);
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+            for (int remaining = 2; remaining >= 1; remaining--)
+            {
+                await ConditionalState(() => broker.Position.Volume == remaining && (runner == null || runner.OwnPosition == remaining) &&
+                    broker.ActiveOrders.Any(order => order.Type == OrderTypes.Limit && order.Unfilled == remaining && !broker.IsReplacementPending(order)), broker, fake);
+                await ConditionalPolls(fake, broker);
+                // The venue-created child has started executing; a drift reconciler must not cancel it.
+                Assert.Equal(("MARKET", "PARTIALLY_FILLED"), (fake.Order(childId).Type, fake.Order(childId).Status));
+                Assert.Same(stop, Assert.Single(broker.ActiveOrders, order => order.NativeIdentity == childNative));
+                Assert.Equal((OrderTypes.Market, childId.ToString(CultureInfo.InvariantCulture), originalIntent, (decimal)remaining),
+                    (stop.Type, stop.ExchangeOrderId, stop.IntentId, stop.Unfilled));
+                Assert.False(stop.Canceled);
+                Assert.Single(fake.PlacedAlgo);
+                Assert.All(fake.Placed.Where(order => order.Side == "SELL"), order => Assert.Equal("LIMIT", order.Type));
+                Assert.All(broker.ActiveOrders, order =>
+                {
+                    Assert.True(order.ReduceOnly);
+                    Assert.Equal(OrderDirections.Sell, order.Direction);
+                    Assert.Equal((decimal)remaining, order.Unfilled);
+                });
+                var claim = Assert.IsType<OwnedOrderIntent>(context.Find(originalIntent));
+                Assert.Equal(new NativeWorkingOrder(originalParent, childNative, OrderTypes.Market, "BTCUSDT", ""), claim.WorkingOrder);
+                if (remaining == 2 && runner != null)
+                {
+                    var nativeHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var releaseNative = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    fake.BeforeGetReply = (request, ct) =>
+                    {
+                        if (request.Route != "/fapi/v1/openOrders") return Task.CompletedTask;
+                        nativeHeld.TrySetResult();
+                        return releaseNative.Task.WaitAsync(ct);
+                    };
+                    try
+                    {
+                        await nativeHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                        fake.Fill(childId, 1m);
+                        await ConditionalState(() => runner.OwnPosition == 1m, broker, fake);
+                        // The identified execution leads the held native snapshot: it is not a size amendment.
+                        Assert.Equal(OrderStates.Active, stop.State);
+                        Assert.Equal(("MARKET", "PARTIALLY_FILLED"), (fake.Order(childId).Type, fake.Order(childId).Status));
+                        Assert.Equal(childNative, stop.NativeIdentity);
+                    }
+                    finally
+                    {
+                        releaseNative.TrySetResult();
+                        fake.BeforeGetReply = null;
+                    }
+                }
+                else fake.Fill(childId, 1m);
+            }
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any() && (runner == null || runner.OwnPosition == 0m), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "FILLED", 3m), (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Fact]
+    public async Task Bracket_same_child_execution_ahead_of_native_snapshot_does_not_resize_or_rearm()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Identified child ahead of native snapshot", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m, broker, fake);
+            using var brackets = new BracketManager(broker);
+            brackets.SetStopLoss(59000m);
+            brackets.AddTarget(61000m);
+            await ConditionalState(() => broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
+                order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var stop = Assert.IsType<Order>(brackets.StopLoss);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            string originalOwner = Assert.IsType<string>(stop.OwnerId);
+            string originalLogical = Assert.IsType<string>(stop.LogicalOrderId);
+            long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+            decimal IdentifiedChildQuantity() => broker.Executions.Capture(ExecutionCursor.Start).Changes
+                .Where(report => report.NativeOrder == childNative).Sum(report => report.Quantity);
+            await ConditionalState(() => broker.Position.Volume == 2m && stop.Type == OrderTypes.Market &&
+                stop.Unfilled == 2m && IdentifiedChildQuantity() == 1m && brackets.Targets.Count == 1 &&
+                brackets.Targets[0].Unfilled == 2m && !broker.IsReplacementPending(brackets.Targets[0]), broker, fake);
+
+            var nativeCaptured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseNative = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fake.BeforeGetReply = (request, ct) =>
+            {
+                if (request.Route != "/fapi/v1/openOrders") return Task.CompletedTask;
+                nativeCaptured.TrySetResult();
+                return releaseNative.Task.WaitAsync(ct);
+            };
+            try
+            {
+                // The response body already contains filled1/unfilled2 before the second execution occurs.
+                await nativeCaptured.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                fake.Fill(childId, 1m);
+                await ConditionalState(() => IdentifiedChildQuantity() == 2m, broker, fake);
+                Assert.Equal(("MARKET", "PARTIALLY_FILLED", 2m),
+                    (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+                Assert.Equal(2m, broker.Position.Volume);
+            }
+            finally
+            {
+                releaseNative.TrySetResult();
+                fake.BeforeGetReply = null;
+            }
+
+            // Native orders replay the older body, then position reports the newer one-unit holding.
+            await ConditionalState(() => broker.Position.Volume == 1m && brackets.Targets.Count == 1 &&
+                brackets.Targets[0].Unfilled == 1m && !broker.IsReplacementPending(brackets.Targets[0]), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 2m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Same(stop, brackets.StopLoss);
+            Assert.Equal((OrderTypes.Market, childNative, originalIntent, originalOwner, originalLogical, 1m),
+                (stop.Type, stop.NativeIdentity, stop.IntentId, stop.OwnerId, stop.LogicalOrderId, stop.Unfilled));
+            Assert.False(stop.Canceled);
+            Assert.False(broker.IsReplacementPending(stop));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.All(fake.Placed.Where(order => order.Side == "SELL"), order => Assert.Equal("LIMIT", order.Type));
+            Assert.All(broker.ActiveOrders, order =>
+            {
+                Assert.True(order.ReduceOnly);
+                Assert.Equal(OrderDirections.Sell, order.Direction);
+                Assert.Equal(1m, order.Unfilled);
+            });
+            Assert.Equal(1m, broker.Position.Volume);
+            fake.Fill(childId, 1m);
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any(), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "FILLED", 3m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Equal(0m, broker.Position.Volume);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Fact]
+    public async Task Runner_public_reprice_market_successor_survives_partial_execution()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true) { HoldMarketExecution = true };
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Runner public executing successor", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var strategy = new PassiveLimits { StopLossTicks = 5, TakeProfitTicks = 100 };
+            using var runner = new LiveStrategyRunner(strategy, data, broker, ChartPeriod.M1);
+            runner.Start();
+            strategy.BuyAt(59990m, 3m);
+            await ConditionalState(() => broker.ActiveOrders.Any(order =>
+                order.Direction == OrderDirections.Buy && order.ExchangeOrderId.Length > 0), broker, fake);
+            var opening = Assert.Single(broker.ActiveOrders, order => order.Direction == OrderDirections.Buy);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => runner.OwnPosition == 3m && broker.Position.Volume == 3m &&
+                broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
+                    order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var strategyStop = Assert.Single(runner.ActiveOrders, order => order.IsProtective && order.Type == StrategyOrderType.Stop);
+            var stop = Assert.IsType<Order>(strategyStop.Live);
+            string ownerId = Assert.IsType<string>(stop.OwnerId);
+            string logicalId = Assert.IsType<string>(stop.LogicalOrderId);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+            await ConditionalState(() => stop.Type == OrderTypes.Market && stop.Unfilled == 2m &&
+                runner.OwnPosition == 2m && broker.Position.Volume == 2m &&
+                broker.ActiveOrders.Any(order => order.Type == OrderTypes.Limit &&
+                    order.Unfilled == 2m && !broker.IsReplacementPending(order)), broker, fake);
+            await ConditionalPolls(fake, broker);
+            var originalWorking = Assert.IsType<NativeWorkingOrder>(context.Find(originalIntent)!.WorkingOrder);
+            Assert.Same(strategyStop, Assert.Single(runner.ActiveOrders, order => order.Type == StrategyOrderType.Stop));
+
+            // Exercise the strategy host's public edit path, not a direct broker replacement.
+            runner.Modify(strategyStop, 59000m);
+
+            await ConditionalState(() => stop.ExchangeOrderId.Length > 0 &&
+                stop.ExchangeOrderId != childId.ToString(CultureInfo.InvariantCulture) &&
+                !broker.IsReplacementPending(stop), broker, fake);
+            long successorId = long.Parse(stop.ExchangeOrderId, CultureInfo.InvariantCulture);
+            var successorNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + successorId.ToString(CultureInfo.InvariantCulture));
+            string successorIntent = Assert.IsType<string>(stop.IntentId);
+            Assert.Equal(("MARKET", "SELL", 2m, 0m, true),
+                (fake.Order(successorId).Type, fake.Order(successorId).Side, fake.Order(successorId).Qty,
+                    fake.Order(successorId).Price, fake.Order(successorId).ReduceOnly));
+            Assert.Equal("CANCELED", fake.Order(childId).Status);
+            var successor = Assert.IsType<OwnedOrderIntent>(context.Find(successorIntent));
+            Assert.Equal((originalIntent, ownerId, logicalId, OrderTypes.Market),
+                (successor.PredecessorId, successor.Owner.Id, successor.LogicalOrderId, successor.Request.Type));
+            Assert.Equal(originalWorking, successor.WorkingOrder);
+            Assert.NotEqual(originalWorking.Child, successorNative);
+
+            fake.Fill(successorId, 1m);
+            await ConditionalState(() => runner.OwnPosition == 1m && broker.Position.Volume == 1m &&
+                broker.ActiveOrders.Any(order => order.Type == OrderTypes.Limit &&
+                    order.Unfilled == 1m && !broker.IsReplacementPending(order)), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m),
+                (fake.Order(successorId).Type, fake.Order(successorId).Status, fake.Order(successorId).Executed));
+            Assert.Same(strategyStop, Assert.Single(runner.ActiveOrders, order => order.Type == StrategyOrderType.Stop));
+            Assert.Same(stop, strategyStop.Live);
+            Assert.Equal((OrderTypes.Market, successorNative, successorIntent, ownerId, logicalId, 1m),
+                (stop.Type, stop.NativeIdentity, stop.IntentId, stop.OwnerId, stop.LogicalOrderId, stop.Unfilled));
+            Assert.False(stop.Canceled);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Single(fake.Placed, order => order.Type == "MARKET");
+            Assert.All(broker.ActiveOrders, order =>
+            {
+                Assert.True(order.ReduceOnly);
+                Assert.Equal(1m, order.Unfilled);
+            });
+            Assert.Equal(1m, strategy.Position);
+            fake.Fill(successorId, 1m);
+            await ConditionalState(() => runner.OwnPosition == 0m && broker.Position.Volume == 0m &&
+                !broker.ActiveOrders.Any(), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "FILLED", 2m),
+                (fake.Order(successorId).Type, fake.Order(successorId).Status, fake.Order(successorId).Executed));
+            Assert.Equal(0m, strategy.Position);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Financial_child_lookup_racing_native_follow_recovers_exact_execution_before_native_detail_returns(bool adoptExternalStop)
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true) { HoldMarketExecution = true };
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            var context = RecoveryContext(root, fake);
+            const string key = "binance-financial-native-child-binding-race";
+            var owner = context.LedgerOwner(key, LiveStore.CaptureLedgerGeneration(root, key));
+            using var broker = orders.Binance(data, fake.Settings, "Financial/native child lookup race", context);
+            var projector = AccountExecutionProjector.For(broker.Executions, context);
+            projector.Synchronize();
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Place(broker, owner, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            string openingId = opening.ExchangeOrderId;
+            fake.Fill(long.Parse(openingId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m &&
+                LiveStore.LoadLedger(root, key, 1m).Position == 3m &&
+                LiveStore.LoadLedger(root, key, 1m).AveragePrice == 59990m &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            Order stop;
+            long parentId;
+            if (adoptExternalStop)
+            {
+                parentId = fake.AddExternalAlgo("SELL", "STOP_MARKET", 3m, 59000m, reduceOnly: true);
+                string parentIdText = "algo:" + parentId.ToString(CultureInfo.InvariantCulture);
+                await ConditionalState(() => broker.ActiveOrders.Any(order => order.ExchangeOrderId == parentIdText), broker, fake);
+                stop = Assert.Single(broker.ActiveOrders, order => order.ExchangeOrderId == parentIdText);
+                Assert.Null(stop.OwnerId);
+                Assert.True(fake.AlgoOrder(parentId).External);
+                Assert.True(fake.AlgoOrder(parentId).ReduceOnly);
+                var adopted = context.Adopt(stop, owner, 0m, Array.Empty<ExecutionIdentity>(), baselineKnown: true);
+                Assert.True(adopted.Adopted);
+                Assert.Equal(owner.Id, stop.OwnerId);
+                Assert.Contains(stop.NativeIdentity!, adopted.NativeOrders!);
+                Assert.Empty(fake.PlacedAlgo);
+            }
+            else
+            {
+                stop = OrderActions.Place(broker, owner, OrderTypes.Stop, OrderDirections.Sell, 3m, 59000m,
+                    reduceOnly: true, protective: true, maximumOwnedQuantity: 3m);
+                await ConditionalState(() => stop.ExchangeOrderId.StartsWith("algo:", StringComparison.Ordinal) &&
+                    !broker.IsReplacementPending(stop), broker, fake);
+                parentId = Assert.Single(fake.PlacedAlgo).AlgoId;
+            }
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            var listCaptured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var financialChildCaptured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeChildCaptured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseList = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseFinancialChild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseNativeChild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int childLookups = 0;
+            fake.BeforeGetReply = (request, ct) =>
+            {
+                if (request.Route == "/fapi/v1/openOrders")
+                {
+                    listCaptured.TrySetResult();
+                    return releaseList.Task.WaitAsync(ct);
+                }
+                if (request.Route != "/fapi/v1/order" || request.Query("orderId") == openingId)
+                    return Task.CompletedTask;
+                if (Interlocked.Increment(ref childLookups) == 1)
+                {
+                    financialChildCaptured.TrySetResult();
+                    return releaseFinancialChild.Task.WaitAsync(ct);
+                }
+                nativeChildCaptured.TrySetResult();
+                return releaseNativeChild.Task.WaitAsync(ct);
+            };
+            long childId;
+            NativeOrderIdentity childNative;
+            try
+            {
+                // Financial history discovers the real child while native order listing still predates its trigger.
+                await listCaptured.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                childId = fake.Trigger(parentId, fill: 1m);
+                childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+                await financialChildCaptured.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                releaseList.TrySetResult();
+                // The actual native parent follow has bound the child, but its detail response remains held.
+                await nativeChildCaptured.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                Assert.Equal(childId.ToString(CultureInfo.InvariantCulture), stop.ExchangeOrderId);
+                Assert.Equal(childNative, stop.NativeIdentity);
+                releaseFinancialChild.TrySetResult();
+                await ConditionalState(() => broker.LastError != null || broker.Executions.Capture(ExecutionCursor.Start)
+                    .Changes.Any(report => report.NativeOrder == childNative), broker, fake);
+                Assert.True(broker.LastError == null,
+                    $"Exact financial MARKET child reply failed while native detail remained held: {broker.LastError}");
+                var report = Assert.Single(broker.Executions.Capture(ExecutionCursor.Start).Changes,
+                    report => report.NativeOrder == childNative);
+                Assert.Equal((originalIntent, false, 1m, 60000m, context.Descriptor.Id),
+                    (report.IntentId, report.Buy, report.Quantity, report.Price, report.ContextId));
+                await ConditionalState(() => LiveStore.LoadLedger(root, key, 1m).Position == 2m &&
+                    LiveStore.LoadLedger(root, key, 1m).Fills.Any(fill => fill.ExecutionId == report.Identity), broker, fake);
+                Assert.Equal(owner.Id, Assert.Single(LiveStore.LoadLedger(root, key, 1m).Fills,
+                    fill => fill.ExecutionId == report.Identity).OwnerId);
+                Assert.Equal(originalIntent, context.FindExecutingProtection(stop, owner)?.Id);
+                if (adoptExternalStop)
+                {
+                    // Public adoption changed current ownership, not the existing transport handle's origin.
+                    // The second identified child fill must reach this same current owner before native replay.
+                    fake.Fill(childId, 1m);
+                    await ConditionalState(() => broker.Executions.Capture(ExecutionCursor.Start).Changes
+                        .Where(change => change.NativeOrder == childNative).Sum(change => change.Quantity) == 2m &&
+                        LiveStore.LoadLedger(root, key, 1m).Position == 1m, broker, fake);
+                    Assert.Equal((OrderTypes.Market, childNative, originalIntent, owner.Id),
+                        (stop.Type, stop.NativeIdentity, stop.IntentId, stop.OwnerId));
+                    Assert.Equal(("MARKET", "PARTIALLY_FILLED", 2m),
+                        (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+                    Assert.Equal(3m, broker.Position.Volume);
+                }
+            }
+            finally
+            {
+                releaseList.TrySetResult();
+                releaseFinancialChild.TrySetResult();
+                releaseNativeChild.TrySetResult();
+                fake.BeforeGetReply = null;
+            }
+
+            decimal expectedHolding = adoptExternalStop ? 1m : 2m;
+            await ConditionalState(() => broker.Position.Volume == expectedHolding && stop.Type == OrderTypes.Market &&
+                stop.Unfilled == expectedHolding && broker.OrdersReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var originalWorking = Assert.IsType<NativeWorkingOrder>(context.Find(originalIntent)!.WorkingOrder);
+            Assert.Equal(childNative, originalWorking.Child);
+            OrderActions.Replace(broker, stop, 59000m, 1m);
+            await ConditionalState(() => stop.ExchangeOrderId.Length > 0 &&
+                stop.ExchangeOrderId != childId.ToString(CultureInfo.InvariantCulture) &&
+                !broker.IsReplacementPending(stop), broker, fake);
+            var successor = fake.Order(long.Parse(stop.ExchangeOrderId, CultureInfo.InvariantCulture));
+            Assert.Equal(("MARKET", "SELL", 1m, 0m, true),
+                (successor.Type, successor.Side, successor.Qty, successor.Price, successor.ReduceOnly));
+            Assert.Equal(originalWorking, context.Find(stop.IntentId)!.WorkingOrder);
+            broker.Cancel(stop);
+            await ConditionalState(() => stop.Canceled && !broker.ActiveOrders.Any() && broker.Position.Volume == expectedHolding &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(expectedHolding, LiveStore.LoadLedger(root, key, 1m).Position);
+            Assert.Equal("CANCELED", fake.Order(childId).Status);
+            Assert.Equal("CANCELED", fake.Order(successor.Id).Status);
+            Assert.Empty(broker.ActiveOrders);
+            Assert.True(broker.LastError == null, $"Completed native cancellation and signed-history replay: {broker.LastError}");
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Revising_identified_child_quantity_cannot_change_native_remaining_or_terminal_authority(int reportedQuantity)
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            var context = RecoveryContext(root, fake);
+            const string key = "binance-revocable-child-native-authority";
+            var owner = context.LedgerOwner(key, LiveStore.CaptureLedgerGeneration(root, key));
+            using var broker = orders.Binance(data, fake.Settings, "Revocable child quantity/native authority", context);
+            var projector = AccountExecutionProjector.For(broker.Executions, context);
+            projector.Synchronize();
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Place(broker, owner, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            long openingId = long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture);
+            fake.Fill(openingId, 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m &&
+                LiveStore.LoadLedger(root, key, 1m).Position == 3m &&
+                !LiveStore.LoadLedger(root, key, 1m).HasPendingFinancials, broker, fake);
+            var entry = Assert.Single(broker.Executions.Capture(ExecutionCursor.Start).Changes,
+                report => report.NativeOrder == opening.NativeIdentity);
+            Assert.Equal((3m, 59990m, true), (entry.Quantity, entry.Price, entry.FeesComplete));
+            Assert.Equal(new ExecutionFee(0m, "USDT"), Assert.Single(entry.Fees));
+            var entryTrade = new FakeBinanceFuturesTrade(long.Parse(entry.Identity.Id, CultureInfo.InvariantCulture),
+                openingId, "BTCUSDT", true, 3m, 59990m, new DateTimeOffset(entry.Time).ToUnixTimeMilliseconds());
+            // This private matching engine has produced exactly the opening and then the child execution.
+            long childTradeId = long.Parse(entry.Identity.Id, CultureInfo.InvariantCulture) + 1;
+            fake.HoldFuturesTradeHistory = true;
+            var stop = OrderActions.Place(broker, owner, OrderTypes.Stop, OrderDirections.Sell, 3m, 59000m,
+                reduceOnly: true, protective: true, maximumOwnedQuantity: 3m);
+            await ConditionalState(() => stop.ExchangeOrderId.StartsWith("algo:", StringComparison.Ordinal) &&
+                !broker.IsReplacementPending(stop), broker, fake);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+            long childTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+            await ConditionalState(() => broker.Position.Volume == 2m && stop.Type == OrderTypes.Market &&
+                stop.Filled == 1m && stop.Unfilled == 2m, broker, fake);
+            int dispatches = fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal) ||
+                call.StartsWith("DELETE ", StringComparison.Ordinal));
+            var nativeCaptured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseNative = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fake.BeforeGetReply = (request, ct) =>
+            {
+                if (request.Route != "/fapi/v1/openOrders") return Task.CompletedTask;
+                nativeCaptured.TrySetResult();
+                return releaseNative.Task.WaitAsync(ct);
+            };
+            try
+            {
+                await nativeCaptured.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                // The SAME execution is first overstated, then corrected. Neither revision executes another unit.
+                fake.ReportFuturesTrades(entryTrade, new FakeBinanceFuturesTrade(childTradeId, childId,
+                    "BTCUSDT", false, reportedQuantity, 60000m, childTime, RealizedPnl: 10m));
+                await ConditionalState(() =>
+                {
+                    var ledger = LiveStore.LoadLedger(root, key, 1m);
+                    return ledger.Fills.Any(fill => fill.ExecutionId?.Id == childTradeId.ToString(CultureInfo.InvariantCulture) &&
+                        fill.Quantity == reportedQuantity) && !ledger.HasPendingFinancials;
+                }, broker, fake);
+                fake.ReportFuturesTrades(entryTrade, new FakeBinanceFuturesTrade(childTradeId, childId,
+                    "BTCUSDT", false, 1m, 60000m, childTime, RealizedPnl: 10m));
+                await ConditionalState(() =>
+                {
+                    var ledger = LiveStore.LoadLedger(root, key, 1m);
+                    return ledger.Position == 2m && !ledger.HasPendingFinancials &&
+                        ledger.Fills.Any(fill => fill.ExecutionId?.Id == childTradeId.ToString(CultureInfo.InvariantCulture) && fill.Quantity == 1m);
+                }, broker, fake);
+                Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m),
+                    (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+                Assert.Equal((OrderTypes.Market, OrderStates.Active, 1m, 2m, childNative, originalIntent, owner.Id),
+                    (stop.Type, stop.State, stop.Filled, stop.Unfilled, stop.NativeIdentity, stop.IntentId, stop.OwnerId));
+                Assert.Null(context.Find(originalIntent)!.TerminalOrder);
+                Assert.Same(stop, Assert.Single(broker.ActiveOrders));
+                Assert.Equal(dispatches, fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal) ||
+                    call.StartsWith("DELETE ", StringComparison.Ordinal)));
+            }
+            finally
+            {
+                releaseNative.TrySetResult();
+                fake.BeforeGetReply = null;
+            }
+
+            await ConditionalState(() => broker.Position.Volume == 2m && broker.OrdersReady && stop.Unfilled == 2m &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Same(stop, Assert.Single(broker.ActiveOrders));
+            Assert.Equal((OrderStates.Active, 1m, 2m, childNative),
+                (stop.State, stop.Filled, stop.Unfilled, stop.NativeIdentity));
+            Assert.Equal(dispatches, fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal) ||
+                call.StartsWith("DELETE ", StringComparison.Ordinal)));
+            Assert.Equal(2m, LiveStore.LoadLedger(root, key, 1m).Position);
+            fake.Fill(childId, 2m);
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any() &&
+                LiveStore.LoadLedger(root, key, 1m).Position == 0m &&
+                !LiveStore.LoadLedger(root, key, 1m).HasPendingFinancials &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var completed = LiveStore.LoadLedger(root, key, 1m);
+            Assert.Equal(30m, completed.Realized);
+            Assert.Equal(3, completed.Fills.Count(fill => fill.Kind == LiveFillKind.Execution));
+            Assert.Equal(("FILLED", 3m), (fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Equal(3m, Assert.IsType<NativeOrderTerminal>(context.Find(originalIntent)!.TerminalOrder).CumulativeQuantity);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Runner_quantity_revision_preserves_native_market_until_actual_terminal_acknowledgment(int reportedQuantity)
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Runner revocable child quantity", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var strategy = new PassiveLimits { StopLossTicks = 5, TakeProfitTicks = 100 };
+            using var runner = new LiveStrategyRunner(strategy, data, broker, ChartPeriod.M1);
+            runner.Start();
+            strategy.BuyAt(59990m, 3m);
+            await ConditionalState(() => broker.ActiveOrders.Any(order =>
+                order.Direction == OrderDirections.Buy && order.ExchangeOrderId.Length > 0), broker, fake);
+            var opening = Assert.Single(broker.ActiveOrders, order => order.Direction == OrderDirections.Buy);
+            long openingId = long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture);
+            fake.Fill(openingId, 3m);
+            await ConditionalState(() => runner.OwnPosition == 3m && broker.Position.Volume == 3m &&
+                !runner.Ledger.HasPendingFinancials && broker.ActiveOrders.Count() == 2 &&
+                broker.ActiveOrders.All(order => order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var entry = Assert.Single(broker.Executions.Capture(ExecutionCursor.Start).Changes,
+                report => report.NativeOrder == opening.NativeIdentity);
+            var entryTrade = new FakeBinanceFuturesTrade(long.Parse(entry.Identity.Id, CultureInfo.InvariantCulture),
+                openingId, "BTCUSDT", true, 3m, 59990m, new DateTimeOffset(entry.Time).ToUnixTimeMilliseconds());
+            long childTradeId = long.Parse(entry.Identity.Id, CultureInfo.InvariantCulture) + 1;
+            string childExecutionId = childTradeId.ToString(CultureInfo.InvariantCulture);
+            fake.HoldFuturesTradeHistory = true;
+            var strategyStop = Assert.Single(runner.ActiveOrders, order => order.IsProtective && order.Type == StrategyOrderType.Stop);
+            var stop = Assert.IsType<Order>(strategyStop.Live);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            string originalOwner = Assert.IsType<string>(stop.OwnerId);
+            string originalLogical = Assert.IsType<string>(stop.LogicalOrderId);
+            long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+            string childIdText = childId.ToString(CultureInfo.InvariantCulture);
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childIdText);
+            long childTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            await ConditionalState(() => runner.OwnPosition == 2m && broker.Position.Volume == 2m &&
+                stop.Type == OrderTypes.Market && stop.Filled == 1m && stop.Unfilled == 2m &&
+                broker.ActiveOrders.Any(order => order.Type == OrderTypes.Limit && order.Unfilled == 2m &&
+                    !broker.IsReplacementPending(order)), broker, fake);
+            var nativeCaptured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseNative = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var reportedConsumed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var correctionConsumed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            void ObserveRevision()
+            {
+                var fill = runner.Ledger.Fills.FirstOrDefault(fill => fill.ExecutionId?.Id == childExecutionId);
+                if (fill?.Quantity == reportedQuantity) reportedConsumed.TrySetResult();
+                if (fill?.Quantity == 1m) correctionConsumed.TrySetResult();
+            }
+            runner.Changed += ObserveRevision;
+            fake.BeforeGetReply = (request, ct) =>
+            {
+                if (request.Route != "/fapi/v1/openOrders") return Task.CompletedTask;
+                nativeCaptured.TrySetResult();
+                return releaseNative.Task.WaitAsync(ct);
+            };
+            try
+            {
+                await nativeCaptured.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                fake.ReportFuturesTrades(entryTrade, new FakeBinanceFuturesTrade(childTradeId, childId,
+                    "BTCUSDT", false, reportedQuantity, 60000m, childTime, RealizedPnl: 10m));
+                await reportedConsumed.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                if (reportedQuantity == 3)
+                {
+                    // Financial flatness is not a native terminal acknowledgment of this still-executing child.
+                    Assert.Contains(childIdText, runner.ProtectionOrderIds);
+                    Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m),
+                        (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+                    strategy.BuyAt(59000m, 1m);
+                    Assert.DoesNotContain(runner.ActiveOrders, order => !order.IsProtective);
+                }
+                fake.ReportFuturesTrades(entryTrade, new FakeBinanceFuturesTrade(childTradeId, childId,
+                    "BTCUSDT", false, 1m, 60000m, childTime, RealizedPnl: 10m));
+                // Wait only for the exact latest execution revision to reach this real runner, not for the expected position.
+                await correctionConsumed.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                var corrected = LiveStore.LoadLedger(root, runner.Key, 1m);
+                Assert.Equal(1m, Assert.Single(corrected.Fills, fill => fill.ExecutionId?.Id == childExecutionId).Quantity);
+                Assert.Equal(1m, context.Find(originalIntent)!.QuantityProjected);
+                Assert.Equal(2m, corrected.Position);
+                Assert.False(corrected.HasPendingFinancials);
+                Assert.Equal(2m, runner.OwnPosition);
+                Assert.Equal(2m, strategy.Position);
+                Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m),
+                    (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+                Assert.Contains(childIdText, runner.ProtectionOrderIds);
+                Assert.Same(strategyStop, Assert.Single(runner.ActiveOrders, order => order.Type == StrategyOrderType.Stop));
+                Assert.Equal((OrderTypes.Market, OrderStates.Active, 1m, 2m, childNative, originalIntent, originalOwner, originalLogical),
+                    (stop.Type, stop.State, stop.Filled, stop.Unfilled, stop.NativeIdentity, stop.IntentId, stop.OwnerId, stop.LogicalOrderId));
+                Assert.Equal(originalIntent, context.FindExecutingProtection(stop, context.Find(originalIntent)!.Owner)?.Id);
+                Assert.Null(context.Find(originalIntent)!.TerminalOrder);
+                Assert.Single(fake.PlacedAlgo);
+                Assert.DoesNotContain(fake.Placed, order => order.Type == "MARKET");
+            }
+            finally
+            {
+                runner.Changed -= ObserveRevision;
+                releaseNative.TrySetResult();
+                fake.BeforeGetReply = null;
+            }
+
+            await ConditionalState(() => broker.Position.Volume == 2m && broker.OrdersReady &&
+                runner.OwnPosition == 2m && !runner.Ledger.HasPendingFinancials &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready &&
+                broker.ActiveOrders.Any(order => order.Type == OrderTypes.Limit && order.Unfilled == 2m &&
+                    !broker.IsReplacementPending(order)), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Same(strategyStop, Assert.Single(runner.ActiveOrders, order => order.Type == StrategyOrderType.Stop));
+            Assert.Equal((OrderStates.Active, childNative, 2m), (stop.State, stop.NativeIdentity, stop.Unfilled));
+            Assert.Single(fake.PlacedAlgo);
+            fake.Fill(childId, 2m);
+            await ConditionalState(() => broker.Position.Volume == 0m && runner.OwnPosition == 0m &&
+                !broker.ActiveOrders.Any() && !runner.Ledger.HasPendingFinancials &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            Assert.Equal(30m, runner.Ledger.Realized);
+            Assert.Equal(30m, LiveStore.LoadLedger(root, runner.Key, 1m).Realized);
+            Assert.Equal(3, runner.Ledger.Fills.Count(fill => fill.Kind == LiveFillKind.Execution));
+            Assert.Equal(("FILLED", 3m), (fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Equal(3m, Assert.IsType<NativeOrderTerminal>(context.Find(originalIntent)!.TerminalOrder).CumulativeQuantity);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Fact]
+    public async Task Unconfirmed_financial_child_quantity_does_not_block_a_bounded_manual_reduction_or_explicit_cancel()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            var context = RecoveryContext(root, fake);
+            const string key = "binance-protection-readiness-bounded-reduction";
+            var owner = context.LedgerOwner(key, LiveStore.CaptureLedgerGeneration(root, key));
+            using var broker = orders.Binance(data, fake.Settings, "Protection coherence/bounded reduction", context);
+            var projector = AccountExecutionProjector.For(broker.Executions, context);
+            projector.Synchronize();
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Place(broker, owner, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            long openingId = long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture);
+            fake.Fill(openingId, 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m &&
+                LiveStore.LoadLedger(root, key, 1m).Position == 3m &&
+                LiveStore.LoadLedger(root, key, 1m).AveragePrice == 59990m &&
+                !LiveStore.LoadLedger(root, key, 1m).HasPendingFinancials, broker, fake);
+            var entry = Assert.Single(broker.Executions.Capture(ExecutionCursor.Start).Changes,
+                report => report.NativeOrder == opening.NativeIdentity);
+            var entryTrade = new FakeBinanceFuturesTrade(long.Parse(entry.Identity.Id, CultureInfo.InvariantCulture),
+                openingId, "BTCUSDT", true, 3m, 59990m, new DateTimeOffset(entry.Time).ToUnixTimeMilliseconds());
+            fake.HoldFuturesTradeHistory = true;
+            var stop = OrderActions.Place(broker, owner, OrderTypes.Stop, OrderDirections.Sell, 3m, 59000m,
+                reduceOnly: true, protective: true, maximumOwnedQuantity: 3m);
+            await ConditionalState(() => stop.ExchangeOrderId.StartsWith("algo:", StringComparison.Ordinal) &&
+                !broker.IsReplacementPending(stop), broker, fake);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+            long childTradeId = long.Parse(entry.Identity.Id, CultureInfo.InvariantCulture) + 1;
+            long childTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            await ConditionalState(() => broker.Position.Volume == 2m && stop.Type == OrderTypes.Market &&
+                stop.Filled == 1m && stop.Unfilled == 2m, broker, fake);
+            fake.ReportFuturesTrades(entryTrade, new FakeBinanceFuturesTrade(childTradeId, childId,
+                "BTCUSDT", false, 2m, 60000m, childTime, RealizedPnl: 10m));
+            await ConditionalState(() => broker.PositionReady && !broker.OrdersReady && broker.LastError != null &&
+                broker.Position.Volume == 2m, broker, fake);
+            Assert.Equal((OrderStates.Active, 1m, 2m), (stop.State, stop.Filled, stop.Unfilled));
+
+            // Native order/position facts are complete: the financial disagreement must not gate an emergency reduction.
+            var close = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 1m, reduceOnly: true);
+            await ConditionalState(() => close.Status == OrderStatus.Filled && broker.Position.Volume == 1m, broker, fake);
+            Assert.Equal((OrderTypes.Market, 1m, context.ManualOwner.Id), (close.Type, close.Filled, close.OwnerId));
+            Assert.NotEqual(stop.LogicalOrderId, close.LogicalOrderId);
+            broker.Cancel(stop);
+            await ConditionalState(() => stop.Canceled && !broker.ActiveOrders.Any(), broker, fake);
+            Assert.Equal(("CANCELED", 1m), (fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Equal(1m, broker.Position.Volume);
+            Assert.Equal(1m, Assert.IsType<NativeOrderTerminal>(context.Find(originalIntent)!.TerminalOrder).CumulativeQuantity);
+            await ConditionalState(() => broker.Executions.Capture(ExecutionCursor.Start).Changes
+                .Any(report => report.NativeOrder == close.NativeIdentity), broker, fake);
+            var closeReport = Assert.Single(broker.Executions.Capture(ExecutionCursor.Start).Changes,
+                report => report.NativeOrder == close.NativeIdentity);
+            var closeTrade = new FakeBinanceFuturesTrade(long.Parse(closeReport.Identity.Id, CultureInfo.InvariantCulture),
+                long.Parse(close.ExchangeOrderId, CultureInfo.InvariantCulture), "BTCUSDT", false,
+                1m, 60000m, new DateTimeOffset(closeReport.Time).ToUnixTimeMilliseconds(), RealizedPnl: 10m);
+            fake.ReportFuturesTrades(entryTrade, new FakeBinanceFuturesTrade(childTradeId, childId,
+                "BTCUSDT", false, 1m, 60000m, childTime, RealizedPnl: 10m), closeTrade);
+            await ConditionalState(() => broker.OrdersReady && broker.Position.Volume == 1m &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready &&
+                LiveStore.LoadLedger(root, key, 1m).Position == 2m &&
+                !LiveStore.LoadLedger(root, key, 1m).HasPendingFinancials, broker, fake);
+            Assert.Equal(10m, LiveStore.LoadLedger(root, key, 1m).Realized);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Single(fake.Placed, order => order.Type == "MARKET");
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Fact]
+    public async Task Reducing_a_partially_executing_market_stop_child_preserves_market_type_and_explicit_cancellation()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true) { HoldMarketExecution = true };
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Executing child bounded reduction", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m, broker, fake);
+            var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 3m, 59000m, reduceOnly: true);
+            await ConditionalState(() => stop.ExchangeOrderId.StartsWith("algo:", StringComparison.Ordinal) &&
+                !broker.IsReplacementPending(stop), broker, fake);
+            long parentId = Assert.Single(fake.PlacedAlgo).AlgoId;
+            long childId = fake.Trigger(parentId, fill: 1m);
+            await ConditionalState(() => stop.Type == OrderTypes.Market && stop.Filled == 1m &&
+                stop.Unfilled == 2m && broker.Position.Volume == 2m, broker, fake);
+            var childNative = Assert.IsType<NativeOrderIdentity>(stop.NativeIdentity);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            string logicalId = Assert.IsType<string>(stop.LogicalOrderId);
+
+            // A bracket resize retains its original requested stop level after the native child starts executing.
+            OrderActions.Replace(broker, stop, 59000m, 1m);
+
+            await ConditionalState(() => fake.Placed.Count == 2 && stop.ExchangeOrderId.Length > 0 &&
+                stop.ExchangeOrderId != childId.ToString(CultureInfo.InvariantCulture), broker, fake);
+            var reduced = Assert.Single(fake.OpenOrders);
+            Assert.Equal(("MARKET", "SELL", 1m, 0m, true),
+                (reduced.Type, reduced.Side, reduced.Qty, reduced.Price, reduced.ReduceOnly));
+            Assert.Equal(0m, stop.Price);
+            await ConditionalState(() => !broker.IsReplacementPending(stop), broker, fake);
+            Assert.Equal((OrderTypes.Market, 1m, 1m), (stop.Type, stop.Filled, stop.Unfilled));
+            Assert.Equal("CANCELED", fake.Order(childId).Status);
+            Assert.Equal(2m, broker.Position.Volume);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Equal(logicalId, stop.LogicalOrderId);
+            Assert.NotEqual(originalIntent, stop.IntentId);
+            Assert.NotEqual(childNative, stop.NativeIdentity);
+            var original = Assert.IsType<OwnedOrderIntent>(context.Find(originalIntent));
+            Assert.Equal(OrderTypes.Stop, original.Request.Type);
+            Assert.Equal(childNative, Assert.IsType<NativeWorkingOrder>(original.WorkingOrder).Child);
+
+            broker.Cancel(stop);
+            await ConditionalState(() => stop.Canceled && !broker.ActiveOrders.Any(), broker, fake);
+            Assert.Equal(2m, broker.Position.Volume);
+            Assert.Equal("CANCELED", fake.Order(reduced.Id).Status);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Fact]
+    public async Task Bracket_reduction_retains_its_acknowledged_market_successor_without_price_drift_or_rearming()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true) { HoldMarketExecution = true };
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Bracket executing successor", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady, broker, fake);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m, broker, fake);
+            using var brackets = new BracketManager(broker);
+            brackets.SetStopLoss(59000m);
+            brackets.AddTarget(61000m);
+            await ConditionalState(() => broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
+                order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var stop = Assert.IsType<Order>(brackets.StopLoss);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            string logicalId = Assert.IsType<string>(stop.LogicalOrderId);
+            string ownerId = Assert.IsType<string>(stop.OwnerId);
+            long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+            await ConditionalState(() => broker.Position.Volume == 2m && stop.Type == OrderTypes.Market && stop.Unfilled == 2m &&
+                brackets.Targets.Count == 1 && brackets.Targets[0].Unfilled == 2m &&
+                !broker.IsReplacementPending(brackets.Targets[0]), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal("PARTIALLY_FILLED", fake.Order(childId).Status);
+            var conditionalEvidence = Assert.IsType<NativeWorkingOrder>(context.Find(originalIntent)!.WorkingOrder);
+            var separateClose = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 1m, reduceOnly: true);
+            await ConditionalState(() => separateClose.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(separateClose.ExchangeOrderId, CultureInfo.InvariantCulture), 1m);
+            await ConditionalState(() => broker.Position.Volume == 1m && fake.Placed.Count(order => order.Type == "MARKET") >= 2 &&
+                stop.ExchangeOrderId != childId.ToString(CultureInfo.InvariantCulture), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Same(stop, brackets.StopLoss);
+            Assert.Equal((OrderTypes.Market, ownerId, logicalId, 1m, 0m),
+                (stop.Type, stop.OwnerId, stop.LogicalOrderId, stop.Unfilled, stop.Price));
+            Assert.False(broker.IsReplacementPending(stop));
+            Assert.Equal("CANCELED", fake.Order(childId).Status);
+            var nativeSuccessor = fake.Order(long.Parse(stop.ExchangeOrderId, CultureInfo.InvariantCulture));
+            Assert.Equal(("MARKET", "SELL", 1m, 0m, true),
+                (nativeSuccessor.Type, nativeSuccessor.Side, nativeSuccessor.Qty, nativeSuccessor.Price, nativeSuccessor.ReduceOnly));
+            Assert.Equal(new NativeOrderIdentity("binance:order", "BTCUSDT:" + nativeSuccessor.Id.ToString(CultureInfo.InvariantCulture)),
+                stop.NativeIdentity);
+            Assert.NotEqual(conditionalEvidence.Child, stop.NativeIdentity);
+            var successor = Assert.IsType<OwnedOrderIntent>(context.Find(stop.IntentId));
+            Assert.Equal(originalIntent, successor.PredecessorId);
+            Assert.Equal(OrderTypes.Market, successor.Request.Type);
+            Assert.Contains(stop.NativeIdentity!, successor.NativeOrders!);
+            // The successor is a new explicit dispatch, not a fabricated vendor conditional-child edge.
+            Assert.Equal(conditionalEvidence, successor.WorkingOrder);
+            Assert.Equal(2, fake.Placed.Count(order => order.Type == "MARKET"));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.All(broker.ActiveOrders, order =>
+            {
+                Assert.True(order.ReduceOnly);
+                Assert.Equal(1m, order.Unfilled);
+            });
+            Assert.Equal(OrderTypes.Limit, Assert.Single(brackets.Targets).Type);
+            int dispatches = fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal));
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(dispatches, fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal)));
+            Assert.Equal(1m, broker.Position.Volume);
+            fake.Fill(long.Parse(stop.ExchangeOrderId, CultureInfo.InvariantCulture), 1m);
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any(), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(0m, broker.Position.Volume);
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
     [Fact]
     public async Task NativeQuantityCapturedBeforeTheFirstProjectorAllowsAdmissionAfterOfflineStopIsPriced()
     {

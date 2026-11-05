@@ -18,6 +18,9 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
     private readonly object _gate = new();
     private readonly CancellationTokenSource _cts = new();
     private bool _disposed;
+    private bool _ownershipNotificationPending;
+    private readonly Queue<OwnedOrderQuantity> _quantityNotifications = new();
+    private bool _publishingQuantities;
     private readonly Dictionary<string, Order> _byTag = new();
     private readonly Dictionary<Order, string> _tagOf = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, Order> _byBasket = new();
@@ -151,7 +154,7 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         lock (_gate)
         {
             if (_disposed) return;
-            // Concurrent order/PnL callbacks must capture, apply and publish under the same gate.
+            // Concurrent order/PnL callbacks capture and apply one snapshot under the same gate.
             var states = _session.OrdersFor(_account, c.Symbol, c.Exchange);
             var seen = new HashSet<Order>(ReferenceEqualityComparer.Instance);
             foreach (var s in states)
@@ -238,6 +241,8 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
                 }
             }
         }
+        PublishOwnershipNotification();
+        PublishQuantityNotifications();
         Changed?.Invoke();
         if (cancels != null)
             foreach (var order in cancels) _ = CancelBoundAsync(order);
@@ -455,7 +460,7 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         var replacement = new Replacement(intent, (int)Math.Round(state.Filled + remaining),
             Instrument.RoundPrice(intent.Request.Price), native.WorkingRevision, native.RejectionRevision);
         _replacements.Add(order, replacement);
-        _ = ReplaceAsync(order, state, replacement);
+        _ = Task.Run(() => ReplaceAsync(order, state, replacement));
     }
 
     private void RejectQueuedReprice(Order order, string reason)
@@ -542,7 +547,55 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
 
     private string? PersistNativeBinding(PreparedOrderIntent intent, NativeOrderIdentity native)
     {
-        lock (_gate) return _disposed ? null : OrderContext.BindNative(intent, native);
+        lock (_gate)
+        {
+            if (_disposed) return null;
+            var error = OrderContext.BindNative(intent, native, notify: false);
+            if (error == null) _ownershipNotificationPending = true;
+            return error;
+        }
+    }
+
+    private void PublishOwnershipNotification()
+    {
+        lock (_gate)
+        {
+            if (!_ownershipNotificationPending) return;
+            _ownershipNotificationPending = false;
+        }
+        OrderContext.NotifyOwnershipChanged();
+    }
+
+    private void PublishQuantityNotifications()
+    {
+        lock (_gate)
+        {
+            if (_publishingQuantities) return;
+            _publishingQuantities = true;
+        }
+        try
+        {
+            while (true)
+            {
+                OwnedOrderQuantity observation;
+                lock (_gate)
+                {
+                    if (_quantityNotifications.Count == 0)
+                    {
+                        _publishingQuantities = false;
+                        return;
+                    }
+                    observation = _quantityNotifications.Dequeue();
+                }
+                // Captures admitted before disposal remain ordered, even while a consumer is held.
+                OrderContext.NotifyQuantityChanged(observation);
+            }
+        }
+        catch
+        {
+            lock (_gate) _publishingQuantities = false;
+            throw;
+        }
     }
 
     private void ObserveNativeQuantity(Order order, decimal previousFilled, OrderStates previousState, OrderStatus previousStatus)
@@ -550,7 +603,11 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         lock (_gate)
         {
             if (_disposed || (order.Filled == previousFilled && order.State == previousState && order.Status == previousStatus)) return;
-            try { OrderContext.ObserveQuantity(order, Instrument.Symbol, Instrument.PointValue); }
+            try
+            {
+                if (OrderContext.CaptureQuantityObservation(order, Instrument.Symbol, Instrument.PointValue) is { } observation)
+                    _quantityNotifications.Enqueue(observation);
+            }
             catch (Exception ex) { _ownershipFault = "Rithmic native quantity projection is unresolved: " + ex.Message; }
         }
     }
@@ -584,6 +641,8 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
             _cts.Cancel();
             _session.Changed -= Sync;
         }
+        PublishOwnershipNotification();
+        PublishQuantityNotifications();
     }
 }
 

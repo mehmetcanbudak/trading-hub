@@ -3,6 +3,7 @@ using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Feeds.Rithmic;
 using TradingHub.Market;
+using TradingHub.Strategies;
 using TradingHub.Trading;
 
 namespace TradingHub.Tests;
@@ -23,6 +24,217 @@ public class RithmicTests : IDisposable
     {
         var end = DateTime.UtcNow.AddMilliseconds(ms);
         while (!condition() && DateTime.UtcNow < end) await Task.Delay(30);
+    }
+
+    [Fact]
+    public async Task NativeOwnershipNotificationAllowsPublicProgressCancellationAndDisposal()
+    {
+        using var server = new FakeRithmicServer();
+        using var session = new RithmicTradingSession(Settings(server));
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => broker.OrdersReady);
+        Assert.True(broker.OrdersReady);
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int notifications = 0, releaseTimedOut = 0;
+        void HoldFirstNotification()
+        {
+            if (Interlocked.Increment(ref notifications) != 1) return;
+            entered.TrySetResult();
+            try
+            {
+                if (!release.Wait(TimeSpan.FromSeconds(20))) Interlocked.Exchange(ref releaseTimedOut, 1);
+            }
+            finally { returned.TrySetResult(); }
+        }
+        broker.OrderContext.OwnershipChanged += HoldFirstNotification;
+        Task progress = Task.CompletedTask;
+        try
+        {
+            var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 2m, 4990m);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(6));
+            progress = Task.Run(async () =>
+            {
+                Assert.True(broker.OrdersReady);
+                Assert.Same(order, Assert.Single(broker.ActiveOrders));
+                broker.Cancel(order);
+                await Until(() => { lock (server.Received) return server.Received.Contains("316"); });
+                lock (server.Received) Assert.Contains("316", server.Received);
+                broker.Dispose();
+            });
+            await progress.WaitAsync(TimeSpan.FromSeconds(6));
+            Assert.Equal(0, Volatile.Read(ref releaseTimedOut));
+            Assert.NotNull(order.NativeIdentity);
+        }
+        finally
+        {
+            release.Set();
+            broker.OrderContext.OwnershipChanged -= HoldFirstNotification;
+            await progress.WaitAsync(TimeSpan.FromSeconds(6));
+            if (entered.Task.IsCompleted) await returned.Task.WaitAsync(TimeSpan.FromSeconds(6));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ready_and_queued_amendments_publish_ownership_outside_the_provider_gate(bool queued)
+    {
+        using var server = new FakeRithmicServer
+        {
+            ModifyResponseRelease = new(TaskCreationOptions.RunContinuationsAsynchronously),
+            SuppressModifyNotification = true,
+        };
+        using var session = new RithmicTradingSession(Settings(server));
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 2m, 4990m);
+        await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
+        string basket = order.ExchangeOrderId;
+        Assert.Equal(basket, Assert.Single(server.Open).Key);
+        if (queued)
+        {
+            OrderActions.Reprice(broker, order, 4991m);
+            await Until(() => server.ModifyRequests == 1);
+            Assert.Equal(1, server.ModifyRequests);
+            OrderActions.Reprice(broker, order, 4992m);
+        }
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int held = 0, releaseTimedOut = 0;
+        void HoldAmendmentOwnership()
+        {
+            if (!broker.IsReplacementPending(order) || Interlocked.CompareExchange(ref held, 1, 0) != 0) return;
+            entered.TrySetResult();
+            try
+            {
+                if (!release.Wait(TimeSpan.FromSeconds(20))) Interlocked.Exchange(ref releaseTimedOut, 1);
+            }
+            finally { returned.TrySetResult(); }
+        }
+        broker.OrderContext.OwnershipChanged += HoldAmendmentOwnership;
+        Task mutation = Task.CompletedTask, progress = Task.CompletedTask;
+        try
+        {
+            mutation = queued
+                ? server.PushOrder(basket, server.Open[basket].Tag, true, 2, 4991, 1)
+                : Task.Run(() => OrderActions.Reprice(broker, order, 4991m));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(6));
+            server.ModifyResponseRelease.TrySetResult();
+            progress = Task.Run(async () =>
+            {
+                Assert.True(broker.OrdersReady);
+                Assert.Same(order, Assert.Single(broker.ActiveOrders));
+                broker.Cancel(order);
+                await Until(() => { lock (server.Received) return server.Received.Contains("316"); });
+                lock (server.Received) Assert.Contains("316", server.Received);
+                broker.Dispose();
+            });
+            await progress.WaitAsync(TimeSpan.FromSeconds(6));
+            Assert.Equal(0, Volatile.Read(ref releaseTimedOut));
+            Assert.Equal(0m, broker.Position.Volume);
+            Assert.InRange(server.ModifyRequests, queued ? 1 : 0, queued ? 2 : 1);
+        }
+        finally
+        {
+            release.Set();
+            broker.OrderContext.OwnershipChanged -= HoldAmendmentOwnership;
+            server.ModifyResponseRelease.TrySetResult();
+            await mutation.WaitAsync(TimeSpan.FromSeconds(6));
+            await progress.WaitAsync(TimeSpan.FromSeconds(6));
+            if (entered.Task.IsCompleted) await returned.Task.WaitAsync(TimeSpan.FromSeconds(6));
+        }
+    }
+
+    [Fact]
+    public async Task NativeQuantityNotificationAllowsPublicProgressAndPreservesOrderedAdmittedQuantities()
+    {
+        using var server = new FakeRithmicServer();
+        using var session = new RithmicTradingSession(Settings(server));
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => broker.OrdersReady);
+        Assert.True(broker.OrdersReady);
+        var context = broker.OrderContext;
+        string root = context.StorageRoot!;
+        const string key = "owned-rithmic-quantity-notification";
+        var owner = context.LedgerOwner(key, LiveStore.CaptureLedgerGeneration(root, key));
+        _ = AccountExecutionProjector.For(broker.Executions, context);
+        var order = OrderActions.Place(broker, owner, OrderTypes.Limit, OrderDirections.Buy, 3m, 4990m);
+        await Until(() => order.NativeIdentity != null && broker.ActiveOrders.Contains(order));
+        Assert.NotNull(order.NativeIdentity);
+        string basket = order.ExchangeOrderId;
+        await Until(() => server.Open.ContainsKey(basket));
+        Assert.True(server.Open.ContainsKey(basket));
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observed = new System.Collections.Concurrent.ConcurrentQueue<decimal>();
+        int releaseTimedOut = 0;
+        void HoldFirstQuantity(OwnedOrderQuantity observation)
+        {
+            observed.Enqueue(observation.CumulativeQuantity);
+            if (observation.CumulativeQuantity == 2m) secondObserved.TrySetResult();
+            if (observation.CumulativeQuantity != 1m) return;
+            entered.TrySetResult();
+            try
+            {
+                if (!release.Wait(TimeSpan.FromSeconds(20))) Interlocked.Exchange(ref releaseTimedOut, 1);
+            }
+            finally { returned.TrySetResult(); }
+        }
+        context.QuantityChanged += HoldFirstQuantity;
+        Task progress = Task.CompletedTask;
+        try
+        {
+            try
+            {
+                await server.FillOrder(basket, 1, 5000.25);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(6));
+                progress = Task.Run(() =>
+                {
+                    Assert.True(broker.OrdersReady);
+                    Assert.Same(order, Assert.Single(broker.ActiveOrders));
+                    Assert.Equal(1m, order.Filled);
+                    Assert.Equal(1m, LiveStore.LoadLedger(root, key, 50m).Position);
+                });
+                await progress.WaitAsync(TimeSpan.FromSeconds(6));
+                Assert.Equal(0, Volatile.Read(ref releaseTimedOut));
+            }
+            finally
+            {
+                release.Set();
+                await progress.WaitAsync(TimeSpan.FromSeconds(6));
+                if (entered.Task.IsCompleted) await returned.Task.WaitAsync(TimeSpan.FromSeconds(6));
+            }
+            await server.FillOrder(basket, 1, 5001.25);
+            await Until(() => context.Find(order.IntentId)!.QuantityProjected == 2m);
+            await secondObserved.Task.WaitAsync(TimeSpan.FromSeconds(6));
+            Assert.Equal(new[] { 1m, 2m }, observed.ToArray());
+            var ledger = LiveStore.LoadLedger(root, key, 50m);
+            Assert.Equal(2m, ledger.Position);
+            Assert.True(ledger.HasPendingPrices); // Cumulative Rithmic quantities are not execution-price evidence.
+            Assert.Equal(0m, ledger.AveragePrice);
+            broker.Dispose();
+            await server.FillOrder(basket, 1, 5002.25);
+            await Until(() => session.OrdersFor("ACC1", "ESZ6", "CME").Single(s => s.BasketId == basket).Filled == 3m);
+            Assert.Equal(3m, session.OrdersFor("ACC1", "ESZ6", "CME").Single(s => s.BasketId == basket).Filled);
+            Assert.Equal(2m, context.Find(order.IntentId)!.QuantityProjected);
+            Assert.Equal(2m, LiveStore.LoadLedger(root, key, 50m).Position);
+            Assert.Equal(new[] { 1m, 2m }, observed.ToArray());
+        }
+        finally { context.QuantityChanged -= HoldFirstQuantity; }
     }
 
     [Fact]

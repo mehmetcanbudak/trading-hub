@@ -68,7 +68,67 @@ public sealed class LiveFinancialApiTests
         }
     }
     [Fact]
-    public void A_recovered_context_conflict_invalidates_saved_confirmed_valuation_until_reconciled()
+    public void Saved_open_valuations_remain_estimates_after_corrections_until_committed_exposure_is_flat()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "TradingHub-stopped-valuation-api-" + Guid.NewGuid().ToString("N"));
+        string previousRoot = LiveStore.Root;
+        string? previousEnvironment = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR");
+        Directory.CreateDirectory(root);
+        try
+        {
+            Environment.SetEnvironmentVariable("TRADINGHUB_LIVE_DIR", root);
+            LiveStore.Root = root;
+            const string key = "stopped-valuation-api|test:TEST|sim";
+            DateTime time = new(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
+            var scope = new ExecutionScope("fixture", "sim", "paper", "test:TEST", "stopped-valuation");
+            var entry = new LiveFill(time, true, 2m, 100m)
+            {
+                Kind = LiveFillKind.Execution, OrderId = "entry-order", ExecutionId = new(scope, "entry"),
+                Fees = new[] { new ExecutionFee(3m, "USD") }, FeesComplete = true, Currency = "USD",
+            };
+            Assert.Null(LiveStore.AppendFill(key, entry));
+            LiveStore.SaveRunners(new[]
+            {
+                new LiveRunnerInfo { Key = key, Strategy = "Stopped valuation fixture", FeedId = "test", Symbol = "TEST",
+                    Period = "M1", Account = "sim", PointValue = 10m, Position = 2m, OpenPnL = 17m, AvailableOpenPnL = 17m },
+            });
+            JsonNode Row() => LabServer.LivePortfolio(new JsonObject())["strategies"]!.AsArray()
+                .Single(row => row!["key"]!.GetValue<string>() == key)!;
+
+            var saved = Row();
+            Assert.Equal("authoritative", saved["financial_quality"]!.GetValue<string>());
+            Assert.Null(saved["open_pnl"]);
+            Assert.Null(saved["net"]);
+            Assert.Equal(17m, saved["open_pnl_estimate"]!.GetValue<decimal>());
+            Assert.Equal(14m, saved["net_estimate"]!.GetValue<decimal>());
+
+            Assert.Null(LiveStore.AppendFill(key, entry with { Price = 102m, Fees = new[] { new ExecutionFee(4m, "USD") } }));
+            var corrected = Row();
+            Assert.Null(corrected["open_pnl"]);
+            Assert.Null(corrected["net"]);
+            Assert.Equal(13m, corrected["net_estimate"]!.GetValue<decimal>());
+
+            Assert.Null(LiveStore.AppendFill(key, new LiveFill(time.AddMinutes(1), false, 2m, 105m)
+            {
+                Kind = LiveFillKind.Execution, OrderId = "exit-order", ExecutionId = new(scope, "exit"),
+                Fees = new[] { new ExecutionFee(3m, "USD") }, FeesComplete = true, Currency = "USD",
+            }));
+            var flat = Row();
+            Assert.Equal(0m, flat["position"]!.GetValue<decimal>());
+            Assert.Equal(0m, flat["open_pnl"]!.GetValue<decimal>());
+            Assert.Equal(53m, flat["net"]!.GetValue<decimal>()); // (105 - 102) * 2 * 10 - 4 - 3.
+            Assert.Equal(53m, flat["net_estimate"]!.GetValue<decimal>());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TRADINGHUB_LIVE_DIR", previousEnvironment);
+            LiveStore.Root = previousRoot;
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Recovered_context_conflicts_block_confirmed_financials_without_discarding_saved_estimates()
     {
         string root = Path.Combine(Path.GetTempPath(), "TradingHub-conflicted-financial-api-" + Guid.NewGuid().ToString("N"));
         string previousRoot = LiveStore.Root;
@@ -100,8 +160,9 @@ public sealed class LiveFinancialApiTests
             });
             JsonNode Row() => LabServer.LivePortfolio(new JsonObject())["strategies"]!.AsArray()
                 .Single(row => row!["key"]!.GetValue<string>() == key)!;
-            Assert.Equal(25m, Row()["net"]!.GetValue<decimal>()); // Closed A20 minus fees5, plus B open10.
-            Assert.Equal(10m, Row()["open_pnl"]!.GetValue<decimal>());
+            Assert.Null(Row()["net"]);
+            Assert.Null(Row()["open_pnl"]);
+            Assert.Equal(25m, Row()["net_estimate"]!.GetValue<decimal>()); // Saved B open10 is an estimate, not a current mark.
 
             Assert.Null(LiveStore.AppendFill(key, entryA with { Quantity = 1m, Fees = new[] { new ExecutionFee(1m, "USD") } }));
             var recovered = LiveStore.LoadLedger(key, 1m);
@@ -117,8 +178,9 @@ public sealed class LiveFinancialApiTests
             var reconciled = LiveStore.LoadLedger(key, 1m);
             Assert.Equal(1m, reconciled.Position);
             Assert.False(reconciled.OpenContextConflict);
-            Assert.Equal(17m, Row()["net"]!.GetValue<decimal>()); // Closed A10 minus fees3, plus valid B open10.
-            Assert.Equal(10m, Row()["open_pnl"]!.GetValue<decimal>());
+            Assert.Null(Row()["net"]);
+            Assert.Null(Row()["open_pnl"]);
+            Assert.Equal(17m, Row()["net_estimate"]!.GetValue<decimal>()); // Closed A10 minus fees3, plus saved B open10 estimate.
         }
         finally
         {

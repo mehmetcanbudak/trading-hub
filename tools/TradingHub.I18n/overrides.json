@@ -4246,5 +4246,1169 @@
   "★ My indicators": {
     "es": "★ Mis indicadores",
     "zh-CN": "★ 我的指标"
+  },
+  "This saved account no longer belongs to a Tradovate connection.": {
+    "es": "Esta cuenta guardada ya no pertenece a una conexión de Tradovate.",
+    "zh-CN": "此已保存账户已不再属于 Tradovate 连接。"
+  },
+  "This saved account no longer belongs to a Rithmic connection.": {
+    "es": "Esta cuenta guardada ya no pertenece a una conexión de Rithmic.",
+    "zh-CN": "此已保存账户已不再属于 Rithmic 连接。"
+  },
+  "This connection does not supply a supported trading account.": {
+    "es": "Esta conexión no proporciona una cuenta de trading compatible.",
+    "zh-CN": "此连接不提供受支持的交易账户。"
+  },
+  "The prepared account route is no longer available.": {
+    "es": "La ruta de cuenta preparada ya no está disponible.",
+    "zh-CN": "预先准备的账户路由已不可用。"
+  },
+  "The requested reduction exceeds the currently reconciled account position.": {
+    "es": "La reducción solicitada supera la posición de la cuenta conciliada actualmente.",
+    "zh-CN": "请求的减仓量超过当前已核对的账户持仓。"
+  },
+  "The connection's trading namespace changed: new exposure is disabled; original-context reductions/cancels remain allowed.": {
+    "es": "Cambió el espacio de nombres de trading de la conexión: se deshabilitó la nueva exposición; se siguen permitiendo reducciones y cancelaciones en el contexto original.",
+    "zh-CN": "连接的交易命名空间已更改：已禁用新增敞口；仍允许在原上下文中减仓或撤单。"
+  },
+  "Trading configuration namespace is not committed: ": {
+    "es": "El espacio de nombres de la configuración de trading no está confirmado: ",
+    "zh-CN": "交易配置命名空间尚未提交： "
+  },
+  "Trading configuration namespace is not committed: {0}": {
+    "es": "El espacio de nombres de la configuración de trading no está confirmado: {0}",
+    "zh-CN": "交易配置命名空间尚未提交：{0}"
+  },
+  "Execution prices or fees are pending; portfolio metrics are unavailable.": {
+    "es": "Los precios de ejecución o los costos están pendientes; las métricas del portafolio no están disponibles.",
+    "zh-CN": "成交价格或费用待确认；投资组合指标不可用。"
+  },
+  " · estimated accounting": {
+    "es": " · contabilidad estimada",
+    "zh-CN": " · 估算核算"
+  },
+  " · accounting pending": {
+    "es": " · contabilidad pendiente",
+    "zh-CN": " · 核算待确认"
+  },
+  "Execution prices, fees or current marks are pending; portfolio risk analysis is unavailable.": {
+    "es": "Los precios de ejecución, los costos o los precios de valoración actuales están pendientes; el análisis de riesgo del portafolio no está disponible.",
+    "zh-CN": "成交价格、费用或当前估值价格待确认；投资组合风险分析不可用。"
+  },
+  " · {0} accounting": {
+    "es": " · contabilidad {0}",
+    "zh-CN": " · {0}核算"
+  },
+  "Execution prices or fees are pending; net trade results are unavailable.": {
+    "es": "Los precios de ejecución o los costos están pendientes; los resultados netos de las operaciones no están disponibles.",
+    "zh-CN": "成交价格或费用待确认；交易净盈亏不可用。"
+  },
+  " · includes legacy estimated accounting": {
+    "es": " · incluye contabilidad estimada heredada",
+    "zh-CN": " · 包含历史估算核算"
+  },
+  "Accounting pending: execution prices, fees or current marks are incomplete; portfolio metrics are unavailable.": {
+    "es": "Contabilidad pendiente: los precios de ejecución, los costos o los precios de valoración actuales están incompletos; las métricas del portafolio no están disponibles.",
+    "zh-CN": "核算待确认：成交价格、费用或当前估值价格不完整；投资组合指标不可用。"
+  },
+  "Portfolio accounting includes legacy estimates.": {
+    "es": "La contabilidad del portafolio incluye estimaciones heredadas.",
+    "zh-CN": "投资组合核算包含历史估算值。"
+  },
+  "Accounting unavailable or pending": {
+    "es": "Contabilidad no disponible o pendiente",
+    "zh-CN": "核算不可用或待确认"
+  },
+  "includes estimates": {
+    "es": "incluye estimaciones",
+    "zh-CN": "包含估算值"
+  },
+  "open {0} · includes estimates": {
+    "es": "abierto {0} · incluye estimaciones",
+    "zh-CN": "浮动 {0} · 包含估算值"
+  },
+  "open {0} · reported executions": {
+    "es": "abierto {0} · ejecuciones informadas",
+    "zh-CN": "浮动 {0} · 已报告成交"
+  },
+  "reported executions": {
+    "es": "ejecuciones informadas",
+    "zh-CN": "已报告成交"
+  },
+  "Execution prices or fees are pending; sizing suggestions are unavailable.": {
+    "es": "Los precios de ejecución o los costos están pendientes; las sugerencias de tamaño no están disponibles.",
+    "zh-CN": "成交价格或费用待确认；仓位规模建议不可用。"
+  },
+  "live · {0} · {1} · {2} accounting": {
+    "es": "en vivo · {0} · {1} · contabilidad {2}",
+    "zh-CN": "实盘 · {0} · {1} · {2}核算"
+  },
+  "execution price pending": {
+    "es": "precio de ejecución pendiente",
+    "zh-CN": "成交价格待确认"
+  },
+  "Execution prices or fees pending": {
+    "es": "Precios de ejecución o costos pendientes",
+    "zh-CN": "成交价格或费用待确认"
+  },
+  "{0} trades · {1}": {
+    "es": "{0} operaciones · {1}",
+    "zh-CN": "{0} 笔交易 · {1}"
+  },
+  "Accounting pending": {
+    "es": "Contabilidad pendiente",
+    "zh-CN": "核算待确认"
+  },
+  "Size multiplies new orders (exits always close only the open quantity). Daily loss blocks entries until the next session. Drawdown stops the strategy. Accounting quality: {0}.": {
+    "es": "El tamaño multiplica las nuevas órdenes (las salidas solo cierran la cantidad abierta). La pérdida diaria bloquea entradas hasta la siguiente sesión. El drawdown detiene la estrategia. Calidad de la contabilidad: {0}.",
+    "zh-CN": "规模倍数用于新订单（退出始终只平掉未平仓数量）。单日亏损限制会阻止入场，直到下一交易时段。回撤限制会停止策略。核算质量：{0}。"
+  },
+  "Size multiplies new orders (exits always close only the open quantity). Daily loss blocks entries until the next session. Drawdown stops the strategy. Accounting quality: {0}.{1}": {
+    "es": "El tamaño multiplica las nuevas órdenes (las salidas solo cierran la cantidad abierta). La pérdida diaria bloquea entradas hasta la siguiente sesión. El drawdown detiene la estrategia. Calidad de la contabilidad: {0}.{1}",
+    "zh-CN": "规模倍数用于新订单（退出始终只平掉未平仓数量）。单日亏损限制会阻止入场，直到下一交易时段。回撤限制会停止策略。核算质量：{0}。{1}"
+  },
+  "open {0} · today {1} · {2}": {
+    "es": "abierto {0} · hoy {1} · {2}",
+    "zh-CN": "浮动 {0} · 今日 {1} · {2}"
+  },
+  "Full file synchronization": {
+    "es": "Sincronización completa del archivo",
+    "zh-CN": "完整文件同步"
+  },
+  "Opening directory for synchronization": {
+    "es": "Apertura del directorio para sincronización",
+    "zh-CN": "正在打开目录以进行同步"
+  },
+  "Directory synchronization": {
+    "es": "Sincronización del directorio",
+    "zh-CN": "目录同步"
+  },
+  "{0} failed (OS error {1}).": {
+    "es": "Falló {0} (error del sistema operativo {1}).",
+    "zh-CN": "{0}失败（操作系统错误 {1}）。"
+  },
+  "IB bar store requires synthetic trade IDs.": {
+    "es": "El almacén de velas de IB requiere identificadores de operaciones sintéticas.",
+    "zh-CN": "IB K线存储需要合成交易 ID。"
+  },
+  "IB day replacement was published, but namespace synchronization failed: {0}": {
+    "es": "Se publicó el reemplazo del día de IB, pero falló la sincronización del espacio de nombres: {0}",
+    "zh-CN": "IB 单日替换已发布，但命名空间同步失败：{0}"
+  },
+  "Unrecognized IB recovery journal.": {
+    "es": "Diario de recuperación de IB no reconocido.",
+    "zh-CN": "无法识别的 IB 恢复日志。"
+  },
+  "Unsupported IB recovery journal.": {
+    "es": "Diario de recuperación de IB no compatible.",
+    "zh-CN": "不支持的 IB 恢复日志。"
+  },
+  "An unresolved legacy IB import requires reviewed recovery before loading history: {0}": {
+    "es": "Una importación heredada de IB sin resolver requiere una recuperación revisada antes de cargar el historial: {0}",
+    "zh-CN": "存在未解决的历史 IB 导入，必须先经审核恢复，才能加载历史数据：{0}"
+  },
+  "IB legacy history audit failed; retain and repair its import journals before retrying.": {
+    "es": "Falló la auditoría del historial heredado de IB; conservá y repará sus diarios de importación antes de reintentar.",
+    "zh-CN": "IB 历史数据审计失败；请保留并修复其导入日志后重试。"
+  },
+  "IB storage root has no existing ancestor: {0}": {
+    "es": "La raíz de almacenamiento de IB no tiene ningún directorio antecesor existente: {0}",
+    "zh-CN": "IB 存储根目录没有已存在的上级目录：{0}"
+  },
+  "IB recovery path escapes its storage root.": {
+    "es": "La ruta de recuperación de IB queda fuera de su raíz de almacenamiento.",
+    "zh-CN": "IB 恢复路径超出其存储根目录。"
+  },
+  "IB recovery refuses a linked managed path: {0}": {
+    "es": "La recuperación de IB rechaza una ruta administrada que es un enlace: {0}",
+    "zh-CN": "IB 恢复拒绝使用链接形式的受管路径：{0}"
+  },
+  "Invalid IB history change epoch.": {
+    "es": "Época de cambio del historial de IB no válida.",
+    "zh-CN": "无效的 IB 历史变更纪元。"
+  },
+  "Damaged IB history change epoch.": {
+    "es": "Época de cambio del historial de IB dañada.",
+    "zh-CN": "IB 历史变更纪元已损坏。"
+  },
+  "IB writer ownership cannot be nested.": {
+    "es": "La titularidad de escritura de IB no se puede anidar.",
+    "zh-CN": "IB 写入者所有权不能嵌套。"
+  },
+  "IB instrument is recording/in use; stop its live consumers before changing recorded history.": {
+    "es": "El instrumento de IB se está grabando o está en uso; detené sus consumidores en vivo antes de modificar el historial grabado.",
+    "zh-CN": "IB 品种正在记录或使用中；更改已记录历史数据前，请先停止其实时使用方。"
+  },
+  "Duplicate IB publication target.": {
+    "es": "Destino de publicación de IB duplicado.",
+    "zh-CN": "重复的 IB 发布目标。"
+  },
+  "IB publication requires its target writer ownership.": {
+    "es": "La publicación de IB requiere la titularidad de escritura de su destino.",
+    "zh-CN": "IB 发布需要持有目标的写入者所有权。"
+  },
+  "Invalid IB history symbol.": {
+    "es": "Símbolo del historial de IB no válido.",
+    "zh-CN": "无效的 IB 历史品种代码。"
+  },
+  "IB commit marker was published; synchronization/finalization is required. Journal: {0}": {
+    "es": "Se publicó el marcador de confirmación de IB; se requiere sincronización y finalización. Diario: {0}",
+    "zh-CN": "IB 提交标记已发布；需要同步并完成收尾。日志：{0}"
+  },
+  "IB publication failed; recovery required before history can be consumed. Journal: {0}": {
+    "es": "Falló la publicación de IB; se requiere recuperación antes de poder consumir el historial. Diario: {0}",
+    "zh-CN": "IB 发布失败；必须恢复后才能使用历史数据。日志：{0}"
+  },
+  "IB import canceled; original files restored. Staging journal: {0}": {
+    "es": "Importación de IB cancelada; se restauraron los archivos originales. Diario de preparación: {0}",
+    "zh-CN": "IB 导入已取消；原始文件已恢复。暂存日志：{0}"
+  },
+  "IB publication target escapes its storage root.": {
+    "es": "El destino de publicación de IB queda fuera de su raíz de almacenamiento.",
+    "zh-CN": "IB 发布目标超出其存储根目录。"
+  },
+  "IB publication target is not an owned standard day file.": {
+    "es": "El destino de publicación de IB no es un archivo diario estándar bajo su titularidad.",
+    "zh-CN": "IB 发布目标不是拥有写入所有权的标准单日文件。"
+  },
+  "Invalid IB recovery folder.": {
+    "es": "Carpeta de recuperación de IB no válida.",
+    "zh-CN": "无效的 IB 恢复文件夹。"
+  },
+  "Invalid IB recovery transaction identity.": {
+    "es": "Identidad de la transacción de recuperación de IB no válida.",
+    "zh-CN": "无效的 IB 恢复事务标识。"
+  },
+  "Missing IB pending authority.": {
+    "es": "Falta el registro de autorización pendiente de IB.",
+    "zh-CN": "缺少 IB 待处理授权依据。"
+  },
+  "IB recovery authority is missing or damaged.": {
+    "es": "El registro de autorización de recuperación de IB falta o está dañado.",
+    "zh-CN": "IB 恢复授权依据缺失或损坏。"
+  },
+  "Missing IB recovery entries.": {
+    "es": "Faltan entradas de recuperación de IB.",
+    "zh-CN": "缺少 IB 恢复条目。"
+  },
+  "Inconsistent IB recovery authority.": {
+    "es": "El registro de autorización de recuperación de IB es incoherente.",
+    "zh-CN": "IB 恢复授权依据不一致。"
+  },
+  "IB history recovery failed for {0}; history remains blocked. Retain {1} and its import backups.": {
+    "es": "Falló la recuperación del historial de IB para {0}; el historial sigue bloqueado. Conservá {1} y sus copias de seguridad de importación.",
+    "zh-CN": "{0} 的 IB 历史恢复失败；历史数据仍被阻止使用。请保留 {1} 及其导入备份。"
+  },
+  "IB commit marker does not match its complete authority.": {
+    "es": "El marcador de confirmación de IB no coincide con su registro de autorización completo.",
+    "zh-CN": "IB 提交标记与其完整授权依据不匹配。"
+  },
+  "Missing IB recovery entry.": {
+    "es": "Falta una entrada de recuperación de IB.",
+    "zh-CN": "缺少 IB 恢复条目。"
+  },
+  "Invalid or duplicate IB recovery entry.": {
+    "es": "Entrada de recuperación de IB no válida o duplicada.",
+    "zh-CN": "IB 恢复条目无效或重复。"
+  },
+  "IB recovery cannot change a target without its writer ownership.": {
+    "es": "La recuperación de IB no puede modificar un destino sin su titularidad de escritura.",
+    "zh-CN": "未持有目标的写入者所有权时，IB 恢复不能更改该目标。"
+  },
+  "IB recovery authority requires regular backup/staged files.": {
+    "es": "El registro de autorización de recuperación de IB requiere archivos normales de copia de seguridad y de preparación.",
+    "zh-CN": "IB 恢复授权依据要求备份文件和暂存文件为常规文件。"
+  },
+  "Unexpected IB original backup.": {
+    "es": "Copia de seguridad del original de IB inesperada.",
+    "zh-CN": "存在非预期的 IB 原始备份。"
+  },
+  "Missing prepared IB output.": {
+    "es": "Falta la salida preparada de IB.",
+    "zh-CN": "缺少已准备的 IB 输出。"
+  },
+  "Unexpected staged IB deletion.": {
+    "es": "Eliminación preparada de IB inesperada.",
+    "zh-CN": "存在非预期的 IB 暂存删除操作。"
+  },
+  "An IB target is a directory, not an authorized day file.": {
+    "es": "Un destino de IB es un directorio, no un archivo diario autorizado.",
+    "zh-CN": "IB 目标是目录，而非获授权的单日文件。"
+  },
+  "IB target has unrelated/later bytes; refusing recovery: {0}": {
+    "es": "El destino de IB contiene bytes ajenos o posteriores; se rechaza la recuperación: {0}",
+    "zh-CN": "IB 目标包含无关或较晚写入的字节；拒绝恢复：{0}"
+  },
+  "IB transaction file changed while validating its identity.": {
+    "es": "El archivo de transacción de IB cambió mientras se validaba su identidad.",
+    "zh-CN": "IB 事务文件在验证其标识时发生了变化。"
+  },
+  "Missing or damaged IB recovery file: {0}": {
+    "es": "Archivo de recuperación de IB ausente o dañado: {0}",
+    "zh-CN": "IB 恢复文件缺失或损坏：{0}"
+  },
+  "IB history recovery failed for {0}; history remains blocked.": {
+    "es": "Falló la recuperación del historial de IB para {0}; el historial sigue bloqueado.",
+    "zh-CN": "{0} 的 IB 历史恢复失败；历史数据仍被阻止使用。"
+  },
+  "IB day metadata identifies a directory, not a data file.": {
+    "es": "Los metadatos diarios de IB identifican un directorio, no un archivo de datos.",
+    "zh-CN": "IB 单日元数据指向目录，而非数据文件。"
+  },
+  "IB repair requires its standard owned day path.": {
+    "es": "La reparación de IB requiere su ruta diaria estándar bajo su titularidad.",
+    "zh-CN": "IB 修复需要其拥有写入所有权的标准单日路径。"
+  },
+  "An adopted Binance conditional order has no unique exact native parent.": {
+    "es": "Una orden condicional de Binance adoptada no tiene una orden madre nativa exacta y única.",
+    "zh-CN": "接管的 Binance 条件单没有唯一且精确匹配的原生父订单。"
+  },
+  "An adopted Binance conditional order has no exact native parent.": {
+    "es": "Una orden condicional de Binance adoptada no tiene una orden madre nativa exacta.",
+    "zh-CN": "接管的 Binance 条件单没有精确匹配的原生父订单。"
+  },
+  "Binance conditional recovery disagrees with its persisted native route.": {
+    "es": "La recuperación condicional de Binance no coincide con su ruta nativa persistida.",
+    "zh-CN": "Binance 条件单恢复与其已持久化的原生路由不一致。"
+  },
+  "Binance conditional submission remains unresolved by its exact client identity.": {
+    "es": "El envío condicional de Binance sigue sin resolverse mediante su identificador exacto de cliente.",
+    "zh-CN": "Binance 条件单提交仍无法通过其精确客户端标识确定结果。"
+  },
+  "Binance conditional parent disagrees with its persisted client dispatch.": {
+    "es": "La orden madre condicional de Binance no coincide con su envío de cliente persistido.",
+    "zh-CN": "Binance 条件单父订单与其已持久化的客户端派发记录不一致。"
+  },
+  "Binance conditional recovery conflicts with an already tracked native parent.": {
+    "es": "La recuperación condicional de Binance entra en conflicto con una orden madre nativa que ya se está siguiendo.",
+    "zh-CN": "Binance 条件单恢复与已跟踪的原生父订单冲突。"
+  },
+  "Binance conditional parent has no matching durable dispatch owner.": {
+    "es": "La orden madre condicional de Binance no tiene un titular de envío persistente coincidente.",
+    "zh-CN": "Binance 条件单父订单没有匹配的持久化派发所有者。"
+  },
+  "Binance conditional client recovery is synchronizing.": {
+    "es": "Se está sincronizando la recuperación condicional de Binance por identificador de cliente.",
+    "zh-CN": "Binance 条件单客户端恢复正在同步。"
+  },
+  "Binance replacement lost its durable predecessor.": {
+    "es": "El reemplazo de Binance perdió su orden predecesora persistente.",
+    "zh-CN": "Binance 替换订单丢失了其持久化前序订单。"
+  },
+  "Binance replacement predecessor disagrees with its exact durable lineage.": {
+    "es": "La orden predecesora del reemplazo de Binance no coincide con su linaje persistente exacto.",
+    "zh-CN": "Binance 替换订单的前序订单与其精确的持久化沿袭关系不一致。"
+  },
+  "Binance replacement predecessor lineage contains a cycle.": {
+    "es": "El linaje de la orden predecesora del reemplazo de Binance contiene un ciclo.",
+    "zh-CN": "Binance 替换订单的前序沿袭关系包含循环。"
+  },
+  "Binance replacement raw cumulative baseline is synchronizing.": {
+    "es": "Se está sincronizando la base acumulada sin procesar del reemplazo de Binance.",
+    "zh-CN": "Binance 替换订单的原始累计基线正在同步。"
+  },
+  "Binance replacement conditional predecessor is not evidenced by its exact parent.": {
+    "es": "La orden madre exacta no acredita la orden predecesora condicional del reemplazo de Binance.",
+    "zh-CN": "Binance 替换订单的条件单前序订单缺少其精确父订单的证据。"
+  },
+  "Binance replacement predecessor has not reached a final state.": {
+    "es": "La orden predecesora del reemplazo de Binance no alcanzó un estado final.",
+    "zh-CN": "Binance 替换订单的前序订单尚未达到终态。"
+  },
+  "Binance replacement child disagrees with its evidenced conditional parent.": {
+    "es": "La orden hija del reemplazo de Binance no coincide con su orden madre condicional acreditada.",
+    "zh-CN": "Binance 替换子订单与已有证据支持的条件单父订单不一致。"
+  },
+  "Binance replacement predecessor has no exact native client lineage.": {
+    "es": "La orden predecesora del reemplazo de Binance no tiene un linaje nativo exacto de identificadores de cliente.",
+    "zh-CN": "Binance 替换订单的前序订单没有精确的原生客户端沿袭关系。"
+  },
+  "Binance replacement predecessor quantity has no final native evidence.": {
+    "es": "La cantidad de la orden predecesora del reemplazo de Binance no tiene evidencia nativa final.",
+    "zh-CN": "Binance 替换订单的前序订单数量缺少最终原生证据。"
+  },
+  "Binance working order type remains unresolved: ": {
+    "es": "El tipo de la orden activa de Binance sigue sin resolverse: ",
+    "zh-CN": "Binance 活动订单类型仍未确定： "
+  },
+  "Binance working order type remains unresolved: {0}": {
+    "es": "El tipo de la orden activa de Binance sigue sin resolverse: {0}",
+    "zh-CN": "Binance 活动订单类型仍未确定：{0}"
+  },
+  "Binance rejected the order.": {
+    "es": "Binance rechazó la orden.",
+    "zh-CN": "Binance 拒绝了订单。"
+  },
+  "Binance rejected the conditional order.": {
+    "es": "Binance rechazó la orden condicional.",
+    "zh-CN": "Binance 拒绝了条件单。"
+  },
+  "Binance accepted order; ownership persistence failed: ": {
+    "es": "Binance aceptó la orden; falló la persistencia de la titularidad: ",
+    "zh-CN": "Binance 已接受订单；所有权持久化失败： "
+  },
+  "Binance accepted order; ownership persistence failed: {0}": {
+    "es": "Binance aceptó la orden; falló la persistencia de la titularidad: {0}",
+    "zh-CN": "Binance 已接受订单；所有权持久化失败：{0}"
+  },
+  "The order became terminal before the queued price update.": {
+    "es": "La orden alcanzó un estado terminal antes de la actualización de precio en cola.",
+    "zh-CN": "在排队的价格更新执行前，订单已进入终态。"
+  },
+  "The prepared instrument does not match this broker.": {
+    "es": "El instrumento preparado no corresponde a este bróker.",
+    "zh-CN": "预先准备的品种与此经纪商不匹配。"
+  },
+  "A native amendment cannot change the instrument, direction, type or reduce-only identity.": {
+    "es": "Una modificación nativa no puede cambiar el instrumento, la dirección, el tipo ni la identidad de solo reducción.",
+    "zh-CN": "原生改单不能更改品种、方向、类型或只减仓标识。"
+  },
+  "The order is no longer available for replacement.": {
+    "es": "La orden ya no está disponible para reemplazarla.",
+    "zh-CN": "订单已无法替换。"
+  },
+  "A later prepared price update superseded this unsent price update.": {
+    "es": "Una actualización de precio preparada posteriormente sustituyó esta actualización de precio no enviada.",
+    "zh-CN": "较晚准备的价格更新取代了此尚未发送的价格更新。"
+  },
+  "The prepared price update requires no native replacement.": {
+    "es": "La actualización de precio preparada no requiere un reemplazo nativo.",
+    "zh-CN": "预先准备的价格更新不需要原生订单替换。"
+  },
+  "The predecessor finished or its acceptance became unresolved before replacement.": {
+    "es": "La orden predecesora finalizó o su aceptación pasó a estar sin resolver antes del reemplazo.",
+    "zh-CN": "替换前，前序订单已结束，或其接受状态变得不确定。"
+  },
+  "The predecessor cancellation completed, but no child quantity remained to submit.": {
+    "es": "Se completó la cancelación de la orden predecesora, pero no quedó cantidad para enviar una orden hija.",
+    "zh-CN": "前序订单撤单已完成，但没有剩余子订单数量可提交。"
+  },
+  "No replacement child was submitted; predecessor cancellation still requires native reconciliation.": {
+    "es": "No se envió ninguna orden hija de reemplazo; la cancelación de la orden predecesora aún requiere conciliación nativa.",
+    "zh-CN": "未提交替换子订单；前序订单撤单仍需与原生状态核对。"
+  },
+  "Binance rejected the replacement.": {
+    "es": "Binance rechazó el reemplazo.",
+    "zh-CN": "Binance 拒绝了替换订单。"
+  },
+  "Cancellation superseded the queued price update.": {
+    "es": "La cancelación sustituyó la actualización de precio en cola.",
+    "zh-CN": "撤单取代了排队的价格更新。"
+  },
+  "Binance trade history contains an incomplete native execution.": {
+    "es": "El historial de operaciones de Binance contiene una ejecución nativa incompleta.",
+    "zh-CN": "Binance 交易历史包含不完整的原生成交。"
+  },
+  "Binance broker has been disposed.": {
+    "es": "Se liberó la instancia del bróker de Binance.",
+    "zh-CN": "Binance 经纪商对象已释放。"
+  },
+  "Binance native quantity projection is unresolved: ": {
+    "es": "La proyección de cantidad nativa de Binance está sin resolver: ",
+    "zh-CN": "Binance 原生数量投影仍未解决： "
+  },
+  "Binance native quantity projection is unresolved: {0}": {
+    "es": "La proyección de cantidad nativa de Binance está sin resolver: {0}",
+    "zh-CN": "Binance 原生数量投影仍未解决：{0}"
+  },
+  "The accepted Binance predecessor could not be restored after an unsent replacement: ": {
+    "es": "No se pudo restaurar la orden predecesora aceptada por Binance tras un reemplazo no enviado: ",
+    "zh-CN": "替换订单未发送后，无法恢复已接受的 Binance 前序订单： "
+  },
+  "The accepted Binance predecessor could not be restored after an unsent replacement: {0}": {
+    "es": "No se pudo restaurar la orden predecesora aceptada por Binance tras un reemplazo no enviado: {0}",
+    "zh-CN": "替换订单未发送后，无法恢复已接受的 Binance 前序订单：{0}"
+  },
+  "Binance terminal ownership evidence remains unresolved: ": {
+    "es": "La evidencia de titularidad terminal de Binance sigue sin resolverse: ",
+    "zh-CN": "Binance 终态所有权证据仍未解决： "
+  },
+  "Binance terminal ownership evidence remains unresolved: {0}": {
+    "es": "La evidencia de titularidad terminal de Binance sigue sin resolverse: {0}",
+    "zh-CN": "Binance 终态所有权证据仍未解决：{0}"
+  },
+  "Binance execution history remains unresolved: ": {
+    "es": "El historial de ejecuciones de Binance sigue sin resolverse: ",
+    "zh-CN": "Binance 成交历史仍未解决： "
+  },
+  "Binance execution history remains unresolved: {0}": {
+    "es": "El historial de ejecuciones de Binance sigue sin resolverse: {0}",
+    "zh-CN": "Binance 成交历史仍未解决：{0}"
+  },
+  "Binance native quantity lost its exact durable logical attribution.": {
+    "es": "La cantidad nativa de Binance perdió su atribución lógica persistente exacta.",
+    "zh-CN": "Binance 原生数量丢失了其精确的持久化逻辑归属。"
+  },
+  "Binance execution history does not match the configured account product.": {
+    "es": "El historial de ejecuciones de Binance no coincide con el producto de la cuenta configurado.",
+    "zh-CN": "Binance 成交历史与配置的账户产品不匹配。"
+  },
+  "A Binance execution producer cannot move to another account generation.": {
+    "es": "Un productor de ejecuciones de Binance no puede pasar a otra generación de cuenta.",
+    "zh-CN": "Binance 成交生产方不能迁移到另一账户代次。"
+  },
+  "Binance changed a trade's native order identity.": {
+    "es": "Binance cambió la identidad nativa de la orden de una operación.",
+    "zh-CN": "Binance 更改了一笔成交的原生订单标识。"
+  },
+  "Binance execution disagrees with its exact durable native owner.": {
+    "es": "La ejecución de Binance no coincide con su titular nativo persistente exacto.",
+    "zh-CN": "Binance 成交与其精确的持久化原生所有者不一致。"
+  },
+  "Binance execution lost its exact durable owner.": {
+    "es": "La ejecución de Binance perdió su titular persistente exacto.",
+    "zh-CN": "Binance 成交丢失了其精确的持久化所有者。"
+  },
+  "Binance accounting currency remains unknown: ": {
+    "es": "La moneda contable de Binance sigue siendo desconocida: ",
+    "zh-CN": "Binance 核算币种仍未知： "
+  },
+  "Binance accounting currency remains unknown: {0}": {
+    "es": "La moneda contable de Binance sigue siendo desconocida: {0}",
+    "zh-CN": "Binance 核算币种仍未知：{0}"
+  },
+  "Binance returned a trade outside its requested native-ID page.": {
+    "es": "Binance devolvió una operación fuera de la página de identificadores nativos solicitada.",
+    "zh-CN": "Binance 返回了一笔超出所请求原生 ID 分页范围的成交。"
+  },
+  "The order became terminal or cancellation was requested before the queued price update.": {
+    "es": "La orden alcanzó un estado terminal o se solicitó su cancelación antes de la actualización de precio en cola.",
+    "zh-CN": "在排队的价格更新执行前，订单已进入终态或已请求撤单。"
+  },
+  "Rithmic accepted order; ownership persistence failed: ": {
+    "es": "Rithmic aceptó la orden; falló la persistencia de la titularidad: ",
+    "zh-CN": "Rithmic 已接受订单；所有权持久化失败： "
+  },
+  "Rithmic accepted order; ownership persistence failed: {0}": {
+    "es": "Rithmic aceptó la orden; falló la persistencia de la titularidad: {0}",
+    "zh-CN": "Rithmic 已接受订单；所有权持久化失败：{0}"
+  },
+  "Cannot replace an order while its previous outcome is unresolved or cancellation is pending.": {
+    "es": "No se puede reemplazar una orden mientras su resultado anterior esté sin resolver o su cancelación esté pendiente.",
+    "zh-CN": "上次结果未确定或撤单待处理时，不能替换订单。"
+  },
+  "Rithmic broker has been disposed.": {
+    "es": "Se liberó la instancia del bróker de Rithmic.",
+    "zh-CN": "Rithmic 经纪商对象已释放。"
+  },
+  "Rithmic native quantity projection is unresolved: ": {
+    "es": "La proyección de cantidad nativa de Rithmic está sin resolver: ",
+    "zh-CN": "Rithmic 原生数量投影仍未解决： "
+  },
+  "Rithmic native quantity projection is unresolved: {0}": {
+    "es": "La proyección de cantidad nativa de Rithmic está sin resolver: {0}",
+    "zh-CN": "Rithmic 原生数量投影仍未解决：{0}"
+  },
+  "The account has not been reported by this Rithmic session.": {
+    "es": "Esta sesión de Rithmic no informó la cuenta.",
+    "zh-CN": "此 Rithmic 会话尚未报告该账户。"
+  },
+  "Tradovate accepted order; ownership persistence failed: ": {
+    "es": "Tradovate aceptó la orden; falló la persistencia de la titularidad: ",
+    "zh-CN": "Tradovate 已接受订单；所有权持久化失败： "
+  },
+  "Tradovate accepted order; ownership persistence failed: {0}": {
+    "es": "Tradovate aceptó la orden; falló la persistencia de la titularidad: {0}",
+    "zh-CN": "Tradovate 已接受订单；所有权持久化失败：{0}"
+  },
+  "The order became terminal or cancellation was requested before amendment dispatch.": {
+    "es": "La orden alcanzó un estado terminal o se solicitó su cancelación antes del envío de la modificación.",
+    "zh-CN": "改单派发前，订单已进入终态或已请求撤单。"
+  },
+  "Tradovate amendment outcome is unknown: ": {
+    "es": "El resultado de la modificación de Tradovate es desconocido: ",
+    "zh-CN": "Tradovate 改单结果未知： "
+  },
+  "Tradovate amendment outcome is unknown: {0}": {
+    "es": "El resultado de la modificación de Tradovate es desconocido: {0}",
+    "zh-CN": "Tradovate 改单结果未知：{0}"
+  },
+  "Tradovate broker has been disposed.": {
+    "es": "Se liberó la instancia del bróker de Tradovate.",
+    "zh-CN": "Tradovate 经纪商对象已释放。"
+  },
+  "Tradovate native quantity projection is unresolved: ": {
+    "es": "La proyección de cantidad nativa de Tradovate está sin resolver: ",
+    "zh-CN": "Tradovate 原生数量投影仍未解决： "
+  },
+  "Tradovate native quantity projection is unresolved: {0}": {
+    "es": "La proyección de cantidad nativa de Tradovate está sin resolver: {0}",
+    "zh-CN": "Tradovate 原生数量投影仍未解决：{0}"
+  },
+  "The account has not been reported by this Tradovate session.": {
+    "es": "Esta sesión de Tradovate no informó la cuenta.",
+    "zh-CN": "此 Tradovate 会话尚未报告该账户。"
+  },
+  "Tradovate fill {0} changed its native account/contract lineage; reconciliation is required.": {
+    "es": "La ejecución {0} de Tradovate cambió su linaje nativo de cuenta y contrato; se requiere conciliación.",
+    "zh-CN": "Tradovate 成交 {0} 的原生账户/合约沿袭关系发生变化；需要核对。"
+  },
+  "The native account has not been reported by this Tradovate session.": {
+    "es": "Esta sesión de Tradovate no informó la cuenta nativa.",
+    "zh-CN": "此 Tradovate 会话尚未报告该原生账户。"
+  },
+  "Tradovate fill {0} does not report Fill.active; reconciliation is required.": {
+    "es": "La ejecución {0} de Tradovate no informa Fill.active; se requiere conciliación.",
+    "zh-CN": "Tradovate 成交 {0} 未报告 Fill.active；需要核对。"
+  },
+  "Tradovate fill {0} requires reconciliation: vendor Fill.active=false/Deleted correction and bust semantics are not established; no zero-quantity reversal was inferred.": {
+    "es": "La ejecución {0} de Tradovate requiere conciliación: no se estableció la semántica de corrección y anulación del proveedor para Fill.active=false/Deleted; no se infirió ninguna reversión de cantidad cero.",
+    "zh-CN": "Tradovate 成交 {0} 需要核对：供应商 Fill.active=false/Deleted 的更正和成交作废语义尚未明确；未据此推断零数量冲销。"
+  },
+  "Tradovate fill {0} lacks a valid native quantity, price, timestamp or action; reconciliation is required.": {
+    "es": "La ejecución {0} de Tradovate carece de una cantidad, precio, marca de tiempo o acción nativos válidos; se requiere conciliación.",
+    "zh-CN": "Tradovate 成交 {0} 缺少有效的原生数量、价格、时间戳或操作；需要核对。"
+  },
+  "Tradovate fill {0} changed its native identity lineage; reconciliation is required.": {
+    "es": "La ejecución {0} de Tradovate cambió su linaje de identidad nativa; se requiere conciliación.",
+    "zh-CN": "Tradovate 成交 {0} 的原生标识沿袭关系发生变化；需要核对。"
+  },
+  "Tradovate fill {0} attribution is unresolved: {1}": {
+    "es": "La atribución de la ejecución {0} de Tradovate está sin resolver: {1}",
+    "zh-CN": "Tradovate 成交 {0} 的归属未确定：{1}"
+  },
+  "Tradovate fill {0} fee snapshot is unavailable: {1}": {
+    "es": "La instantánea de costos de la ejecución {0} de Tradovate no está disponible: {1}",
+    "zh-CN": "Tradovate 成交 {0} 的费用快照不可用：{1}"
+  },
+  "FillFee dependents were not an array.": {
+    "es": "Los elementos dependientes de FillFee no eran un arreglo.",
+    "zh-CN": "FillFee 的 dependents 不是数组。"
+  },
+  "Execution projection requires an explicit durable ownership root.": {
+    "es": "La proyección de ejecuciones requiere una raíz de titularidad persistente explícita.",
+    "zh-CN": "成交投影需要明确的持久化所有权根目录。"
+  },
+  "Native account identity reconciliation failed: ": {
+    "es": "Falló la conciliación de la identidad de la cuenta nativa: ",
+    "zh-CN": "原生账户标识核对失败： "
+  },
+  "Native account identity reconciliation failed: {0}": {
+    "es": "Falló la conciliación de la identidad de la cuenta nativa: {0}",
+    "zh-CN": "原生账户标识核对失败：{0}"
+  },
+  "The ownership context descriptor does not match its persisted namespace.": {
+    "es": "El descriptor del contexto de titularidad no coincide con su espacio de nombres persistido.",
+    "zh-CN": "所有权上下文描述符与其已持久化的命名空间不匹配。"
+  },
+  "An intent cannot cross account context generations.": {
+    "es": "Una intención no puede cruzar generaciones del contexto de cuenta.",
+    "zh-CN": "意图不能跨越账户上下文代次。"
+  },
+  "A client identity already belongs to another intent.": {
+    "es": "Un identificador de cliente ya pertenece a otra intención.",
+    "zh-CN": "一个客户端标识已属于另一意图。"
+  },
+  "Corrupt or incorrectly scoped intent ownership.": {
+    "es": "La titularidad de la intención está dañada o tiene un ámbito incorrecto.",
+    "zh-CN": "意图所有权已损坏或作用域不正确。"
+  },
+  "Client index identity mismatch.": {
+    "es": "La identidad del índice de clientes no coincide.",
+    "zh-CN": "客户端索引标识不匹配。"
+  },
+  "An ownership intent disappeared during startup recovery.": {
+    "es": "Una intención de titularidad desapareció durante la recuperación al iniciar.",
+    "zh-CN": "启动恢复期间，一项所有权意图消失。"
+  },
+  "Corrupt or incorrectly scoped startup ownership intent.": {
+    "es": "La intención de titularidad de inicio está dañada o tiene un ámbito incorrecto.",
+    "zh-CN": "启动所有权意图已损坏或作用域不正确。"
+  },
+  "Native index identity mismatch.": {
+    "es": "La identidad del índice nativo no coincide.",
+    "zh-CN": "原生索引标识不匹配。"
+  },
+  "A native identity is already bound to another logical owner.": {
+    "es": "Una identidad nativa ya está vinculada a otro titular lógico.",
+    "zh-CN": "一个原生标识已绑定到另一逻辑所有者。"
+  },
+  "Execution receipt identity collision.": {
+    "es": "Colisión de identidades de comprobantes de ejecución.",
+    "zh-CN": "成交回执标识冲突。"
+  },
+  "A pending execution receipt disappeared.": {
+    "es": "Desapareció un comprobante de ejecución pendiente.",
+    "zh-CN": "一份待处理成交回执消失。"
+  },
+  "Projection index execution identity mismatch.": {
+    "es": "La identidad de ejecución del índice de proyección no coincide.",
+    "zh-CN": "投影索引成交标识不匹配。"
+  },
+  "The reported native account differs from this local ownership namespace.": {
+    "es": "La cuenta nativa informada difiere de este espacio de nombres de titularidad local.",
+    "zh-CN": "报告的原生账户与此本地所有权命名空间不同。"
+  },
+  "Missing ownership record envelope.": {
+    "es": "Falta la envoltura del registro de titularidad.",
+    "zh-CN": "缺少所有权记录封装。"
+  },
+  "Ownership record checksum or version mismatch.": {
+    "es": "La suma de comprobación o la versión del registro de titularidad no coincide.",
+    "zh-CN": "所有权记录校验和或版本不匹配。"
+  },
+  "A used order context cannot be moved to another account or generation.": {
+    "es": "Un contexto de órdenes ya utilizado no se puede trasladar a otra cuenta o generación.",
+    "zh-CN": "已使用的订单上下文不能迁移到另一账户或代次。"
+  },
+  "An account's ownership root cannot change during its lifetime.": {
+    "es": "La raíz de titularidad de una cuenta no puede cambiar durante su vida útil.",
+    "zh-CN": "账户的所有权根目录在其生命周期内不能更改。"
+  },
+  "An order needs an owner, instrument and positive quantity.": {
+    "es": "Una orden necesita un titular, un instrumento y una cantidad positiva.",
+    "zh-CN": "订单需要所有者、品种和正数数量。"
+  },
+  "Native order ownership has not been configured with an explicit storage root.": {
+    "es": "La titularidad de órdenes nativas no se configuró con una raíz de almacenamiento explícita.",
+    "zh-CN": "原生订单所有权尚未配置明确的存储根目录。"
+  },
+  "The replacement does not belong to this exact account and owner.": {
+    "es": "El reemplazo no pertenece a esta cuenta y este titular exactos.",
+    "zh-CN": "替换订单不属于此精确账户和所有者。"
+  },
+  "A replacement cannot change the predecessor's routed instrument, side, type or reduction mode.": {
+    "es": "Un reemplazo no puede cambiar el instrumento enrutado, el lado, el tipo ni el modo de reducción de la orden predecesora.",
+    "zh-CN": "替换订单不能更改前序订单的路由品种、买卖方向、类型或减仓模式。"
+  },
+  "Could not prepare owned order: ": {
+    "es": "No se pudo preparar la orden con titularidad: ",
+    "zh-CN": "无法准备具有所有权的订单： "
+  },
+  "Could not prepare owned order: {0}": {
+    "es": "No se pudo preparar la orden con titularidad: {0}",
+    "zh-CN": "无法准备具有所有权的订单：{0}"
+  },
+  "; no matching unused bounded emergency identity remains": {
+    "es": "; no queda ningún identificador de emergencia acotado, coincidente y sin usar",
+    "zh-CN": "；没有剩余的匹配、未使用且有界的紧急标识"
+  },
+  "Could not prepare price-only amendment: ": {
+    "es": "No se pudo preparar la modificación exclusiva de precio: ",
+    "zh-CN": "无法准备仅改价格的改单： "
+  },
+  "Could not prepare price-only amendment: {0}": {
+    "es": "No se pudo preparar la modificación exclusiva de precio: {0}",
+    "zh-CN": "无法准备仅改价格的改单：{0}"
+  },
+  "The prepared routing context no longer matches.": {
+    "es": "El contexto de enrutamiento preparado ya no coincide.",
+    "zh-CN": "预先准备的路由上下文已不匹配。"
+  },
+  "This operation was definitively rejected before reuse: ": {
+    "es": "Esta operación fue rechazada de forma definitiva antes de reutilizarla: ",
+    "zh-CN": "此操作在重复使用前已被明确拒绝： "
+  },
+  "This operation was definitively rejected before reuse: {0}": {
+    "es": "Esta operación fue rechazada de forma definitiva antes de reutilizarla: {0}",
+    "zh-CN": "此操作在重复使用前已被明确拒绝：{0}"
+  },
+  "Native ownership storage is not configured.": {
+    "es": "El almacenamiento de titularidad nativa no está configurado.",
+    "zh-CN": "尚未配置原生所有权存储。"
+  },
+  "Native ownership persistence is unresolved; new exposure is disabled.": {
+    "es": "La persistencia de la titularidad nativa está sin resolver; se deshabilitó la nueva exposición.",
+    "zh-CN": "原生所有权持久化仍未解决；已禁用新增敞口。"
+  },
+  "The routed quantity must be positive.": {
+    "es": "La cantidad enrutada debe ser positiva.",
+    "zh-CN": "路由数量必须为正数。"
+  },
+  "The emergency reduction exceeds its durable quantity/side authority.": {
+    "es": "La reducción de emergencia supera su autorización persistente de cantidad y lado.",
+    "zh-CN": "紧急减仓超出其持久化数量/方向授权范围。"
+  },
+  "The prepared order belongs to another account context or routing generation.": {
+    "es": "La orden preparada pertenece a otro contexto de cuenta o generación de enrutamiento.",
+    "zh-CN": "预先准备的订单属于另一账户上下文或路由代次。"
+  },
+  "Native order ownership is not configured.": {
+    "es": "La titularidad de órdenes nativas no está configurada.",
+    "zh-CN": "尚未配置原生订单所有权。"
+  },
+  "A replacement ticket cannot submit a new independent order.": {
+    "es": "Un ticket de reemplazo no puede enviar una nueva orden independiente.",
+    "zh-CN": "替换凭单不能提交新的独立订单。"
+  },
+  "The replacement ticket does not match the exact predecessor.": {
+    "es": "El ticket de reemplazo no coincide con la orden predecesora exacta.",
+    "zh-CN": "替换凭单与精确前序订单不匹配。"
+  },
+  "Restoring an accepted binding requires its exact unchanged native predecessor and an immediate successor proven not to own a native child.": {
+    "es": "Restaurar un vínculo aceptado requiere su orden predecesora nativa exacta y sin cambios, y una sucesora inmediata de la que se haya demostrado que no es titular de una orden hija nativa.",
+    "zh-CN": "恢复已接受的绑定需要原生前序订单精确匹配且未更改，并需要证明其直接后继不拥有原生子订单。"
+  },
+  "The accepted predecessor no longer has the exact current native ownership claim.": {
+    "es": "La orden predecesora aceptada ya no tiene la atribución exacta de titularidad nativa vigente.",
+    "zh-CN": "已接受的前序订单不再持有精确的当前原生所有权声明。"
+  },
+  "Could not restore the accepted predecessor binding: ": {
+    "es": "No se pudo restaurar el vínculo de la orden predecesora aceptada: ",
+    "zh-CN": "无法恢复已接受的前序订单绑定： "
+  },
+  "Could not restore the accepted predecessor binding: {0}": {
+    "es": "No se pudo restaurar el vínculo de la orden predecesora aceptada: {0}",
+    "zh-CN": "无法恢复已接受的前序订单绑定：{0}"
+  },
+  "The native routed instrument is not resolved.": {
+    "es": "El instrumento nativo enrutado está sin resolver.",
+    "zh-CN": "尚未确定原生路由品种。"
+  },
+  "The emergency reduction does not match its durable native routed instrument.": {
+    "es": "La reducción de emergencia no coincide con su instrumento nativo enrutado persistente.",
+    "zh-CN": "紧急减仓与其持久化的原生路由品种不匹配。"
+  },
+  "This identity was already attempted; reconcile its outcome instead of resending.": {
+    "es": "Ya se intentó un envío con este identificador; conciliá su resultado en lugar de reenviarlo.",
+    "zh-CN": "已尝试过此标识；请核对其结果，而非重新发送。"
+  },
+  "The durable identity already has an uncertain dispatch; it cannot be resent.": {
+    "es": "El identificador persistente ya tiene un envío de resultado incierto; no se puede reenviar.",
+    "zh-CN": "该持久化标识已有结果不确定的派发；不能重新发送。"
+  },
+  "Could not commit dispatch ownership: ": {
+    "es": "No se pudo confirmar la titularidad del envío: ",
+    "zh-CN": "无法提交派发所有权： "
+  },
+  "Could not commit dispatch ownership: {0}": {
+    "es": "No se pudo confirmar la titularidad del envío: {0}",
+    "zh-CN": "无法提交派发所有权：{0}"
+  },
+  "A predecessor fill baseline requires the exact attempted replacement and unchanged native lineage.": {
+    "es": "Una base de ejecuciones de la orden predecesora requiere el reemplazo intentado exacto y un linaje nativo sin cambios.",
+    "zh-CN": "前序订单成交基线需要精确匹配的已尝试替换订单及未更改的原生沿袭关系。"
+  },
+  "Could not persist replacement predecessor quantity: ": {
+    "es": "No se pudo persistir la cantidad de la orden predecesora del reemplazo: ",
+    "zh-CN": "无法持久化替换订单的前序订单数量： "
+  },
+  "Could not persist replacement predecessor quantity: {0}": {
+    "es": "No se pudo persistir la cantidad de la orden predecesora del reemplazo: {0}",
+    "zh-CN": "无法持久化替换订单的前序订单数量：{0}"
+  },
+  "Reserved emergency reduction": {
+    "es": "Reducción de emergencia reservada",
+    "zh-CN": "预留的紧急减仓"
+  },
+  "Terminal exposure lost its durable logical identity.": {
+    "es": "La exposición terminal perdió su identidad lógica persistente.",
+    "zh-CN": "终态敞口丢失了其持久化逻辑标识。"
+  },
+  "A native binding needs the exact account context and native identity.": {
+    "es": "Un vínculo nativo necesita el contexto de cuenta y la identidad nativa exactos.",
+    "zh-CN": "原生绑定需要精确匹配的账户上下文和原生标识。"
+  },
+  "Native order accepted or unknown; could not persist binding: ": {
+    "es": "Orden nativa aceptada o de estado desconocido; no se pudo persistir el vínculo: ",
+    "zh-CN": "原生订单已接受或状态未知；无法持久化绑定： "
+  },
+  "Native order accepted or unknown; could not persist binding: {0}": {
+    "es": "Orden nativa aceptada o de estado desconocido; no se pudo persistir el vínculo: {0}",
+    "zh-CN": "原生订单已接受或状态未知；无法持久化绑定：{0}"
+  },
+  "Native binding is durable; its projection notification failed: ": {
+    "es": "El vínculo nativo es persistente; falló la notificación de su proyección: ",
+    "zh-CN": "原生绑定已持久化；其投影通知失败： "
+  },
+  "Native binding is durable; its projection notification failed: {0}": {
+    "es": "El vínculo nativo es persistente; falló la notificación de su proyección: {0}",
+    "zh-CN": "原生绑定已持久化；其投影通知失败：{0}"
+  },
+  "A native binding requires the exact durable order owner and lineage.": {
+    "es": "Un vínculo nativo requiere el titular y el linaje persistentes exactos de la orden.",
+    "zh-CN": "原生绑定需要精确匹配的持久化订单所有者和沿袭关系。"
+  },
+  "Native client recovery disagrees with its frozen durable dispatch.": {
+    "es": "La recuperación nativa por identificador de cliente no coincide con su envío persistente e inmutable.",
+    "zh-CN": "原生客户端恢复与其已冻结的持久化派发记录不一致。"
+  },
+  "A working-type transition requires the exact durable owner and lineage.": {
+    "es": "Una transición del tipo de orden activa requiere el titular y el linaje persistentes exactos.",
+    "zh-CN": "活动订单类型转换需要精确匹配的持久化所有者和沿袭关系。"
+  },
+  "The native working-type evidence does not match this conditional parent and route.": {
+    "es": "La evidencia nativa del tipo de orden activa no coincide con esta orden madre condicional y esta ruta.",
+    "zh-CN": "原生活动订单类型证据与此条件单父订单及路由不匹配。"
+  },
+  "Could not persist broker working-type evidence: ": {
+    "es": "No se pudo persistir la evidencia del tipo de orden activa del bróker: ",
+    "zh-CN": "无法持久化经纪商活动订单类型证据： "
+  },
+  "Could not persist broker working-type evidence: {0}": {
+    "es": "No se pudo persistir la evidencia del tipo de orden activa del bróker: {0}",
+    "zh-CN": "无法持久化经纪商活动订单类型证据：{0}"
+  },
+  "Terminal evidence requires the exact bound terminal native order and lineage.": {
+    "es": "La evidencia terminal requiere la orden nativa terminal vinculada y su linaje exactos.",
+    "zh-CN": "终态证据需要精确匹配的已绑定终态原生订单及沿袭关系。"
+  },
+  "Terminal native quantity precedes its immutable ownership baseline.": {
+    "es": "La cantidad nativa terminal es anterior a su base inmutable de titularidad.",
+    "zh-CN": "终态原生数量早于其不可变的所有权基线。"
+  },
+  "Could not persist terminal native evidence: ": {
+    "es": "No se pudo persistir la evidencia nativa terminal: ",
+    "zh-CN": "无法持久化终态原生证据： "
+  },
+  "Could not persist terminal native evidence: {0}": {
+    "es": "No se pudo persistir la evidencia nativa terminal: {0}",
+    "zh-CN": "无法持久化终态原生证据：{0}"
+  },
+  "Could not persist definite order rejection: ": {
+    "es": "No se pudo persistir el rechazo definitivo de la orden: ",
+    "zh-CN": "无法持久化明确的订单拒绝： "
+  },
+  "Could not persist definite order rejection: {0}": {
+    "es": "No se pudo persistir el rechazo definitivo de la orden: {0}",
+    "zh-CN": "无法持久化明确的订单拒绝：{0}"
+  },
+  "Cannot adopt an order from another account context.": {
+    "es": "No se puede adoptar una orden de otro contexto de cuenta.",
+    "zh-CN": "不能接管来自另一账户上下文的订单。"
+  },
+  "An order already owned by another strategy ledger cannot be adopted.": {
+    "es": "No se puede adoptar una orden que ya pertenece al registro contable de otra estrategia.",
+    "zh-CN": "不能接管已归另一策略账本所有的订单。"
+  },
+  "Native quantity remains known at the account; owned projection is unreconciled: ": {
+    "es": "La cantidad nativa sigue siendo conocida en la cuenta; la proyección con titularidad no está conciliada: ",
+    "zh-CN": "账户仍已知原生数量；所有权投影尚未核对： "
+  },
+  "Native quantity remains known at the account; owned projection is unreconciled: {0}": {
+    "es": "La cantidad nativa sigue siendo conocida en la cuenta; la proyección con titularidad no está conciliada: {0}",
+    "zh-CN": "账户仍已知原生数量；所有权投影尚未核对：{0}"
+  },
+  "Quantity acknowledgement requires the exact captured logical owner and generation.": {
+    "es": "El acuse de recibo de cantidad requiere el titular lógico y la generación capturados exactos.",
+    "zh-CN": "数量确认需要精确匹配的已捕获逻辑所有者和代次。"
+  },
+  "The predecessor is no longer working.": {
+    "es": "La orden predecesora ya no está activa.",
+    "zh-CN": "前序订单已不再活动。"
+  },
+  "The simulator needs a simulator context with an actual execution log.": {
+    "es": "El simulador necesita un contexto de simulación con un registro de las ejecuciones efectivamente realizadas.",
+    "zh-CN": "模拟器需要带有真实成交日志的模拟器上下文。"
+  },
+  "The prepared order routes to another instrument.": {
+    "es": "La orden preparada se enruta a otro instrumento.",
+    "zh-CN": "预先准备的订单路由至另一品种。"
+  },
+  "A durable fact requires its frozen ledger root and owner.": {
+    "es": "Un hecho persistente requiere su raíz de registro contable y su titular inmutables.",
+    "zh-CN": "持久化事实需要其已冻结的账本根目录和所有者。"
+  },
+  "An execution owner could not reconcile its captured updates: ": {
+    "es": "Un titular de ejecuciones no pudo conciliar sus actualizaciones capturadas: ",
+    "zh-CN": "成交所有者无法核对其已捕获的更新： "
+  },
+  "An execution owner could not reconcile its captured updates: {0}": {
+    "es": "Un titular de ejecuciones no pudo conciliar sus actualizaciones capturadas: {0}",
+    "zh-CN": "成交所有者无法核对其已捕获的更新：{0}"
+  },
+  "The execution source has an incomplete revision range; replay reconciliation is required.": {
+    "es": "La fuente de ejecuciones tiene un intervalo de revisiones incompleto; se requiere conciliación mediante reproducción.",
+    "zh-CN": "成交来源的修订范围不完整；需要重放核对。"
+  },
+  "Execution projection remains unreconciled: ": {
+    "es": "La proyección de ejecuciones sigue sin conciliarse: ",
+    "zh-CN": "成交投影仍未核对： "
+  },
+  "Execution projection remains unreconciled: {0}": {
+    "es": "La proyección de ejecuciones sigue sin conciliarse: {0}",
+    "zh-CN": "成交投影仍未核对：{0}"
+  },
+  "Could not persist actual execution receipt: ": {
+    "es": "No se pudo persistir el comprobante de ejecución efectivamente realizada: ",
+    "zh-CN": "无法持久化实际成交回执： "
+  },
+  "Could not persist actual execution receipt: {0}": {
+    "es": "No se pudo persistir el comprobante de ejecución efectivamente realizada: {0}",
+    "zh-CN": "无法持久化实际成交回执：{0}"
+  },
+  "Execution account context does not match its canonical scoped identity.": {
+    "es": "El contexto de cuenta de la ejecución no coincide con su identidad canónica de ámbito definido.",
+    "zh-CN": "成交账户上下文与其规范作用域标识不匹配。"
+  },
+  "Execution ownership or the adopted execution prefix is not yet proven.": {
+    "es": "Todavía no se acreditó la titularidad de la ejecución o el prefijo de ejecuciones adoptado.",
+    "zh-CN": "成交所有权或接管成交前缀尚未得到证实。"
+  },
+  "Execution instrument does not match the prepared native route.": {
+    "es": "El instrumento de la ejecución no coincide con la ruta nativa preparada.",
+    "zh-CN": "成交品种与预先准备的原生路由不匹配。"
+  },
+  "A persisted ledger owner has no bound ownership root.": {
+    "es": "Un titular de registro contable persistido no tiene una raíz de titularidad vinculada.",
+    "zh-CN": "已持久化的账本所有者没有绑定的所有权根目录。"
+  },
+  "Execution committed or pending; projection acknowledgement failed: ": {
+    "es": "Ejecución confirmada o pendiente; falló el acuse de recibo de la proyección: ",
+    "zh-CN": "成交已提交或待处理；投影确认失败： "
+  },
+  "Execution committed or pending; projection acknowledgement failed: {0}": {
+    "es": "Ejecución confirmada o pendiente; falló el acuse de recibo de la proyección: {0}",
+    "zh-CN": "成交已提交或待处理；投影确认失败：{0}"
+  },
+  "An owned quantity observation has no frozen persistence root.": {
+    "es": "Una observación de cantidad con titularidad no tiene una raíz de persistencia inmutable.",
+    "zh-CN": "具有所有权的数量观测没有已冻结的持久化根目录。"
+  },
+  "Quantity committed; its durable acknowledgement is pending: ": {
+    "es": "Cantidad confirmada; su acuse de recibo persistente está pendiente: ",
+    "zh-CN": "数量已提交；其持久化确认待处理： "
+  },
+  "Quantity committed; its durable acknowledgement is pending: {0}": {
+    "es": "Cantidad confirmada; su acuse de recibo persistente está pendiente: {0}",
+    "zh-CN": "数量已提交；其持久化确认待处理：{0}"
+  },
+  "An execution source cannot move between ownership contexts or storage roots.": {
+    "es": "Una fuente de ejecuciones no puede trasladarse entre contextos de titularidad o raíces de almacenamiento.",
+    "zh-CN": "成交来源不能在所有权上下文或存储根目录之间迁移。"
+  },
+  "This live ledger owner already has an active runner.": {
+    "es": "Este titular de registro contable en vivo ya tiene una instancia de ejecución activa.",
+    "zh-CN": "此实盘账本所有者已有活动的运行器。"
+  },
+  "An execution ledger event has no execution identity, order ownership or actual price.": {
+    "es": "Un evento de ejecución del registro contable carece de identidad de ejecución, titularidad de la orden o precio efectivo.",
+    "zh-CN": "成交账本事件缺少成交标识、订单所有权或实际价格。"
+  },
+  "An execution identity cannot move to another ledger order owner.": {
+    "es": "Una identidad de ejecución no puede pasar a otro titular de órdenes del registro contable.",
+    "zh-CN": "成交标识不能迁移到另一账本订单所有者。"
+  },
+  "A quantity or execution ledger event has no order ownership.": {
+    "es": "Un evento de cantidad o ejecución del registro contable no tiene titularidad de orden.",
+    "zh-CN": "数量或成交账本事件缺少订单所有权。"
+  },
+  "Ledger event requires a durable scoped owner and matching history generation.": {
+    "es": "El evento del registro contable requiere un titular persistente de ámbito definido y una generación de historial coincidente.",
+    "zh-CN": "账本事件需要持久化的作用域所有者及匹配的历史代次。"
+  },
+  "Execution projection requires matching scoped identity and durable logical order.": {
+    "es": "La proyección de ejecuciones requiere una identidad de ámbito definido coincidente y una orden lógica persistente.",
+    "zh-CN": "成交投影需要匹配的作用域标识和持久化逻辑订单。"
+  },
+  "Could not project ledger '{0}': {1}": {
+    "es": "No se pudo proyectar el registro contable '{0}': {1}",
+    "zh-CN": "无法投影账本“{0}”：{1}"
+  },
+  "This ledger generation was explicitly retired; original exposure remains managed without recreating its history.": {
+    "es": "Esta generación del registro contable fue retirada explícitamente; la exposición original sigue gestionándose sin recrear su historial.",
+    "zh-CN": "此账本代次已被明确停用；原有敞口仍受管理，但不会重建其历史记录。"
+  },
+  "Execution facts needed for position pricing or configured risk limits are pending: new exposure is paused; reductions and protection remain managed.": {
+    "es": "Los datos de ejecución necesarios para valorar la posición o aplicar los límites de riesgo configurados están pendientes: la nueva exposición está en pausa; las reducciones y la protección siguen gestionándose.",
+    "zh-CN": "持仓定价或所配置风险限额所需的成交事实待确认：已暂停新增敞口；减仓和保护措施仍受管理。"
+  },
+  "This ledger generation was explicitly retired; old observations cannot recreate its history.": {
+    "es": "Esta generación del registro contable fue retirada explícitamente; las observaciones antiguas no pueden recrear su historial.",
+    "zh-CN": "此账本代次已被明确停用；旧观测不能重建其历史记录。"
+  },
+  "Could not save a ledger event ({0}): it stays pending and is saved before the next event; new entries are paused": {
+    "es": "No se pudo guardar un evento del registro contable ({0}): queda pendiente y se guardará antes del siguiente evento; las nuevas entradas están en pausa",
+    "zh-CN": "无法保存账本事件（{0}）：该事件保持待处理，并将在下一事件前保存；已暂停新入场"
+  },
+  "Saved {0} pending ledger event to its ledger; resume manually when ready": {
+    "es": "Se guardó {0} evento pendiente en su registro contable; reanudá manualmente cuando estés listo",
+    "zh-CN": "已将 {0} 个待处理账本事件保存至其账本；准备就绪后请手动恢复"
+  },
+  "Saved {0} pending ledger events to its ledger; resume manually when ready": {
+    "es": "Se guardaron {0} eventos pendientes en su registro contable; reanudá manualmente cuando estés listo",
+    "zh-CN": "已将 {0} 个待处理账本事件保存至其账本；准备就绪后请手动恢复"
+  },
+  "at an execution price still pending": {
+    "es": "a un precio de ejecución aún pendiente",
+    "zh-CN": "成交价格仍待确认"
+  },
+  "«{0}» bought {1} {2} {3}{4} on {5}{6}": {
+    "es": "«{0}» compró {1} {2} {3}{4} en {5}{6}",
+    "zh-CN": "«{0}» 在 {5}{6} 买入 {1} {2} {3}{4}"
+  },
+  "«{0}» sold {1} {2} {3}{4} on {5}{6}": {
+    "es": "«{0}» vendió {1} {2} {3}{4} en {5}{6}",
+    "zh-CN": "«{0}» 在 {5}{6} 卖出 {1} {2} {3}{4}"
+  },
+  "Execution facts required for configured risk are pending. Did not submit {0}; reductions and cancels remain allowed.": {
+    "es": "Los datos de ejecución necesarios para el riesgo configurado están pendientes. No se envió {0}; se siguen permitiendo reducciones y cancelaciones.",
+    "zh-CN": "所配置风险控制所需的成交事实待确认。未提交 {0}；仍允许减仓和撤单。"
+  },
+  "Recovered pending ledger events: new entries remain paused until the events are saved; existing exposure remains managed.": {
+    "es": "Se recuperaron eventos pendientes del registro contable: las nuevas entradas siguen en pausa hasta guardar los eventos; la exposición existente sigue gestionándose.",
+    "zh-CN": "已恢复待处理账本事件：在保存这些事件之前，新入场仍暂停；已有敞口仍受管理。"
+  },
+  "Cannot resume: execution prices or the financial facts required by configured risk limits are pending.": {
+    "es": "No se puede reanudar: los precios de ejecución o los datos financieros necesarios para los límites de riesgo configurados están pendientes.",
+    "zh-CN": "无法恢复：成交价格或所配置风险限额所需的财务事实待确认。"
+  },
+  "Cannot resume: pending ledger events could not be saved ({0}). New entries remain paused.": {
+    "es": "No se puede reanudar: no se pudieron guardar los eventos pendientes del registro contable ({0}). Las nuevas entradas siguen en pausa.",
+    "zh-CN": "无法恢复：待处理账本事件无法保存（{0}）。新入场仍暂停。"
+  },
+  "Cannot resume: ledger events are still pending. Restore ledger storage and save the pending events before opening new exposure.": {
+    "es": "No se puede reanudar: aún hay eventos pendientes en el registro contable. Restaurá su almacenamiento y guardá los eventos pendientes antes de abrir nueva exposición.",
+    "zh-CN": "无法恢复：账本事件仍待处理。请恢复账本存储并保存待处理事件后再新增敞口。"
+  },
+  "An active account subscription requires a strategy owner.": {
+    "es": "Una suscripción de cuenta activa requiere una estrategia titular.",
+    "zh-CN": "活动账户订阅需要策略所有者。"
+  },
+  "An active account subscription requires an execution projector.": {
+    "es": "Una suscripción de cuenta activa requiere un proyector de ejecuciones.",
+    "zh-CN": "活动账户订阅需要成交投影器。"
+  },
+  "The open ledger position belongs to another or conflicting account context; reconcile its original account before resuming.": {
+    "es": "La posición abierta del registro contable pertenece a otro contexto de cuenta o a uno en conflicto; conciliá su cuenta original antes de reanudar.",
+    "zh-CN": "账本中的未平持仓属于另一账户上下文或存在上下文冲突；恢复前请先核对其原始账户。"
+  },
+  "The adopted order's prior execution baseline is unconfirmed: quantity protection continues, but financial attribution remains pending.": {
+    "es": "La base de ejecuciones previas de la orden adoptada no está confirmada: la protección de cantidad continúa, pero la atribución financiera sigue pendiente.",
+    "zh-CN": "接管订单的先前成交基线尚未确认：数量保护继续生效，但财务归属仍待确认。"
+  },
+  "History could not be deleted: ": {
+    "es": "No se pudo eliminar el historial: ",
+    "zh-CN": "无法删除历史数据："
+  },
+  "History could not be deleted: {0}": {
+    "es": "No se pudo eliminar el historial: {0}",
+    "zh-CN": "无法删除历史数据：{0}"
+  },
+  "History could not be loaded: ": {
+    "es": "No se pudo cargar el historial: ",
+    "zh-CN": "无法加载历史数据："
+  },
+  "History could not be loaded: {0}": {
+    "es": "No se pudo cargar el historial: {0}",
+    "zh-CN": "无法加载历史数据：{0}"
+  },
+  "Replay history could not be loaded: ": {
+    "es": "No se pudo cargar el historial del replay: ",
+    "zh-CN": "无法加载回放历史数据："
+  },
+  "Replay history could not be loaded: {0}": {
+    "es": "No se pudo cargar el historial del replay: {0}",
+    "zh-CN": "无法加载回放历史数据：{0}"
+  },
+  "Saved prices are unavailable or incomplete for this range": {
+    "es": "Los precios guardados no están disponibles o están incompletos para este rango",
+    "zh-CN": "此区间的已保存价格不可用或不完整"
+  },
+  "Authoritative": {
+    "es": "Confirmada",
+    "zh-CN": "已确认"
+  },
+  "Estimated": {
+    "es": "Estimada",
+    "zh-CN": "估算"
+  },
+  "Pending": {
+    "es": "Pendiente",
+    "zh-CN": "待确认"
+  },
+  "Binance protection is synchronizing with identified executions.": {
+    "es": "La protección de Binance se está sincronizando con las ejecuciones identificadas.",
+    "zh-CN": "Binance 保护订单正在与已识别的成交同步。"
   }
 }

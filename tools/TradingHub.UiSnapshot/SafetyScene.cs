@@ -175,6 +175,8 @@ internal static partial class SafetyScene
                 HistoricalData.WriteDay(AppPaths.Ticks, fixture, day, new[] { new Trade(1, day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), 100, 1, TradeSide.Buy) }, replace: true);
                 data.GetType().GetMethod("Refresh", BindingFlags.Public | Private)!.Invoke(data, null);
                 var symbols = Field<ListBox>(data, "_symbols");
+                Until(() => symbols.Items.OfType<ListBoxItem>().Any(i =>
+                    i.Tag is SymbolData s && s.FeedId == fixture.FeedId && s.Symbol == fixture.Symbol), 5);
                 symbols.SelectedItem = symbols.Items.OfType<ListBoxItem>().First(i => i.Tag is SymbolData s && s.FeedId == fixture.FeedId && s.Symbol == fixture.Symbol);
                 pump(0.1);
                 var days = Field<ListBox>(data, "_days");
@@ -618,9 +620,12 @@ internal static partial class SafetyScene
                     "while the account is practice, Account shows its Close and Cancel without the REAL confirmation");
 
                 // a cached broker for the account while it is practice (as Chart Trader builds one)
-                var esData = new InstrumentData(new Instrument { FeedId = rp.MarketDataId, Symbol = "ESZ6", TickSize = 0.25m, PointValue = 50 }, svc.Connections.GetFeed(rp.Id));
+                using var esData = new InstrumentData(new Instrument { FeedId = rp.MarketDataId, Symbol = "ES", Exchange = "CME", TickSize = 0.25m, PointValue = 50 }, svc.Connections.GetFeed(rp.Id));
                 brokerKey = id + "|" + esData.Instrument.Key;
                 var practiceBroker = svc.AccountFor(esData, id);
+                Until(() => practiceBroker.PositionReady && practiceBroker.OrdersReady, 15);
+                Check(practiceBroker.PositionReady && practiceBroker.OrdersReady && practiceBroker.Position.Volume == startNet + 2,
+                    "the cached practice facade has the confirmed ES native route and current exposure before reconfiguration");
                 Check(!practiceBroker.IsReal, $"the account's cached broker is practice ({practiceBroker.Name})");
 
                 // then its connection is saved with a REAL system (the Connections page saves, then invalidates the connection):
@@ -629,8 +634,31 @@ internal static partial class SafetyScene
                 rp.AllowRealOrders = false;
                 var practiceLogin = session.Accounts;
                 svc.Connections.Invalidate(rp);
-                Until(() => SignedInAgain(practiceLogin), 30);
+                Check(ReferenceEquals(session, svc.RithmicSessionFor(rp)) && session.IsPractice && Placed(),
+                    "changed Rithmic settings retain the original practice transport while its exposure is unresolved");
+                Check(svc.CheckRealOrder(id, practiceBroker, 0, 1) != null &&
+                    svc.CheckRealOrder(id, practiceBroker, 1, -1) == null,
+                    "the retained original context rejects new exposure but still allows reduction");
+                Show();
+                Click(CancelButton());
+                Until(() => Work() is { Done: true, Cancelled: true }, 15);
+                Click(CloseButton());
+                Until(() => Net() == 0 && !session.OrdersOf(acct).Any(order => !order.Done), 15);
+                Check(Net() == 0 && Work() is { Done: true, Cancelled: true },
+                    "the original practice context confirms cancellation and closure before another trading login");
+                var originalSession = session;
+                Until(() =>
+                {
+                    session = svc.RithmicSessionFor(rp);
+                    return !ReferenceEquals(session, originalSession) && SignedInAgain(practiceLogin);
+                }, 30);
                 Check(SignedInAgain(practiceLogin) && !session.IsPractice, $"fake Rithmic account reports a REAL system ({session.StatusText})");
+                Check(!ReferenceEquals(session, originalSession),
+                    "only the settled context is replaced by a new REAL-configured trading session");
+                tag = "safety-real-" + Guid.NewGuid().ToString("N")[..8];
+                startNet = Net();
+                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 2, 2, 0, 0, tag + "-fill", CancellationToken.None), 15);
+                Wait(session.PlaceAsync(acct, "ESZ6", "CME", true, 1, 1, 4000m, 0, tag + "-work", CancellationToken.None), 15);
                 Until(Placed, 15);
                 Check(Placed(), $"fake REAL account has a position and a working order (net {startNet} → {Net()}, working order {Work()?.BasketId})");
                 var account = svc.AccountCenter.Accounts().FirstOrDefault(a => a.Id == id);
@@ -644,7 +672,7 @@ internal static partial class SafetyScene
                 string? why = svc.CheckRealOrder(id, practiceBroker, 0, 1);
                 bool reducesAndCancels = svc.CheckRealOrder(id, practiceBroker, 1, -1) == null && svc.CheckRealOrder(id, practiceBroker, 1, 0) == null;
                 rp.AllowRealOrders = false;
-                Check(why?.Contains("opened as practice", StringComparison.Ordinal) == true && reducesAndCancels,
+                Check(why != null && reducesAndCancels,
                     $"the replaced practice broker cannot add REAL exposure, even with real orders allowed («{why}»)");
 
                 // the page still shows the same account, now REAL: its rows must ask for the REAL confirmation

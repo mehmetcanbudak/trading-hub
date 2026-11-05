@@ -264,6 +264,66 @@ public class ExecutionIntegrityTests
     }
 
     [Fact]
+    public async Task QuantityFirstOwnedProtectionIgnoresSameAccountManualAverage()
+    {
+        using var root = new ProjectionRegressionRoot();
+        using var feed = new ManualFeed();
+        using var data = await StartProjectionData(feed);
+        using var broker = new SimBroker(data, new TradingHub.Trading.Portfolio(), new TradingStatistics());
+        OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 4m);
+        Assert.Equal(4m, broker.Position!.Volume);
+        Assert.True(broker.Position.AveragePrice > 100m);
+
+        using var account = new QuantityBeforePriceAccount(broker, exposeAccountAverage: true);
+        var strategy = new PassiveLimits { StopLossTicks = 5, TakeProfitTicks = 10 };
+        using var runner = new LiveStrategyRunner(strategy, data, account, ChartPeriod.M1);
+        runner.Start();
+        strategy.BuyAt(100m, 2m);
+        feed.Emit(new Trade(2, T0.AddMinutes(1), 98m, 1m, TradeSide.Sell));
+        data.Pump();
+
+        // Four unrelated units with a higher basis must not price two owned units whose execution is unavailable.
+        Assert.Equal(6m, broker.Position.Volume);
+        Assert.Equal(2m, runner.OwnPosition);
+        Assert.Equal(2m, strategy.Position);
+        Assert.True(runner.Ledger.HasPendingPrices);
+        Assert.Equal(0m, runner.Ledger.AveragePrice);
+        Assert.True(account.Position.AveragePrice > 100m);
+        var stop = Assert.Single(broker.ActiveOrders, order => order.Type == OrderTypes.Stop);
+        var target = Assert.Single(broker.ActiveOrders, order => order.Type == OrderTypes.Limit);
+        Assert.Equal(93m, stop.TriggerPrice);
+        Assert.Equal(108m, target.Price);
+        Assert.All(broker.ActiveOrders, order =>
+        {
+            Assert.True(order.ReduceOnly);
+            Assert.Equal(OrderDirections.Sell, order.Direction);
+            Assert.Equal(2m, order.Unfilled);
+        });
+
+        feed.Emit(new Trade(3, T0.AddMinutes(2), 99m, 1m, TradeSide.Buy));
+        data.Pump();
+        OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 1m);
+        Assert.Same(stop, Assert.Single(broker.ActiveOrders, order => order.Type == OrderTypes.Stop));
+        Assert.Same(target, Assert.Single(broker.ActiveOrders, order => order.Type == OrderTypes.Limit));
+        Assert.Equal(93m, stop.TriggerPrice);
+        Assert.Equal(108m, target.Price);
+        Assert.Equal(7m, broker.Position.Volume);
+        Assert.Equal(2m, runner.OwnPosition);
+
+        account.ReleaseExecutionReports();
+
+        // Only the owned resting-limit execution establishes basis 100, without changing any native exposure.
+        Assert.False(runner.Ledger.HasPendingPrices);
+        Assert.Equal(100m, runner.Ledger.AveragePrice);
+        Assert.Equal(7m, broker.Position.Volume);
+        Assert.Equal(2m, runner.OwnPosition);
+        Assert.Equal(2m, strategy.Position);
+        Assert.Equal(95m, Assert.Single(broker.ActiveOrders, order => order.Type == OrderTypes.Stop).TriggerPrice);
+        Assert.Equal(110m, Assert.Single(broker.ActiveOrders, order => order.Type == OrderTypes.Limit).Price);
+        Assert.All(broker.ActiveOrders, order => Assert.Equal(2m, order.Unfilled));
+    }
+
+    [Fact]
     public async Task PriorSessionUnknownFeesDoNotBlockAFlatCurrentSessionButCurrentSessionFeesStillGateRisk()
     {
         string root = Path.Combine(Path.GetTempPath(), "tradinghub_fee_session_" + Guid.NewGuid().ToString("N"));
@@ -1911,11 +1971,14 @@ public class ExecutionIntegrityTests
         private readonly SimBroker _inner;
         private readonly Position _quantityOnly = new();
         private bool _holdingReports = true;
+        private readonly bool _exposeAccountAverage;
 
-        public QuantityBeforePriceAccount(SimBroker inner)
+        public QuantityBeforePriceAccount(SimBroker inner, bool exposeAccountAverage = false)
         {
             _inner = inner;
+            _exposeAccountAverage = exposeAccountAverage;
             _quantityOnly.Volume = inner.Position!.Volume;
+            _quantityOnly.AveragePrice = exposeAccountAverage ? inner.Position.AveragePrice : 0;
             inner.Changed += OnBrokerChanged;
         }
 
@@ -1933,6 +1996,7 @@ public class ExecutionIntegrityTests
         private void OnBrokerChanged()
         {
             _quantityOnly.Volume = _inner.Position!.Volume;
+            if (_exposeAccountAverage) _quantityOnly.AveragePrice = _inner.Position.AveragePrice;
             Changed?.Invoke();
         }
 

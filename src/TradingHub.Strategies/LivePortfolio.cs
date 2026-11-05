@@ -523,6 +523,9 @@ public sealed class LiveStats
 {
     public LiveRunnerInfo Info { get; set; } = new();
     public PerformanceMetrics Metrics { get; set; } = new();
+    public decimal Position { get; set; }
+    public decimal OpenPnLEstimate { get; set; }
+    public decimal? AvailableOpenPnL { get; set; }
     public decimal Net { get; set; }
     public LiveFinancialQuality FinancialQuality { get; set; }
     public decimal? CompleteNet { get; set; }
@@ -1343,12 +1346,19 @@ public static class LiveStore
             peak = Math.Max(peak, eq);
         }
 
+        // Saved marks are estimates, not a current valuation of this committed ledger.
+        bool flat = ledger.Position == 0 && !ledger.OpenContextConflict;
+        decimal openEstimate = flat ? 0m : info.OpenPnL;
+
         return new LiveStats
         {
             Info = info,
             Metrics = m,
-            Net = ledger.Realized + info.OpenPnL,
-            CompleteNet = ledger.NetRealized + info.AvailableOpenPnL,
+            Position = ledger.Position,
+            OpenPnLEstimate = openEstimate,
+            AvailableOpenPnL = flat ? 0m : null,
+            Net = ledger.Realized + openEstimate,
+            CompleteNet = flat ? ledger.NetRealized : null,
             FinancialQuality = ledger.FinancialQuality,
             CurrentDrawdown = peak - eq,
             RecentTrades = recent.Count,
