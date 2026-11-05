@@ -196,17 +196,13 @@ public class RealOrderPermissionTests : IDisposable
             remove => inner.Changed -= value;
         }
 
-        public Order Market(OrderDirections dir, decimal qty, string comment = "") => inner.Market(dir, qty, comment);
-        public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Limit(dir, qty, price, comment);
-        public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => inner.Stop(dir, qty, trigger, comment);
-        public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Exit(type, dir, qty, price, comment);
-        public Order Replace(Order order, decimal newPrice, decimal newQuantity) => inner.Replace(order, newPrice, newQuantity);
+        public OrderContext OrderContext => inner.OrderContext;
+        public IExecutionSource Executions => inner.Executions;
+        public Order Submit(PreparedOrderIntent intent) => inner.Submit(intent);
+        public Order Replace(Order order, PreparedOrderIntent intent) => inner.Replace(order, intent);
         public void Cancel(Order order) => inner.Cancel(order);
         public void CancelAt(decimal price) => inner.CancelAt(price);
         public void CancelAll() => inner.CancelAll();
-        public void Modify(Order order, decimal newPrice) => inner.Modify(order, newPrice);
-        public void Flatten() => inner.Flatten();
-        public void Reverse() => inner.Reverse();
     }
 
     private (Scripted Strategy, ITradingAccount Broker, LiveStrategyRunner Runner) Setup(ILiveOrderGuard guard, bool real)

@@ -75,6 +75,8 @@ internal sealed class LiveRiskAgent
         if (p == null) return "Portfolio not found.";
         if (p.Members.FirstOrDefault(m => m.Ledger == null) is { } unavailable)
             return unavailable.LedgerError ?? "History unavailable";
+        if (p.Members.Any(m => m.Ledger!.HasPendingFinancials || m.OpenPnL == null))
+            return "Execution prices, fees or current marks are pending; portfolio risk analysis is unavailable.";
         var a = p.Def.Agent;
         var adjustable = p.Members.Where(m => !m.Locked && (m.Running || m.WaitingResume)).ToList();
         if (adjustable.Count == 0) return "No strategies to adjust.";
@@ -230,13 +232,14 @@ internal sealed class LiveRiskAgent
         var analysis = LiveCenter.Analyze(p);
         var sb = new StringBuilder();
         sb.AppendLine($"Portfolio «{p.Def.Name}» · reference capital {N(capital)} · date {DateTime.Now:yyyy-MM-dd HH:mm} (local time).");
+        sb.AppendLine("Accounting quality: legacy or modeled figures are estimates; only fully reported execution costs are authoritative.");
         sb.AppendLine($"Budget: total daily risk {N(a.DailyRiskPercent)} % of capital ({N(capital * a.DailyRiskPercent / 100)}), maximum portfolio drawdown {N(a.MaxDrawdownPercent)} % ({N(capital * a.MaxDrawdownPercent / 100)}).");
         sb.AppendLine($"Size limits per strategy: between {N(a.MinSize)} and {N(a.MaxSize)} (or 0 to block new entries).");
         if (!string.IsNullOrWhiteSpace(a.Instructions)) sb.AppendLine($"Trader instructions: {a.Instructions.Trim()}");
         if (a.LastSummary.Length > 0 && a.LastRunUtc is { } last) sb.AppendLine($"Your previous review ({last.ToLocalTime():dd/MM HH:mm}): {a.LastSummary}");
         sb.AppendLine();
         var m = analysis.Metrics;
-        sb.AppendLine($"PORTFOLIO (closed trades): net {N(m.NetProfit)} · {m.TotalTrades} trades · PF {N(Math.Min(m.ProfitFactor, 99))} · max drawdown {N(m.MaxDrawdown)} · " +
+        sb.AppendLine($"PORTFOLIO (closed trades; {analysis.FinancialQuality} accounting): net {N(m.NetProfit)} · {m.TotalTrades} trades · PF {N(Math.Min(m.ProfitFactor, 99))} · max drawdown {N(m.MaxDrawdown)} · " +
                       $"Sharpe {m.SharpeRatio.ToString("0.00", Inv)} · currently open {N(p.Members.Sum(x => x.OpenPnL!.Value))}");
         sb.AppendLine();
         sb.AppendLine("STRATEGIES:");

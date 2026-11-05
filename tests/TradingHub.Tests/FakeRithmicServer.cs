@@ -17,10 +17,13 @@ internal sealed class FakeRithmicServer : IDisposable
     private WebSocket? _pnlSocket;
     private int _basket;
     private readonly Dictionary<string, int> _filled = new();
+    private readonly Dictionary<string, (bool Buy, int Qty, double Price, int Type, string Tag)> _canceledOrders = new();
 
     public TaskCompletionSource? OrderReplayRelease { get; set; }
     public TaskCompletionSource? PositionSnapshotRelease { get; set; }
     public TaskCompletionSource OrderReplayRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource? PositionUpdateRelease { get; set; }
+    public TaskCompletionSource PositionUpdateRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public bool LoseNewOrderResponse { get; set; }
     public string? NewOrderRejection { get; set; }
     public TaskCompletionSource<string> UnacknowledgedOrderAccepted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -371,6 +374,7 @@ internal sealed class FakeRithmicServer : IDisposable
                 _ = Send(ws, Msg(317, m).String(132766, "5").String(132766, "order not found"));
                 return;
             }
+            _canceledOrders[basket] = o;
         }
 
         await Send(ws, Msg(317, m).String(132766, "0"));
@@ -440,6 +444,11 @@ internal sealed class FakeRithmicServer : IDisposable
         WebSocket? ws;
         lock (_gate) ws = _pnlSocket;
         if (ws == null) return;
+        if (!snapshot && PositionUpdateRelease is { } release)
+        {
+            PositionUpdateRequested.TrySetResult();
+            await release.Task.WaitAsync(_cts.Token);
+        }
         double open = (MarketPrice - AvgPrice) * Position * 50;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         await Send(ws, new ProtoWriter().Int(154467, 450).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1").String(110100, "ESZ6").String(110101, "CME")
@@ -485,6 +494,27 @@ internal sealed class FakeRithmicServer : IDisposable
         }
 
         if (ws is { State: WebSocketState.Open }) await Send(ws, Notify(351, 13, basket, o).Int(154112, qty).Int(154111, 0));
+    }
+
+    /// <summary>A real late execution report for a canceled basket; never reopens or resubmits it.</summary>
+    public async Task FillCanceledOrder(string basket, int quantity, double price)
+    {
+        (bool Buy, int Qty, double Price, int Type, string Tag) order;
+        WebSocket ws;
+        int filled;
+        lock (_gate)
+        {
+            order = _canceledOrders[basket];
+            filled = _filled.GetValueOrDefault(basket) + quantity;
+            if (quantity <= 0 || filled > order.Qty) throw new ArgumentOutOfRangeException(nameof(quantity));
+            _filled[basket] = filled;
+            if (filled == order.Qty) _canceledOrders.Remove(basket);
+            ws = _sessions[2];
+            ApplyFill(order.Buy, quantity, price);
+        }
+        await Send(ws, Notify(352, 5, basket, order).Double(110307, price).Int(110308, quantity)
+            .Int(154111, filled).Int(154112, order.Qty - filled));
+        await SendPnl(snapshot: false);
     }
 
     public async Task FillOrder(string basket, int quantity, double price)

@@ -129,9 +129,10 @@ internal sealed class LiveTradesPanel : UserControl
         _filter.SelectedItem = _filter.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (i.Tag as string) == keep) ?? _filter.Items[0];
         _filling = false;
         var selected = entries.Where(e => keep == null || e.Key == keep).ToList();
-        _historyError.Text = string.Join("\n", selected.Where(e => e.Ledger == null).Select(e => $"{e.Info.Strategy} · {e.Info.Symbol}: {e.LedgerError}"));
+        _historyError.Text = string.Join("\n", selected.Where(e => e.Ledger == null || e.Ledger.HasPendingFinancials)
+            .Select(e => $"{e.Info.Strategy} · {e.Info.Symbol}: {e.LedgerError ?? "Execution prices or fees are pending; net trade results are unavailable."}"));
         _historyError.IsVisible = _historyError.Text.Length > 0;
-        _rows = selected.Where(e => e.Ledger != null)
+        _rows = selected.Where(e => e.Ledger is { HasPendingFinancials: false })
             .SelectMany(e => e.Ledger!.Trades.ToList().Select(t => new Row(e, t))).ToList();
         Render();
         _ = ComputeExcursionsAsync();
@@ -184,6 +185,8 @@ internal sealed class LiveTradesPanel : UserControl
         var durations = rows.Select(r => r.Trade.ExitTime - r.Trade.EntryTime).ToList();
         _summary.Text = $"{rows.Count} trades · net {Money(net)} · {(rows.Count > 0 ? 100.0 * wins / rows.Count : 0):0} % winners · PF {(gl > 0 ? (gp / gl).ToString("0.00", Es) : gp > 0 ? "∞" : "—")}" +
                         $" · average duration {Duration(TimeSpan.FromTicks((long)durations.Average(d => d.Ticks)))}{exText}";
+        if (rows.Any(r => r.Entry.Ledger?.FinancialQuality == LiveFinancialQuality.Estimated))
+            _summary.Text += " · includes legacy estimated accounting";
     }
 
     private Grid BuildRow(Row r)
@@ -228,7 +231,7 @@ internal sealed class LiveTradesPanel : UserControl
 
     private async Task CopyAsync()
     {
-        var sb = new StringBuilder("estrategia;mercado;cuenta;origen;numero;lado;entrada_utc;precio_entrada;salida_utc;precio_salida;duracion_min;cantidad;puntos;resultado;mae;mfe\n");
+        var sb = new StringBuilder("estrategia;mercado;cuenta;origen;numero;lado;entrada_utc;precio_entrada;salida_utc;precio_salida;duracion_min;cantidad;puntos;resultado;mae;mfe;accounting_quality\n");
         foreach (var r in Ordered())
         {
             var t = r.Trade;
@@ -237,7 +240,7 @@ internal sealed class LiveTradesPanel : UserControl
             sb.AppendLine(string.Join(";", r.Entry.Info.Strategy, r.Entry.Info.Symbol, r.Entry.Info.Account, r.Entry.SourceLabel, t.Number.ToString(Inv), t.IsLong ? "long" : "short",
                 t.EntryTime.ToString("yyyy-MM-dd HH:mm:ss", Inv), t.EntryPrice.ToString(Inv), t.ExitTime.ToString("yyyy-MM-dd HH:mm:ss", Inv), t.ExitPrice.ToString(Inv),
                 (t.ExitTime - t.EntryTime).TotalMinutes.ToString("0.##", Inv), t.Quantity.ToString(Inv), points.ToString(Inv), t.NetPnl.ToString("0.##", Inv),
-                hasEx ? ex.Mae.ToString("0.##", Inv) : "", hasEx ? ex.Mfe.ToString("0.##", Inv) : ""));
+                hasEx ? ex.Mae.ToString("0.##", Inv) : "", hasEx ? ex.Mfe.ToString("0.##", Inv) : "", r.Entry.Ledger!.FinancialQuality.ToString()));
         }
 
         if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)

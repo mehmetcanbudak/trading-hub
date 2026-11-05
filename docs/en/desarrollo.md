@@ -87,6 +87,7 @@ The number is initial loading seconds. With no scenes, Trading is captured. Asse
 | ib-data-refresh | Actual Data refresh remains responsive while an owned public import holds publication; the UI releases the import and displays the complete new day index. |
 | ib-live-trades | Actual rendered live trade table refresh after a same-length/preserved-mtime IB replacement; its MAE/MFE must match the validated service, not an older per-view result. |
 | ib-recorded-prefix | Actual live excursion consumer under an owned recorder lease: an incomplete prefix is unavailable, then fully drained valid prices establish the closed range. |
+| live-financial | Actual simulator execution charges in the live portfolio KPI; saves the rendered surface and independent accounting receipt. Requires an explicit isolated live-store override. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
 | panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
 | footprint | Footprint text colors and editor. |

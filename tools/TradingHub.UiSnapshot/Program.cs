@@ -360,6 +360,30 @@ foreach (var page in pages)
         continue;
     }
 
+    if (page == "live-financial")
+    {
+        exitCode += LiveFinancialScene.Run(window, Pump, outDir);
+        continue;
+    }
+
+    if (page == "live-stopped-correction")
+    {
+        exitCode += LiveFinancialScene.Run(window, Pump, outDir, correctAfterStop: true);
+        continue;
+    }
+
+    if (page == "account-journal-revision")
+    {
+        exitCode += LiveFinancialScene.RunJournalRevision(window, Pump, outDir);
+        continue;
+    }
+
+    if (page == "live-excursions")
+    {
+        exitCode += LiveFinancialScene.RunExcursions(Pump, outDir);
+        continue;
+    }
+
     if (page == "english")
     {
         exitCode += EnglishScene.Run(window, Pump, outDir);
@@ -550,15 +574,15 @@ foreach (var page in pages)
         Pump(2);
         var simData = tv.ActiveTab!.Model!.Data;
         var sim = App.Services.SimBrokerFor(simData);
-        sim.Market(TradingHub.Trading.OrderDirections.Buy, 0.5m);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Buy, 0.5m);
         Pump(1.5);
-        sim.Market(TradingHub.Trading.OrderDirections.Buy, 0.5m);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Buy, 0.5m);
         Pump(1.5);
-        sim.Market(TradingHub.Trading.OrderDirections.Sell, 1m);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Sell, 1m);
         Pump(1.5);
-        sim.Market(TradingHub.Trading.OrderDirections.Sell, 0.3m);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Sell, 0.3m);
         Pump(1.5);
-        sim.Limit(TradingHub.Trading.OrderDirections.Buy, 0.2m, Math.Round(simData.LastPrice * 0.98m, 1));
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Limit, TradingHub.Trading.OrderDirections.Buy, 0.2m, Math.Round(simData.LastPrice * 0.98m, 1));
         Pump(1);
         Console.WriteLine($"Simulada: posición {sim.Position!.Volume} · órdenes {sim.Orders.Count} · ejecuciones guardadas {App.Services.Journal.FillsOf("sim").Count}");
 
@@ -715,12 +739,12 @@ foreach (var page in pages)
             decimal last = m.Data.LastPrice;
             decimal tick = m.Instrument.TickSize;
             decimal q = Math.Max(m.Instrument.VolumeStep, 1m * m.Instrument.VolumeStep * 10);
-            acc.Market(TradingHub.Trading.OrderDirections.Buy, q * 4);
+            TradingHub.Trading.OrderActions.Manual(acc, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Buy, q * 4);
             Pump(0.3);
             Console.WriteLine(br.DropFromPosition(last - 60 * tick));
             Console.WriteLine(br.DropFromPosition(last + 80 * tick));
             Console.WriteLine(br.AddTarget(last + 160 * tick));
-            var entry = acc.Limit(TradingHub.Trading.OrderDirections.Buy, q, last - 120 * tick);
+            var entry = TradingHub.Trading.OrderActions.Manual(acc, TradingHub.Trading.OrderTypes.Limit, TradingHub.Trading.OrderDirections.Buy, q, last - 120 * tick);
             Console.WriteLine(br.AttachToEntry(entry, last - 170 * tick));
             Console.WriteLine(br.AttachToEntry(entry, last - 40 * tick));
             m.Viewport.AutoScale = false;
@@ -736,7 +760,7 @@ foreach (var page in pages)
             Console.WriteLine(br.ClosePartial(0.5m));
             Pump(0.5);
             Console.WriteLine($"Después del parcial: posición={acc.Position.Volume} stop={br.StopLoss?.Unfilled} objetivos={string.Join(",", br.Targets.Select(t => t.Unfilled))}");
-            acc.Flatten();
+            TradingHub.Trading.OrderActions.Flatten(acc);
             Pump(0.5);
             Console.WriteLine($"Plana: órdenes activas={acc.ActiveOrders.Count()}");
             m.Viewport.AutoScale = true;
@@ -871,7 +895,7 @@ foreach (var page in pages)
             trChart.Trader?.Refresh();
             Pump(0.5);
             using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_trader_cross.png"));
-            var flat = tv.AccountActionAsync(trChart, a => a.Flatten(), "cerrada");
+            var flat = tv.AccountActionAsync(trChart, a => TradingHub.Trading.OrderActions.Flatten(a), "cerrada");
             while (!flat.IsCompleted) Pump(0.05);
             Pump(1);
             Console.WriteLine($"Cerrada: {target.Instrument.Symbol} posición {target.Position.Volume}");
@@ -1000,7 +1024,7 @@ foreach (var page in pages)
             var others = tv.Tabs.Where(t => !ReferenceEquals(t, ch) && t.Model != null).Select(t => t.Model!.Theme.BackgroundTop.ToString()).Distinct();
             Console.WriteLine($"Colores: este gráfico fondo {ch.Model.Theme.BackgroundTop} · los otros {string.Join(", ", others)}");
 
-            var flat = tv.AccountActionAsync(ch, a => a.Flatten(), "cerrada");
+            var flat = tv.AccountActionAsync(ch, a => TradingHub.Trading.OrderActions.Flatten(a), "cerrada");
             while (!flat.IsCompleted) Pump(0.05);
             PumpPush(1.5);
             Console.WriteLine($"Cerrada: {crossAcc.Instrument.Symbol} posición {crossAcc.Position.Volume}");

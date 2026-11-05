@@ -164,8 +164,8 @@ internal sealed class MenuBarPanel : Window
             };
             var ledger = r.Ledger;
             decimal open = ledger.OpenPnL(r.Data.LastPrice);
-            var pos = new TextBlock { Text = Side(ledger.Position, inst.FormatPrice(ledger.AveragePrice), ledger.OpenSymbol ?? plan.Symbol), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-            var pnl = new TextBlock { Text = $"open {Money(open)} · today {Money(r.TodayPnL)}", FontSize = 12, Foreground = MoneyBrush(open + r.TodayPnL), VerticalAlignment = VerticalAlignment.Center };
+            var pos = new TextBlock { Text = Side(ledger.Position, ledger.HasPendingPrices ? "pending" : inst.FormatPrice(ledger.AveragePrice), ledger.OpenSymbol ?? plan.Symbol), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            var pnl = new TextBlock { Text = $"open {(ledger.KnownOpenPnL(r.Data.LastPrice) is { } knownOpen ? Money(knownOpen) : "pending")} · today {(r.AvailableTodayPnL is { } today ? Money(today) : "pending")} · {ledger.FinancialQuality}", FontSize = 12, Foreground = MoneyBrush(open + r.TodayPnL), VerticalAlignment = VerticalAlignment.Center };
             var bottom = new DockPanel();
             DockPanel.SetDock(pnl, Dock.Right);
             bottom.Children.Add(pnl);

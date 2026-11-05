@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TradingHub.App.Services;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Market;
@@ -115,8 +116,10 @@ public class LivePortfolioTests
             using var runner = new LiveStrategyRunner(new BuyTwo { StopLossTicks = 5, TakeProfitTicks = 10 }, data, broker, ChartPeriod.M1);
             runner.Start();
             string file = LiveStore.LedgerFile(runner.Key);
+            string committed = file + ".fixture-committed";
             try
             {
+                File.Move(file, committed);
                 Directory.CreateDirectory(file);
                 int start = data.Trades.Count;
                 data.Trades.Add(new Trade(6, T0.AddMinutes(3), 100, 1, TradeSide.Buy));
@@ -126,7 +129,6 @@ public class LivePortfolioTests
                 Assert.Equal(2m, broker.Position!.Volume);
                 Assert.True(runner.IsRunning);
                 Assert.True(runner.Paused);
-                Assert.Equal(1, LiveStore.PendingFills(runner.Key));
                 Assert.Equal(2, runner.ActiveOrders.Count(o => o.IsProtective));
                 Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Stop);
                 Assert.Single(broker.ActiveOrders, o => o.Type == OrderTypes.Limit);
@@ -137,9 +139,12 @@ public class LivePortfolioTests
                 Assert.Equal(submitted, broker.Orders.Count);
                 runner.SetPaused(false);
                 Assert.True(runner.Paused);
-                Assert.Contains(runner.LogLines, line => line.Contains("Cannot resume", StringComparison.Ordinal));
 
-                if (restoreBeforeClose) Directory.Delete(file);
+                if (restoreBeforeClose)
+                {
+                    Directory.Delete(file);
+                    File.Move(committed, file);
+                }
                 runner.ClosePosition("Close while ledger entries are paused");
                 Assert.Equal(0m, runner.Ledger.Position);
                 Assert.Equal(0m, broker.Position.Volume);
@@ -147,15 +152,13 @@ public class LivePortfolioTests
                 Assert.True(runner.Paused); // A storage repair does not silently resume new exposure.
                 Assert.False(runner.IsClosing);
                 Assert.Empty(broker.ActiveOrders);
-                var saved = LiveStore.LoadLedger(runner.Key, 1);
-                Assert.Equal(new[] { true, false }, saved.Fills.Select(fill => fill.Buy));
-                Assert.Equal(new[] { 2m, 2m }, saved.Fills.Select(fill => fill.Quantity));
-                Assert.Equal(restoreBeforeClose ? 0 : 2, LiveStore.PendingFills(runner.Key));
                 runner.SetPaused(false);
                 Assert.Equal(!restoreBeforeClose, runner.Paused);
                 if (!restoreBeforeClose)
                 {
+                    Assert.Throws<IOException>(() => LiveStore.LoadLedger(runner.Key, 1));
                     Directory.Delete(file);
+                    File.Move(committed, file);
                     var fillsBeforeResume = runner.Ledger.Fills.ToArray();
                     var tradesBeforeResume = runner.Ledger.Trades.ToArray();
                     int ordersBeforeResume = broker.Orders.Count;
@@ -165,8 +168,11 @@ public class LivePortfolioTests
                     Assert.Equal(tradesBeforeResume, runner.Ledger.Trades);
                     Assert.Equal(ordersBeforeResume, broker.Orders.Count);
                     Assert.Equal(fillsBeforeResume, LiveStore.LoadLedger(runner.Key, 1).Fills);
-                    Assert.Equal(0, LiveStore.PendingFills(runner.Key));
+                    Assert.Equal(0, LiveStore.PendingLedgerEvents(runner.Key));
                 }
+                var saved = LiveStore.LoadLedger(runner.Key, 1);
+                Assert.Equal(new[] { true, false }, saved.Fills.Select(fill => fill.Buy));
+                Assert.Equal(new[] { 2m, 2m }, saved.Fills.Select(fill => fill.Quantity));
             }
             finally
             {
@@ -196,15 +202,297 @@ public class LivePortfolioTests
 
     private const string LedgerKey = "TradingHub.Tests.Strategy|test:TEST|Cuenta simulada";
 
+    private static LiveFill CorrectionExecution(string context, string execution, string order,
+        int minute, bool buy, decimal quantity, decimal price, decimal fee, bool feesComplete = true) =>
+        new(T0.AddMinutes(minute), buy, quantity, price, "TEST", 1m)
+        {
+            Kind = LiveFillKind.Execution,
+            OrderId = order,
+            ContextId = context,
+            ExecutionId = new(new ExecutionScope("ledger-correction-fixture", "sim", "paper", "test:TEST")
+            {
+                ContextId = context,
+            }, execution),
+            Currency = "USD",
+            Fees = new[] { new ExecutionFee(fee, "USD") },
+            FeesComplete = feesComplete,
+        };
+
+    [Fact]
+    public void Correcting_known_five_to_four_retains_five_observed_units_without_prices()
+    {
+        InTemporaryStore(() =>
+        {
+            var ledger = new LiveLedger(LedgerKey, 1m);
+            var observation = new LiveFill(T0, true, 10m, 0m, "TEST", 1m)
+            {
+                Kind = LiveFillKind.QuantityObservation,
+                OrderId = "entry",
+                CumulativeQuantity = 10m,
+                ContextId = "context-A",
+            };
+            var execution = CorrectionExecution("context-A", "entry-1", "entry", 1, true, 5m, 100m, 1m);
+            foreach (var fill in new[] { observation, execution })
+            {
+                Assert.Null(LiveStore.AppendFill(LedgerKey, fill));
+                ledger.Apply(fill);
+            }
+            Assert.Equal(10m, ledger.Position);
+            Assert.True(ledger.HasPendingPrices);
+
+            var correction = execution with { Quantity = 4m, Fees = new[] { new ExecutionFee(0.75m, "USD") } };
+            Assert.Null(LiveStore.AppendFill(LedgerKey, correction));
+            ledger.Apply(correction);
+            var reloaded = LiveStore.LoadLedger(LedgerKey, 1m);
+            foreach (var actual in new[] { ledger, reloaded })
+            {
+                Assert.Equal(9m, actual.Position);
+                Assert.Equal(4m, Assert.Single(actual.Fills).Quantity);
+                Assert.True(actual.HasPendingPrices);
+                Assert.True(actual.HasPendingFinancials);
+                Assert.Equal(LiveFinancialQuality.Pending, actual.FinancialQuality);
+                Assert.Null(actual.NetRealized);
+                Assert.Null(actual.AuthoritativeNet);
+                Assert.Null(actual.AuthoritativeGross);
+                Assert.Null(actual.KnownOpenPnL(120m));
+                Assert.Equal(0m, actual.GrossRealized);
+                Assert.Equal(-0.75m, actual.Realized);
+                Assert.Empty(actual.Trades);
+            }
+
+            // Price exactly the five remaining observed units, without inventing additional exposure.
+            var remaining = CorrectionExecution("context-A", "entry-2", "entry", 2, true, 5m, 118m, 1.25m);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, remaining));
+            ledger.Apply(remaining);
+            foreach (var actual in new[] { ledger, LiveStore.LoadLedger(LedgerKey, 1m) })
+            {
+                Assert.Equal(9m, actual.Position);
+                Assert.Equal(110m, actual.AveragePrice);
+                Assert.Equal(90m, actual.KnownOpenPnL(120m));
+                Assert.False(actual.HasPendingFinancials);
+                Assert.Equal(LiveFinancialQuality.Authoritative, actual.FinancialQuality);
+                Assert.Equal(-2m, actual.AuthoritativeNet);
+                Assert.Equal(0m, actual.AuthoritativeGross);
+                Assert.Equal(2, actual.Fills.Count);
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(false, true, 0, 0)]
+    [InlineData(false, true, 2, -2)]
+    [InlineData(false, false, 0, 0)]
+    [InlineData(false, false, 2, -2)]
+    [InlineData(true, true, 0, -1)]
+    [InlineData(true, true, 2, -3)]
+    [InlineData(true, false, 0, -1)]
+    [InlineData(true, false, 2, -3)]
+    public void Zero_quantity_execution_bust_preserves_real_fees_and_remains_reloadable(
+        bool bustExit, bool feesComplete, int remainingFee, int expectedNet)
+    {
+        InTemporaryStore(() =>
+        {
+            var ledger = new LiveLedger(LedgerKey, 1m);
+            var opening = CorrectionExecution("context-A", "entry", "entry-order", 0, true, 2m, 100m, 1m);
+            Assert.Null(LiveStore.AppendFill(LedgerKey, opening));
+            ledger.Apply(opening);
+            var original = opening;
+            if (bustExit)
+            {
+                original = CorrectionExecution("context-A", "exit", "exit-order", 1, false, 2m, 110m, 3m);
+                Assert.Null(LiveStore.AppendFill(LedgerKey, original));
+                ledger.Apply(original);
+                Assert.Equal(0m, ledger.Position);
+                Assert.Equal(16m, ledger.AuthoritativeNet);
+            }
+            else
+            {
+                Assert.Equal(2m, ledger.Position);
+                Assert.Equal(-1m, ledger.AuthoritativeNet);
+            }
+
+            var bust = original with
+            {
+                Quantity = 0m,
+                Fees = new[] { new ExecutionFee(remainingFee, "USD") },
+                FeesComplete = feesComplete,
+            };
+            Assert.Null(LiveStore.AppendFill(LedgerKey, bust));
+            // Exercise both consumers even if one throws: a successful append must not poison a fresh load.
+            var activeError = Record.Exception(() => ledger.Apply(bust));
+            LiveLedger? reloaded = null;
+            var reloadError = Record.Exception(() => { reloaded = LiveStore.LoadLedger(LedgerKey, 1m); });
+            Assert.Null(activeError);
+            Assert.Null(reloadError);
+            Assert.NotNull(reloaded);
+            foreach (var actual in new[] { ledger, reloaded! })
+            {
+                Assert.Equal(bustExit ? 2m : 0m, actual.Position);
+                Assert.Equal(bustExit ? 100m : 0m, actual.AveragePrice);
+                Assert.Equal(bustExit ? 20m : 0m, actual.KnownOpenPnL(110m));
+                Assert.Equal(0m, actual.GrossRealized);
+                Assert.Equal((decimal)expectedNet, actual.Realized);
+                Assert.Empty(actual.Trades);
+                Assert.False(actual.HasPendingPrices);
+                Assert.Equal(!feesComplete, actual.HasPendingFinancials);
+                Assert.Equal(feesComplete ? LiveFinancialQuality.Authoritative : LiveFinancialQuality.Pending,
+                    actual.FinancialQuality);
+                if (feesComplete)
+                {
+                    Assert.Equal((decimal)expectedNet, actual.AuthoritativeNet);
+                    Assert.Equal((decimal)expectedNet, actual.NetRealized);
+                }
+                else
+                {
+                    Assert.Null(actual.AuthoritativeNet);
+                    Assert.Null(actual.NetRealized);
+                }
+                Assert.Equal(0m, actual.AuthoritativeGross);
+                var effectiveBust = Assert.Single(actual.Fills, fill => fill.ExecutionId == original.ExecutionId);
+                Assert.Equal(0m, effectiveBust.Quantity);
+                Assert.Equal((decimal)remainingFee, Assert.Single(effectiveBust.Fees!).Amount);
+            }
+        });
+    }
+
+    [Fact]
+    public void Opposing_open_contexts_remain_conflicted_at_aggregate_zero_until_both_legs_are_corrected()
+    {
+        InTemporaryStore(() =>
+        {
+            var ledger = new LiveLedger(LedgerKey, 1m);
+            var entryA = CorrectionExecution("context-A", "entry-A", "entry-order-A", 0, true, 2m, 100m, 2m);
+            var exitA = CorrectionExecution("context-A", "exit-A", "exit-order-A", 1, false, 2m, 110m, 2m);
+            var entryB = CorrectionExecution("context-B", "entry-B", "entry-order-B", 2, true, 1m, 200m, 1m);
+            foreach (var fill in new[] { entryA, exitA, entryB })
+            {
+                Assert.Null(LiveStore.AppendFill(LedgerKey, fill));
+                ledger.Apply(fill);
+            }
+            Assert.Equal(1m, ledger.Position);
+            Assert.Equal("context-B", ledger.OpenContextId);
+            Assert.False(ledger.OpenContextConflict);
+            Assert.Equal(15m, ledger.AuthoritativeNet); // A gross twenty minus all five actual fees.
+            Assert.Equal(10m, ledger.KnownOpenPnL(210m));
+
+            var correctedEntryA = entryA with { Quantity = 1m, Fees = new[] { new ExecutionFee(1m, "USD") } };
+            Assert.Null(LiveStore.AppendFill(LedgerKey, correctedEntryA));
+            ledger.Apply(correctedEntryA);
+            foreach (var actual in new[] { ledger, LiveStore.LoadLedger(LedgerKey, 1m) })
+            {
+                // A is short one and B is long one. Their aggregate zero does not settle either owner.
+                Assert.Equal(0m, actual.Position);
+                Assert.True(actual.OpenContextConflict);
+                Assert.Null(actual.OpenContextId);
+                Assert.Null(actual.KnownOpenPnL(210m));
+                Assert.Null(actual.KnownOpenPnL(0m));
+                var stopped = new LiveEntry
+                {
+                    Key = LedgerKey, Source = "fixture", Ledger = actual,
+                    Info = new LiveRunnerInfo { Key = LedgerKey, PointValue = 1m },
+                };
+                Assert.Null(stopped.OpenPnL);
+                Assert.Null(stopped.Net); // No confirmed flat open-value/net from opposing contexts.
+            }
+
+            var correctedExitA = exitA with { Quantity = 1m, Fees = new[] { new ExecutionFee(1m, "USD") } };
+            Assert.Null(LiveStore.AppendFill(LedgerKey, correctedExitA));
+            ledger.Apply(correctedExitA);
+            foreach (var actual in new[] { ledger, LiveStore.LoadLedger(LedgerKey, 1m) })
+            {
+                Assert.Equal(1m, actual.Position);
+                Assert.Equal("context-B", actual.OpenContextId);
+                Assert.False(actual.OpenContextConflict);
+                Assert.Equal(200m, actual.AveragePrice);
+                Assert.Equal(10m, actual.KnownOpenPnL(210m));
+                Assert.False(actual.HasPendingPrices);
+                Assert.False(actual.HasPendingFinancials);
+                Assert.Equal(LiveFinancialQuality.Authoritative, actual.FinancialQuality);
+                Assert.Equal(10m, actual.AuthoritativeGross);
+                Assert.Equal(7m, actual.AuthoritativeNet); // A gross ten minus A fees two and B fee one.
+                Assert.Equal(7m, actual.NetRealized);
+                var closedA = Assert.Single(actual.Trades);
+                Assert.Equal(1m, closedA.Quantity);
+                Assert.Equal(100m, closedA.EntryPrice);
+                Assert.Equal(110m, closedA.ExitPrice);
+                Assert.Equal(10m, closedA.Pnl);
+                Assert.Equal(2m, closedA.Commission);
+                Assert.Equal(8m, closedA.NetPnl);
+                Assert.Equal(3, actual.Fills.Count);
+                Assert.Equal(1m, Assert.Single(actual.Fills, fill => fill.ExecutionId == entryA.ExecutionId).Quantity);
+                Assert.Equal(1m, Assert.Single(actual.Fills, fill => fill.ExecutionId == exitA.ExecutionId).Quantity);
+                Assert.Equal(1m, Assert.Single(actual.Fills, fill => fill.ExecutionId == entryB.ExecutionId).Quantity);
+            }
+        });
+    }
+
+    [Fact]
+    public void Correcting_both_legs_of_closed_context_clears_conflict_without_losing_current_owner()
+    {
+        InTemporaryStore(() =>
+        {
+            var ledger = new LiveLedger(LedgerKey, 1m);
+            var entryA = CorrectionExecution("context-A", "entry-A", "entry-order-A", 0, true, 2m, 100m, 2m);
+            var exitA = CorrectionExecution("context-A", "exit-A", "exit-order-A", 1, false, 2m, 110m, 2m);
+            var entryB = CorrectionExecution("context-B", "entry-B", "entry-order-B", 2, true, 3m, 200m, 3m);
+            foreach (var fill in new[] { entryA, exitA, entryB })
+            {
+                Assert.Null(LiveStore.AppendFill(LedgerKey, fill));
+                ledger.Apply(fill);
+            }
+            Assert.Equal(3m, ledger.Position);
+            Assert.Equal("context-B", ledger.OpenContextId);
+            Assert.False(ledger.OpenContextConflict);
+            Assert.Equal(13m, ledger.AuthoritativeNet);
+
+            var correctedEntryA = entryA with { Quantity = 1m, Fees = new[] { new ExecutionFee(1m, "USD") } };
+            Assert.Null(LiveStore.AppendFill(LedgerKey, correctedEntryA));
+            ledger.Apply(correctedEntryA);
+            Assert.Equal(2m, ledger.Position);
+            Assert.True(ledger.OpenContextConflict);
+            var intermediate = LiveStore.LoadLedger(LedgerKey, 1m);
+            Assert.Equal(2m, intermediate.Position);
+            Assert.True(intermediate.OpenContextConflict);
+
+            var correctedExitA = exitA with { Quantity = 1m, Fees = new[] { new ExecutionFee(1m, "USD") } };
+            Assert.Null(LiveStore.AppendFill(LedgerKey, correctedExitA));
+            ledger.Apply(correctedExitA);
+            foreach (var actual in new[] { ledger, LiveStore.LoadLedger(LedgerKey, 1m) })
+            {
+                Assert.Equal(3m, actual.Position);
+                Assert.Equal("context-B", actual.OpenContextId);
+                Assert.False(actual.OpenContextConflict);
+                Assert.Equal("TEST", actual.OpenSymbol);
+                Assert.Equal(1m, actual.OpenPointValue);
+                Assert.Equal(200m, actual.AveragePrice);
+                Assert.Equal(30m, actual.KnownOpenPnL(210m));
+                Assert.False(actual.HasPendingFinancials);
+                Assert.Equal(LiveFinancialQuality.Authoritative, actual.FinancialQuality);
+                Assert.Equal(10m, actual.AuthoritativeGross);
+                Assert.Equal(5m, actual.AuthoritativeNet);
+                Assert.Equal(5m, actual.NetRealized);
+                var closedA = Assert.Single(actual.Trades);
+                Assert.Equal(1m, closedA.Quantity);
+                Assert.Equal(100m, closedA.EntryPrice);
+                Assert.Equal(110m, closedA.ExitPrice);
+                Assert.Equal(10m, closedA.Pnl);
+                Assert.Equal(2m, closedA.Commission);
+                Assert.Equal(8m, closedA.NetPnl);
+                Assert.Equal(3, actual.Fills.Count);
+            }
+            Assert.Equal(0, LiveStore.PendingLedgerEvents(LedgerKey));
+        });
+    }
+
     [Fact]
     public void Saving_existing_pending_fills_does_not_invent_a_fill_or_create_a_missing_history()
     {
         InTemporaryStore(() =>
         {
-            Assert.Null(LiveStore.SavePendingFills(LedgerKey));
+            Assert.Null(LiveStore.SavePendingLedgerEvents(LedgerKey));
             Assert.False(File.Exists(LiveStore.LedgerFile(LedgerKey)));
             Assert.Empty(LiveStore.LoadLedger(LedgerKey, 1).Fills);
-            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(0, LiveStore.PendingLedgerEvents(LedgerKey));
         });
     }
 
@@ -217,10 +505,10 @@ public class LivePortfolioTests
             File.WriteAllText(LiveStore.Root, "artificial root I/O fault");
             try { Assert.NotNull(LiveStore.AppendFill(LedgerKey, fill)); }
             finally { File.Delete(LiveStore.Root); }
-            Assert.Null(LiveStore.SavePendingFills(LedgerKey));
+            Assert.Null(LiveStore.SavePendingLedgerEvents(LedgerKey));
             Assert.Equal(new[] { fill }, LiveStore.LoadLedger(LedgerKey, 1).Fills);
-            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
-            Assert.Null(LiveStore.SavePendingFills(LedgerKey));
+            Assert.Equal(0, LiveStore.PendingLedgerEvents(LedgerKey));
+            Assert.Null(LiveStore.SavePendingLedgerEvents(LedgerKey));
             Assert.Equal(new[] { fill }, LiveStore.LoadLedger(LedgerKey, 1).Fills);
         });
     }
@@ -262,12 +550,12 @@ public class LivePortfolioTests
             var second = new LiveFill(T0.AddMinutes(1), false, 1, 101);
             var third = new LiveFill(T0.AddMinutes(2), true, 2, 102);
             Assert.NotNull(LiveStore.AppendFill(LedgerKey, first)); // reported, not swallowed
-            Assert.Equal(1, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(1, LiveStore.PendingLedgerEvents(LedgerKey));
             Assert.Equal(1m, LiveStore.LoadLedger(LedgerKey, 1).Position); // still part of the ledger in this process
 
             Directory.Delete(file); // writable again
             Assert.Null(LiveStore.AppendFill(LedgerKey, second));
-            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(0, LiveStore.PendingLedgerEvents(LedgerKey));
             Assert.Null(LiveStore.AppendFill(LedgerKey, third));
             // in order and once each
             Assert.Equal(new[] { first, second, third }.Select(f => JsonSerializer.Serialize(f)), File.ReadAllLines(file));
@@ -376,7 +664,7 @@ public class LivePortfolioTests
             Assert.Equal(10m, saved.Realized);
             Assert.Equal(5m, saved.OpenPnL(75));
             Assert.Equal(1, saved.SkippedLines);
-            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(0, LiveStore.PendingLedgerEvents(LedgerKey));
             Assert.Equal(new[]
             {
                 JsonSerializer.Serialize(opening), "{corrupt committed line}",
@@ -433,7 +721,7 @@ public class LivePortfolioTests
                     ? new FaultingLedgerStream(path, failure)
                     : new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0)));
             Assert.Equal(committed, File.ReadAllBytes(file));
-            Assert.Equal(1, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(1, LiveStore.PendingLedgerEvents(LedgerKey));
             var waiting = LiveStore.LoadLedger(LedgerKey, 1);
             Assert.Equal(new[] { opening, closing }, waiting.Fills);
             Assert.Equal(1m, waiting.Position);
@@ -443,7 +731,7 @@ public class LivePortfolioTests
             Assert.Equal(new[] { opening, closing, next }, saved.Fills);
             Assert.Equal(0m, saved.Position);
             Assert.Equal(15m, saved.Realized);
-            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(0, LiveStore.PendingLedgerEvents(LedgerKey));
         });
     }
 
@@ -475,7 +763,7 @@ public class LivePortfolioTests
             Assert.NotNull(LiveStore.AppendFill(LedgerKey, new LiveFill(T0, true, 1, 100)));
             LiveStore.DeleteFills(LedgerKey); // starting fresh: the unsaved fill belongs to the deleted history
             Directory.Delete(file); // Remove the artificial I/O fault before querying the now-deleted history.
-            Assert.Equal(0, LiveStore.PendingFills(LedgerKey));
+            Assert.Equal(0, LiveStore.PendingLedgerEvents(LedgerKey));
             Assert.Empty(LiveStore.LoadLedger(LedgerKey, 1).Fills);
             var next = new LiveFill(T0.AddMinutes(1), false, 1, 101);
             Assert.Null(LiveStore.AppendFill(LedgerKey, next));
@@ -516,7 +804,7 @@ public class LivePortfolioTests
             Assert.Null(LiveStore.AppendFill(LedgerKey, new LiveFill(T0, true, 1, 100)));
             string file = LiveStore.LedgerFile(LedgerKey);
             File.Delete(file);
-            Assert.Throws<IOException>(() => LiveStore.PendingFills(LedgerKey));
+            Assert.Throws<IOException>(() => LiveStore.PendingLedgerEvents(LedgerKey));
             Assert.Throws<IOException>(() => LiveStore.LoadLedger(LedgerKey, 1));
             Assert.NotNull(LiveStore.AppendFill(LedgerKey, new LiveFill(T0.AddMinutes(1), false, 1, 110)));
             Assert.False(File.Exists(file));

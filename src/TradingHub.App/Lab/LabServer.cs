@@ -195,7 +195,7 @@ internal static class LabServer
             Tool("suggest_portfolio", "Searches the latest strategy backtests for a low-correlation combination that most improves aggregate Sharpe.",
                 Schema(("max_components", "integer", "Maximum strategies (5)", false), ("max_correlation", "number", "Maximum correlation between two strategies (0.5)", false),
                     ("capital", "number", "Portfolio capital (10000)", false))),
-            Tool("live_portfolio", "Live portfolio (read-only): each strategy currently or previously running algorithms in Trading Hub, with live parameters, size, position, PnL, trades, win rate, profit factor (overall and last 20 trades), current/maximum drawdown and recent trades with prices and quantities. " +
+            Tool("live_portfolio", "Read-only live strategy positions, sizes, accounting quality, PnL, trades and risk metrics. Confirmed financial values are nullable; explicitly named estimates preserve legacy or incomplete results without presenting them as verified execution economics. " +
                                    "Identifies each execution contract (e.g. MNQ for an NQ strategy): quantities and PnL refer to that contract.",
                 Schema(("recent_trades", "integer", "Recent trades per strategy (10)", false))),
             Tool("propose_sizing", "Proposes position-size changes for live strategies. Applies NOTHING: proposals remain pending until the user approves or rejects each in Live → Proposals.",
@@ -1245,6 +1245,7 @@ internal static class LabServer
     private static JsonArray LiveTrades(LiveRunnerInfo info, int recent)
     {
         var ledger = LiveStore.LoadLedger(info.Key, info.PointValue);
+        bool pricesKnown = ledger.AuthoritativeGross.HasValue;
         return new JsonArray(ledger.Trades.TakeLast(recent).Select(t =>
         {
             // los llenados viejos no traen contrato: son del instrumento de la estrategia
@@ -1254,16 +1255,28 @@ internal static class LabServer
             {
                 ["side"] = t.IsLong ? "long" : "short",
                 ["entry"] = t.EntryTime.ToString("yyyy-MM-dd HH:mm", Inv),
-                ["entry_price"] = t.EntryPrice,
+                ["entry_price"] = pricesKnown ? t.EntryPrice : null,
+                ["entry_price_estimate"] = t.EntryPrice,
                 ["exit"] = t.ExitTime.ToString("yyyy-MM-dd HH:mm", Inv),
-                ["exit_price"] = t.ExitPrice,
+                ["exit_price"] = pricesKnown ? t.ExitPrice : null,
+                ["exit_price_estimate"] = t.ExitPrice,
                 ["contract"] = contract,
                 ["quantity"] = t.Quantity,
                 ["instrument_quantity"] = ratio is { } r ? Math.Round(t.Quantity / r, 4) : null,
-                ["pnl"] = Math.Round(t.NetPnl, 2),
+                ["financial_quality"] = FinancialQualityCode(ledger.FinancialQuality),
+                ["pnl"] = ledger.FinancialQuality == LiveFinancialQuality.Authoritative ? Math.Round(t.NetPnl, 2) : null,
+                ["pnl_estimate"] = Math.Round(t.NetPnl, 2),
             };
         }).ToArray());
     }
+
+    private static string FinancialQualityCode(LiveFinancialQuality quality) => quality switch
+    {
+        LiveFinancialQuality.Authoritative => "authoritative",
+        LiveFinancialQuality.Estimated => "estimated",
+        LiveFinancialQuality.Pending => "pending",
+        _ => throw new ArgumentOutOfRangeException(nameof(quality), quality, "Unknown live financial quality."),
+    };
 
     internal static JsonNode LivePortfolio(JsonObject a)
     {
@@ -1285,20 +1298,27 @@ internal static class LabServer
                 ["parameters"] = JsonSerializer.SerializeToNode(s.Info.Parameters),
                 ["size"] = s.Info.Size,
                 ["position"] = s.Info.Position,
-                ["open_pnl"] = Math.Round(s.Info.OpenPnL, 2),
-                ["net"] = Math.Round(s.Net, 2),
-                ["metrics"] = MetricsJson(s.Metrics),
-                ["recent_profit_factor"] = s.RecentTrades > 0 ? Math.Round(Math.Min(s.RecentProfitFactor, 999), 2) : null,
-                ["recent_expectancy"] = Math.Round(s.RecentExpectancy, 2),
+                ["financial_quality"] = FinancialQualityCode(s.FinancialQuality),
+                ["open_pnl"] = s.FinancialQuality == LiveFinancialQuality.Authoritative && s.Info.AvailableOpenPnL is { } open ? Math.Round(open, 2) : null,
+                ["open_pnl_estimate"] = Math.Round(s.Info.OpenPnL, 2),
+                ["net"] = s.FinancialQuality == LiveFinancialQuality.Authoritative && s.CompleteNet is { } net ? Math.Round(net, 2) : null,
+                ["net_estimate"] = Math.Round(s.Net, 2),
+                ["metrics"] = s.FinancialQuality == LiveFinancialQuality.Authoritative ? MetricsJson(s.Metrics) : null,
+                ["metrics_estimate"] = s.FinancialQuality != LiveFinancialQuality.Authoritative ? MetricsJson(s.Metrics) : null,
+                ["recent_profit_factor"] = s.FinancialQuality == LiveFinancialQuality.Authoritative && s.RecentTrades > 0 ? Math.Round(Math.Min(s.RecentProfitFactor, 999), 2) : null,
+                ["recent_profit_factor_estimate"] = s.RecentTrades > 0 ? Math.Round(Math.Min(s.RecentProfitFactor, 999), 2) : null,
+                ["recent_expectancy"] = s.FinancialQuality == LiveFinancialQuality.Authoritative ? Math.Round(s.RecentExpectancy, 2) : null,
+                ["recent_expectancy_estimate"] = Math.Round(s.RecentExpectancy, 2),
                 ["recent_trades_count"] = s.RecentTrades,
-                ["current_drawdown"] = Math.Round(s.CurrentDrawdown, 2),
+                ["current_drawdown"] = s.FinancialQuality == LiveFinancialQuality.Authoritative ? Math.Round(s.CurrentDrawdown, 2) : null,
+                ["current_drawdown_estimate"] = Math.Round(s.CurrentDrawdown, 2),
                 ["last_trades"] = LiveTrades(s.Info, recent),
             }).ToArray()),
             ["pending_proposals"] = LiveStore.LoadProposals().Count(p => p.IsPending),
             ["note"] = "Sizes multiply each strategy's requested quantity (1 = normal, 0 = paused). Use propose_sizing to change them; the user approves every change. " +
-                       "Times are UTC. entry_price and exit_price are the latest market prices when each fill was recorded, not broker-reported fill prices, " +
-                       "so they cannot measure exact slippage. Live PnL uses those prices and excludes commissions (the strategy ledger does not record them): " +
-                       "compare against a zero-commission backtest or account for fees separately. " +
+                       "Times are UTC. financial_quality is authoritative, estimated or pending. Null confirmed values mean unavailable, never zero. " +
+                       "Fields ending in _estimate are best-available numeric estimates, not necessarily confirmed results. Actual execution facts use reported prices and original-currency fees; " +
+                       "legacy history remains estimated, and missing prices, fees, conversions or valuations are not invented. Execution PnL is not a complete broker cash statement including funding or financing. " +
                        "position, quantity and pnl refer to the execution contract (exec_symbol per strategy, contract per trade; e.g. MNQ for an NQ strategy) " +
                        "and already include the size multiplier. instrument_quantity converts to the strategy's instrument (5 MNQ = 0.5 NQ; exec_ratio is execution contracts per instrument unit) " +
                        "and pnl is for that quantity: scale it for a backtest comparison (pnl × backtest quantity / instrument_quantity).",

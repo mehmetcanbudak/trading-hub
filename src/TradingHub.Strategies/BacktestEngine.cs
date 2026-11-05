@@ -401,6 +401,7 @@ public sealed class BacktestEngine : IStrategyHost
     public decimal AveragePrice => _avg;
     public decimal OpenPnL => _pos == 0 ? 0 : (LastPrice - _avg) * _pos * _pointValue;
     public decimal RealizedPnL => _realized;
+    public LiveFinancialQuality FinancialQuality => LiveFinancialQuality.Estimated;
     public IReadOnlyList<StrategyOrder> ActiveOrders => _orders.ToList();
     public bool IsBacktest => true;
 

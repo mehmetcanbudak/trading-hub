@@ -30,45 +30,18 @@ public interface ITradingAccount
 
     event Action? Changed;
 
-    Order Market(OrderDirections dir, decimal qty, string comment = "");
-    Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "");
-    Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "");
+    /// <summary>Prepared identities and read-only account execution replay; neither is derived from display comments.</summary>
+    OrderContext OrderContext { get; }
+    IExecutionSource Executions { get; }
+    Order Submit(PreparedOrderIntent intent);
+    Order Replace(Order order, PreparedOrderIntent intent);
     void Cancel(Order order);
     void CancelAt(decimal price);
     void CancelAll();
-    void Modify(Order order, decimal newPrice);
-    void Flatten();
-    void Reverse();
 
     /// <summary>Último precio operado del instrumento (0 si todavía no hay datos).</summary>
     decimal LastPrice => 0;
 
-    /// <summary>A reducing market, stop or limit exit. Accounts with native reduce-only support must send that flag
-    /// with the request; otherwise callers must coordinate sibling exits (the local flag alone is not exchange enforcement).</summary>
-    Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "")
-    {
-        var o = type == OrderTypes.Market ? Market(dir, qty, comment) : type == OrderTypes.Stop ? Stop(dir, qty, price, comment) : Limit(dir, qty, price, comment);
-        o.ReduceOnly = true;
-        return o;
-    }
-
-    /// <summary>
-    /// Cambia precio y cantidad de una orden. Devuelve la orden vigente: la misma, o una nueva si el
-    /// broker no permite modificar (cancela y vuelve a enviar).
-    /// </summary>
-    Order Replace(Order order, decimal newPrice, decimal newQuantity)
-    {
-        if (newQuantity == order.Unfilled)
-        {
-            Modify(order, newPrice);
-            return order;
-        }
-
-        Cancel(order);
-        return order.ReduceOnly
-            ? Exit(order.Type, order.Direction, newQuantity, newPrice, order.Comment)
-            : order.Type == OrderTypes.Stop ? Stop(order.Direction, newQuantity, newPrice, order.Comment) : Limit(order.Direction, newQuantity, newPrice, order.Comment);
-    }
 }
 
 /// <summary>

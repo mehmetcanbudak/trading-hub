@@ -235,21 +235,21 @@ internal sealed partial class LiveView : UserControl, IPage
         else _notice.IsVisible = false;
 
         _kpis.Children.Clear();
-        bool complete = entries.All(e => e.Ledger != null);
+        bool complete = entries.All(e => e.Ledger is { HasPendingFinancials: false });
         decimal? net = complete ? entries.Sum(e => e.Net) : null;
-        decimal? open = running.All(e => e.Ledger != null) ? running.Sum(e => e.OpenPnL) : null;
-        decimal today = running.Sum(e => e.Runner!.TodayPnL);
+        decimal? open = running.All(e => e.OpenPnL != null) ? running.Sum(e => e.OpenPnL) : null;
+        decimal? today = running.All(e => e.Runner!.AvailableTodayPnL != null) ? running.Sum(e => e.Runner!.AvailableTodayPnL) : null;
         int? trades = complete ? entries.Sum(e => e.Ledger!.Trades.Count) : null;
         int paused = running.Count(e => e.Paused || e.Runner!.DailyLimitActive);
         int pending = LiveStore.LoadProposals().Sum(p => p.Items.Count(i => i.Status == "pending"));
-        _kpis.Children.Add(Kpi("PnL", Money(net), complete ? $"open {Money(open)}" : "History unavailable", net == null ? Ui.Warn : net >= 0 ? Ui.Up : Ui.Down));
+        _kpis.Children.Add(Kpi("PnL", Money(net), complete ? $"open {Money(open)} · {((entries.Any(e => e.Ledger?.FinancialQuality == LiveFinancialQuality.Estimated)) ? "includes estimates" : "reported executions")}" : "Accounting unavailable or pending", net == null ? Ui.Warn : net >= 0 ? Ui.Up : Ui.Down));
         _kpis.Children.Add(Kpi("Today", Money(today), "closed + open PnL of running strategies", today >= 0 ? Ui.Up : Ui.Down));
         _kpis.Children.Add(Kpi("Live", running.Count.ToString(Inv), paused > 0 ? $"{paused} paused or risk-stopped" : $"Total strategies: {entries.Count}", running.Count > 0 ? Ui.Accent : null));
         _kpis.Children.Add(Kpi("Closed trades", trades?.ToString(Inv) ?? "—", complete ? "click to view all trade details" : "History unavailable", null, () => OpenTrades(), "All trades with MAE, MFE, size and more; select a trade to view it on the chart"));
         _kpis.Children.Add(Kpi("Pending changes", pending.ToString(Inv), "awaiting your approval", pending > 0 ? Ui.Warn : null, pending > 0 ? () => Select("proposals") : null));
 
         // la tabla solo se rehace si cambió algo visible
-        string key = string.Join("|", entries.Select(e => $"{e.Key}:{e.StateLabel}:{e.LedgerError}:{OutOfContext(e)}:{e.Ledger?.Fills.Count}:{e.Ledger?.Position}:{(e.Runner?.SizeMultiplier ?? e.Info.Size)}:{_svc.Live.PlanOf(e).Text}:{e.OpenPnL:0}:{(e.Runner?.MaxDailyLoss ?? e.Info.MaxDailyLoss)}:{(e.Runner?.MaxDrawdown ?? e.Info.MaxDrawdown)}"));
+        string key = string.Join("|", entries.Select(e => $"{e.Key}:{e.StateLabel}:{e.LedgerError}:{OutOfContext(e)}:{e.Ledger?.Revision}:{e.Ledger?.Position}:{(e.Runner?.SizeMultiplier ?? e.Info.Size)}:{_svc.Live.PlanOf(e).Text}:{e.OpenPnL:0}:{(e.Runner?.MaxDailyLoss ?? e.Info.MaxDailyLoss)}:{(e.Runner?.MaxDrawdown ?? e.Info.MaxDrawdown)}"));
         if (!force && key == _rowsKey) return;
         _rowsKey = key;
         _rows.Children.Clear();
@@ -282,7 +282,7 @@ internal sealed partial class LiveView : UserControl, IPage
         var info = e.Info;
         var r = e.Runner;
         var ledger = e.Ledger;
-        var stats = ledger != null ? LiveStore.StatsOf(info, ledger, 25_000m) : null;
+        var stats = ledger is { HasPendingFinancials: false } ? LiveStore.StatsOf(info, ledger, 25_000m) : null;
         var g = new Grid { ColumnDefinitions = new ColumnDefinitions(RowColumns), Margin = new Thickness(10, 0) };
         IBrush dotColor = ledger == null ? Ui.Warn : e.Running ? (e.Paused || r!.DailyLimitActive ? Ui.Warn : Ui.Up) : e.WaitingResume ? Ui.Warn : Ui.Text2;
         var dot = new Avalonia.Controls.Shapes.Ellipse { Width = 8, Height = 8, Fill = dotColor, VerticalAlignment = VerticalAlignment.Center };
@@ -313,11 +313,11 @@ internal sealed partial class LiveView : UserControl, IPage
             StateCell(e, dotColor),
             SizeCell(e, size, plan),
             Num(pos is not { } quantity ? "Unavailable" : quantity == 0 ? "—" : $"{(quantity > 0 ? "L" : "C")} {Math.Abs(quantity).ToString("0.####", Es)} {posSymbol}", pos == null ? Ui.Warn : pos > 0 ? Ui.Up : pos < 0 ? Ui.Down : null),
-            Num(r != null && e.Running ? Money(r.TodayPnL) : "—", r != null && e.Running ? (r.TodayPnL >= 0 ? Ui.Up : Ui.Down) : null),
+            Num(r != null && e.Running ? Money(r.AvailableTodayPnL) : "—", r != null && e.Running ? (r.AvailableTodayPnL >= 0 ? Ui.Up : Ui.Down) : null),
             Num(Money(e.Net), e.Net == null ? Ui.Text2 : e.Net >= 0 ? Ui.Up : Ui.Down),
             Num(m?.TotalTrades.ToString(Inv) ?? "—"),
             Num(m is { TotalTrades: > 0 } ? (m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es)) : "—"),
-            Num((r?.CurrentDrawdown ?? stats?.CurrentDrawdown)?.ToString("#,##0.00", Es) ?? "—"),
+            Num((r?.AvailableCurrentDrawdown ?? stats?.CurrentDrawdown)?.ToString("#,##0.00", Es) ?? "—"),
             new TextBlock { Text = $"{(dl > 0 ? dl.ToString("#,##0", Es) : "—")} / {(dd > 0 ? dd.ToString("#,##0", Es) : "—")}", FontSize = 12, Foreground = Ui.Text1 },
             Ui.Icon(MaterialIconKind.ChevronRight, 16, Ui.Text2),
         };
@@ -409,6 +409,11 @@ internal sealed partial class LiveView : UserControl, IPage
         if (entries.FirstOrDefault(e => e.Ledger == null) is { } unavailable)
         {
             _status(unavailable.LedgerError ?? "History unavailable");
+            return;
+        }
+        if (entries.Any(e => e.Ledger!.HasPendingFinancials))
+        {
+            _status("Execution prices or fees are pending; sizing suggestions are unavailable.");
             return;
         }
         var stats = entries.Select(e => LiveStore.StatsOf(e.Info, e.Ledger!, 10_000)).ToList();

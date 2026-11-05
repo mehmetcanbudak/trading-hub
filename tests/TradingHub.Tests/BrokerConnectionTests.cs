@@ -12,8 +12,11 @@ using TradingHub.Trading;
 namespace TradingHub.Tests;
 
 /// <summary>cTrader (Open API JSON) y Tradovate (REST + WebSocket) contra servidores de mentira con sus mensajes reales.</summary>
-public class BrokerConnectionTests
+public class BrokerConnectionTests : IDisposable
 {
+    private readonly NativeOrderTestFixture _orders = new();
+    public void Dispose() => _orders.Dispose();
+
     private static readonly DateOnly Day = new(2026, 10, 12);
 
     private sealed class Sink : IMarketDataSink
@@ -186,9 +189,9 @@ public class BrokerConnectionTests
         Assert.Equal("DEMO101", acc.Name);
 
         var data = new InstrumentData(Es, new SimulatedFeed());
-        using var broker = new TradovateBroker(data, session, acc, "DEMO101 · Tradovate (demo)");
+        using var broker = _orders.Tradovate(data, session, acc, "DEMO101 · Tradovate (demo)");
         Assert.False(broker.IsReal);
-        broker.Market(OrderDirections.Buy, 2, "Chart Trader");
+        OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 2, comment: "Chart Trader");
         await Until(() => broker.Position.Volume == 2 && fills.Count == 1);
         Assert.Equal(2, broker.Position.Volume);
         Assert.Equal(5000.25m, broker.Position.AveragePrice);
@@ -201,11 +204,12 @@ public class BrokerConnectionTests
         Assert.False(sent["isAutomated"]!.GetValue<bool>());
 
         // límite: queda activa, se modifica y se cancela
-        var limit = broker.Limit(OrderDirections.Buy, 1, 4990, "Estrategia: entrada");
+        var limit = OrderActions.Place(broker, new OrderOwner("native-test-strategy", Kind: OrderOwnerKind.Strategy),
+            OrderTypes.Limit, OrderDirections.Buy, 1, 4990, "Limit fixture");
         await Until(() => limit.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(limit));
         Assert.True(fake.Orders[1]["isAutomated"]!.GetValue<bool>()); // de una estrategia
         Assert.Equal(4990m, fake.Orders[1]["price"]!.GetValue<decimal>());
-        broker.Modify(limit, 4985);
+        OrderActions.Reprice(broker, limit, 4985);
         await Until(() => fake.Orders.Count >= 3);
         Assert.Equal(4985m, fake.Orders[2]["price"]!.GetValue<decimal>());
         broker.Cancel(limit);
@@ -223,11 +227,11 @@ public class BrokerConnectionTests
         using var session = new TradovateTradingSession(feed.Connection);
         session.Start();
         await Until(() => session.Accounts.Count == 1);
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
-        var entry = broker.Market(OrderDirections.Buy, 2);
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var entry = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 2);
         await Until(() => broker.Position.Volume == 2 && entry.Status == OrderStatus.Filled);
         Assert.Equal(2m, broker.Position.Volume);
-        var limit = broker.Limit(OrderDirections.Buy, 1, 4990);
+        var limit = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1, 4990);
         await Until(() => limit.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(limit));
         Assert.Contains(limit, broker.ActiveOrders);
         await fake.DisconnectUserAndFlatten();
@@ -269,8 +273,9 @@ public class BrokerConnectionTests
         using var session = new TradovateTradingSession(feed.Connection);
         session.Start();
         await Until(() => session.SnapshotReady);
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
-        var owned = broker.Limit(OrderDirections.Buy, 3, 4990, "Strategy: unknown acceptance");
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var owned = OrderActions.Place(broker, new OrderOwner("native-test-strategy", Kind: OrderOwnerKind.Strategy),
+            OrderTypes.Limit, OrderDirections.Buy, 3, 4990, "Uncertain placement fixture");
         var sent = await accepted.Task.WaitAsync(TimeSpan.FromSeconds(8));
         string tag = sent["clOrdId"]!.GetValue<string>();
         Assert.InRange(tag.Length, 1, 64);
@@ -360,8 +365,8 @@ public class BrokerConnectionTests
         using var session = new TradovateTradingSession(feed.Connection);
         session.Start();
         await Until(() => session.SnapshotReady);
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
-        var order = broker.Limit(OrderDirections.Buy, 1, 4990);
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1, 4990);
         await Until(() => order.State == OrderStates.Failed && !broker.ActiveOrders.Contains(order));
         Assert.Equal(OrderStates.Failed, order.State);
         Assert.Equal(OrderStatus.Rejected, order.Status);
@@ -390,12 +395,12 @@ public class BrokerConnectionTests
         using var session = new TradovateTradingSession(feed.Connection);
         session.Start();
         await Until(() => session.SnapshotReady);
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
-        var order = broker.Limit(OrderDirections.Buy, 3, 4990);
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && order.QuantityToFill == 3);
         string originalId = order.ExchangeOrderId;
         long id = long.Parse(originalId, System.Globalization.CultureInfo.InvariantCulture);
-        Assert.Same(order, broker.Replace(order, 4985, 2));
+        Assert.Same(order, OrderActions.Replace(broker, order, 4985, 2));
         await Until(() => Volatile.Read(ref amendments) == 1);
         if (rejected)
         {
@@ -408,7 +413,7 @@ public class BrokerConnectionTests
         order.Price = 4985;
         order.Unfilled = 2;
         Assert.True(broker.IsReplacementPending(order));
-        broker.Replace(order, 4980, 1);
+        OrderActions.Replace(broker, order, 4980, 1);
         await Task.Delay(100);
         Assert.Equal(1, Volatile.Read(ref amendments));
         Assert.True(session.HasOpenPositionsOrOrders);
@@ -468,19 +473,19 @@ public class BrokerConnectionTests
         using var session = new TradovateTradingSession(feed.Connection);
         session.Start();
         await Until(() => session.SnapshotReady);
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
-        var order = broker.Stop(OrderDirections.Sell, 3, 4990);
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 3, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && order.TriggerPrice == 4990);
         long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
         await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Stop"));
-        broker.Modify(order, 4991);
+        OrderActions.Reprice(broker, order, 4991);
         var first = await firstRequest.Task.WaitAsync(TimeSpan.FromSeconds(8));
         Assert.Equal(4991m, first["stopPrice"]!.GetValue<decimal>());
-        broker.Modify(order, 4992);
-        broker.Modify(order, 4993); // No subsequent market high is needed to deliver this latest price.
+        OrderActions.Reprice(broker, order, 4992);
+        OrderActions.Reprice(broker, order, 4993); // No subsequent market high is needed to deliver this latest price.
         order.Price = 4993; // The runner may already have advanced its public trailing-stop fields.
         order.TriggerPrice = 4993;
-        broker.Replace(order, 4980, 1); // Explicit sizing requests remain duplicate-suppressed.
+        OrderActions.Replace(broker, order, 4980, 1); // Explicit sizing requests remain duplicate-suppressed.
         await fake.PublishFill(new JsonObject
         {
             ["id"] = 9901, ["orderId"] = id, ["contractId"] = 555, ["action"] = "Sell",
@@ -549,14 +554,14 @@ public class BrokerConnectionTests
         using var session = new TradovateTradingSession(feed.Connection);
         session.Start();
         await Until(() => session.SnapshotReady);
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
-        var order = broker.Stop(OrderDirections.Sell, 3, 4990);
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 3, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && order.TriggerPrice == 4990);
         long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
         await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Stop"));
-        broker.Replace(order, 4991, 2);
+        OrderActions.Replace(broker, order, 4991, 2);
         await Until(() => Volatile.Read(ref amendments) == 1 && broker.LastError != null);
-        broker.Modify(order, 4993);
+        OrderActions.Reprice(broker, order, 4993);
         await fake.PublishFill(new JsonObject
         {
             ["id"] = 9902, ["orderId"] = id, ["contractId"] = 555, ["action"] = "Sell",
@@ -594,8 +599,8 @@ public class BrokerConnectionTests
         using var session = new TradovateTradingSession(feed.Connection);
         session.Start();
         await Until(() => session.SnapshotReady);
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
-        var order = broker.Limit(OrderDirections.Buy, 3, 4990);
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && order.QuantityToFill == 3);
         long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
         await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Limit"));
@@ -662,17 +667,17 @@ public class BrokerConnectionTests
         using var session = new TradovateTradingSession(feed.Connection);
         session.Start();
         await Until(() => session.SnapshotReady);
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
-        var order = broker.Stop(OrderDirections.Sell, 3, 4990);
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        var order = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 3, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0);
         long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
         await Until(() => session.OrdersOf(101, 555).Any(s => s.Id == id && s.Type == "Stop"));
-        broker.Modify(order, 4991);
+        OrderActions.Reprice(broker, order, 4991);
         await Until(() => Volatile.Read(ref amendments) == 1);
-        broker.Modify(order, 4993);
+        OrderActions.Reprice(broker, order, 4993);
         broker.Cancel(order);
         await Until(() => Volatile.Read(ref cancels) == 1);
-        broker.Modify(order, 4994); // Cancel intent also rejects later trailing updates.
+        OrderActions.Reprice(broker, order, 4994); // Cancel intent also rejects later trailing updates.
         await fake.PublishVersion(new JsonObject
         {
             ["id"] = 95, ["orderId"] = id, ["orderQty"] = 3, ["orderType"] = "Stop", ["stopPrice"] = 4991
@@ -720,13 +725,13 @@ public class BrokerConnectionTests
         {
             if (observedBroker == null || observedOrder == null) return;
             if (!session.SnapshotReady && Interlocked.CompareExchange(ref phase, 2, 1) == 1)
-                observedBroker.Modify(observedOrder, 4991);
+                OrderActions.Reprice(observedBroker, observedOrder, 4991);
             else if (session.SnapshotReady && Interlocked.CompareExchange(ref phase, 3, 2) == 2)
-                observedBroker.Modify(observedOrder, 4993);
+                OrderActions.Reprice(observedBroker, observedOrder, 4993);
         };
-        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
+        using var broker = _orders.Tradovate(new InstrumentData(Es, new SimulatedFeed()), session, Assert.Single(session.Accounts), "DEMO101");
         observedBroker = broker;
-        var order = broker.Stop(OrderDirections.Sell, 3, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 3, 4990);
         observedOrder = order;
         await Until(() => order.ExchangeOrderId.Length > 0);
         long id = long.Parse(order.ExchangeOrderId, CultureInfo.InvariantCulture);

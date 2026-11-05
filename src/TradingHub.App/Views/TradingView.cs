@@ -76,8 +76,8 @@ public sealed class ChartTab
     /// <summary>Estrategias puestas en este gráfico (como indicadores: visuales o ejecutando en una cuenta).</summary>
     public List<ChartStrategy> Strategies { get; } = new();
 
-    /// <summary>Qué ejecuciones están marcadas en el gráfico (cuenta, instrumento y cantidad) para no rehacerlas.</summary>
-    public string MarksKey { get; set; } = "";
+    /// <summary>The displayed account, instrument and journal revision, avoiding unchanged mark/link rebuilds.</summary>
+    public (string Account, string Instrument, long Revision, bool Visible)? MarksKey { get; set; }
 }
 
 /// <summary>Cómo se reparten los gráficos dentro de una pestaña.</summary>
@@ -1081,13 +1081,14 @@ public sealed partial class TradingView : UserControl
     {
         if (c.Model is not { } m || c.IsReplay) return;
         var inst = (c.CrossData ?? m.Data).Instrument;
-        string key = m.Settings.ShowTradeMarks ? $"{c.AccountId}|{inst.Key}|{_svc.Journal.CountOf(c.AccountId)}" : "off";
+        var key = (Account: c.AccountId, Instrument: inst.Key,
+            Revision: m.Settings.ShowTradeMarks ? _svc.Journal.RevisionOf(c.AccountId) : 0L, Visible: m.Settings.ShowTradeMarks);
         if (key == c.MarksKey) return;
-        c.MarksKey = key;
         if (!m.Settings.ShowTradeMarks)
         {
             m.TradeMarks = Array.Empty<TradeMark>();
             m.TradeLinks = Array.Empty<TradeLink>();
+            c.MarksKey = key;
             m.Invalidate();
             return;
         }
@@ -1097,9 +1098,12 @@ public sealed partial class TradingView : UserControl
         bool Same(string symbol) =>
             symbol.Equals(inst.Symbol, StringComparison.OrdinalIgnoreCase)
             || System.Text.RegularExpressions.Regex.Replace(symbol, "[FGHJKMNQUVXZ][0-9]{1,2}$", "").Equals(root, StringComparison.OrdinalIgnoreCase);
-        var fills = _svc.Journal.FillsOf(c.AccountId).Where(f => Same(f.Symbol)).ToList();
+        var snapshot = _svc.Journal.SnapshotOf(c.AccountId);
+        key.Revision = snapshot.Revision;
+        var fills = snapshot.Fills.Where(f => Same(f.Symbol)).ToList();
         m.TradeMarks = fills.Select(f => new TradeMark(f.Time, f.Price, f.Buy, f.Quantity)).ToList();
         m.TradeLinks = RoundTrips.Analyze(fills).Trades.Select(t => new TradeLink(t.OpenTime, t.OpenPrice, t.CloseTime, t.ClosePrice, t.IsLong, t.NetPnl)).ToList();
+        c.MarksKey = key;
         m.Invalidate();
     }
 
