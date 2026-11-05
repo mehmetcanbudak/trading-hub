@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using TradingHub.Feeds.Rithmic;
 using TradingHub.Market;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.Tradovate;
 
@@ -32,9 +33,9 @@ public sealed class TradovateFeed : IMarketDataFeed, IKlineHistory, IDayDownload
     private long _liveId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    public TradovateFeed(Func<TradovateSettings> settings)
+    public TradovateFeed(Func<TradovateSettings> settings, ProxyHandlerFactory? network = null)
     {
-        _conn = new TradovateConnection(settings);
+        _conn = new TradovateConnection(settings, network);
         _conn.Md.Event += OnMdEvent;
         _conn.Md.StateChanged += (up, why) =>
         {

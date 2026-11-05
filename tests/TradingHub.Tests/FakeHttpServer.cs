@@ -47,6 +47,9 @@ internal sealed class FakeHttpServer : IDisposable
     /// <summary>Async HTTP replies can wait for a test-controlled event without blocking request workers.</summary>
     public Func<FakeRequest, CancellationToken, ValueTask<(int Status, string Body)>>? OnHttpAsync { get; set; }
 
+    /// <summary>Optional response metadata for redirects and other transport-level consumer scenarios.</summary>
+    public Func<FakeRequest, IReadOnlyDictionary<string, string>>? ResponseHeaders { get; set; }
+
     /// <summary>Respuesta en streaming (por ejemplo precios de OANDA): escribe líneas mientras quiera.</summary>
     public Func<FakeRequest, Stream, CancellationToken, Task>? OnStream { get; set; }
 
@@ -55,6 +58,9 @@ internal sealed class FakeHttpServer : IDisposable
 
     /// <summary>WebSocket: ruta y el socket ya aceptado.</summary>
     public Func<string, WebSocket, CancellationToken, Task>? OnSocket { get; set; }
+
+    /// <summary>Optional redirect before an upgrade is accepted; tests can observe whether a session follows it.</summary>
+    public Func<string, string?>? SocketRedirect { get; set; }
 
     public List<FakeRequest> Requests { get; } = new();
 
@@ -83,6 +89,13 @@ internal sealed class FakeHttpServer : IDisposable
             string path = ctx.Request.Url!.PathAndQuery;
             if (ctx.Request.IsWebSocketRequest)
             {
+                if (SocketRedirect?.Invoke(path) is { } redirect)
+                {
+                    ctx.Response.StatusCode = 307;
+                    ctx.Response.RedirectLocation = redirect;
+                    ctx.Response.Close();
+                    return;
+                }
                 var wsc = await ctx.AcceptWebSocketAsync(null).ConfigureAwait(false);
                 if (OnSocket != null) await OnSocket(path, wsc.WebSocket, _cts.Token).ConfigureAwait(false);
                 return;
@@ -108,6 +121,8 @@ internal sealed class FakeHttpServer : IDisposable
                 : OnHttp?.Invoke(req) ?? (404, "{}");
             var bytes = Encoding.UTF8.GetBytes(text);
             ctx.Response.StatusCode = status;
+            if (ResponseHeaders?.Invoke(req) is { } responseHeaders)
+                foreach (var header in responseHeaders) ctx.Response.Headers[header.Key] = header.Value;
             ctx.Response.ContentType = text.StartsWith('{') || text.StartsWith('[') ? "application/json" : "text/plain";
             ctx.Response.ContentLength64 = bytes.Length;
             await ctx.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);

@@ -1,11 +1,13 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.TextInput;
 using Avalonia.Threading;
 using SkiaSharp;
 using TradingHub.Charting;
 using TradingHub.Charting.Rendering;
 using TradingHub.Rendering;
+using TradingHub.Rendering.Context;
 
 namespace TradingHub.App.Controls;
 
@@ -19,6 +21,40 @@ public sealed class ChartView : SkiaView
     private readonly TextBlock _recordingWarningTip = new() { FontSize = 13, MaxWidth = 420, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
     private bool _recordingWarningTipActive, _recordingWarningAttached;
     private int _recordingWarningTipGeneration;
+    private readonly ChartTextInputClient _textInputClient;
+    public bool IsTextComposing => _textInputClient.IsComposing;
+
+    public ChartView()
+    {
+        _textInputClient = new ChartTextInputClient(this);
+        AddHandler(TextInputMethodClientRequestedEvent, (_, e) =>
+        {
+            if (IsFocused && CommittedText != null) e.Client = _textInputClient;
+        });
+    }
+
+    private sealed class ChartTextInputClient(ChartView view) : TextInputMethodClient
+    {
+        public string Preedit { get; private set; } = "";
+        public bool IsComposing => Preedit.Length > 0;
+        public override Visual TextViewVisual => view;
+        public override bool SupportsPreedit => true;
+        public override bool SupportsSurroundingText => false;
+        public override string SurroundingText => "";
+        public override Rect CursorRectangle => new(24, 24, 1, 24);
+        public override TextSelection Selection { get; set; }
+        public override void SetPreeditText(string? preeditText)
+        {
+            Preedit = preeditText ?? "";
+            view.InvalidateVisual();
+        }
+        public void Cancel()
+        {
+            if (!IsComposing) return;
+            SetPreeditText(null);
+            RequestReset();
+        }
+    }
 
     public ChartModel? Model
     {
@@ -27,6 +63,9 @@ public sealed class ChartView : SkiaView
         {
             if (ReferenceEquals(_model, value)) return;
             if (_recordingWarningAttached && _model != null) _model.Invalidated -= RecordingWarningInvalidated;
+            _controller?.CancelInteraction();
+            _textInputClient.Cancel();
+            _state.ClearDrawingRuntime();
             _model = value;
             if (_recordingWarningAttached && _model != null) _model.Invalidated += RecordingWarningInvalidated;
             _state.CompactRecordingWarning = null;
@@ -43,6 +82,7 @@ public sealed class ChartView : SkiaView
             if (_controller != null) _controller.IndicatorSettingsRequested += slot => IndicatorSettingsRequested?.Invoke(slot);
             if (_controller != null) _controller.StrategySettingsRequested += st => StrategySettingsRequested?.Invoke(st);
             if (_controller != null) _controller.StrategyRemoveRequested += st => StrategyRemoveRequested?.Invoke(st);
+            ModelChanged?.Invoke();
             InvalidateVisual();
         }
     }
@@ -51,6 +91,9 @@ public sealed class ChartView : SkiaView
 
     public event Action? ToolFinished;
     public event Action? DrawingsChanged;
+    /// <summary>Committed text only: keyboard layouts and IME determine the text, never key-code guesses.</summary>
+    public event Action<string>? CommittedText;
+    public event Action? ModelChanged;
 
     /// <summary>Orden propia arrastrada a un nuevo precio.</summary>
     public event Action<TradingHub.Trading.Order, decimal>? OrderDragged;
@@ -114,6 +157,15 @@ public sealed class ChartView : SkiaView
         }
 
         _renderer.Render(canvas, _model, width, height, _state);
+        if (_textInputClient.IsComposing)
+        {
+            var font = RenderContext.GetFont(_model.Theme.FontFamily, 16, false, false);
+            using var background = new SKPaint { Color = _model.Theme.AxisBackground };
+            using var text = new SKPaint { Color = _model.Theme.Text, IsAntialias = true };
+            float textWidth = RenderContext.MeasureWidth(font, _textInputClient.Preedit);
+            canvas.DrawRect(new SKRect(20, 20, 36 + textWidth, 52), background);
+            canvas.DrawUiText(_textInputClient.Preedit, 28, 43, font, text);
+        }
         UpdateRecordingWarningTip();
     }
 
@@ -135,9 +187,8 @@ public sealed class ChartView : SkiaView
     {
         // Render state supplies geometry, not recording authority. Recovery/loading can
         // invalidate the model before the next picture is recorded, including while focused.
-        if (!_recordingWarningAttached || _model == null || _model.Data.IsLoadingHistory ||
-            _model.Series.Count == 0 || _state.Message != null) return null;
-        string? warning = _model.Data.RecordingWarning;
+        if (!_recordingWarningAttached || _model == null || _model.Data.IsLoadingHistory || _state.Message != null) return null;
+        string? warning = _renderer.CurrentDataWarning(_model);
         if (warning == null || warning != _state.CompactRecordingWarning) return null;
         bool hovering = _state.CompactRecordingWarningBounds is { } bounds &&
             _state.MouseX is { } x && _state.MouseY is { } y && bounds.Contains(x, y);
@@ -153,10 +204,9 @@ public sealed class ChartView : SkiaView
         }
         // Close obsolete disclosure immediately, without reopening from cached geometry
         // or reacting to transient render-state reset while a picture is being recorded.
-        if (!_recordingWarningAttached || _model == null || _model.Data.IsLoadingHistory ||
-            _model.Series.Count == 0 || _state.Message != null ||
-            _model.Data.RecordingWarning is not { } warning ||
-            (_recordingWarningTipActive && _recordingWarningTip.Text != UiText.Tr(warning)))
+        if (!_recordingWarningAttached || _model == null || _model.Data.IsLoadingHistory || _state.Message != null ||
+            _renderer.CurrentDataWarning(_model) is not { } warning ||
+            (_recordingWarningTipActive && _recordingWarningTip.Text != ChartRenderer.TranslateDataWarning(warning)))
             ClearRecordingWarningTip();
     }
 
@@ -168,7 +218,7 @@ public sealed class ChartView : SkiaView
             ClearRecordingWarningTip();
             return;
         }
-        string text = UiText.Tr(warning);
+        string text = ChartRenderer.TranslateDataWarning(warning);
         if (_recordingWarningTipActive && _recordingWarningTip.Text == text) return;
         _recordingWarningTip.Text = text;
         _recordingWarningTipActive = true;
@@ -181,7 +231,7 @@ public sealed class ChartView : SkiaView
             if (generation != _recordingWarningTipGeneration) return;
             if (!_recordingWarningTipActive || !ReferenceEquals(_model, model) ||
                 !ReferenceEquals(ToolTip.GetTip(this), _recordingWarningTip) ||
-                CurrentRecordingWarningDisclosure() != warning || UiText.Tr(warning) != text)
+                CurrentRecordingWarningDisclosure() != warning || ChartRenderer.TranslateDataWarning(warning) != text)
             {
                 ClearRecordingWarningTip();
                 return;
@@ -198,6 +248,8 @@ public sealed class ChartView : SkiaView
 
     protected override void OnLostFocus(Avalonia.Interactivity.RoutedEventArgs e)
     {
+        _controller?.CancelInteraction();
+        _textInputClient.Cancel();
         base.OnLostFocus(e);
         UpdateRecordingWarningTip();
     }
@@ -212,6 +264,9 @@ public sealed class ChartView : SkiaView
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _recordingWarningAttached = false;
+        _controller?.CancelInteraction();
+        _state.ClearDrawingRuntime();
+        _textInputClient.Cancel();
         if (_model != null) _model.Invalidated -= RecordingWarningInvalidated;
         ClearRecordingWarningTip();
         base.OnDetachedFromVisualTree(e);
@@ -297,11 +352,29 @@ public sealed class ChartView : SkiaView
         InvalidateVisual();
         CrosshairMoved?.Invoke(null, null);
     }
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        if (_controller?.IsDragging == true) _controller.CancelInteraction();
+    }
+
+    protected override void OnTextInput(TextInputEventArgs e)
+    {
+        base.OnTextInput(e);
+        _textInputClient.SetPreeditText(null);
+        if (e.Handled || !IsFocused || string.IsNullOrWhiteSpace(e.Text) || CommittedText == null) return;
+        // Only committed text reaches this event. Composition remains owned by the platform/TextBox.
+        if (e.Text.All(c => !char.IsControl(c)))
+        {
+            CommittedText.Invoke(e.Text);
+            e.Handled = true;
+        }
+    }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (_controller == null) return;
+        if (_controller == null || e.Handled || _textInputClient.IsComposing) return;
         if (_controller.ForwardKey(e) || _controller.KeyDown(e.Key.ToString(), Mods(e.KeyModifiers)))
         {
             e.Handled = true;

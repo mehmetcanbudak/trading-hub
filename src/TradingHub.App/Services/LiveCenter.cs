@@ -5,6 +5,7 @@ using TradingHub.App.Views;
 using TradingHub.Data;
 using TradingHub.Market;
 using TradingHub.Strategies;
+using TradingHub.Trading;
 
 namespace TradingHub.App.Services;
 
@@ -24,6 +25,7 @@ internal sealed class LiveEntry
     /// <summary>Su contabilidad (en memoria si corre; si no, la guardada).</summary>
     public LiveLedger? Ledger { get; set; }
     public string? LedgerError { get; init; }
+    public bool AwaitingAccountIdentity { get; init; }
 
     public bool Running => Runner?.IsRunning == true;
 
@@ -41,7 +43,8 @@ internal sealed class LiveEntry
     public string SourceLabel => Source == "chart" ? "Chart" : "Live";
 
     public string StateLabel =>
-        Ledger == null ? "History unavailable"
+        AwaitingAccountIdentity ? LedgerError ?? LiveCenter.AwaitingIdentityMessage
+        : Ledger == null ? "History unavailable"
         : Running ? Runner!.DailyLimitActive ? "Stopped for today" : Paused ? "Paused" : "Running"
         : WaitingResume ? "Awaiting manual resume"
         : Runner?.IsClosing == true ? "Closing position"
@@ -91,6 +94,9 @@ internal sealed class LiveLaunch
     /// new ones (null: the ones its saved state records).
     /// </summary>
     public IReadOnlyCollection<string>? AdoptProtectionIds { get; init; }
+
+    /// <summary>A restored run may resume only on its original verified account scope.</summary>
+    public string? ExpectedRunnerKey { get; init; }
 }
 
 /// <summary>Un portafolio con sus estrategias ya resueltas.</summary>
@@ -180,6 +186,7 @@ internal sealed partial class LiveCenter
         ;
 
     internal const string PendingBrokerMessage = "Order cancellation or position closure is still awaiting broker confirmation. Wait and reconcile the account before restarting or removing this strategy.";
+    private const string ShuttingDownMessage = "Trading Hub is shutting down; strategies cannot be started.";
 
     internal bool AwaitingBroker(string key) =>
         _svc.Runners.Any(r => r.Key == key && !r.IsRunning && (r.IsClosing || r.HasWorkingOrders));
@@ -233,9 +240,42 @@ internal sealed partial class LiveCenter
 
                     if (cs.Runner is { IsRunning: true }) continue;
                     var inst = chart.Model?.Instrument;
-                    var info = stored.FirstOrDefault(i => i.StrategyId == cs.StrategyId && inst != null && i.FeedId == inst.FeedId && i.Symbol == inst.Symbol &&
-                                                         (i.AccountId == cs.AccountId || (i.AccountId.Length == 0 && !LiveEntry.IsManaged(i.Source))));
-                    string key = info?.Key ?? $"chart|{cs.StrategyId}|{inst?.FeedId}:{chart.Symbol}|{cs.AccountId}";
+                    string? scope = null;
+                    bool identityReady = false;
+                    if (inst != null && chart.Model is { } model && !_svc.IsShuttingDown)
+                    {
+                        try
+                        {
+                            var account = _svc.AccountFor(model.Data, cs.AccountId);
+                            scope = account is IAccountExecutionSource execution ? execution.PersistentAccountIdentity : account.Name;
+                            identityReady = !string.IsNullOrWhiteSpace(scope);
+                        }
+                        catch (Exception error) when (error is InvalidOperationException or KeyNotFoundException or NotSupportedException)
+                        {
+                            // A data-only/unavailable connection must not be joined to a saved executable account.
+                        }
+                    }
+                    string? verifiedKey = identityReady ? $"{cs.StrategyId}|{inst!.FeedId}:{inst.Symbol}|{scope}" : null;
+                    if (cs.PersistentOwnerKey == null && cs.Paused && inst != null)
+                    {
+                        LiveRunnerInfo? candidate = null;
+                        bool ambiguous = false;
+                        foreach (var saved in stored)
+                        {
+                            if (saved.StrategyId != cs.StrategyId || saved.FeedId != inst.FeedId || saved.Symbol != inst.Symbol ||
+                                (saved.AccountId != cs.AccountId && saved.AccountId.Length != 0) ||
+                                (saved.ProfileId.Length != 0 && saved.ProfileId != chart.FeedId)) continue;
+                            if (candidate != null) { ambiguous = true; break; }
+                            candidate = saved;
+                        }
+                        // Associate only unique saved metadata; no ledger/account facts are read until native verification.
+                        if (!ambiguous && candidate != null) cs.PersistentOwnerKey = candidate.Key;
+                    }
+                    string key = cs.PersistentOwnerKey ?? verifiedKey ?? $"chart|{cs.StrategyId}|{inst?.FeedId}:{chart.Symbol}|{cs.AccountId}";
+                    bool differentOwner = identityReady && cs.PersistentOwnerKey != null &&
+                        !string.Equals(cs.PersistentOwnerKey, verifiedKey, StringComparison.Ordinal);
+                    identityReady &= !differentOwner;
+                    var info = stored.FirstOrDefault(i => i.Key == key);
                     if (!seen.Add(key)) continue;
                     info ??= new LiveRunnerInfo
                     {
@@ -250,8 +290,12 @@ internal sealed partial class LiveCenter
                         Source = "chart",
                         PointValue = inst?.PointValue ?? 1,
                     };
-                    var ledger = LedgerOf(key, info.PointValue, out var ledgerError);
-                    list.Add(new LiveEntry { Key = key, Source = "chart", Info = info, Runner = cs.Runner, Chart = chart, ChartStrategy = cs, Ledger = ledger, LedgerError = ledgerError });
+                    string? ledgerError = identityReady ? null : differentOwner
+                        ? "The selected connection is verified for a different saved strategy account; history and protection were not adopted."
+                        : AwaitingIdentityMessage;
+                    var ledger = identityReady ? LedgerOf(key, info.PointValue, out ledgerError) : null;
+                    list.Add(new LiveEntry { Key = key, Source = "chart", Info = info, Runner = cs.Runner, Chart = chart, ChartStrategy = cs,
+                        Ledger = ledger, LedgerError = ledgerError, AwaitingAccountIdentity = !identityReady });
                 }
             }
         }
@@ -356,6 +400,7 @@ internal sealed partial class LiveCenter
     /// <summary>Detiene (opcionalmente cerrando su posición). La de un gráfico vuelve a modo visual.</summary>
     public async Task StopAsync(LiveEntry e, bool close)
     {
+        CancelStartsFor(e.Key);
 
         var r = e.Runner;
         if (r is { IsRunning: true })
@@ -378,7 +423,7 @@ internal sealed partial class LiveCenter
     public async Task<string?> ResumeAsync(LiveEntry e)
     {
 
-        if (e.Ledger == null) return e.LedgerError ?? "History unavailable";
+        if (e.Ledger == null && !e.AwaitingAccountIdentity) return e.LedgerError ?? "History unavailable";
         if (e.ChartStrategy is { } cs && e.Chart is { } chart && Trading?.Invoke() is { } tv)
         {
             cs.Live = true;
@@ -401,8 +446,11 @@ internal sealed partial class LiveCenter
     {
         var s = _svc.Settings;
         var was = _svc.RunningAtLastClose;
-        _svc.RunningAtLastClose = new(); // una sola vez por apertura
-        if (!s.AutoResumeLive || was.Count == 0) return;
+        if (!s.AutoResumeLive || was.Count == 0)
+        {
+            _svc.RunningAtLastClose = new();
+            return;
+        }
         var byKey = was.GroupBy(i => i.Key).ToDictionary(g => g.Key, g => g.First());
         var resumed = new List<string>();
         var waiting = new List<string>();
@@ -414,6 +462,7 @@ internal sealed partial class LiveCenter
             if ((info.IsReal || e.Info.IsReal) && !s.AutoResumeLiveReal)
             {
                 waiting.Add(name);
+                _svc.RunningAtLastClose.RemoveAll(saved => saved.Key == e.Key);
                 continue;
             }
 
@@ -434,6 +483,7 @@ internal sealed partial class LiveCenter
                 CrashLog.Write(ex);
                 failed.Add($"{name}: {ex.Message}");
             }
+            finally { _svc.RunningAtLastClose.RemoveAll(saved => saved.Key == e.Key); }
         }
 
         var parts = new List<string>();
@@ -494,6 +544,7 @@ internal sealed partial class LiveCenter
             PortfolioId = info.PortfolioId,
             Paused = info.Paused,
             AdoptProtectionIds = info.ProtectionOrderIds,
+            ExpectedRunnerKey = info.Key,
         }, null);
     }
 
@@ -585,40 +636,73 @@ internal sealed partial class LiveCenter
     /// <summary>Lanza una estrategia en vivo (la confirmación de cuenta real la pide la ventana antes).</summary>
     public async Task<(LiveStrategyRunner? Runner, string Message)> LaunchAsync(LiveLaunch spec)
     {
+        using var ownedStart = BeginStart(spec.ExpectedRunnerKey);
+        if (ownedStart == null) return (null, ShuttingDownMessage);
+        try { return await LaunchCoreAsync(spec, ownedStart.Token); }
+        catch (OperationCanceledException) when (ownedStart.Token.IsCancellationRequested)
+        {
+            return (null, _svc.IsShuttingDown ? ShuttingDownMessage : "Strategy start was canceled before account readiness.");
+        }
+    }
+
+    private async Task<(LiveStrategyRunner? Runner, string Message)> LaunchCoreAsync(LiveLaunch spec, CancellationToken cancellationToken)
+    {
+        if (_svc.IsShuttingDown) return (null, ShuttingDownMessage);
+        cancellationToken.ThrowIfCancellationRequested();
         if (spec.File.Type == null) await Task.Run(() => _svc.Strategies.Compile(spec.File));
+        if (_svc.IsShuttingDown) return (null, ShuttingDownMessage);
+        cancellationToken.ThrowIfCancellationRequested();
         if (spec.File.Type == null) return (null, $"«{spec.File.FileName}» has errors: fix them in Backtesting.");
         var data = _svc.Open(spec.ProfileId, spec.Instrument);
-        for (int i = 0; i < 240 && data.IsLoadingHistory; i++) await Task.Delay(500);
+        for (int i = 0; i < 240 && data.IsLoadingHistory && !_svc.IsShuttingDown; i++) await Task.Delay(500, cancellationToken);
+        if (_svc.IsShuttingDown) return (null, ShuttingDownMessage);
+        cancellationToken.ThrowIfCancellationRequested();
         var strategy = spec.File.Create();
         strategy.SetParameters(spec.Parameters);
+        LiveStrategyRunner NewRunner(ITradingAccount selected, Instrument execution, decimal executionRatio) =>
+            new(strategy, data, selected, spec.Period, spec.TimeZoneId, spec.SessionStart)
+            {
+                ExecInstrument = execution,
+                ExecRatio = executionRatio,
+                Source = "panel",
+                AccountId = spec.AccountId,
+                ProfileId = spec.ProfileId,
+                SizeMultiplier = spec.Size,
+                MaxDailyLoss = spec.MaxDailyLoss,
+                MaxDrawdown = spec.MaxDrawdown,
+                CloseOnLimit = spec.CloseOnLimit,
+                PortfolioId = spec.PortfolioId,
+                ProtectOnStart = true,
+                Guard = _svc.OrderGuard,
+            };
+        var account = _svc.AccountFor(data, spec.AccountId);
+        var runner = NewRunner(account, spec.Instrument, 1);
+        if (!await WaitForAccountIdentityAsync(runner, cancellationToken))
+            return (null, _svc.IsShuttingDown ? ShuttingDownMessage : "Strategy start was canceled before account readiness.");
+        string preparedKey = runner.Key;
+        if (spec.ExpectedRunnerKey is { } expected && !string.Equals(expected, preparedKey, StringComparison.Ordinal))
+            return (null, "The selected connection is verified for a different account scope. Saved history and protection were not adopted; select the original account or launch a separate strategy explicitly.");
         Instrument execInst;
         decimal ratio;
         try
         {
-            (execInst, ratio) = await ExecutionContractAsync(spec, strategy, data);
+            (execInst, ratio) = await ExecutionContractForAsync(spec.ProfileId, spec.Instrument, spec.Parameters, spec.Size, preparedKey);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return (null, "Could not start: " + ex.Message);
         }
-        var execData = ReferenceEquals(execInst, spec.Instrument) ? data : _svc.Open(spec.ProfileId, execInst);
-        var account = _svc.AccountFor(execData, spec.AccountId);
-        var runner = new LiveStrategyRunner(strategy, data, account, spec.Period, spec.TimeZoneId, spec.SessionStart)
+        if (_svc.IsShuttingDown) return (null, ShuttingDownMessage);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!ReferenceEquals(execInst, spec.Instrument))
         {
-            ExecInstrument = execInst,
-            ExecRatio = ratio,
-            Source = "panel",
-            AccountId = spec.AccountId,
-            ProfileId = spec.ProfileId,
-            SizeMultiplier = spec.Size,
-            MaxDailyLoss = spec.MaxDailyLoss,
-            MaxDrawdown = spec.MaxDrawdown,
-            CloseOnLimit = spec.CloseOnLimit,
-            PortfolioId = spec.PortfolioId,
-            ProtectOnStart = true,
-            // launch, resume, auto-resume and restarts all come through here: real-order permission at every submit
-            Guard = _svc.OrderGuard,
-        };
+            account = _svc.AccountFor(_svc.Open(spec.ProfileId, execInst), spec.AccountId);
+            runner = NewRunner(account, execInst, ratio);
+            if (!await WaitForAccountIdentityAsync(runner, cancellationToken))
+                return (null, _svc.IsShuttingDown ? ShuttingDownMessage : "Strategy start was canceled before account readiness.");
+            if (!string.Equals(preparedKey, runner.Key, StringComparison.Ordinal))
+                return (null, "The execution instrument resolved to a different account scope; saved history and protection were not adopted.");
+        }
         // resume, auto-resume and restarts adopt the stop loss and take profit the previous run left working at the broker
         runner.AdoptProtectionIds = spec.AdoptProtectionIds ?? (IReadOnlyCollection<string>?)LiveStore.InfoFor(runner.Key)?.ProtectionOrderIds ?? Array.Empty<string>();
         if (Running(runner.Key) != null) return (null, $"«{runner.StrategyName}» is already running on {spec.Instrument.Symbol} with {TradingHub.Common.EnglishText.Of(account.Name)}.");
@@ -706,23 +790,16 @@ internal sealed partial class LiveCenter
         return a > 0 && b > 0 ? a / b : 1;
     }
 
-    /// <summary>
-    /// En qué contrato ejecuta al lanzarse: el preferido para su tamaño, salvo que tenga una posición abierta (la sigue en
-    /// el contrato en que está, y cambia recién cuando queda plana).
-    /// </summary>
-    private Task<(Instrument Instrument, decimal Ratio)> ExecutionContractAsync(LiveLaunch spec, Strategy strategy, InstrumentData data) =>
-        ExecutionContractForAsync(spec.ProfileId, spec.Instrument, spec.Parameters, spec.Size, strategy, _svc.AccountFor(data, spec.AccountId).Name);
 
     /// <summary>
     /// En qué contrato ejecuta una estrategia (del panel o de un gráfico) con ese tamaño: el preferido (el micro si el tamaño
     /// pide fracciones del mini), salvo que tenga una posición abierta, que sigue en el contrato en que está.
     /// </summary>
     internal async Task<(Instrument Instrument, decimal Ratio)> ExecutionContractForAsync(string profileId, Instrument signal, IReadOnlyDictionary<string, object?> parameters,
-        decimal size, Strategy strategy, string accountName)
+        decimal size, string preparedRunnerKey)
     {
         var (symbol, ratio) = PreferredContract(signal.FeedId, signal.Symbol, QuantityOf(parameters), size);
-        string key = $"{strategy.GetType().FullName}|{signal.FeedId}:{signal.Symbol}|{accountName}";
-        var ledger = LiveStore.LoadLedger(key, signal.PointValue);
+        var ledger = LiveStore.LoadLedger(preparedRunnerKey, signal.PointValue);
         if (ledger.Position != 0)
         {
             symbol = ledger.OpenSymbol ?? signal.Symbol;
@@ -807,6 +884,7 @@ internal sealed partial class LiveCenter
             PortfolioId = old?.PortfolioId ?? spec.PortfolioId,
             Paused = old?.Paused ?? spec.Paused,
             AdoptProtectionIds = old != null ? old.ProtectionOrderIds.ToList() : spec.AdoptProtectionIds,
+            ExpectedRunnerKey = old?.Key ?? spec.ExpectedRunnerKey,
         });
         return runner == null ? message : null;
     }
@@ -847,6 +925,7 @@ internal sealed partial class LiveCenter
     {
         if (e.Locked) return "Locked: cannot be removed here.";
         if (history && e.Ledger == null) return e.LedgerError ?? "History unavailable";
+        CancelStartsFor(e.Key);
         if (e.Runner is { IsRunning: true } r)
         {
             r.StopReason = "Removed";

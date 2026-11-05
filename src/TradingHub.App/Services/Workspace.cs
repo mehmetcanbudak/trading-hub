@@ -52,6 +52,7 @@ internal static partial class Workspace
         public double BarWidth { get; set; }
         public string AccountId { get; set; } = "sim";
         public double HistoryHours { get; set; }
+        public bool PreserveAccountSelection { get; set; }
         public int LinkGroup { get; set; }
         public decimal Quantity { get; set; }
         public string? CrossSymbol { get; set; }
@@ -67,6 +68,7 @@ internal static partial class Workspace
         public JObject Parameters { get; set; } = new();
         public bool Live { get; set; }
         public string AccountId { get; set; } = "sim";
+        public string? PersistentOwnerKey { get; set; }
         public bool Visible { get; set; } = true;
     }
 
@@ -207,6 +209,7 @@ internal static partial class Workspace
             BarWidth = t.Model.Viewport.BarWidth,
             AccountId = t.AccountId,
             HistoryHours = t.HistoryHours,
+            PreserveAccountSelection = t.AccountSelectionUnavailable,
             LinkGroup = t.LinkGroup,
             Quantity = t.Quantity,
             CrossSymbol = t.CrossSymbol,
@@ -221,6 +224,7 @@ internal static partial class Workspace
                 Parameters = JObject.FromObject(cs.Parameters.ToDictionary(kv => kv.Key, kv => kv.Value is System.Text.Json.JsonElement je ? (object?)je.ToString() : kv.Value)),
                 Live = cs.Live,
                 AccountId = cs.AccountId,
+                PersistentOwnerKey = cs.PersistentOwnerKey,
                 Visible = cs.Overlay.Visible,
             });
         return td;
@@ -331,6 +335,7 @@ internal static partial class Workspace
                 Parameters = sd.Parameters.Properties().ToDictionary(p => p.Name, p => (object?)p.Value.ToObject<object>()),
                 Live = sd.Live,
                 AccountId = sd.AccountId,
+                PersistentOwnerKey = sd.PersistentOwnerKey,
                 Paused = sd.Live,
             };
             cs.Overlay.Visible = sd.Visible;
@@ -367,13 +372,13 @@ internal static partial class Workspace
             if (pd.Charts.Count == 0) continue;
             var first = pd.Charts[0];
             var tab = await w.NewTabAsync(first.FeedId, first.Symbol, PeriodOf(first), SettingsOf(first), activate: i == activePage || i == 0,
-                accountId: first.AccountId, historyHours: first.HistoryHours, layout: pd.Layout);
+                accountId: first.AccountId, historyHours: first.HistoryHours, layout: pd.Layout, preserveAccountSelection: first.PreserveAccountSelection);
             Finish(w, tab, first);
             var page = tab.Page!;
             var charts = new List<ChartTab> { tab };
             foreach (var td in pd.Charts.Skip(1))
             {
-                var t = await w.AddToPageAsync(page, td.FeedId, td.Symbol, PeriodOf(td), SettingsOf(td), td.AccountId, td.HistoryHours);
+                var t = await w.AddToPageAsync(page, td.FeedId, td.Symbol, PeriodOf(td), SettingsOf(td), td.AccountId, td.HistoryHours, preserveAccountSelection: td.PreserveAccountSelection);
                 Finish(w, t, td);
                 charts.Add(t);
             }
@@ -385,7 +390,7 @@ internal static partial class Workspace
         foreach (var fd in dto.Floating)
         {
             var td = fd.Chart;
-            var tab = await w.NewTabAsync(td.FeedId, td.Symbol, PeriodOf(td), SettingsOf(td), activate: false, accountId: td.AccountId, historyHours: td.HistoryHours);
+            var tab = await w.NewTabAsync(td.FeedId, td.Symbol, PeriodOf(td), SettingsOf(td), activate: false, accountId: td.AccountId, historyHours: td.HistoryHours, preserveAccountSelection: td.PreserveAccountSelection);
             Finish(w, tab, td);
             w.Detach(tab, new Avalonia.PixelPoint(fd.X, fd.Y), fd.Width > 200 && fd.Height > 150 ? new Avalonia.Size(fd.Width, fd.Height) : null);
         }

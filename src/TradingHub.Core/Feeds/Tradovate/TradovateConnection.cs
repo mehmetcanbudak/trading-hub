@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TradingHub.Market;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.Tradovate;
 
@@ -48,7 +49,8 @@ public sealed class TradovateException(string message, int status = 0) : Excepti
 public sealed class TradovateConnection : IDisposable
 {
     private readonly Func<TradovateSettings> _settings;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private readonly ProxyHandlerFactory _network;
+    private readonly HttpClient _http;
     private readonly SemaphoreSlim _authGate = new(1, 1);
     private readonly ConcurrentDictionary<string, (long Id, string Name)> _contracts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<long, string> _contractNames = new();
@@ -56,7 +58,14 @@ public sealed class TradovateConnection : IDisposable
     private DateTime _expires;
     private TradovateSocket? _mdSocket, _userSocket;
 
-    public TradovateConnection(Func<TradovateSettings> settings) => _settings = settings;
+    public TradovateConnection(Func<TradovateSettings> settings, ProxyHandlerFactory? network = null)
+    {
+        _settings = settings;
+        _network = network ?? new ProxyHandlerFactory(new NetworkProxyPolicy());
+        var handler = _network.CreateHandler();
+        handler.AllowAutoRedirect = false;
+        _http = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(30) };
+    }
 
     public TradovateSettings Settings => _settings();
     public long UserId { get; private set; }
@@ -68,8 +77,8 @@ public sealed class TradovateConnection : IDisposable
     private string UserSocketUrl => Settings.UserSocketUrl ?? (Settings.Live ? "wss://live.tradovateapi.com/v1/websocket" : "wss://demo.tradovateapi.com/v1/websocket");
     private string MdSocketUrl => Settings.MdSocketUrl ?? "wss://md.tradovateapi.com/v1/websocket";
 
-    public TradovateSocket Md => _mdSocket ??= new TradovateSocket(MdSocketUrl, ct => MdTokenAsync(ct), "Tradovate data connection");
-    public TradovateSocket User => _userSocket ??= new TradovateSocket(UserSocketUrl, ct => AccessTokenAsync(ct), "Tradovate account connection");
+    public TradovateSocket Md => _mdSocket ??= new TradovateSocket(MdSocketUrl, ct => MdTokenAsync(ct), "Tradovate data connection", _network);
+    public TradovateSocket User => _userSocket ??= new TradovateSocket(UserSocketUrl, ct => AccessTokenAsync(ct), "Tradovate account connection", _network);
 
     // ===================================================================== token
 
@@ -272,6 +281,7 @@ public sealed class TradovateSocket : IDisposable
     private readonly string _url;
     private readonly Func<CancellationToken, Task<string>> _token;
     private readonly string _name;
+    private readonly HttpMessageInvoker _webSocketInvoker;
     private readonly SemaphoreSlim _connectGate = new(1, 1);
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pending = new();
@@ -281,11 +291,12 @@ public sealed class TradovateSocket : IDisposable
     private TaskCompletionSource<bool>? _authorized;
     private int _id = 1;
 
-    public TradovateSocket(string url, Func<CancellationToken, Task<string>> token, string name)
+    public TradovateSocket(string url, Func<CancellationToken, Task<string>> token, string name, ProxyHandlerFactory? network = null)
     {
         _url = url;
         _token = token;
         _name = name;
+        _webSocketInvoker = (network ?? new ProxyHandlerFactory(new NetworkProxyPolicy())).CreateWebSocketInvoker();
     }
 
     public bool IsConnected => _ws?.State == WebSocketState.Open && _authorized?.Task.IsCompletedSuccessfully == true;
@@ -309,7 +320,7 @@ public sealed class TradovateSocket : IDisposable
             using (var c = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 c.CancelAfter(TimeSpan.FromSeconds(15));
-                await ws.ConnectAsync(new Uri(_url), c.Token).ConfigureAwait(false);
+                await ws.ConnectAsync(new Uri(_url), _webSocketInvoker, c.Token).ConfigureAwait(false);
             }
 
             _ws = ws;
@@ -542,5 +553,6 @@ public sealed class TradovateSocket : IDisposable
     {
         _life.Cancel();
         Drop("closed", notify: false);
+        _webSocketInvoker.Dispose();
     }
 }

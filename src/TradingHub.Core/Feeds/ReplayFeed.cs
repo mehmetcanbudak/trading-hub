@@ -17,10 +17,19 @@ public sealed class ReplayFeed : IMarketDataFeed
     private volatile bool _stop;
     private long _clockTicks;
     private long _seekTicks = -1;
+    private readonly object _lifecycle = new();
+    private bool _disposed;
 
+    private readonly CancellationTokenSource _readCancellation = new();
     public ReplayFeed(string root, Instrument source, DateTime startUtc, DateTime endUtc)
+        : this(root, source, startUtc, endUtc, Guid.NewGuid()) { }
+
+    public ReplayFeed(string root, Instrument source, DateTime startUtc, DateTime endUtc, Guid runId)
     {
         _root = root;
+        if (startUtc.Kind != DateTimeKind.Utc || endUtc.Kind != DateTimeKind.Utc || endUtc <= startUtc)
+            throw new ArgumentException("Replay needs an increasing UTC interval.");
+        RunId = runId;
         _source = source;
         Start = startUtc;
         End = endUtc;
@@ -28,7 +37,7 @@ public sealed class ReplayFeed : IMarketDataFeed
         Instrument = new Instrument
         {
             Symbol = source.Symbol,
-            FeedId = $"{FeedPrefix}-{source.FeedId}-{startUtc:yyyyMMddHHmm}",
+            FeedId = $"{FeedPrefix}-{runId:N}",
             Exchange = "Replay · " + source.Exchange,
             TickSize = source.TickSize,
             VolumeStep = source.VolumeStep,
@@ -45,6 +54,7 @@ public sealed class ReplayFeed : IMarketDataFeed
     public bool IsLive => false;
     public Instrument Instrument { get; }
     public Instrument Source => _source;
+    public Guid RunId { get; }
     public DateTime Start { get; }
     public DateTime End { get; }
 
@@ -52,7 +62,8 @@ public sealed class ReplayFeed : IMarketDataFeed
     public double Speed { get; set; } = 1;
 
     public bool Paused { get; set; }
-    public bool IsFinished { get; private set; }
+    private volatile bool _finished;
+    public bool IsFinished { get => _finished; private set => _finished = value; }
 
     /// <summary>Instante del mercado que se está reproduciendo.</summary>
     public DateTime Clock => new(Interlocked.Read(ref _clockTicks), DateTimeKind.Utc);
@@ -77,10 +88,10 @@ public sealed class ReplayFeed : IMarketDataFeed
         {
             var to = toUtc > Start ? Start : toUtc;
             var batch = new List<Trade>(10_000);
-            foreach (var t in HistoricalData.Read(_root, _source.FeedId, _source.Symbol, fromUtc, to))
+            foreach (var t in RequireKnownAvailability(HistoricalData.ReadAvailable(_root, _source.FeedId, _source.Symbol, fromUtc, to, ct)))
             {
                 ct.ThrowIfCancellationRequested();
-                if (fromId.HasValue && t.Id < fromId.Value) continue;
+                if (fromId.HasValue && t.IsObservedTrade && t.Id < fromId.Value) continue;
                 batch.Add(t);
                 if (batch.Count < 10_000) continue;
                 if (!onBatch(batch)) return;
@@ -92,56 +103,96 @@ public sealed class ReplayFeed : IMarketDataFeed
         }, ct);
     }
 
+    private static List<Trade> RequireKnownAvailability(List<Trade> events)
+    {
+        if (events.Any(trade => !trade.Provenance.HasKnownAvailability))
+            throw new InvalidDataException("Replay history contains events with unknown source availability.");
+        return events;
+    }
+
     public IDisposable Subscribe(Instrument instrument, IMarketDataSink sink)
     {
-        _stop = false;
-        _thread = new Thread(() => Run(sink)) { IsBackground = true, Name = "replay-" + _source.Symbol };
-        _thread.Start();
-        return new Unsub(this);
+        lock (_lifecycle)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_thread != null) throw new InvalidOperationException("A replay feed supports one owned subscription.");
+            _stop = false;
+            _thread = new Thread(() => Run(sink)) { IsBackground = true, Name = "replay-" + RunId.ToString("N")[..8] };
+            _thread.Start();
+            return new Unsub(this);
+        }
     }
 
     private void Run(IMarketDataSink sink)
     {
-        sink.OnStatus(Instrument, FeedStatus.Connected, $"Replay from {Start:dd/MM HH:mm} UTC");
-        using var e = HistoricalData.Read(_root, _source.FeedId, _source.Symbol, Start, End).GetEnumerator();
-        bool has = e.MoveNext();
-        var sw = Stopwatch.StartNew();
-        double lastMs = 0;
-        var batch = new List<Trade>(4096);
-        while (!_stop && has)
+        try
         {
-            double nowMs = sw.Elapsed.TotalMilliseconds;
-            double dtMs = nowMs - lastMs;
-            lastMs = nowMs;
-            long seek = Interlocked.Exchange(ref _seekTicks, -1);
-            long clock = Interlocked.Read(ref _clockTicks);
-            if (seek > 0) clock = seek;
-            else if (!Paused && Speed > 0) clock += (long)(dtMs * Speed * TimeSpan.TicksPerMillisecond);
-            Interlocked.Exchange(ref _clockTicks, clock);
-
-            batch.Clear();
-            while (has && e.Current.Time.Ticks <= clock && batch.Count < 20_000)
+            sink.OnStatus(Instrument, FeedStatus.Connected, $"Replay from {Start:yyyy-MM-dd HH:mm} UTC");
+            using var e = RequireKnownAvailability(HistoricalData.ReadAvailable(_root, _source.FeedId, _source.Symbol, Start, End, _readCancellation.Token)).GetEnumerator();
+            bool has = e.MoveNext();
+            var sw = Stopwatch.StartNew();
+            double lastMs = 0;
+            var batch = new List<Trade>(4096);
+            while (!_stop && has)
             {
-                batch.Add(e.Current);
-                has = e.MoveNext();
+                double nowMs = sw.Elapsed.TotalMilliseconds;
+                double dtMs = nowMs - lastMs;
+                lastMs = nowMs;
+                long seek = Interlocked.Exchange(ref _seekTicks, -1);
+                if (Paused && seek < 0) { Thread.Sleep(15); continue; }
+                long clock = Interlocked.Read(ref _clockTicks);
+                if (seek > 0) clock = seek;
+                else if (double.IsFinite(Speed) && Speed > 0)
+                    clock += (long)Math.Min(End.Ticks - clock, dtMs * Math.Min(Speed, 100_000) * TimeSpan.TicksPerMillisecond);
+                clock = Math.Clamp(clock, Start.Ticks, End.Ticks);
+                Interlocked.Exchange(ref _clockTicks, clock);
+                batch.Clear();
+                while (has && e.Current.AvailableAt.Ticks <= clock && batch.Count < 20_000 && !_stop)
+                {
+                    batch.Add(e.Current);
+                    has = e.MoveNext();
+                }
+                if (batch.Count > 0 && !_stop) sink.OnTrades(Instrument, batch.ToArray());
+                if (batch.Count < 20_000) Thread.Sleep(15);
             }
-
-            if (batch.Count > 0) sink.OnTrades(Instrument, batch.ToArray());
-            if (batch.Count < 20_000) Thread.Sleep(15);
+            if (!has && !_stop)
+            {
+                IsFinished = true;
+                Interlocked.Exchange(ref _clockTicks, End.Ticks);
+                sink.OnStatus(Instrument, FeedStatus.Disconnected, "Replay finished");
+            }
         }
-
-        if (!has)
+        catch (Exception ex)
         {
-            IsFinished = true;
-            Interlocked.Exchange(ref _clockTicks, End.Ticks);
-            sink.OnStatus(Instrument, FeedStatus.Disconnected, "Replay finished");
+            if (!_stop) sink.OnStatus(Instrument, FeedStatus.Error, "Replay history could not be read: " + ex.Message);
         }
     }
 
-    public void Dispose() => _stop = true;
+    public void Stop()
+    {
+        Thread? thread;
+        lock (_lifecycle)
+        {
+            _stop = true;
+            try { _readCancellation.Cancel(); } catch (ObjectDisposedException) { }
+            thread = _thread;
+        }
+        if (thread != null && thread != Thread.CurrentThread) thread.Join();
+    }
+
+    public void Dispose()
+    {
+        lock (_lifecycle)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
+        Stop();
+        _readCancellation.Dispose();
+    }
 
     private sealed class Unsub(ReplayFeed feed) : IDisposable
     {
-        public void Dispose() => feed._stop = true;
+        public void Dispose() => feed.Stop();
     }
 }

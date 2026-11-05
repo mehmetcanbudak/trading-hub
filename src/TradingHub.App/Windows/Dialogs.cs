@@ -104,8 +104,18 @@ internal sealed class ConfirmDialog : TradingHubDialog<bool>
     }
 
     /// <param name="cancelByDefault">Cancel is the default even when the action is not danger-styled (a paid download).</param>
-    public static Task<bool> ShowAsync(Window owner, string title, string message, string okText = "OK", bool danger = false, bool cancelByDefault = false) =>
-        new ConfirmDialog(title, message, okText, danger, cancelByDefault).ShowDialog<bool>(owner);
+    public static async Task<bool> ShowAsync(Window owner, string title, string message, string okText = "OK", bool danger = false, bool cancelByDefault = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (cancellationToken.IsCancellationRequested) return false;
+        var dialog = new ConfirmDialog(title, message, okText, danger, cancelByDefault);
+        using var registration = cancellationToken.Register(() => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (dialog.IsVisible) dialog.Close(false);
+        }));
+        bool confirmed = await dialog.ShowDialog<bool>(owner);
+        return confirmed && !cancellationToken.IsCancellationRequested;
+    }
 }
 
 /// <summary>Pide un texto (nombre de una estrategia, perfil, etc.).</summary>

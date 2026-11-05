@@ -20,6 +20,8 @@ public sealed class IndicatorSlot
         var t = indicator.GetType();
         WantsTrades = Overrides(t, "OnNewTrade") || Overrides(t, "OnNewTrades");
         WantsDepth = Overrides(t, "MarketDepthChanged") || Overrides(t, "MarketDepthsChanged");
+        WantsDepthSnapshots = Overrides(t, "OnDepthSnapshot");
+        WantsDepthHistory = Overrides(t, "OnDepthHistoryChanged");
         WantsBestBidAsk = Overrides(t, "OnBestBidAskChanged");
         WantsMyTrades = Overrides(t, "OnNewMyTrade");
     }
@@ -31,6 +33,7 @@ public sealed class IndicatorSlot
     internal bool NeedsRecalc = true;
     internal bool Initialized;
     internal bool WantsTrades, WantsDepth, WantsBestBidAsk, WantsMyTrades;
+    internal bool WantsDepthSnapshots, WantsDepthHistory;
     internal bool WantsCumulative;
     internal List<CumulativeTradesRequest> PendingCumulative { get; } = new();
 
@@ -139,23 +142,38 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     private int? _autoStep;
     private CumulativeTrade? _openCumulative;
     private long _lastBestBid = long.MinValue, _lastBestAsk = long.MaxValue;
+    private bool _lastBestAvailable;
+    private DateTime AvailabilityClock => Data.Feed is TradingHub.Feeds.ReplayFeed replay ? replay.Clock : Data.Feed.Now;
+    private string CandleCacheScope => Data.Feed is TradingHub.Feeds.IDataScopeFeed scoped ? scoped.DataScopeKey : Data.Feed.Id;
     private readonly ChartInfo _chartInfo;
     private readonly InstrumentInfo _instrumentInfo = new();
     private readonly MarketDepthInfo _depthInfo;
+    private sealed record DepthLoadPublication(long Request, DepthSelectionResult Result, string? Error = null);
+    private DepthLoadPublication? _depthPublication;
+    private CancellationTokenSource? _depthLoadCancellation;
+    private Task? _depthLoadTask;
+    private (DateTime From, DateTime To)? _depthRequestedRange;
+    private readonly DepthHistorySelection _depthSelection;
+    private string? _depthSelectionError;
+    private long _depthRequest, _depthObservedVersion = -1;
+    private volatile bool _disposed;
 
     public ChartModel(InstrumentData data, ChartPeriod period, ChartSettings? settings = null)
     {
         Data = data;
+        _depthSelection = data.DepthHistory.CreateSelection();
         Period = period;
         Settings = settings ?? new ChartSettings();
         Theme = ChartTheme.With(Settings.Colors);
         Series = new CandleSeries(data.Instrument, period, 1, (data.Feed as TradingHub.Feeds.ISessionSettingsFeed)?.GetSessionSettings(data.Instrument));
         _chartInfo = new ChartInfo(() => (IChartContainer?)LastLayout?.Main ?? EmptyContainer.Instance);
-        _depthInfo = new MarketDepthInfo(DepthSnapshotArgs, () => SumDepth(BookSide.Ask), () => SumDepth(BookSide.Bid));
+        _depthInfo = new MarketDepthInfo(DepthSnapshotArgs, () => SumDepth(BookSide.Ask), () => SumDepth(BookSide.Bid),
+            () => Data.DepthHistory.Current, () => Data.DepthHistory.Status, GetDepthHistory);
 
         data.TradesAppended += OnTradesAppended;
         data.HistoryLoaded += OnHistoryLoaded;
         data.DepthUpdated += OnDepthUpdated;
+        data.DepthHistoryChanged += OnDepthHistoryChanged;
         data.StatusChanged += OnStatusChanged;
         data.OpenInterestChanged += OnOpenInterestChanged;
         Rebuild();
@@ -163,6 +181,35 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
 
     public InstrumentData Data { get; }
     public Instrument Instrument => Data.Instrument;
+    /// <summary>Changes for every rebuild, append and correction, even when candle count is unchanged.</summary>
+    public long DataGeneration { get; private set; }
+    public string SourceIdentity => $"{Instrument.FeedId}/{Instrument.Symbol}/{Instrument.TickSize.ToString(CultureInfo.InvariantCulture)}";
+
+    public string DepthStatusText
+    {
+        get
+        {
+            var status = Data.DepthHistory.Status;
+            var current = Data.DepthHistory.Current;
+            string source = current == null ? "" : $" · {current.ProviderId}/{current.Venue}";
+            string availability = status.IsStale ? "missing or stale" : "received L2 book";
+            string text = $"Depth: {status.RecordingState} · {availability}{source}";
+            if ((status.Coverage & (DepthCoverage.PartialBook | DepthCoverage.Truncated)) != 0) text += " · partial depth coverage";
+            if (status.DroppedRecords > 0) text += $" · {status.DroppedRecords} unrecorded updates";
+            if (!string.IsNullOrWhiteSpace(status.Message)) text += " · " + status.Message;
+            if (IsLoadingDepthHistory) text += " · loading selected recorded depth";
+            else if ((_depthSelectionError ?? _depthSelection.Message) is { } historyMessage) text += " · " + historyMessage;
+            var memory = Data.DepthHistory.MemoryUsage;
+            double estimated = (memory.LiveBytes + memory.HistoricalBytes + memory.SelectedBytes + memory.QueuedBytes + memory.WorkingReadBytes + Data.QueuedDepthBytes) / (1024d * 1024);
+            double limit = (memory.LiveLimit + memory.HistoricalLimit + memory.SelectedLimit + memory.QueueLimit + memory.ReadLimit + Data.DepthQueueByteLimit) / (1024d * 1024);
+            text += $" · estimated depth RAM {estimated:0.#}/{limit:0.#} MiB · disk cap {Data.DepthHistory.Options.MaxDiskBytes / (1024 * 1024)} MiB · retention up to {Data.DepthHistory.Options.RetentionDays}d (disk cap and update rate may shorten it)";
+            return text;
+        }
+    }
+    public bool IsAggregating => Series.HasPendingTrades(Data.Trades);
+    public double AggregationProgress => Data.Trades.Count == 0 ? 1 : Math.Clamp((double)Series.ProcessedTrades / Data.Trades.Count, 0, 1);
+    public bool IsLoadingDepthHistory { get; private set; }
+    public long DepthDataVersion => Data.DepthHistory.DataVersion + _depthSelection.Version;
     public ChartPeriod Period { get; private set; }
     public ChartSettings Settings { get; }
     public ChartViewport Viewport { get; } = new();
@@ -282,15 +329,22 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     /// <summary>Reconstruye las velas desde las operaciones y recalcula los indicadores.</summary>
     public void Rebuild()
     {
+        DataGeneration++;
         int step = BaseStepFor(Settings.PriceStep);
         Series = new CandleSeries(Instrument, Period, step, (Data.Feed as TradingHub.Feeds.ISessionSettingsFeed)?.GetSessionSettings(Instrument));
-        Series.Rebuild(Data.Trades);
+        if (!CandleSeriesCache.Shared.TryRestore(Series, Data.Trades, CandleCacheScope))
+            Series.BeginRebuild(Data.Trades);
+        Series.Append(Data.Trades, CandleSeries.InitialBatchSize);
+        Series.AdvanceAvailability(AvailabilityClock);
+        if (!Series.HasPendingTrades(Data.Trades)) CandleSeriesCache.Shared.Store(Series, Data.Trades, CandleCacheScope);
         Data.OpenInterest.Apply(Series, Data.Feed.Now);
         _wrappers.Clear();
         for (int i = 0; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
         UpdateInfos();
         foreach (var s in Indicators) s.NeedsRecalc = true;
         _openCumulative = null;
+        if (Indicators.Any(s => s.WantsDepthHistory) && Series.Count > 0)
+            EnsureDepthHistory(GetDepthInterval(0).From, GetDepthInterval(Series.Count - 1).To);
         ProcessPending();
         Invalidate();
     }
@@ -368,6 +422,8 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
             if (e.PropertyName == nameof(Indicator.Panel)) MoveToPanelByName(slot, indicator.Panel);
         };
         slot.NeedsRecalc = true;
+        if (slot.WantsDepthHistory && Series.Count > 0)
+            EnsureDepthHistory(GetDepthInterval(0).From, GetDepthInterval(Series.Count - 1).To);
         ProcessPending();
         Invalidate();
         return slot;
@@ -417,6 +473,22 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     /// <summary>Procesa recálculos, timers y pedidos pendientes. Llamar en cada tick de UI.</summary>
     public void Update()
     {
+        if (_disposed) return;
+        var selection = Interlocked.Exchange(ref _depthPublication, null);
+        if (selection != null && selection.Request == _depthRequest)
+        {
+            _depthSelectionError = selection.Error;
+            IsLoadingDepthHistory = false;
+        }
+        long depthVersion = DepthDataVersion;
+        if (_depthObservedVersion != depthVersion)
+        {
+            _depthObservedVersion = depthVersion;
+            OnDepthHistoryChanged();
+        }
+        ContinueAggregation();
+        if (Series.AdvanceAvailability(AvailabilityClock))
+            foreach (var slot in Indicators) slot.NeedsRecalc = true;
         RefreshFixedProfiles();
         while (_invokes.Count > 0)
         {
@@ -441,8 +513,33 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         }
     }
 
+    private void ContinueAggregation()
+    {
+        if (!Series.HasPendingTrades(Data.Trades)) return;
+        long correction = Series.CorrectionRevision;
+        var result = Series.Append(Data.Trades, CandleSeries.InitialBatchSize);
+        Series.AdvanceAvailability(AvailabilityClock);
+        bool rebuilt = Series.CorrectionRevision != correction;
+        if (rebuilt) { _wrappers.Clear(); _openCumulative = null; }
+        for (int i = _wrappers.Count; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
+        if (!result.Changed && !rebuilt) return;
+        DataGeneration++;
+        int first = Math.Max(0, result.FirstChangedBar);
+        Data.OpenInterest.Apply(Series, Data.Feed.Now, first);
+        foreach (var slot in Indicators)
+        {
+            if (rebuilt) slot.NeedsRecalc = true;
+            else if (!slot.NeedsRecalc) Safe(slot, () => slot.Indicator.HostCalculate(first));
+        }
+        if (!Series.HasPendingTrades(Data.Trades)) CandleSeriesCache.Shared.Store(Series, Data.Trades, CandleCacheScope);
+        if (!Series.HasPendingTrades(Data.Trades) && Series.Count > 0 && Indicators.Any(s => s.WantsDepthHistory))
+            EnsureDepthHistory(GetDepthInterval(0).From, GetDepthInterval(Series.Count - 1).To);
+        Invalidate();
+    }
+
     private void ProcessPending()
     {
+        bool cumulativeReady = !Series.HasPendingTrades(Data.Trades);
         foreach (var slot in Indicators.ToArray())
         {
             if (slot.NeedsRecalc)
@@ -453,7 +550,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
                 Invalidate();
             }
 
-            if (slot.PendingCumulative.Count > 0)
+            if (slot.PendingCumulative.Count > 0 && cumulativeReady)
             {
                 var reqs = slot.PendingCumulative.ToArray();
                 slot.PendingCumulative.Clear();
@@ -502,6 +599,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
             while (from > 0 && Series[from - 1].LastTime >= time) from--;
         }
         int first = Data.OpenInterest.Apply(Series, Data.Feed.Now, from);
+        if (first >= 0) DataGeneration++;
         foreach (var slot in Indicators)
         {
             if (slot.NeedsRecalc) continue;
@@ -512,9 +610,19 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
 
     private void OnTradesAppended(int start, int count)
     {
-        var res = Series.Append(Data.Trades);
+        long correction = Series.CorrectionRevision;
+        var res = Series.Append(Data.Trades, CandleSeries.InitialBatchSize);
+        Series.AdvanceAvailability(AvailabilityClock);
+        bool rebuilt = correction != Series.CorrectionRevision;
+        if (rebuilt)
+        {
+            _openCumulative = null;
+            _wrappers.Clear();
+            foreach (var slot in Indicators) slot.NeedsRecalc = true;
+        }
         for (int i = _wrappers.Count; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
         if (!res.Changed) return;
+        DataGeneration++;
         Data.OpenInterest.Apply(Series, Data.Feed.Now, res.FirstChangedBar);
 
         // ticks para los indicadores que los piden
@@ -535,6 +643,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
                     Direction = side == TradeSide.Buy ? TradeDirection.Buy : side == TradeSide.Sell ? TradeDirection.Sell : TradeDirection.Between,
                     DataType = MarketDataType.Trade,
                     Security = Instrument.Symbol,
+                    Provenance = Data.Trades.GetProvenance(i),
                 });
             }
         }
@@ -554,52 +663,162 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     private void OnDepthUpdated(DepthUpdate update)
     {
         var snap = update.Snapshot;
-        bool bestChanged = snap.BestBidTicks != _lastBestBid || snap.BestAskTicks != _lastBestAsk;
+        bool available = update.IsUsable && AvailabilityClock - update.ReceivedAt <= Data.DepthHistory.Options.MaxAge;
+        bool bestChanged = snap.BestBidTicks != _lastBestBid || snap.BestAskTicks != _lastBestAsk || available != _lastBestAvailable;
         _lastBestBid = snap.BestBidTicks;
         _lastBestAsk = snap.BestAskTicks;
+        _lastBestAvailable = available;
 
-        if (Indicators.Any(s => s.WantsDepth) && update.Changes.Count > 0)
+        foreach (var slot in Indicators)
+            if (slot.WantsDepthSnapshots && slot.Initialized)
+                Safe(slot, () => slot.Indicator.HostDepthSnapshot(update));
+
+        if (Indicators.Any(s => s.WantsDepth) && (update.Changes.Count > 0 || update.IsFullRefresh))
         {
-            var args = update.Changes.Select(c => new MarketDataArg
+            var args = update.IsFullRefresh ? DepthSnapshotArgs(update).ToList() : update.Changes.Select(c => new MarketDataArg
             {
-                Time = snap.Time,
+                Time = update.ReceivedAt,
                 Price = Instrument.FromTicks(c.PriceTicks),
                 Volume = c.Size,
                 DataType = c.Side == BookSide.Bid ? MarketDataType.Bid : MarketDataType.Ask,
-                Security = Instrument.Symbol,
+                Security = Instrument.Symbol, IsAvailable = available,
+                DepthCoverage = update.Coverage, ProviderId = update.ProviderId, Venue = update.Venue,
             }).ToList();
-            foreach (var slot in Indicators.Where(s => s.WantsDepth && !s.NeedsRecalc))
-                Safe(slot, () => slot.Indicator.HostMarketDepths(args));
+            foreach (var slot in Indicators)
+                if (slot.WantsDepth && !slot.NeedsRecalc) Safe(slot, () => slot.Indicator.HostMarketDepths(args));
         }
 
-        if (bestChanged && Indicators.Any(s => s.WantsBestBidAsk))
-        {
-            var bid = new MarketDataArg { Time = snap.Time, Price = Instrument.FromTicks(snap.BestBidTicks), Volume = snap.BestBidSize, DataType = MarketDataType.Bid };
-            var ask = new MarketDataArg { Time = snap.Time, Price = Instrument.FromTicks(snap.BestAskTicks), Volume = snap.BestAskSize, DataType = MarketDataType.Ask };
-            foreach (var slot in Indicators.Where(s => s.WantsBestBidAsk && !s.NeedsRecalc))
+        if (bestChanged) NotifyBestQuotes(update, available);
+        Invalidate();
+    }
+
+    private void NotifyBestQuotes(DepthUpdate update, bool available)
+    {
+        var snapshot = update.Snapshot;
+        var bid = new MarketDataArg { Time = update.ReceivedAt, Price = snapshot.HasBid ? Instrument.FromTicks(snapshot.BestBidTicks) : 0,
+            Volume = available ? snapshot.BestBidSize : 0, DataType = MarketDataType.Bid, IsAvailable = available && snapshot.HasBid,
+            DepthCoverage = update.Coverage, ProviderId = update.ProviderId, Venue = update.Venue };
+        var ask = new MarketDataArg { Time = update.ReceivedAt, Price = snapshot.HasAsk ? Instrument.FromTicks(snapshot.BestAskTicks) : 0,
+            Volume = available ? snapshot.BestAskSize : 0, DataType = MarketDataType.Ask, IsAvailable = available && snapshot.HasAsk,
+            DepthCoverage = update.Coverage, ProviderId = update.ProviderId, Venue = update.Venue };
+        foreach (var slot in Indicators)
+            if (slot.WantsBestBidAsk && slot.Initialized)
             {
                 Safe(slot, () => slot.Indicator.HostBestBidAsk(bid));
                 Safe(slot, () => slot.Indicator.HostBestBidAsk(ask));
             }
-        }
+    }
 
+    private void OnDepthHistoryChanged()
+    {
+        if (_lastBestAvailable && Data.DepthHistory.Current == null)
+        {
+            _lastBestAvailable = false;
+            NotifyBestQuotes(new DepthUpdate { Snapshot = DepthSnapshot.Empty, ReceivedAt = AvailabilityClock,
+                Coverage = Data.DepthHistory.Status.Coverage | DepthCoverage.Missing, ProviderId = Instrument.FeedId }, false);
+        }
+        foreach (var slot in Indicators)
+            if (slot.WantsDepthHistory && !slot.NeedsRecalc)
+                Safe(slot, () => slot.Indicator.HostDepthHistoryChanged());
         Invalidate();
     }
 
     private IEnumerable<MarketDataArg> DepthSnapshotArgs()
     {
-        var snap = Data.Depth;
-        foreach (var b in snap.Bids)
-            yield return new MarketDataArg { Price = Instrument.FromTicks(b.PriceTicks), Volume = b.Size, DataType = MarketDataType.Bid, Time = snap.Time };
-        foreach (var a in snap.Asks)
-            yield return new MarketDataArg { Price = Instrument.FromTicks(a.PriceTicks), Volume = a.Size, DataType = MarketDataType.Ask, Time = snap.Time };
+        var current = Data.DepthHistory.Current;
+        if (current == null) yield break;
+        foreach (var arg in DepthSnapshotArgs(current.Update)) yield return arg;
     }
+
+    private IEnumerable<MarketDataArg> DepthSnapshotArgs(DepthUpdate update)
+    {
+        foreach (var b in update.Snapshot.Bids) yield return DepthArg(update, b, BookSide.Bid);
+        foreach (var a in update.Snapshot.Asks) yield return DepthArg(update, a, BookSide.Ask);
+    }
+
+    private MarketDataArg DepthArg(DepthUpdate update, BookLevel level, BookSide side) => new()
+    {
+        Price = Instrument.FromTicks(level.PriceTicks), Volume = level.Size,
+        DataType = side == BookSide.Bid ? MarketDataType.Bid : MarketDataType.Ask,
+        Time = update.ReceivedAt, Security = Instrument.Symbol, DepthCoverage = update.Coverage,
+        ProviderId = update.ProviderId, Venue = update.Venue, IsAvailable = update.IsUsable,
+    };
 
     private decimal SumDepth(BookSide side)
     {
-        decimal s = 0;
-        foreach (var l in side == BookSide.Bid ? Data.Depth.Bids : Data.Depth.Asks) s += l.Size;
-        return s;
+        var current = Data.DepthHistory.Current;
+        if (current == null) return 0;
+        decimal sum = 0;
+        foreach (var level in side == BookSide.Bid ? current.Snapshot.Bids : current.Snapshot.Asks) sum += level.Size;
+        return sum;
+    }
+
+    public DepthHistoryQuery GetDepthHistory(DateTime fromUtc, DateTime toUtc) => _depthSelection.Query(fromUtc, toUtc);
+
+    /// <summary>
+    /// Requests the selected visible interval from disk without network access or replacing
+    /// another chart's selection. One owned cancellable reader runs at a time; newer requests
+    /// supersede older publication. Minute rounding avoids issuing one file read per frame.
+    /// </summary>
+    public void EnsureDepthHistory(DateTime fromUtc, DateTime toUtc)
+    {
+        if (_disposed || Data.RecordingRoot == null || toUtc <= fromUtc) return;
+        var from = new DateTime(fromUtc.Ticks / TimeSpan.TicksPerMinute * TimeSpan.TicksPerMinute, DateTimeKind.Utc);
+        long endTicks = toUtc.Ticks / TimeSpan.TicksPerMinute * TimeSpan.TicksPerMinute;
+        if (endTicks < toUtc.Ticks && endTicks <= DateTime.MaxValue.Ticks - TimeSpan.TicksPerMinute) endTicks += TimeSpan.TicksPerMinute;
+        var to = new DateTime(endTicks, DateTimeKind.Utc);
+        if (_depthRequestedRange == (from, to)) return;
+        _depthRequestedRange = (from, to);
+        _depthLoadCancellation?.Cancel();
+        _depthLoadCancellation?.Dispose();
+        _depthLoadCancellation = new CancellationTokenSource();
+        long request = ++_depthRequest;
+        IsLoadingDepthHistory = true;
+        _depthLoadTask = ReadDepthSelectionAsync(_depthLoadTask ?? Task.CompletedTask, request, from, to, _depthLoadCancellation.Token);
+    }
+
+    private async Task ReadDepthSelectionAsync(Task previous, long request, DateTime from, DateTime to, CancellationToken ct)
+    {
+        try
+        {
+            await previous.ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            var result = await _depthSelection.LoadAsync(from, to, ct).ConfigureAwait(false);
+            if (!ct.IsCancellationRequested && !_disposed && request == Volatile.Read(ref _depthRequest))
+                Interlocked.Exchange(ref _depthPublication, new(request, result));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (!ct.IsCancellationRequested && !_disposed && request == Volatile.Read(ref _depthRequest))
+                Interlocked.Exchange(ref _depthPublication, new(request, new(_depthSelection.Version, null, true), "Selected depth history is unavailable: " + ex.Message));
+        }
+    }
+
+
+    public DepthHistoryQuery GetDepthHistory(int bar)
+    {
+        var (from, to) = GetDepthInterval(bar);
+        return GetDepthHistory(from, to);
+    }
+
+    /// <summary>
+    /// Time bars use the exchange-session calendar bucket, not approximate months. Non-time
+    /// bars use consecutive availability timestamps; equal-start bars have no unique interval.
+    /// </summary>
+    public (DateTime From, DateTime To) GetDepthInterval(int bar)
+    {
+        if (bar < 0 || bar >= Series.Count) return (DateTime.MinValue, DateTime.MinValue);
+        var from = Series[bar].Time;
+        DateTime to;
+        if (Period.IsTimeBased)
+            to = new DateTime(Series.TimeBucket(from.Ticks).End, DateTimeKind.Utc);
+        else if (bar + 1 < Series.Count)
+            to = Series[bar + 1].Time;
+        else
+            to = Series[bar].LastTime < AvailabilityClock ? AvailabilityClock : Series[bar].LastTime;
+        if (!Series[bar].IsClosed && AvailabilityClock < to) to = AvailabilityClock;
+        return (from, to < from ? from : to);
     }
 
     // =================================================================== operaciones acumuladas
@@ -608,14 +827,15 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     {
         var res = new List<CumulativeTrade>();
         var store = Data.Trades;
+        int processed = Math.Min(Series.ProcessedTrades, store.Count);
         int i = store.LowerBound(from);
         CumulativeTrade? cur = null;
         long curTime = 0;
-        for (; i < store.Count; i++)
+        for (; i < processed; i++)
         {
             long t = store.GetTimeTicks(i);
             if (to != DateTime.MaxValue && t > to.Ticks) break;
-            if (store.GetId(i) < 0) continue; // historia armada con velas: no son operaciones reales
+            if (!store.GetProvenance(i).IsObservedTrade) continue;
             var side = store.GetSide(i);
             var dir = side == TradeSide.Buy ? TradeDirection.Buy : side == TradeSide.Sell ? TradeDirection.Sell : TradeDirection.Between;
             var price = store.GetPrice(i);
@@ -630,18 +850,31 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
 
             cur.Lastprice = price;
             cur.Volume += vol;
-            cur.Ticks.Add(new MarketDataArg { Time = new DateTime(t, DateTimeKind.Utc), Price = price, Volume = vol, Direction = dir, DataType = MarketDataType.Trade });
+            cur.Ticks.Add(new MarketDataArg { Id = store.GetId(i), Time = new DateTime(t, DateTimeKind.Utc), Price = price, Volume = vol,
+                Direction = dir, DataType = MarketDataType.Trade, Provenance = store.GetProvenance(i), Security = Instrument.Symbol });
         }
 
-        _openCumulative = cur;
+        if (cur != null && processed == store.Count && (to == DateTime.MaxValue || to.Ticks >= store.GetTimeTicks(processed - 1)))
+        {
+            var existing = _openCumulative;
+            if (existing != null && existing.Time == cur.Time && existing.Direction == cur.Direction &&
+                existing.FirstPrice == cur.FirstPrice && existing.Lastprice == cur.Lastprice &&
+                existing.Volume == cur.Volume && existing.Ticks.Count == cur.Ticks.Count &&
+                existing.Ticks[0].Id == cur.Ticks[0].Id && existing.Ticks[^1].Id == cur.Ticks[^1].Id)
+                res[^1] = existing;
+            else if (existing == null || existing.Time.Ticks / TimeSpan.TicksPerMillisecond != curTime ||
+                existing.Direction != cur.Direction || cur.Time <= existing.Time)
+                _openCumulative = cur;
+        }
         return res;
     }
 
     private void FeedCumulative(List<MarketDataArg> ticks)
     {
-        var slots = Indicators.Where(s => s.WantsCumulative && !s.NeedsRecalc).ToList();
+        var slots = Indicators.Where(s => s.WantsCumulative && !s.NeedsRecalc && s.PendingCumulative.Count == 0).ToList();
         foreach (var tk in ticks)
         {
+            if (!tk.IsObservedTrade) continue;
             var cur = _openCumulative;
             bool same = cur != null && cur.Direction == tk.Direction &&
                         cur.Time.Ticks / TimeSpan.TicksPerMillisecond == tk.Time.Ticks / TimeSpan.TicksPerMillisecond;
@@ -800,9 +1033,10 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
             decimal vol = store.GetVolume(i);
             var side = store.GetSide(i);
             long t = store.GetTimeTicks(i);
-            bool synthetic = store.GetId(i) < 0;
-            scaled.AddTrade(price, Series.RowOf(price), vol, side, t, i, synthetic);
-            exact.AddTrade(price, price, vol, side, t, i, synthetic);
+            var provenance = store.GetProvenance(i);
+            bool synthetic = provenance.Quality.HasFlag(DataQuality.Synthetic);
+            scaled.AddTrade(price, Series.RowOf(price), vol, side, t, i, synthetic, provenance);
+            exact.AddTrade(price, price, vol, side, t, i, synthetic, provenance);
         }
 
         try
@@ -842,9 +1076,17 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+        _depthLoadCancellation?.Cancel();
+        _depthLoadTask?.GetAwaiter().GetResult();
+        _depthLoadCancellation?.Dispose();
+        Interlocked.Exchange(ref _depthPublication, null);
+        _depthSelection.Dispose();
         Data.TradesAppended -= OnTradesAppended;
         Data.HistoryLoaded -= OnHistoryLoaded;
         Data.DepthUpdated -= OnDepthUpdated;
+        Data.DepthHistoryChanged -= OnDepthHistoryChanged;
         Data.StatusChanged -= OnStatusChanged;
         Data.OpenInterestChanged -= OnOpenInterestChanged;
         foreach (var s in Indicators.ToArray())

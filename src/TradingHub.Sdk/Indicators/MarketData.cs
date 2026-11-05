@@ -1,3 +1,5 @@
+using TradingHub.Data;
+using TradingHub.Market;
 using TradingHub.Trading;
 
 namespace TradingHub.Indicators
@@ -15,6 +17,17 @@ namespace TradingHub.Indicators
         public long? ExchangeOrderId { get; set; }
         public long Id { get; set; }
         public decimal OpenInterest { get; set; }
+        /// <summary>False for a missing/stale quote; zero price is otherwise a valid price.</summary>
+        public bool IsAvailable { get; set; } = true;
+        public DepthCoverage DepthCoverage { get; set; }
+        public string? ProviderId { get; set; }
+        public string? Venue { get; set; }
+        public TradeProvenance Provenance { get; set; } = new(DataQuality.Raw);
+        public DataQuality Quality => Provenance.Quality;
+        public int ResolutionSeconds => Provenance.ResolutionSeconds;
+        public string? SourceIdentity => Provenance.SourceIdentity;
+        public int ObservedTradeCount => Provenance.ObservedTradeCount;
+        public bool IsObservedTrade => IsTrade && Provenance.IsObservedTrade;
 
         /// <summary>Precio original (antes de agrupar por filas).</summary>
         public decimal OriginPrice { get; set; }
@@ -91,12 +104,30 @@ namespace TradingHub.Indicators
         private readonly Func<IEnumerable<MarketDataArg>> _snapshot;
         private readonly Func<decimal> _cumAsks;
         private readonly Func<decimal> _cumBids;
+        private readonly Func<DepthSample?>? _current;
+        private readonly Func<DepthHistoryStatus>? _status;
+        private readonly Func<DateTime, DateTime, DepthHistoryQuery>? _history;
 
+        public DepthSample? Current => _current?.Invoke();
+        public DepthHistoryStatus HistoryStatus => _status?.Invoke() ??
+            new(DepthRecordingState.Disabled, "No depth provider is attached.", null, null, 0, DepthCoverage.Missing, true);
+
+        public DepthHistoryQuery GetHistory(DateTime fromUtc, DateTime toUtc) =>
+            _history?.Invoke(fromUtc, toUtc) ?? new(fromUtc, toUtc, Array.Empty<DepthSample>(), null, DepthCoverage.Missing, "Recorded depth is unavailable.");
         public MarketDepthInfo(Func<IEnumerable<MarketDataArg>> snapshot, Func<decimal> cumulativeAsks, Func<decimal> cumulativeBids)
         {
             _snapshot = snapshot;
             _cumAsks = cumulativeAsks;
             _cumBids = cumulativeBids;
+        }
+
+        public MarketDepthInfo(Func<IEnumerable<MarketDataArg>> snapshot, Func<decimal> cumulativeAsks,
+            Func<decimal> cumulativeBids, Func<DepthSample?> current, Func<DepthHistoryStatus> status,
+            Func<DateTime, DateTime, DepthHistoryQuery> history) : this(snapshot, cumulativeAsks, cumulativeBids)
+        {
+            _current = current;
+            _status = status;
+            _history = history;
         }
 
         public static MarketDepthInfo Empty { get; } = new(() => Array.Empty<MarketDataArg>(), () => 0, () => 0);

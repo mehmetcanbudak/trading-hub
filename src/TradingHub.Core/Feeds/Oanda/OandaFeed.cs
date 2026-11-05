@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using TradingHub.Market;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.Oanda;
 
@@ -20,24 +21,30 @@ public sealed class OandaSettings
 }
 
 /// <summary>
-/// OANDA v20: CFDs de índices (NAS100_USD, SPX500_USD, US30_USD, DE30_EUR…), metales, petróleo y forex. Precios en vivo
-/// por streaming y años de historia en velas de 5 segundos o 1 minuto, gratis con una cuenta de práctica. Los CFDs no
-/// tienen operaciones reales: cada cotización (precio medio) cuenta como una operación de volumen 1 y el lado sale de
-/// si el precio subió o bajó, igual que los archivos importados.
+/// OANDA v20: index CFDs, metals, oil and forex with live midpoint quotes and historical midpoint candles.
+/// Quote-derived prices are synthetic trading-path estimates, not observed exchange trades or aggressor flow.
+/// Live quotes carry zero traded volume; historical candle volume is provider quote activity, not exchange volume.
 /// </summary>
 public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 {
     public const string FeedId = "oanda";
     private readonly OandaSettings _s;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
-    private readonly HttpClient _stream = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly HttpClient _http;
+    private readonly HttpClient _stream;
     private string? _account;
     private long _liveId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    public OandaFeed(OandaSettings settings)
+    public OandaFeed(OandaSettings settings, ProxyHandlerFactory? network = null)
     {
         _s = settings;
+        network ??= new ProxyHandlerFactory(new NetworkProxyPolicy());
+        var httpHandler = network.CreateHandler();
+        httpHandler.AllowAutoRedirect = false;
+        _http = new HttpClient(httpHandler) { Timeout = TimeSpan.FromSeconds(30) };
+        var streamHandler = network.CreateHandler();
+        streamHandler.AllowAutoRedirect = false;
+        _stream = new HttpClient(streamHandler) { Timeout = Timeout.InfiniteTimeSpan };
         foreach (var h in new[] { _http, _stream })
         {
             h.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.Token);
@@ -49,7 +56,7 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     public string DisplayName => "OANDA";
     public bool SupportsHistory => true;
     public bool IsLive => true;
-    public string HistoryNote => "OANDA 5-second bars converted to synthetic trades (CFDs have no centralized exchange trades)";
+    public string HistoryNote => "OANDA 5-second midpoint bars converted to synthetic prices (volume is quote activity, not traded volume; no observed aggressor side)";
 
     private string Rest => (_s.RestUrl ?? (_s.Practice ? "https://api-fxpractice.oanda.com" : "https://api-fxtrade.oanda.com")).TrimEnd('/');
     private string StreamBase => (_s.StreamUrl ?? (_s.Practice ? "https://stream-fxpractice.oanda.com" : "https://stream-fxtrade.oanda.com")).TrimEnd('/');
@@ -165,11 +172,13 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     {
         long lastId = 0;
         bool stop = false;
+        var provenance = new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide | DataQuality.Partial,
+            SourceIdentity: "oanda:midpoint-candles:quote-count", ObservedTradeCount: 0);
         await CandlesAsync(instrument.Symbol, "S5", TimeSpan.FromSeconds(5), fromUtc, toUtc, batch =>
         {
             var trades = new List<Trade>(batch.Count * 4);
             foreach (var c in batch)
-                if (c.Complete) HistoryBuilder.Synthesize(c.Time, TimeSpan.FromSeconds(5), c.O, c.H, c.L, c.C, c.V, instrument, ref lastId, trades);
+                if (c.Complete) HistoryBuilder.Synthesize(c.Time, TimeSpan.FromSeconds(5), c.O, c.H, c.L, c.C, c.V, instrument, ref lastId, trades, provenance);
             if (trades.Count > 0 && !onBatch(trades)) stop = true;
             return !stop;
         }, progress, ct).ConfigureAwait(false);
@@ -196,8 +205,10 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     {
         string granularity = minutes switch { >= 15 => "M15", >= 5 => "M5", _ => "M1" };
         int m = minutes >= 15 ? 15 : minutes >= 5 ? 5 : 1;
+        var provenance = new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide | DataQuality.Partial,
+            ResolutionSeconds: m * 60, SourceIdentity: "oanda:midpoint-candles:quote-count", ObservedTradeCount: 0);
         await CandlesAsync(instrument.Symbol, granularity, TimeSpan.FromMinutes(m), fromUtc, toUtc, batch =>
-            onBatch(batch.Where(c => c.Complete).Select(c => new Kline(new DateTimeOffset(c.Time).ToUnixTimeMilliseconds(), c.O, c.H, c.L, c.C, Math.Max(1, c.V), 0, false)).ToList()),
+            onBatch(batch.Where(c => c.Complete).Select(c => new Kline(new DateTimeOffset(c.Time).ToUnixTimeMilliseconds(), c.O, c.H, c.L, c.C, Math.Max(1, c.V), 0, false, provenance)).ToList()),
             progress, ct).ConfigureAwait(false);
     }
 
@@ -261,7 +272,12 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
                     var time = root.TryGetProperty("time", out var tm) && DateTime.TryParse(tm.GetString(), Inv, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : DateTime.UtcNow;
                     decimal mid = instrument.RoundPrice((b[0].P + a[0].P) / 2);
                     var side = HistoryBuilder.TickRule(mid, ref lastPrice, ref lastSide);
-                    sink.OnTrades(instrument, new[] { new Trade(Interlocked.Increment(ref _liveId), time, mid, 1, side) });
+                    sink.OnTrades(instrument, new[]
+                    {
+                        new Trade(Interlocked.Increment(ref _liveId), time, mid, 0, side,
+                            new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide | DataQuality.Partial,
+                                SourceIdentity: "oanda:midpoint-quotes", ObservedTradeCount: 0)),
+                    });
                     book.Clear();
                     foreach (var x in b) book.Set(BookSide.Bid, instrument.ToTicks(x.P), Math.Max(1, x.L));
                     foreach (var x in a) book.Set(BookSide.Ask, instrument.ToTicks(x.P), Math.Max(1, x.L));

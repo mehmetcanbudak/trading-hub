@@ -65,12 +65,12 @@ public sealed class IbConsumerCorrectionsTests : IDisposable
             TickData.Load(_root, _instrument, Start, Start.AddMinutes(4), null, default, compress: true),
             TickData.FromTrades(_instrument, rows), TickData.FromStore(store),
             TickData.FromTrades(_instrument, rows).Compress().Slice(Start, Start.AddMinutes(4)) }) AssertMixed(ticks);
-        Assert.Equal(rows.Count * 25L, TickData.FromTrades(_instrument, rows).MemoryBytes);
     }
     [Fact]
     public void CompressionNeverMergesObservedAndSyntheticTicksAtTheSamePriceSideAndSecond()
     {
-        var ticks = TickData.FromTrades(_instrument, new[] { new Trade(1, Start, 100, 2, TradeSide.Buy), new Trade(-1, Start, 100, 5, TradeSide.Buy) }).Compress();
+        var ticks = TickData.FromTrades(_instrument, new[] { new Trade(1, Start, 100, 2, TradeSide.Buy), new Trade(-1, Start, 100, 5, TradeSide.Buy,
+            new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide, ObservedTradeCount: 0)) }).Compress();
         Assert.Equal(2, ticks.Count); Assert.False(ticks.IsSynthetic(0)); Assert.True(ticks.IsSynthetic(1));
         var strategy = new Probe(); var result = new BacktestEngine(strategy, ticks, Settings()).Run(); Assert.Null(result.Error);
         var bar = Assert.Single(strategy.Seen);
@@ -94,7 +94,8 @@ public sealed class IbConsumerCorrectionsTests : IDisposable
         Assert.True(strategy.FormingBar!.IsSynthetic); Assert.Empty(strategy.FormingBar.Levels);
         Assert.Equal(4m, strategy.FormingBar.Volume);
         int index = data.Trades.Count;
-        data.Trades.Add(new Trade(-999, Start.AddMinutes(3), 100, 1, TradeSide.Buy));
+        data.Trades.Add(new Trade(-999, Start.AddMinutes(3), 100, 1, TradeSide.Buy,
+            new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide, ObservedTradeCount: 0)));
         var appended = typeof(InstrumentData).GetField("TradesAppended", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         ((Action<int, int>?)appended.GetValue(data))?.Invoke(index, 1);
         Assert.True(Assert.Single(strategy.CapturedTicks).Id < 0);

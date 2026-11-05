@@ -10,6 +10,9 @@ using TradingHub.App.Controls;
 using TradingHub.App.Services;
 using TradingHub.App.Windows;
 using TradingHub.Feeds.Rithmic;
+using TradingHub.Feeds.Bybit;
+using TradingHub.Feeds.Longbridge;
+using System.Text.Json;
 
 namespace TradingHub.App.Views;
 
@@ -26,6 +29,7 @@ internal sealed class ConnectionsView : UserControl, IPage
     private readonly Dictionary<string, (bool Ok, string Message, DateTime When)> _results = new();
     private ConnectionProfile? _selected;
     private CancellationTokenSource? _testCts;
+    private CancellationTokenSource? _authorizationCts;
 
     public ConnectionsView(AppServices svc, Action<string> status)
     {
@@ -47,6 +51,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         ConnectionKind.Simulator => MaterialIconKind.FlaskOutline,
         ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot => MaterialIconKind.Bitcoin,
         ConnectionKind.Bybit => MaterialIconKind.CurrencyUsd,
+        ConnectionKind.AggregateCrypto => MaterialIconKind.ChartLineVariant,
+        ConnectionKind.Longbridge => MaterialIconKind.Earth,
         ConnectionKind.Rithmic => MaterialIconKind.ChartTimelineVariant,
         ConnectionKind.AmpFutures => MaterialIconKind.ChartBellCurveCumulative,
         ConnectionKind.Tradovate => MaterialIconKind.ChartLineVariant,
@@ -74,6 +80,8 @@ internal sealed class ConnectionsView : UserControl, IPage
                 ConnectionKind.Oanda => "Index, gold and forex CFDs (free demo)",
                 ConnectionKind.Alpaca => "Free US stocks and ETFs (SPY, QQQ)",
                 ConnectionKind.Databento => "CME futures history since 2010",
+                ConnectionKind.Longbridge => "OAuth market data only; configured stock metadata",
+                ConnectionKind.AggregateCrypto => "non-executable composite data; Binance-only DOM",
                 _ => null,
             };
             object itemHeader = hint == null ? Ui.EnumName(kind) : Ui.V(1, new TextBlock { Text = Ui.EnumName(kind) }, new TextBlock { Text = hint, Classes = { "faint", "small" } });
@@ -144,7 +152,11 @@ internal sealed class ConnectionsView : UserControl, IPage
             ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot => string.IsNullOrWhiteSpace(p.ApiKey)
                 ? "public data · no account"
                 : p.Testnet ? "data + testnet account" : p.AllowRealOrders ? "data + REAL account" : "data + real account (read-only)",
-            ConnectionKind.Bybit => "public market data",
+            ConnectionKind.Bybit => !_svc.Connections.HasTradingCredentials(p) ? "public market data · no account"
+                : p.BybitEnvironment == BybitEnvironment.Real ? p.AllowRealOrders ? "data + REAL UTA account" : "data + real UTA account (read-only)"
+                : $"data + {p.BybitEnvironment.ToString().ToLowerInvariant()} UTA account",
+            ConnectionKind.Longbridge => "data only · OAuth · configured markets",
+            ConnectionKind.AggregateCrypto => "composite data · not executable · Binance DOM",
             ConnectionKind.Rithmic or ConnectionKind.AmpFutures => string.IsNullOrWhiteSpace(p.RithmicUser) ? "no username configured" : $"{p.RithmicUser} · {p.RithmicSystem}",
             ConnectionKind.Tradovate => string.IsNullOrWhiteSpace(p.TradovateUser) ? "no username configured" : $"{p.TradovateUser} · {(p.Testnet ? "demo" : p.AllowRealOrders ? "REAL" : "real (read-only)")}",
             ConnectionKind.CTrader => string.IsNullOrWhiteSpace(p.CTraderClientId) ? "no app configured" : $"{(p.Testnet ? "demo" : "real")}{(p.CTraderLogin > 0 ? " · account " + p.CTraderLogin : "")}",
@@ -185,6 +197,7 @@ internal sealed class ConnectionsView : UserControl, IPage
 
     private void Select(ConnectionProfile p)
     {
+        if (_selected?.Id != p.Id) _authorizationCts?.Cancel();
         _selected = p;
         _detail.Content = BuildDetail(p);
     }
@@ -231,7 +244,15 @@ internal sealed class ConnectionsView : UserControl, IPage
                 sections.Children.Add(Ui.Card(BinanceAccount(p, apply)));
                 break;
             case ConnectionKind.Bybit:
-                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Public Bybit linear USDT perpetual data. Bybit account order routing is not yet available."));
+                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Bybit USDT linear perpetuals. Demo uses the main market; testnet has separate prices and history. UTA one-way accounts only."));
+                sections.Children.Add(Ui.Card(BybitAccount(p, apply)));
+                break;
+            case ConnectionKind.Longbridge:
+                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Data only: quotes, candles, recent trade tape and provider depth. Recent tape and candle history are not full historical order flow."));
+                sections.Children.Add(Ui.Card(LongbridgeSection(p, apply)));
+                break;
+            case ConnectionKind.AggregateCrypto:
+                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Binance Futures + Bybit composite trades and candles. Prices are not executable. DOM and depth history are explicitly Binance Futures only. Missing constituents remain marked as partial coverage."));
                 break;
             case ConnectionKind.Rithmic:
             case ConnectionKind.AmpFutures:
@@ -265,7 +286,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         var save = Ui.Button("Save", MaterialIconKind.ContentSaveOutline, () => { }, "primary");
         var delete = Ui.Button("Remove", MaterialIconKind.DeleteOutline, () => { }, "ghost");
         delete.IsVisible = _svc.Connections.Profiles.Count(x => x.Kind == p.Kind) > 1 || p.Kind is ConnectionKind.InteractiveBrokers or ConnectionKind.AmpFutures
-            or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento;
+            or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento
+            or ConnectionKind.Longbridge or ConnectionKind.AggregateCrypto;
 
         bool Save()
         {
@@ -311,7 +333,10 @@ internal sealed class ConnectionsView : UserControl, IPage
         delete.Click += async (_, _) =>
         {
             if (TopLevel.GetTopLevel(this) is not Window w) return;
-            if (!await ConfirmDialog.ShowAsync(w, "Remove connection", $"Removes \"{p.Name}\" and its secrets from {Os.SecretStoreShort}. Saved market data remains unchanged.", "Remove", danger: true)) return;
+            string removal = p.Kind == ConnectionKind.Bybit
+                ? $"Removes \"{p.Name}\" and its active credentials. Previous private credential contexts are retained only while exposure or order outcomes remain unresolved, so protection can reconcile after restart. Saved market data remains unchanged."
+                : $"Removes \"{p.Name}\" and its secrets from {Os.SecretStoreShort}. Saved market data remains unchanged.";
+            if (!await ConfirmDialog.ShowAsync(w, "Remove connection", removal, "Remove", danger: true)) return;
             try
             {
                 _svc.Connections.ClearSecrets(p);
@@ -436,6 +461,108 @@ internal sealed class ConnectionsView : UserControl, IPage
             warn);
     }
 
+    private Control BybitAccount(ConnectionProfile p, List<Action> apply)
+    {
+        var environment = new ComboBox { MinWidth = 200, ItemsSource = Enum.GetValues<BybitEnvironment>(), SelectedItem = p.BybitEnvironment };
+        var key = new TextBox { PasswordChar = '•', Watermark = string.IsNullOrEmpty(_svc.Connections.GetSecret(p, "apikey")) ? "API key" : $"Saved in {Os.SecretStoreShort}" };
+        var secret = new TextBox { PasswordChar = '•', Watermark = string.IsNullOrEmpty(_svc.Connections.GetSecret(p)) ? "API secret" : $"Saved in {Os.SecretStoreShort}" };
+        var allow = new CheckBox { Content = "Allow REAL orders from Trading Hub", IsChecked = p.AllowRealOrders };
+        var confirm = new CheckBox { Content = "Confirm each real-money order", IsChecked = p.ConfirmOrders };
+        var maximum = new NumericUpDown { Value = p.MaxOrderQuantity, Minimum = 0, Increment = 0.001m, FormatString = "0.########", Watermark = "no limit" };
+        void Update()
+        {
+            bool real = environment.SelectedItem is BybitEnvironment.Real;
+            allow.IsEnabled = real;
+            confirm.IsEnabled = real && allow.IsChecked == true;
+        }
+        environment.SelectionChanged += (_, _) => Update();
+        allow.IsCheckedChanged += (_, _) => Update();
+        Update();
+        apply.Add(() =>
+        {
+            p.BybitEnvironment = environment.SelectedItem is BybitEnvironment selected ? selected : BybitEnvironment.Demo;
+            p.Testnet = p.BybitEnvironment != BybitEnvironment.Real;
+            if (!string.IsNullOrWhiteSpace(key.Text)) _svc.Connections.SetSecret(p, "apikey", key.Text.Trim());
+            if (!string.IsNullOrWhiteSpace(secret.Text)) _svc.Connections.SetSecret(p, secret.Text.Trim());
+            key.Text = secret.Text = "";
+            p.ApiKey = "";
+            p.AllowRealOrders = p.BybitEnvironment == BybitEnvironment.Real && allow.IsChecked == true;
+            p.ConfirmOrders = confirm.IsChecked != false;
+            p.MaxOrderQuantity = maximum.Value ?? 0;
+        });
+        var forget = Ui.Button("Forget Bybit keys", MaterialIconKind.DeleteOutline, () =>
+        {
+            _svc.Connections.SetSecret(p, "apikey", null);
+            _svc.Connections.SetSecret(p, null);
+            key.Text = secret.Text = "";
+            _svc.Connections.Invalidate(p);
+            _status("Active Bybit keys removed. Previous private contexts remain only while exposure or order outcomes need reconciliation; native reductions and cancel remain available.");
+        }, "ghost");
+        return Ui.V(14, Ui.H2("Bybit UTA trading account"),
+            Note(MaterialIconKind.ShieldKeyOutline, $"Both API credentials are stored in {Os.SecretStore}. Use contract-trading permission without withdrawals. Keys must belong to the selected environment."),
+            Ui.Field("Environment", environment), TwoColumns(Ui.Field("API key", key), Ui.Field("API secret", secret)), forget,
+            allow, confirm, Ui.Field("Maximum new order quantity (0 = no local limit)", maximum),
+            Note(MaterialIconKind.AlertOutline, "REAL orders use actual money. Native reduce-only applies account-wide, not to one strategy; local sibling cancellation is not atomic OCO. Market orders can partially fill or cancel without a fill."));
+    }
+
+    private Control LongbridgeSection(ConnectionProfile p, List<Action> apply)
+    {
+        var client = new TextBox { Text = p.Longbridge.ClientId, Watermark = "Register automatically during authorization" };
+        var region = new ComboBox { ItemsSource = new[] { "global", "cn" }, SelectedItem = p.Longbridge.Region, MinWidth = 180 };
+        var symbols = new TextBox { Text = string.Join(", ", p.Longbridge.Symbols), Watermark = "Configured provider symbols, separated by commas" };
+        var metadata = new TextBox
+        {
+            Text = JsonSerializer.Serialize(p.Longbridge.Instruments, new JsonSerializerOptions { WriteIndented = true }),
+            AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, MinHeight = 150, MaxHeight = 360,
+            Watermark = "Per-symbol JSON: TickSize, VolumeStep, Exchange, Currency, TimeZoneId, RegularSessions",
+        };
+        var result = new TextBlock { TextWrapping = TextWrapping.Wrap, Classes = { "muted", "small" } };
+        void Apply()
+        {
+            var configured = JsonSerializer.Deserialize<Dictionary<string, LongbridgeInstrumentMetadata>>(metadata.Text ?? "{}") ??
+                throw new InvalidOperationException("Longbridge instrument metadata must be a JSON object.");
+            _svc.Connections.Invalidate(p); // Retire token refresh before editing its public client/resource context.
+            p.Longbridge.ClientId = (client.Text ?? "").Trim();
+            p.Longbridge.Region = region.SelectedItem as string ?? "global";
+            p.Longbridge.Symbols = (symbols.Text ?? "").Split(new[] { ',', ';', '\r', '\n' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal).ToList();
+            p.Longbridge.Instruments = configured;
+        }
+        apply.Add(Apply);
+        var authorize = Ui.Button("Authorize Longbridge data", MaterialIconKind.ShieldKeyOutline, () => { }, "primary");
+        var cancel = Ui.Button("Cancel authorization", MaterialIconKind.Close, () => _authorizationCts?.Cancel(), "ghost");
+        var forget = Ui.Button("Forget authorization", MaterialIconKind.DeleteOutline, () =>
+        {
+            _authorizationCts?.Cancel();
+            _svc.Connections.LongbridgeSessionFor(p).ForgetAuthorization();
+            _svc.Connections.Invalidate(p);
+            result.Text = "Longbridge authorization removed. No trading account is created.";
+        }, "ghost");
+        authorize.Click += async (_, _) =>
+        {
+            _authorizationCts?.Cancel();
+            _authorizationCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            authorize.IsEnabled = false;
+            try
+            {
+                Apply();
+                _svc.Connections.Save();
+                _svc.Connections.Invalidate(p);
+                result.Text = "Complete authorization in the browser. Access is limited to market data.";
+                await LongbridgeAuthorizationFlow.AuthorizeAsync(_svc.Connections, p, cancellationToken: _authorizationCts.Token);
+                client.Text = p.Longbridge.ClientId;
+                result.Text = "Longbridge data authorization saved in the secret store. Test the configured instruments to check entitlement and metadata.";
+            }
+            catch (OperationCanceledException) { result.Text = "Longbridge authorization canceled; no new credentials were published."; }
+            catch (Exception ex) { result.Text = "Longbridge authorization failed: " + ex.Message; }
+            finally { authorize.IsEnabled = true; }
+        };
+        return Ui.V(14, Ui.H2("Longbridge market-data authorization"), TwoColumns(Ui.Field("Public OAuth client ID", client), Ui.Field("Region", region)),
+            Ui.Field("Symbols", symbols), Ui.Field("Exact market metadata (JSON)", metadata,
+                "Supply exchange tick size and lot step, currency, IANA time zone, and regular session start/end periods per symbol. Missing metadata is rejected, never guessed."),
+            Note(MaterialIconKind.InformationOutline, "RegularSessions entries use Start and End in HH:mm:ss. Confirm exchange holidays and provider entitlements separately; a configured weekly session is not a full exchange calendar."),
+            Ui.H(8, authorize, cancel, forget), result);
+    }
+
     private static string RithmicCacheFile => Path.Combine(AppPaths.Root, "rithmic-servidores.json");
 
     private static List<RithmicServer> LoadRithmicCache()
@@ -536,7 +663,7 @@ internal sealed class ConnectionsView : UserControl, IPage
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-                var found = await RithmicDirectory.DiscoverAsync(cts.Token);
+                var found = await RithmicDirectory.DiscoverAsync(cts.Token, network: _svc.Connections.NetworkFactory());
                 if (found.Count > 0)
                 {
                     servers = found;
@@ -788,8 +915,9 @@ internal sealed class ConnectionsView : UserControl, IPage
     }
 
     /// <summary>OAuth de cTrader: abre el navegador y espera el código en la dirección local de redirección.</summary>
-    private static async Task<(string Access, string Refresh)> CTraderOAuthAsync(string clientId, string secret, string redirect)
+    private async Task<(string Access, string Refresh)> CTraderOAuthAsync(string clientId, string secret, string redirect)
     {
+        var network = _svc.Connections.NetworkFactory();
         var uri = new Uri(redirect);
         using var listener = new System.Net.HttpListener();
         listener.Prefixes.Add($"http://127.0.0.1:{uri.Port}/");
@@ -807,7 +935,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         await ctx.Response.OutputStream.WriteAsync(html);
         ctx.Response.Close();
         if (code == null) throw new InvalidOperationException(error ?? "cTrader did not send an authorization code");
-        var (access, refresh, _) = await TradingHub.Feeds.CTrader.CTraderAuth.ExchangeAsync(clientId, secret, code, redirect, CancellationToken.None);
+        var (access, refresh, _) = await TradingHub.Feeds.CTrader.CTraderAuth.ExchangeAsync(clientId, secret, code, redirect, CancellationToken.None, network: network);
         return (access, refresh);
     }
 

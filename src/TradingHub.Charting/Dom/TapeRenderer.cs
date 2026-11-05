@@ -25,6 +25,17 @@ public sealed class TapeModel
     public decimal HighlightVolume { get; set; }
 
     public TimeZoneInfo TimeZone { get; set; } = TimeZoneInfo.Local;
+    public bool BlindReplay { get; set; }
+    public DateTime BlindReplayStart { get; set; }
+
+    public string DisplayTime(DateTime utc)
+    {
+        if (!BlindReplay) return TimeZoneInfo.ConvertTimeFromUtc(utc, TimeZone).ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+        var elapsed = utc - BlindReplayStart;
+        string sign = elapsed < TimeSpan.Zero ? "−" : "+";
+        elapsed = elapsed.Duration();
+        return $"{sign}{(long)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
+    }
 
     /// <summary>
     /// Desplazada hacia atrás: índice de la operación más nueva que se muestra (null = en vivo, arriba la última).
@@ -66,7 +77,7 @@ public sealed class TapeRenderer
         var head = RenderContext.GetFont(t.FontFamily, 10, false, false);
         float c1 = 6, c2 = width * 0.36f, c3 = width - 6;
         _text.Color = t.TextDim;
-        canvas.DrawUiText("Time", c1, 14, head, _text);
+        canvas.DrawUiText(tape.BlindReplay ? "Elapsed" : "Time", c1, 14, head, _text);
         canvas.DrawUiText("Price", c2, 14, head, _text);
         canvas.DrawUiText("Volume", c3 - RenderContext.MeasureWidth(head, "Volume"), 14, head, _text);
 
@@ -88,8 +99,7 @@ public sealed class TapeRenderer
             canvas.DrawRect(0, y, width, RowH, _fill);
             var f = big ? bold : font;
             _text.Color = big ? SKColors.White : col;
-            var local = TimeZoneInfo.ConvertTimeFromUtc(r.Time, tape.TimeZone);
-            canvas.DrawUiText(local.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture), c1, y + baseOff, f, _text);
+            canvas.DrawUiText(tape.DisplayTime(r.Time), c1, y + baseOff, f, _text);
             canvas.DrawUiText(inst.FormatPrice(r.Price), c2, y + baseOff, f, _text);
             string v = VolumeFormat.Compact(r.Volume, dec);
             canvas.DrawUiText(v, c3 - RenderContext.MeasureWidth(f, v), y + baseOff, f, _text);

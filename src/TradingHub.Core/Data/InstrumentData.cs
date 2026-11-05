@@ -12,9 +12,14 @@ namespace TradingHub.Data;
 public sealed class InstrumentData : IMarketDataSink, IDisposable
 {
     private readonly ConcurrentQueue<Trade> _incoming = new();
-    private readonly ConcurrentQueue<BookChange> _depthChanges = new();
-    private volatile DepthSnapshot? _latestDepth;
-    private volatile bool _depthFull;
+    private readonly string _sourceIdentity;
+    private readonly ConcurrentQueue<DepthUpdate> _depthUpdates = new();
+    private long _depthUpdateBytes;
+    private DateTime _lastReplayAvailableAt;
+    private long _depthHistoryVersion = -1;
+    private long _depthLoadRevision;
+    private bool _depthUnavailable;
+    private bool _depthOverflow;
     private volatile bool _historyMerged;
     private List<Trade>? _historyToMerge;
     private IDisposable? _subscription;
@@ -45,8 +50,10 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     public InstrumentData(Instrument instrument, IMarketDataFeed feed)
     {
         Instrument = instrument;
+        _sourceIdentity = HistorySources.DefaultSourceIdentity(instrument.FeedId, instrument.Symbol);
         Feed = feed;
         Trades = new TradeStore(instrument);
+        DepthHistory = new DepthHistory(instrument);
         if (feed is IHistoryRefreshFeed refresh) refresh.HistoryInvalidated += OnHistoryInvalidated;
     }
 
@@ -60,12 +67,38 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     public IMarketDataFeed Feed { get; }
     public TradeStore Trades { get; }
     public DepthSnapshot Depth { get; private set; } = DepthSnapshot.Empty;
+    public DepthHistory DepthHistory { get; }
+    public DepthRecordingOptions DepthRecording { get; set; } = new();
+    public event Action? DepthHistoryChanged;
+    public long QueuedDepthBytes { get { lock (_lifecycle) return _depthUpdateBytes; } }
+    public long DepthQueueByteLimit => DepthHistory.Options.MaxQueuedBytes;
+    private DateTime DepthNow => Feed is ReplayFeed replay ? replay.Clock : Feed.Now;
+
+    public void ConfigureDepthRecording(DepthRecordingOptions options)
+    {
+        lock (_lifecycle)
+        {
+            DepthRecording = options;
+            if (_cts != null && !_disposed) DepthHistory.Configure(RecordingRoot, options, DepthNow);
+            TrimDepthQueue(enforceSampleLimit: true);
+        }
+    }
 
     public FeedStatus Status => _status;
+    public bool ReplayInputDrained
+    {
+        get
+        {
+            lock (_lifecycle)
+                return Feed is ReplayFeed && _cts != null && !_disposed && _historyMerged && !IsLoadingHistory && !IsExtending &&
+                    _historyToMerge == null && _olderToMerge == null && _incoming.IsEmpty && _publications.IsEmpty && !_refreshRequested;
+        }
+    }
     public string? StatusMessage => _statusMessage;
     public bool IsLoadingHistory { get; private set; }
     public double HistoryProgress { get; private set; }
     public string? HistoryError { get; private set; }
+    public string? HistoryWarning { get; private set; }
     public string? RecordingWarning { get; private set; }
 
     /// <summary>Desde cuándo hay historia pedida/cargada (UTC).</summary>
@@ -120,10 +153,14 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         HistoryFrom = historyFrom;
         HistoryProgress = 0;
         HistoryError = null;
+        HistoryWarning = null;
+        Depth = DepthSnapshot.Empty;
+        DepthHistory.Start(RecordingRoot, DepthRecording, Feed.Now);
+        LoadDepthHistory(historyFrom, Feed.Now, generation, ct);
         OpenInterest.Clear();
         OpenInterest.Availability = OpenInterestAvailability.Unsupported;
         _openInterestDirty = true;
-        SetStatus(FeedStatus.Connecting, "Connecting…");
+        ReceiveStatus(generation, FeedStatus.Connecting, "Connecting…");
 
         RecordingWarning = null;
         if (Feed.IsLive && RecordingRoot != null && RecordLive)
@@ -140,7 +177,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         }
         catch (Exception ex)
         {
-            SetStatus(FeedStatus.Error, ex.Message);
+            ReceiveStatus(generation, FeedStatus.Error, ex.Message);
         }
         if (Feed is IOpenInterestProvider oi && oi.SupportsOpenInterest(Instrument))
         {
@@ -179,7 +216,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
                     }
                 }
 
-                all = await LoadRangeAsync(from, Feed.Now, long.MaxValue, generation, ct, anchor).ConfigureAwait(false);
+                all = await LoadRangeAsync(from, Feed.Now, generation, ct, anchor).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -199,10 +236,18 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     /// Hasta qué antigüedad se piden ticks al exchange cuando faltan. Lo anterior (y sin ticks en disco)
     /// se completa con velas del exchange: así se cargan meses o años en segundos, como en cualquier plataforma.
     /// </summary>
-    public TimeSpan TickWindow { get; set; } = TimeSpan.FromHours(2);
-
-    /// <summary>Máximo de operaciones reales que se leen de disco por carga (lo que no entra se completa con velas).</summary>
-    public static int MaxDiskTrades { get; set; } = 30_000_000;
+    private TimeSpan _tickWindow = TimeSpan.FromDays(7);
+    public TimeSpan TickWindow
+    {
+        get => _tickWindow;
+        set => _tickWindow = value < TimeSpan.FromHours(1) ? TimeSpan.FromHours(1) : value > TimeSpan.FromDays(90) ? TimeSpan.FromDays(90) : value;
+    }
+    public static int MaxDiskTrades { get; set; } = 2_000_000;
+    public int RawTradeLimit { get; set; } = MaxDiskTrades;
+    public string? CompactRoot { get; set; }
+    public bool UseCompactHistory { get; set; }
+    public int CompactMinutes { get; set; } = 5;
+    public int CompactTradeLimit { get; set; } = 500_000;
 
     /// <summary>Desde cuándo hay ticks reales (antes, la historia viene de velas del exchange).</summary>
     public DateTime RealTicksFrom { get; private set; } = DateTime.MaxValue;
@@ -211,53 +256,131 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     /// Lee lo grabado/descargado entre <paramref name="from"/> y <paramref name="to"/> y completa los huecos:
     /// lo reciente con ticks del exchange (se graban para no volver a pedirlos) y lo viejo con velas.
     /// </summary>
-    private async Task<List<Trade>> LoadRangeAsync(DateTime from, DateTime to, long maxIdExclusive, long generation, CancellationToken ct, DateTime? anchor = null)
+    private async Task<List<Trade>> LoadRangeAsync(DateTime from, DateTime to, long generation, CancellationToken ct, DateTime? anchor = null)
     {
         var real = new List<Trade>();
+        var compact = new List<Trade>();
         if (RecordingRoot != null && (Feed.IsLive || Feed is IBarHistoryFeed))
         {
-            // de lo más nuevo a lo más viejo, hasta el tope de memoria
-            var chunks = new List<List<Trade>>();
-            long count = 0;
+            DateTime rawCut = (anchor ?? _anchor ?? Feed.Now) - TickWindow;
+            var rawChunks = new List<List<Trade>>();
+            var compactChunks = new List<List<Trade>>();
+            int rawCount = 0, compactCount = 0;
+            var sourceIdentity = _sourceIdentity;
             foreach (var day in EachDay(from, to).Reverse())
             {
-                var path = TickFile.DayPath(RecordingRoot, Instrument.FeedId, Instrument.Symbol, day);
-                if (!File.Exists(path)) continue;
-                var list = (Feed is IBarHistoryFeed && Instrument.FeedId == IbBarImport.FeedId
-                    ? IbBarStore.ReadRecordedDay(RecordingRoot, Instrument.Symbol, day, Instrument.TickSize)
-                    : TickFile.Read(path)).Where(t => t.Id >= 0 && t.Time >= from && t.Time < to && t.Id < maxIdExclusive).ToList();
-                if (count > 0 && count + list.Count > MaxDiskTrades) break;
-                chunks.Add(list);
-                count += list.Count;
+                ct.ThrowIfCancellationRequested();
+                var path = TickFile.ExistingDayPath(RecordingRoot, Instrument.FeedId, Instrument.Symbol, day);
+                if (path == null) continue;
+                List<Trade> list;
+                try
+                {
+                    IEnumerable<Trade> recorded = Feed is IBarHistoryFeed && Instrument.FeedId == IbBarImport.FeedId
+                        ? IbBarStore.ReadRecordedDay(RecordingRoot, Instrument.Symbol, day, Instrument.TickSize)
+                        : TickFile.Enumerate(path, allowIncompleteTail: !path.EndsWith(".br", StringComparison.Ordinal) && TickFile.HasActiveRecordingWriter(RecordingRoot, Instrument.FeedId, Instrument.Symbol), requireOrdered: false);
+                    var window = new HistoryWindow(Math.Max(0, RawTradeLimit - rawCount));
+                    foreach (var recordedTrade in recorded)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var trade = HistorySources.AnnotateSource(recordedTrade, Instrument.FeedId, sourceIdentity);
+                        bool include = trade.Time >= from && trade.Time < to &&
+                            (!trade.Provenance.IsMeasured || trade.Time >= rawCut);
+                        window.Observe(trade, include);
+                    }
+                    list = window.Finish();
+                    if (window.Truncated)
+                    {
+                        for (int index = 0; index < list.Count; index++)
+                        {
+                            var trade = list[index];
+                            list[index] = new Trade(trade.Id, trade.Time, trade.Price, trade.Volume, trade.Side,
+                                trade.Provenance with { Quality = trade.Provenance.Quality | DataQuality.Partial });
+                        }
+                        Publish(generation, () => HistoryWarning = "The recent-history event limit retained the newest source events. Earlier coverage may be compact or unavailable.");
+                    }
+                }
+                catch (Exception error) when (error is IOException or InvalidDataException or ArgumentException)
+                {
+                    // A small append file may end mid-record. Keep its established codec's recoverable prefix;
+                    // large/unordered/corrupt days remain unavailable rather than allocating an unbounded retry.
+                    if (Instrument.FeedId != IbBarImport.FeedId && new FileInfo(path).Length <= 16 * 1024 * 1024)
+                        list = HistorySources.ReadSourceFile(path, Instrument.FeedId, Instrument.Symbol)
+                            .Where(t => t.Time >= from && t.Time < to && (!t.Provenance.IsMeasured || t.Time >= rawCut))
+                            .TakeLast(Math.Max(0, RawTradeLimit - rawCount)).ToList();
+                    else list = new List<Trade>();
+                    Publish(generation, () => HistoryWarning = "Some recorded history is incomplete or requires correction: " + error.Message);
+                }
+                rawCount += list.Count;
+                if (list.Count > 0) rawChunks.Add(list);
+                if (UseCompactHistory && CompactRoot != null && Instrument.FeedId != IbBarImport.FeedId && compactCount < CompactTradeLimit)
+                {
+                    try
+                    {
+                        var summary = CompactHistory.LoadDay(RecordingRoot, CompactRoot, Instrument, day, CompactMinutes, ct);
+                        var rawBuckets = new HashSet<long>(list.Select(t => t.Time.Ticks / (CompactMinutes * TimeSpan.TicksPerMinute)));
+                        summary = summary.Where(t => t.Time >= from && t.Time < to && !rawBuckets.Contains(t.Time.Ticks / (CompactMinutes * TimeSpan.TicksPerMinute))).ToList();
+                        int available = Math.Max(0, CompactTradeLimit - compactCount);
+                        if (summary.Count > available)
+                        {
+                            summary = summary.TakeLast(available).Select(t => new Trade(t.Id, t.Time, t.Price, t.Volume, t.Side, t.Provenance with { Quality = t.Provenance.Quality | DataQuality.Partial })).ToList();
+                            Publish(generation, () => HistoryWarning = "The compact memory limit retained only recent summaries. The oldest retained bucket may be partial; raw files remain intact.");
+                        }
+                        compactCount += summary.Count;
+                        if (summary.Count > 0) compactChunks.Add(summary);
+                    }
+                    catch (Exception error) when (error is IOException or InvalidDataException or ArgumentException)
+                    { Publish(generation, () => HistoryWarning = "Compact history is unavailable; intact raw files are retained: " + error.Message); }
+                }
             }
-
-            chunks.Reverse();
-            foreach (var c in chunks) real.AddRange(c);
+            rawChunks.Reverse(); compactChunks.Reverse();
+            if (rawChunks.Count > 0)
+            {
+                real = rawChunks[0];
+                for (int index = 1; index < rawChunks.Count; index++) real.AddRange(rawChunks[index]);
+                rawChunks.Clear();
+            }
+            if (compactChunks.Count > 0)
+            {
+                compact = compactChunks[0];
+                for (int index = 1; index < compactChunks.Count; index++) compact.AddRange(compactChunks[index]);
+                compactChunks.Clear();
+            }
             real = TickFile.SortAndDedupe(real);
+            for (int i = 0; i < real.Count; i++)
+            {
+                var trade = real[i];
+                if (trade.Provenance.SourceIdentity == null)
+                    real[i] = new Trade(trade.Id, trade.Time, trade.Price, trade.Volume, trade.Side, trade.Provenance with { SourceIdentity = sourceIdentity });
+            }
         }
         if (real.Count > 0)
         {
-            var first = real.Min(t => t.Time);
-            Publish(generation, () => RealTicksFrom = first < RealTicksFrom ? first : RealTicksFrom);
+            DateTime first = DateTime.MaxValue;
+            foreach (var trade in real) if (trade.Provenance.IsMeasured && trade.Time < first) first = trade.Time;
+            if (first != DateTime.MaxValue) Publish(generation, () => RealTicksFrom = first < RealTicksFrom ? first : RealTicksFrom);
         }
-        if (Feed is IBarHistoryFeed bars)
+        if (Feed is IBarHistoryFeed bars && Instrument.FeedId == IbBarImport.FeedId)
         {
             var syntheticBars = await bars.LoadBarHistoryAsync(Instrument, from, to, ct).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
-            var realMinutes = new HashSet<long>(real.Select(t => t.Time.Ticks / TimeSpan.TicksPerMinute));
-            var filtered = syntheticBars.Where(t => t.Id < 0 && t.Time >= from && t.Time < to &&
-                !realMinutes.Contains(t.Time.Ticks / TimeSpan.TicksPerMinute)).OrderBy(t => t.Time).ToList();
-            return KlineHistory.MergeByTime(filtered, real.OrderBy(t => t.Time).ToList());
+            var measured = KlineHistory.MergeByTime(compact, real);
+            var recordedTimes = measured.Where(t => t.Provenance.IsMeasured).Select(t => t.Time.Ticks).ToList();
+            var filtered = syntheticBars.Where(t => (t.Provenance.Quality & DataQuality.Synthetic) != 0 && t.Time >= from && t.Time < to &&
+                !HistoricalData.OverlapsMeasured(t, recordedTimes)).OrderBy(t => t.Time).ToList();
+            return KlineHistory.MergeByTime(filtered, measured);
         }
 
-        if (!Feed.SupportsHistory) return real;
-        var gaps = FindGaps(real, from, to, tailById: maxIdExclusive == long.MaxValue);
-        if (gaps.Count == 0) return real;
+        if (!Feed.SupportsHistory) return KlineHistory.MergeByTime(compact, real);
+        var measuredHistory = KlineHistory.MergeByTime(compact, real);
+        var gaps = FindGaps(measuredHistory, from, to, tailById: false);
+        if (gaps.Count == 0) return measuredHistory;
 
         // lo reciente en ticks; lo viejo en velas (si el feed las tiene)
         var klineSource = Feed as IKlineHistory;
         // los ticks cubren las últimas horas de mercado (con el mercado cerrado, antes de la última operación)
-        DateTime tickCut = klineSource != null ? (anchor ?? _anchor ?? Feed.Now) - TickWindow : DateTime.MinValue;
+        DateTime tickCut = klineSource != null || Feed.IsLive
+            ? (anchor ?? _anchor ?? Feed.Now) - (klineSource != null && TickWindow > TimeSpan.FromDays(1) ? TimeSpan.FromDays(1) : TickWindow)
+            : DateTime.MinValue;
         var tickGaps = new List<(DateTime From, DateTime To, long? FromId)>();
         var klineGaps = new List<(DateTime From, DateTime To)>();
         foreach (var (gFrom, gTo, fromId) in gaps)
@@ -278,12 +401,29 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         {
             int index = part++;
             var progress = new InlineProgress(p => Publish(generation, () => HistoryProgress = (index + Math.Clamp(p, 0, 1)) / parts));
-            await Feed.LoadTradesAsync(Instrument, gFrom, gTo, fromId, batch =>
+            try
             {
-                foreach (var t in batch)
-                    if (t.Id >= 0 && t.Id < maxIdExclusive && t.Time >= from && t.Time < to) fetched.Add(t);
-                return !ct.IsCancellationRequested;
-            }, progress, ct).ConfigureAwait(false);
+                await Feed.LoadTradesAsync(Instrument, gFrom, gTo, fromId, batch =>
+                {
+                    foreach (var incoming in batch)
+                    {
+                        var trade = WithSource(incoming);
+                        DateTime available = Feed is ReplayFeed ? trade.AvailableAt : trade.Time;
+                        if (available < from || available >= to) continue;
+                        if (fetched.Count + real.Count >= RawTradeLimit)
+                        {
+                            Publish(generation, () => HistoryWarning = "The bounded raw window is full. Remaining coverage uses labelled candle history when available.");
+                            return false;
+                        }
+                        fetched.Add(trade);
+                    }
+                    return !ct.IsCancellationRequested;
+                }, progress, ct).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            { Publish(generation, () => HistoryWarning = "Some recent trade history is unavailable; recorded data is retained: " + error.Message); }
+            // Also cover unavailable/capacity-limited portions, without replacing any finer observations.
+            if (klineSource != null) klineGaps.Add((gFrom, gTo));
         }
 
         if (fetched.Count > 0)
@@ -292,30 +432,40 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             lock (_lifecycle)
                 if (generation == _generation && _cts != null && !ct.IsCancellationRequested)
                     _recorder?.WriteHistory(fetched);
-            real.AddRange(fetched);
+            if (real.Count == 0) real = fetched;
+            else real.AddRange(fetched);
             real = TickFile.SortAndDedupe(real);
         }
 
         if (real.Count > 0)
         {
-            var first = real.Min(t => t.Time);
-            Publish(generation, () => RealTicksFrom = first < RealTicksFrom ? first : RealTicksFrom);
+            DateTime first = DateTime.MaxValue;
+            foreach (var trade in real) if (trade.Provenance.IsMeasured && trade.Time < first) first = trade.Time;
+            if (first != DateTime.MaxValue) Publish(generation, () => RealTicksFrom = first < RealTicksFrom ? first : RealTicksFrom);
         }
-        if (klineGaps.Count == 0 || klineSource == null) return real;
+        if (klineGaps.Count == 0 || klineSource == null) return KlineHistory.MergeByTime(compact, real);
 
         // velas solo donde no hay ticks reales
-        var windows = KlineHistory.Subtract(klineGaps, KlineHistory.Coverage(real));
-        if (windows.Count == 0) return real;
+        measuredHistory = KlineHistory.MergeByTime(compact, real);
+        var windows = KlineHistory.Subtract(klineGaps, DisplayCoverage(measuredHistory));
+        if (windows.Count == 0) return measuredHistory;
         var kFrom = windows[0].From;
         var kTo = windows[^1].To;
         int minutes = KlineHistory.MinutesFor(kTo - kFrom);
         decimal endPrice = real.Count > 0 ? real[0].Price : Trades.Count > 0 ? Trades.GetPrice(0) : 0;
         int kIndex = part;
         var kProgress = new InlineProgress(p => Publish(generation, () => HistoryProgress = (kIndex + Math.Clamp(p, 0, 1)) / parts));
-        var klines = await KlineHistory.LoadAsync(klineSource, Instrument, kFrom, kTo, minutes, endPrice, kProgress, ct).ConfigureAwait(false);
+        List<Kline> klines;
+        try { klines = await KlineHistory.LoadAsync(klineSource, Instrument, kFrom, kTo, minutes, endPrice, kProgress, ct,
+            warning => Publish(generation, () => HistoryWarning = warning)).ConfigureAwait(false); }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            Publish(generation, () => HistoryWarning = "Candle fallback is unavailable; finer recorded history is retained: " + error.Message);
+            return measuredHistory;
+        }
         var synthetic = new List<Trade>(klines.Count * 4);
         KlineHistory.Synthesize(klines, Instrument, minutes, windows, synthetic);
-        return KlineHistory.MergeByTime(synthetic, real);
+        return KlineHistory.MergeByTime(synthetic, measuredHistory);
     }
 
     /// <summary>Rangos que faltan en <paramref name="local"/> (ordenado) para cubrir [from, to).</summary>
@@ -358,8 +508,15 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         var ct = _cts.Token;
         long generation = _generation;
         DateTime until = Trades.Count > 0 ? Trades.FirstTime : Feed.Now;
-        // si lo primero que hay es historia en velas (ids negativos), los ids no sirven para cortar
-        long firstId = Trades.Count > 0 && Trades.GetId(0) > 0 ? Trades.GetId(0) : long.MaxValue;
+        if (Feed is ReplayFeed && Trades.Count > 0)
+        {
+            until = DateTime.MaxValue;
+            for (int index = 0; index < Trades.Count; index++)
+            {
+                var trade = Trades.Get(index);
+                if (trade.AvailableAt < until) until = trade.AvailableAt;
+            }
+        }
         IsExtending = true;
         HistoryProgress = 0;
         _pendingFrom = from;
@@ -368,7 +525,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             var older = new List<Trade>();
             try
             {
-                older = await LoadRangeAsync(from, until, firstId, generation, ct).ConfigureAwait(false);
+                older = await LoadRangeAsync(from, until, generation, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception ex)
@@ -380,6 +537,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         }, ct);
         if (Feed is IOpenInterestProvider oi && oi.SupportsOpenInterest(Instrument))
             LoadOpenInterest(oi, from, until, generation, ct);
+        LoadDepthHistory(from, DepthNow, generation, ct);
         return true;
     }
 
@@ -415,7 +573,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         }
         catch (Exception ex)
         {
-            SetStatus(FeedStatus.Error, ex.Message);
+            ReceiveStatus(_generation, FeedStatus.Error, ex.Message);
         }
     }
 
@@ -437,10 +595,11 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             _recorder = null;
             _historyToMerge = _olderToMerge = null;
             _incoming.Clear();
-            _depthChanges.Clear();
-            _publications.Clear();
-            _latestDepth = null;
-            _depthFull = false;
+            _depthUpdates.Clear();
+            _depthUpdateBytes = 0;
+            _depthOverflow = false;
+            _lastReplayAvailableAt = DateTime.MinValue;
+            _depthUnavailable = true;
             _statusDirty = false;
             _openInterestDirty = false;
             _refreshRequested = false;
@@ -453,6 +612,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         subscription?.Dispose();
         openInterestSubscription?.Dispose();
         recorder?.Dispose();
+        DepthHistory.Stop(Feed.Now);
     }
 
     private static IEnumerable<DateOnly> EachDay(DateTime fromUtc, DateTime toUtc)
@@ -466,14 +626,28 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     void IMarketDataSink.OnTrades(Instrument instrument, IReadOnlyList<Trade> trades) => ReceiveTrades(_generation, trades);
     void IMarketDataSink.OnDepth(Instrument instrument, DepthUpdate update) => ReceiveDepth(_generation, update);
     void IMarketDataSink.OnStatus(Instrument instrument, FeedStatus status, string? message) =>
-        Publish(_generation, () => SetStatus(status, message));
+        ReceiveStatus(_generation, status, message);
+
+    private void ReceiveStatus(long generation, FeedStatus status, string? message)
+    {
+        lock (_lifecycle)
+        {
+            if (_cts == null || generation != _generation || _disposed) return;
+            if (status is FeedStatus.Disconnected or FeedStatus.Error or FeedStatus.Connecting or FeedStatus.Reconnecting)
+            {
+                DepthHistory.MarkGap(DepthNow, DepthGapReason.Disconnected, message);
+                EnqueueDepth(new DepthUpdate { Snapshot = DepthSnapshot.Empty, ProviderId = Feed.Id, ReceivedAt = DepthNow, GapBefore = DepthGapReason.Disconnected, Coverage = DepthCoverage.Disconnected | DepthCoverage.Missing, Message = message });
+            }
+            Publish(generation, () => SetStatus(status, message));
+        }
+    }
 
     private void ReceiveTrades(long generation, IReadOnlyList<Trade> trades)
     {
         lock (_lifecycle)
         {
             if (_cts == null || generation != _generation || _disposed) return;
-            foreach (var t in trades) _incoming.Enqueue(t);
+            foreach (var trade in trades) _incoming.Enqueue(WithSource(trade));
             _recorder?.WriteLive(trades);
             _lastDataAt = DateTime.UtcNow.Ticks;
             if (trades.Count > 0 && _anchor != null) Volatile.Write(ref _tradedSinceAnchor, 1);
@@ -486,11 +660,53 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         {
             if (_cts == null || generation != _generation || _disposed) return;
             _lastDataAt = DateTime.UtcNow.Ticks;
-            _latestDepth = update.Snapshot;
-            if (update.IsFullRefresh) _depthFull = true;
-            foreach (var c in update.Changes) _depthChanges.Enqueue(c);
-            while (_depthChanges.Count > 50_000) _depthChanges.TryDequeue(out _);
+            var normalized = DepthHistory.Receive(update, DepthNow);
+            EnqueueDepth(normalized);
         }
+    }
+
+    private void EnqueueDepth(DepthUpdate update)
+    {
+        _depthUpdates.Enqueue(update);
+        _depthUpdateBytes += DepthSample.EstimateMemoryBytes(update);
+        TrimDepthQueue();
+    }
+
+    private void TrimDepthQueue(bool enforceSampleLimit = false)
+    {
+        if (enforceSampleLimit)
+        {
+            long maxSample = DepthHistory.Options.MaxSampleBytes;
+            int pending = _depthUpdates.Count;
+            for (int index = 0; index < pending && _depthUpdates.TryDequeue(out var update); index++)
+            {
+                long bytes = DepthSample.EstimateMemoryBytes(update);
+                if (bytes <= maxSample) _depthUpdates.Enqueue(update);
+                else { _depthUpdateBytes -= bytes; _depthOverflow = true; }
+            }
+        }
+        while ((_depthUpdates.Count > 2_048 || _depthUpdateBytes > DepthQueueByteLimit) && _depthUpdates.TryDequeue(out var removed))
+        {
+            _depthUpdateBytes -= DepthSample.EstimateMemoryBytes(removed);
+            _depthOverflow = true;
+        }
+    }
+
+    private void LoadDepthHistory(DateTime from, DateTime to, long generation, CancellationToken ct)
+    {
+        long request = Interlocked.Increment(ref _depthLoadRevision);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var loaded = await DepthHistory.LoadAsync(from, to, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                Publish(generation, () => { if (request == _depthLoadRevision) DepthHistory.Apply(loaded); });
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+            catch (Exception error)
+            { Publish(generation, () => DepthHistory.MarkGap(Feed.Now, DepthGapReason.StorageFailure, error.Message)); }
+        }, ct);
     }
 
     private void LoadOpenInterest(IOpenInterestProvider provider, DateTime from, DateTime to, long generation, CancellationToken ct)
@@ -532,7 +748,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     {
         public void OnTrades(Instrument instrument, IReadOnlyList<Trade> trades) => owner.ReceiveTrades(generation, trades);
         public void OnDepth(Instrument instrument, DepthUpdate update) => owner.ReceiveDepth(generation, update);
-        public void OnStatus(Instrument instrument, FeedStatus status, string? message) => owner.Publish(generation, () => owner.SetStatus(status, message));
+        public void OnStatus(Instrument instrument, FeedStatus status, string? message) => owner.ReceiveStatus(generation, status, message);
         public void OnOpenInterest(OpenInterestSample sample)
         {
             if (sample.Time.Kind != DateTimeKind.Utc || sample.Quantity < 0)
@@ -587,6 +803,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     private void PumpCore()
     {
         if (_cts == null || _disposed) return;
+        if (_recorder?.Error is { } recordingError) RecordingWarning = recordingError;
         long generation = _generation;
         while (_publications.TryDequeue(out var publication))
         {
@@ -631,10 +848,12 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
                 _historyMerged = true;
                 IsLoadingHistory = false;
                 HistoryProgress = 1;
-                DrainIncoming(skipKnown: true, raise: false);
+                if (Feed is not ReplayFeed) DrainIncoming(skipKnown: true, raise: false);
                 HistoryLoaded?.Invoke();
                 if (_cts == null || _disposed || generation != _generation) return;
                 StatusChanged?.Invoke();
+                if (_cts == null || _disposed || generation != _generation) return;
+                if (Feed is ReplayFeed) DrainIncoming(skipKnown: true, raise: true);
                 if (_cts == null || _disposed || generation != _generation) return;
             }
         }
@@ -668,36 +887,167 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             if (_cts == null || _disposed || generation != _generation) return;
         }
 
-        var depth = _latestDepth;
-        if (depth != null && !ReferenceEquals(depth, Depth))
+        if (_depthUnavailable)
         {
-            Depth = depth;
-            var changes = new List<BookChange>();
-            while (_depthChanges.TryDequeue(out var c)) changes.Add(c);
-            bool full = _depthFull;
-            _depthFull = false;
-            DepthUpdated?.Invoke(new DepthUpdate { Snapshot = depth, Changes = changes, IsFullRefresh = full });
+            _depthUnavailable = false;
+            Depth = DepthSnapshot.Empty;
+            DepthUpdated?.Invoke(new DepthUpdate { Snapshot = Depth, Coverage = DepthCoverage.Disconnected | DepthCoverage.Missing, GapBefore = DepthGapReason.Disconnected, ReceivedAt = Feed.Now, ProviderId = Feed.Id });
+            if (_cts == null || _disposed || generation != _generation) return;
+        }
+        while (_depthUpdates.TryDequeue(out var depthUpdate))
+        {
+            _depthUpdateBytes -= DepthSample.EstimateMemoryBytes(depthUpdate);
+            if (_depthOverflow)
+            {
+                _depthOverflow = false;
+                depthUpdate = new DepthUpdate
+                {
+                    Snapshot = depthUpdate.Snapshot, Changes = depthUpdate.Changes, IsFullRefresh = depthUpdate.IsFullRefresh,
+                    ProviderId = depthUpdate.ProviderId, Venue = depthUpdate.Venue, ReceivedAt = depthUpdate.ReceivedAt,
+                    Sequence = depthUpdate.Sequence, FirstSequence = depthUpdate.FirstSequence, PreviousSequence = depthUpdate.PreviousSequence,
+                    Coverage = depthUpdate.Coverage | DepthCoverage.Truncated, GapBefore = DepthGapReason.Overflow, Message = "Received depth updates exceeded the bounded UI queue.",
+                };
+            }
+            Depth = depthUpdate.HasAvailableLevels ? depthUpdate.Snapshot : DepthSnapshot.Empty;
+            DepthUpdated?.Invoke(depthUpdate);
+            if (_cts == null || _disposed || generation != _generation) return;
+        }
+        DepthHistory.Refresh(DepthNow);
+        if (!DepthHistory.HasFreshLevels && (Depth.HasBid || Depth.HasAsk))
+        {
+            Depth = DepthSnapshot.Empty;
+            DepthUpdated?.Invoke(new DepthUpdate
+            {
+                Snapshot = Depth, ProviderId = Feed.Id, ReceivedAt = DepthNow,
+                Coverage = DepthHistory.Status.Coverage | DepthCoverage.Missing,
+                GapBefore = DepthGapReason.Missing, Message = "Current depth is unavailable or stale.",
+            });
+            if (_cts == null || _disposed || generation != _generation) return;
+        }
+        if (_depthHistoryVersion != DepthHistory.Version)
+        {
+            _depthHistoryVersion = DepthHistory.Version;
+            DepthHistoryChanged?.Invoke();
         }
     }
+
+    // Display coverage prevents duplicate candle fallbacks; it never grants observed-volume/footprint coverage.
+    private static List<(DateTime From, DateTime To)> DisplayCoverage(IReadOnlyList<Trade> history)
+    {
+        var coverage = KlineHistory.Coverage(history);
+        foreach (var trade in history)
+        {
+            var provenance = trade.Provenance;
+            if (provenance.IsMeasured || !provenance.HasKnownAvailability) continue;
+            if (provenance.ResolutionSeconds > 0) coverage.Add(provenance.SourceWindow(trade.Time));
+            else
+            {
+                long start = trade.Time.Ticks / TimeSpan.TicksPerMinute * TimeSpan.TicksPerMinute;
+                coverage.Add((new DateTime(start, DateTimeKind.Utc),
+                    new DateTime(Math.Min(DateTime.MaxValue.Ticks, start + TimeSpan.TicksPerMinute), DateTimeKind.Utc)));
+            }
+        }
+        coverage.Sort(static (left, right) => left.From.CompareTo(right.From));
+        return coverage;
+    }
+
+    private (List<TradeIdentity> Ordered, HashSet<TradeIdentity> Seen) CaptureNewArrivals(int start)
+    {
+        var ordered = new List<TradeIdentity>();
+        var seen = new HashSet<TradeIdentity>();
+        for (int index = start; index < Trades.Count; index++)
+        {
+            var identity = Trades.GetIdentity(index);
+            if (seen.Add(identity)) ordered.Add(identity);
+        }
+        return (ordered, seen);
+    }
+
+    private Trade WithSource(in Trade trade) => trade.Provenance.SourceIdentity != null ? trade :
+        new Trade(trade.Id, trade.Time, trade.Price, trade.Volume, trade.Side, trade.Provenance with { SourceIdentity = _sourceIdentity });
 
     private void DrainIncoming(bool skipKnown, bool raise)
     {
         if (_incoming.IsEmpty) return;
+        if (raise && Feed is ReplayFeed) { DrainReplayIncoming(skipKnown); return; }
         int start = Trades.Count;
-        long lastId = Trades.LastId;
-        long lastTicks = Trades.Count > 0 ? Trades.GetTimeTicks(Trades.Count - 1) : long.MinValue;
-        while (_incoming.TryDequeue(out var t))
+        long generation = _generation;
+        long lastTicks = Trades.Count > 0 ? Trades.LastTime.Ticks : long.MinValue;
+        bool corrected = false;
+        List<Trade>? outOfOrder = null;
+        List<TradeIdentity>? arriving = null;
+        HashSet<TradeIdentity>? arrivalKeys = null;
+        while (_incoming.TryDequeue(out var trade))
         {
-            // ya estaba: id conocido y no más nuevo que lo último guardado. Si un id raro quedó adelante
-            // (archivo dañado), lo nuevo de verdad se reconoce por el tiempo y no se pierde el vivo.
-            if (skipKnown && t.Id <= lastId && t.Time.Ticks <= lastTicks) continue;
-            Trades.Add(t);
-            lastId = Math.Max(lastId, t.Id);
-            if (t.Time.Ticks > lastTicks) lastTicks = t.Time.Ticks;
+            var identity = TradeIdentity.From(trade);
+            int known = skipKnown ? Trades.FindIdentity(identity) : -1;
+            if (known >= 0)
+            {
+                var previous = Trades.Get(known);
+                if (trade.Id == previous.Id && trade.Time == previous.Time && trade.Price == previous.Price &&
+                    trade.Volume == previous.Volume && trade.Side == previous.Side && trade.Provenance == previous.Provenance) continue;
+                if (trade.Time == previous.Time) Trades.Update(known, trade);
+                else
+                {
+                    if (arriving == null) (arriving, arrivalKeys) = CaptureNewArrivals(start);
+                    (outOfOrder ??= []).Add(trade);
+                }
+                corrected = true;
+                continue;
+            }
+            if (trade.Time.Ticks < lastTicks)
+            {
+                if (arriving == null) (arriving, arrivalKeys) = CaptureNewArrivals(start);
+                if (arrivalKeys!.Add(identity)) arriving.Add(identity);
+                (outOfOrder ??= []).Add(trade);
+                continue;
+            }
+            Trades.Add(trade);
+            if (arriving != null && arrivalKeys!.Add(identity)) arriving.Add(identity);
+            lastTicks = trade.Time.Ticks;
         }
+        if (outOfOrder != null)
+        {
+            var merged = new List<Trade>(Trades.Count + outOfOrder.Count);
+            for (int index = 0; index < Trades.Count; index++) merged.Add(Trades.Get(index));
+            merged.AddRange(outOfOrder);
+            Trades.Replace(TickFile.SortAndDedupe(merged));
+            corrected = true;
+        }
+        if (!raise) return;
+        if (corrected) HistoryLoaded?.Invoke();
+        if (_cts == null || _disposed || generation != _generation) return;
+        if (arriving != null)
+        {
+            foreach (var identity in arriving)
+            {
+                int index = Trades.FindIdentity(identity);
+                if (index >= 0) TradesAppended?.Invoke(index, 1);
+                if (_cts == null || _disposed || generation != _generation) return;
+            }
+        }
+        else if (Trades.Count > start) TradesAppended?.Invoke(start, Trades.Count - start);
+    }
 
-        int added = Trades.Count - start;
-        if (added > 0 && raise) TradesAppended?.Invoke(start, added);
+    private void DrainReplayIncoming(bool skipKnown)
+    {
+        long generation = _generation;
+        if (HistoryError != null) { _incoming.Clear(); return; }
+        while (_incoming.TryDequeue(out var trade))
+        {
+            if (skipKnown && Trades.FindIdentity(TradeIdentity.From(trade)) >= 0) continue;
+            if (!trade.HasKnownAvailability || (_lastReplayAvailableAt != DateTime.MinValue && trade.AvailableAt < _lastReplayAvailableAt))
+            {
+                HistoryError = "Replay event availability is unknown or out of order. Playback stopped before the event could reach the practice account.";
+                if (Feed is ReplayFeed replay) replay.Paused = true;
+                SetStatus(FeedStatus.Error, HistoryError);
+                return;
+            }
+            _lastReplayAvailableAt = trade.AvailableAt;
+            int start = Trades.InsertChronological(trade);
+            TradesAppended?.Invoke(start, 1);
+            if (_cts == null || _disposed || generation != _generation) return;
+        }
     }
 
     public void Dispose()
@@ -705,6 +1055,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         if (Feed is IHistoryRefreshFeed refresh) refresh.HistoryInvalidated -= OnHistoryInvalidated;
         Stop();
         _disposed = true;
+        DepthHistory.Dispose();
     }
 }
 
@@ -713,7 +1064,7 @@ public sealed class TickRecorder : IDisposable
 {
     private readonly string _root;
     private readonly Instrument _instrument;
-    private readonly BlockingCollection<Trade> _queue = new(new ConcurrentQueue<Trade>());
+    private readonly BlockingCollection<Trade> _queue = new(new ConcurrentQueue<Trade>(), 1_000_000);
     private readonly Thread? _thread;
     private readonly FileStream? _lock;
     private TickFile.Writer? _writer;
@@ -721,6 +1072,8 @@ public sealed class TickRecorder : IDisposable
     private readonly object _writeGate = new();
     private bool _closed;
     private volatile bool _leaseReleased;
+    private volatile string? _error;
+    public string? Error { get => _error; private set => _error = value; }
 
     public TickRecorder(string root, Instrument instrument)
     {
@@ -747,7 +1100,9 @@ public sealed class TickRecorder : IDisposable
         lock (_writeGate)
         {
             if (_lock == null || _closed) return;
-            foreach (var t in trades) if (t.Id >= 0) _queue.TryAdd(t);
+            foreach (var trade in trades)
+                if (trade.Id >= 0 && !_queue.TryAdd(trade))
+                    Error = "Tick recording queue is full; some live observations were not saved.";
         }
     }
 
@@ -764,19 +1119,36 @@ public sealed class TickRecorder : IDisposable
                 {
                     _writer?.Dispose();
                     _day = day;
-                    _writer = new TickFile.Writer(TickFile.DayPath(_root, _instrument.FeedId, _instrument.Symbol, day), _instrument);
+                    var path = TickFile.DayPath(_root, _instrument.FeedId, _instrument.Symbol, day);
+                    TickArchive.EnsureRawDay(path);
+                    if (TickFile.RequiresExtended(t)) TickFile.EnsureProvenanceFormat(path, _instrument);
+                    _writer = new TickFile.Writer(path, _instrument, includeProvenance: !File.Exists(path));
+                }
+                if (!_writer.IncludesProvenance && TickFile.RequiresExtended(t))
+                {
+                    _writer.Dispose();
+                    var path = TickFile.DayPath(_root, _instrument.FeedId, _instrument.Symbol, day);
+                    TickFile.EnsureProvenanceFormat(path, _instrument);
+                    _writer = new TickFile.Writer(path, _instrument);
                 }
 
                 _writer.Write(t);
                 if (_queue.Count == 0) _writer.Flush();
             }
         }
-        catch (InvalidOperationException)
+        catch (Exception error)
         {
+            Error = "Tick recording stopped; incoming market data remains available: " + error.Message;
         }
         finally
         {
+            lock (_writeGate)
+            {
+                _closed = true;
+                if (!_queue.IsAddingCompleted) _queue.CompleteAdding();
+            }
             try { _writer?.Dispose(); }
+            catch (Exception error) { Error = "Tick recording could not finish saving: " + error.Message; }
             finally
             {
                 _lock?.Dispose();
@@ -803,6 +1175,13 @@ public sealed class MarketDataHub : IDisposable
     private readonly Dictionary<string, InstrumentData> _items = new();
 
     public string? RecordingRoot { get; set; }
+    public DepthRecordingOptions DepthRecording { get; set; } = new();
+    public TimeSpan TickWindow { get; set; } = TimeSpan.FromDays(7);
+    public int MaxDiskTrades { get; set; } = 2_000_000;
+    public string? CompactRoot { get; set; }
+    public bool UseCompactHistory { get; set; }
+    public int CompactMinutes { get; set; } = 5;
+    public int MaxCompactTrades { get; set; } = 500_000;
 
     /// <summary>Si los instrumentos nuevos graban el vivo.</summary>
     public bool RecordLive { get; set; } = true;
@@ -818,9 +1197,14 @@ public sealed class MarketDataHub : IDisposable
                 throw new InvalidOperationException("An active data scope is already bound to a different feed instance. Use the stable scoped feed or a new configuration scope.");
             return d;
         }
-        // ticks del exchange para lo reciente; lo más viejo se completa con velas (rápido aunque sean años)
-        var window = history < TimeSpan.FromHours(2) ? TimeSpan.FromHours(2) : history > TimeSpan.FromDays(1) ? TimeSpan.FromDays(1) : history;
-        d = new InstrumentData(instrument, feed) { RecordingRoot = RecordingRoot, RecordLive = RecordLive, TickWindow = window };
+        d = new InstrumentData(instrument, feed)
+        {
+            RecordingRoot = RecordingRoot, RecordLive = RecordLive, TickWindow = TickWindow,
+            RawTradeLimit = Math.Clamp(MaxDiskTrades, 1_000, 30_000_000), CompactRoot = CompactRoot,
+            UseCompactHistory = UseCompactHistory, CompactMinutes = CompactMinutes,
+            CompactTradeLimit = Math.Clamp(MaxCompactTrades, 1_000, 5_000_000),
+            DepthRecording = DepthRecording,
+        };
         _items[key] = d;
         d.Start(feed.Now - history);
         return d;

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.Rithmic;
 
@@ -111,6 +112,7 @@ public sealed class RithmicPosition
 public sealed class RithmicTradingSession : IDisposable
 {
     private RithmicSettings _settings;
+    private readonly ProxyHandlerFactory _network;
     private readonly CancellationTokenSource _cts = new();
     private CancellationTokenSource? _connCts;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ProtoMessage>> _pending = new();
@@ -135,9 +137,10 @@ public sealed class RithmicTradingSession : IDisposable
     private long _seq;
     private Task? _loop;
 
-    public RithmicTradingSession(RithmicSettings settings)
+    public RithmicTradingSession(RithmicSettings settings, ProxyHandlerFactory? network = null)
     {
         _settings = settings;
+        _network = network ?? new ProxyHandlerFactory(new NetworkProxyPolicy());
     }
 
     /// <summary>Sistema de la sesión (para saber si es de práctica).</summary>
@@ -247,7 +250,7 @@ public sealed class RithmicTradingSession : IDisposable
                 foreach (var (id, order) in _orders)
                     if (!order.Done && order.BasketId.Length > 0) _replayCandidates[id] = order;
                 StatusText = "Connecting to order plant…";
-                orders = new RithmicClient();
+                orders = new RithmicClient(_network);
                 await orders.ConnectAsync(_settings.Uri, ct, _settings.TimeoutMs).ConfigureAwait(false);
                 var login = await orders.LoginAsync(_settings.User, _settings.Password, _settings.System, _settings.AppName, _settings.AppVersion, 2, ct).ConfigureAwait(false);
                 if (!login.Ok) throw new RithmicRejectedException(login.Message);
@@ -288,7 +291,7 @@ public sealed class RithmicTradingSession : IDisposable
 
                 // posiciones y resultado
                 StatusText = "Connecting to PnL plant…";
-                pnl = new RithmicClient();
+                pnl = new RithmicClient(_network);
                 await pnl.ConnectAsync(_settings.Uri, ct, _settings.TimeoutMs).ConfigureAwait(false);
                 var pl = await pnl.LoginAsync(_settings.User, _settings.Password, _settings.System, _settings.AppName, _settings.AppVersion, 4, ct).ConfigureAwait(false);
                 if (!pl.Ok) throw new RithmicRejectedException(pl.Message);

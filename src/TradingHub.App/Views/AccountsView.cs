@@ -59,7 +59,11 @@ public sealed class AccountsView : UserControl
     private readonly WrapPanel _periodChips = new();
     private string _period = "all";
     private string _selected = AccountCenter.SimId;
-    private string _chipsKey = "", _listsKey = "", _statsKey = "";
+    private readonly record struct FinancialContentKey(string AccountId, string? CredentialContext, int FillCount, long ExecutionRevision, bool AnalysisKnown, bool CostsComplete);
+    private readonly record struct StatisticsContentKey(FinancialContentKey Content, string Period, DateOnly Day);
+    private string _chipsKey = "";
+    private FinancialContentKey? _listsKey;
+    private StatisticsContentKey? _statsKey;
     private AccountEntry? _entry;
     private bool _syncing;
 
@@ -69,7 +73,7 @@ public sealed class AccountsView : UserControl
         _status = status;
         _window = window;
         // la cuenta del gráfico activo, si es una de las que hay
-        if (window.Trading.ActiveTab?.AccountId is { } active && active.StartsWith("rithmic|", StringComparison.Ordinal)) _selected = active;
+        if (window.Trading.ActiveTab?.AccountId is { Length: > 0 } active) _selected = active;
 
         _startBalance.Value = svc.Settings.SimStartBalance;
         _startBalance.ValueChanged += (_, _) =>
@@ -237,7 +241,7 @@ public sealed class AccountsView : UserControl
             {
                 _period = id;
                 foreach (var c in _periodChips.Children.OfType<ToggleButton>()) c.IsChecked = (string)c.Tag! == id;
-                _statsKey = "";
+                _statsKey = null;
                 Refresh();
             };
             _periodChips.Children.Add(b);
@@ -272,7 +276,8 @@ public sealed class AccountsView : UserControl
         }
 
         _svc.Statistics.HistoryMyTrades.Clear();
-        _listsKey = _statsKey = "";
+        _listsKey = null;
+        _statsKey = null;
         _status($"Simulated account reset: balance {_svc.Settings.SimStartBalance:N2}.");
         Refresh();
     }
@@ -310,15 +315,17 @@ public sealed class AccountsView : UserControl
             var accounts = _svc.AccountCenter.Accounts();
             var entry = accounts.FirstOrDefault(a => a.Id == _selected) ?? accounts[0];
             UpdateChips(accounts, entry.Id);
-            if (_entry is not { } shown || shown.Id != entry.Id || shown.IsReal != entry.IsReal)
+            if (_entry is not { } shown || shown.Id != entry.Id || shown.IsReal != entry.IsReal ||
+                shown.BybitContextIdentity != entry.BybitContextIdentity)
             {
-                // another account, or the same one turned REAL or practice (its connection changed): new rows, so Close and
-                // Cancel ask for the REAL confirmation exactly when the account is REAL
+                // Rebuild captured action rows when the native credential context changes, even
+                // when the current profile ID/name and financial content counters stay identical.
                 _positionRows.Clear();
                 _positions.Children.Clear();
                 _orderRows.Clear();
                 _orders.Children.Clear();
-                _listsKey = _statsKey = "";
+                _listsKey = null;
+                _statsKey = null;
             }
 
             _entry = entry;
@@ -375,7 +382,12 @@ public sealed class AccountsView : UserControl
         string? group = null;
         foreach (var a in _accounts)
         {
-            string g = a.Kind == AccountKind.Sim ? "TRADING HUB" : $"{(a.Profile?.Name ?? "Rithmic").ToUpperInvariant()} · {(a.IsReal ? "REAL" : a.Kind == AccountKind.Tradovate ? "DEMO" : "PRACTICE")}";
+            string g = a.Kind switch
+            {
+                AccountKind.Sim => "TRADING HUB",
+                AccountKind.Replay => "PRACTICE REPLAY",
+                _ => $"{(a.Profile?.Name ?? a.Kind.ToString()).ToUpperInvariant()} · {(a.IsReal ? "REAL" : a.Kind is AccountKind.Tradovate or AccountKind.Bybit ? "DEMO / TESTNET" : "PRACTICE")}",
+            };
             if (g != group)
             {
                 group = g;
@@ -391,7 +403,7 @@ public sealed class AccountsView : UserControl
                 row.Children.Add(check);
             }
 
-            row.Children.Add(AccountLabel(a, a.Kind == AccountKind.Sim ? a.Name : a.RithmicAccount, 12.5));
+            row.Children.Add(AccountLabel(a, a.Kind is AccountKind.Sim or AccountKind.Replay or AccountKind.Bybit ? a.Name : a.RithmicAccount, 12.5));
             var item = new Button
             {
                 Content = row, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -426,22 +438,41 @@ public sealed class AccountsView : UserControl
     private void UpdateHeader(AccountSnapshot s)
     {
         var a = s.Account;
-        _accountStatus.Text = s.Status + (a.IsReal ? " · REAL ACCOUNT" + (a.CanTrade ? "" : " (new orders disabled in Connections; cancel/close allowed)") : "");
-        _accountStatus.Foreground = !s.Connected ? Ui.Warn : a.IsReal ? Brushes.OrangeRed : Ui.Text2;
+        _accountStatus.Text = s.Status + (a.IsReal ? " · REAL ACCOUNT" + (a.CanTrade ? "" : " (new orders disabled in Connections; cancel/close allowed)") : "")
+            + (!s.FinancialsKnown ? " · Financial totals unavailable until complete account snapshots arrive." : "")
+            + (!s.CostsComplete ? " · Known costs only: unconverted or unavailable fees are excluded from PnL and statistics." : "");
+        _accountStatus.Foreground = !s.Connected || !s.FinancialsKnown || !s.CostsComplete ? Ui.Warn : a.IsReal ? Brushes.OrangeRed : Ui.Text2;
         int open = s.Positions.Count(p => p.Net != 0);
         int active = s.Orders.Count(o => o.Active);
         int filledToday = s.Orders.Count(o => o.Filled > 0 && _svc.AccountCenter.IsToday(o.Time));
 
+        string provider = a.Kind switch
+        {
+            AccountKind.Sim => "Trading Hub simulation",
+            AccountKind.Replay => "practice run",
+            AccountKind.Bybit => "Bybit",
+            AccountKind.Tradovate => "Tradovate",
+            _ => "Rithmic",
+        };
+        string incomplete = "Awaiting complete account snapshots";
+        bool dayPnlKnown = s.OpenPnlKnown && s.RealizedPnlKnown;
         Card(0, "Balance", s.Balance is { } bal ? Money(bal, false) : "—",
-            a.Kind == AccountKind.Sim ? $"started with {Money(s.StartBalance ?? 0, false)}" : s.Balance == null ? $"waiting for {(a.Kind == AccountKind.Tradovate ? "Tradovate" : "Rithmic")}…" : $"reported by {(a.Kind == AccountKind.Tradovate ? "Tradovate" : "Rithmic")}");
-        Card(1, "Today's PnL", Money(s.DayPnl), $"realized {Money(s.RealizedToday)} · open {Money(s.OpenPnl)}", Signed(s.DayPnl));
-        Card(2, "Open PnL", Money(s.OpenPnl), open == 0 ? "no open positions" : open == 1 ? "1 open position" : $"{open} open positions", Signed(s.OpenPnl));
-        Card(3, "Realized today", Money(s.RealizedToday), s.TradesToday == 1 ? "1 trade closed today" : $"{s.TradesToday} trades closed today", Signed(s.RealizedToday));
-        if (a.Kind == AccountKind.Sim)
-            Card(4, "Total PnL", Money(s.Analysis.RealizedNet), $"{s.Analysis.Trades.Count} trades since inception", Signed(s.Analysis.RealizedNet));
+            a.Kind is AccountKind.Sim or AccountKind.Replay ? $"started with {Money(s.StartBalance ?? 0, false)}"
+            : s.Balance == null ? $"waiting for {provider}…" : $"reported by {provider}");
+        Card(1, s.CostsComplete ? "Today's PnL" : "Today's PnL (known costs)", dayPnlKnown ? Money(s.DayPnl) : "—",
+            dayPnlKnown ? $"realized {Money(s.RealizedToday)} · open {Money(s.OpenPnl)}" : incomplete, dayPnlKnown ? Signed(s.DayPnl) : Ui.Warn);
+        Card(2, "Open PnL", s.OpenPnlKnown ? Money(s.OpenPnl) : "—",
+            !s.OpenPnlKnown ? incomplete : !s.PositionsKnown ? "Position snapshot unavailable" : open == 0 ? "no open positions" : open == 1 ? "1 open position" : $"{open} open positions", s.OpenPnlKnown ? Signed(s.OpenPnl) : Ui.Warn);
+        Card(3, s.CostsComplete ? "Realized today" : "Realized (known costs)", s.RealizedPnlKnown ? Money(s.RealizedToday) : "—",
+            !s.RealizedPnlKnown ? incomplete : !s.AnalysisKnown ? "Provider-reported result; full round-trip statistics unavailable"
+                : s.TradesToday == 1 ? "1 trade closed today" : $"{s.TradesToday} trades closed today", s.RealizedPnlKnown ? Signed(s.RealizedToday) : Ui.Warn);
+        if (a.Kind is AccountKind.Sim or AccountKind.Replay)
+            Card(4, "Total PnL", s.AnalysisKnown ? Money(s.Analysis.RealizedNet) : "—",
+                s.AnalysisKnown ? $"{s.Analysis.Trades.Count} trades since inception" : incomplete, s.AnalysisKnown ? Signed(s.Analysis.RealizedNet) : Ui.Warn);
         else
-            Card(4, "Available to trade", s.Available is { } av ? Money(av, false) : "—", s.MarginBalance is { } mb ? $"margin {Money(mb, false)}" : "buying power reported by Rithmic");
-        Card(5, "Active orders", active.ToString(), $"{filledToday} filled today");
+            Card(4, "Available to trade", s.Available is { } av ? Money(av, false) : "—",
+                s.MarginBalance is { } mb ? $"margin {Money(mb, false)}" : $"buying power reported by {provider}");
+        Card(5, "Active orders", s.OrdersKnown ? active.ToString() : "—", s.OrdersKnown ? $"{filledToday} filled today" : "Order snapshot unavailable");
 
         _simBar.IsVisible = a.Kind == AccountKind.Sim;
         if (a.Kind == AccountKind.Sim)
@@ -491,18 +522,19 @@ public sealed class AccountsView : UserControl
 
             row.Line = p;
             row.Symbol.Text = p.Symbol;
-            row.Side.Text = p.Net > 0 ? "Long" : p.Net < 0 ? "Short" : "Flat";
-            row.Side.Foreground = p.Net > 0 ? Ui.Up : p.Net < 0 ? Ui.Down : Ui.Text2;
-            row.Qty.Text = p.Net == 0 ? "0" : Qty(Math.Abs(p.Net));
-            row.Avg.Text = p.Net == 0 ? "—" : Price(p.AvgPrice);
-            row.Open.Text = p.Net == 0 ? "—" : Money(p.OpenPnl);
-            row.Open.Foreground = p.Net == 0 ? Ui.Text2 : Signed(p.OpenPnl);
-            row.Closed.Text = Money(p.ClosedPnl);
-            row.Closed.Foreground = Signed(p.ClosedPnl);
+            row.Side.Text = !s.PositionsKnown ? "Unknown" : p.Net > 0 ? "Long" : p.Net < 0 ? "Short" : "Flat";
+            row.Side.Foreground = !s.PositionsKnown ? Ui.Warn : p.Net > 0 ? Ui.Up : p.Net < 0 ? Ui.Down : Ui.Text2;
+            row.Qty.Text = !s.PositionsKnown ? "—" : p.Net == 0 ? "0" : Qty(Math.Abs(p.Net));
+            row.Avg.Text = !s.PositionsKnown || p.Net == 0 ? "—" : Price(p.AvgPrice);
+            row.Open.Text = !s.PositionsKnown || !s.OpenPnlKnown || p.Net == 0 ? "—" : Money(p.OpenPnl);
+            row.Open.Foreground = !s.PositionsKnown || !s.OpenPnlKnown || p.Net == 0 ? Ui.Text2 : Signed(p.OpenPnl);
+            row.Closed.Text = s.RealizedPnlKnown && p.ClosedPnlKnown ? Money(p.ClosedPnl) : "—";
+            row.Closed.Foreground = s.RealizedPnlKnown && p.ClosedPnlKnown ? Signed(p.ClosedPnl) : Ui.Text2;
             row.Close.IsVisible = p.Net != 0; // closing only reduces: available even with real orders disabled (confirmed on real accounts)
         }
 
         _positionsEmpty.IsVisible = _positionRows.Count == 0;
+        _positionsEmpty.Text = s.PositionsKnown ? "No positions yet" : "Position snapshot unavailable";
     }
 
     private sealed class OrderRow
@@ -545,29 +577,45 @@ public sealed class AccountsView : UserControl
             row.Price.Text = o.Type == "Market" || o.Price == 0 ? "—" : Price(o.Price);
             row.Filled.Text = Qty(o.Filled);
             row.Avg.Text = o.AvgFill > 0 ? Price(o.AvgFill) : "—";
-            row.Status.Text = o.Status;
-            ToolTip.SetTip(row.Status, o.Status);
-            row.Status.Foreground = o.Active ? Ui.Accent : o.Status.StartsWith("Rejected", StringComparison.Ordinal) ? Ui.Down : o.Status == "Filled" ? Ui.Text1 : Ui.Text2;
+            row.Status.Text = s.OrdersKnown ? o.Status : $"Last known: {o.Status}";
+            ToolTip.SetTip(row.Status, row.Status.Text);
+            row.Status.Foreground = !s.OrdersKnown ? Ui.Warn : o.Active ? Ui.Accent : o.Status.StartsWith("Rejected", StringComparison.Ordinal) ? Ui.Down : o.Status == "Filled" ? Ui.Text1 : Ui.Text2;
             row.Cancel.IsVisible = o.Active; // a cancel never adds exposure: available even with real orders disabled (confirmed on real accounts)
         }
 
         _ordersEmpty.IsVisible = _orderRows.Count == 0;
+        _ordersEmpty.Text = s.OrdersKnown ? "No orders yet" : "Order snapshot unavailable";
     }
 
     private void UpdateLists(AccountSnapshot s)
     {
-        string key = s.Account.Id + "#" + s.Fills.Count;
+        var key = new FinancialContentKey(s.Account.Id, s.Account.BybitContextIdentity, s.Fills.Count, s.ExecutionRevision, s.AnalysisKnown, s.CostsComplete);
         if (key == _listsKey) return;
         _listsKey = key;
         _fills.ItemsSource = s.Fills.Reverse().ToList();
-        _trades.ItemsSource = s.Analysis.Trades.AsEnumerable().Reverse().ToList();
+        _trades.ItemsSource = s.AnalysisKnown ? s.Analysis.Trades.AsEnumerable().Reverse().ToList() : null;
+        ToolTip.SetTip(_trades, !s.AnalysisKnown ? "Full round-trip statistics unavailable: complete opening cost basis is unknown."
+            : s.CostsComplete ? null : "PnL includes known costs only; unconverted or unavailable fees are excluded.");
     }
 
     private void UpdateStats(AccountSnapshot s)
     {
-        string key = s.Account.Id + "#" + s.Fills.Count + "#" + _period + "#" + _svc.AccountCenter.ToLocal(DateTime.UtcNow).Date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        var key = new StatisticsContentKey(
+            new FinancialContentKey(s.Account.Id, s.Account.BybitContextIdentity, s.Fills.Count, s.ExecutionRevision, s.AnalysisKnown, s.CostsComplete),
+            _period, DateOnly.FromDateTime(_svc.AccountCenter.ToLocal(DateTime.UtcNow)));
         if (key == _statsKey) return;
         _statsKey = key;
+        if (!s.AnalysisKnown)
+        {
+            _statKpis.Children.Clear();
+            _statKpis.Children.Add(Kpi("Statistics unavailable", "—", "Complete opening cost basis is unknown", Ui.Warn));
+            _equity.EmptyText = "Full round-trip statistics unavailable until complete opening cost basis is known";
+            _equity.SetData(Array.Empty<EquityPoint>(), 0);
+            _metrics.Children.Clear();
+            _days.Children.Clear();
+            return;
+        }
+        _equity.EmptyText = "No closed trades in this period";
 
         var center = _svc.AccountCenter;
         var today = center.ToLocal(DateTime.UtcNow).Date;
@@ -598,7 +646,7 @@ public sealed class AccountsView : UserControl
         _equity.SetData(equity, capital);
 
         _statKpis.Children.Clear();
-        _statKpis.Children.Add(Kpi("Net PnL", Money(m.NetProfit), $"{m.TotalTrades} trades", Signed(m.NetProfit)));
+        _statKpis.Children.Add(Kpi(s.CostsComplete ? "Net PnL" : "Net PnL (known costs)", Money(m.NetProfit), $"{m.TotalTrades} trades", Signed(m.NetProfit)));
         _statKpis.Children.Add(Kpi("% winners", m.TotalTrades > 0 ? $"{m.WinRate:0.#}%" : "—", $"{m.Winners} winners · {m.Losers} losers"));
         _statKpis.Children.Add(Kpi("Profit factor", m.TotalTrades > 0 ? (m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es)) : "—", "gross profit / gross loss"));
         _statKpis.Children.Add(Kpi("Maximum drawdown", Money(-m.MaxDrawdown), capital > 0 ? $"{m.MaxDrawdownPercent:0.##}% of balance" : "from peak", m.MaxDrawdown > 0 ? Ui.Down : null));
@@ -607,7 +655,7 @@ public sealed class AccountsView : UserControl
         var avgDuration = trades.Count > 0 ? TimeSpan.FromTicks((long)trades.Average(t => t.Duration.Ticks)) : TimeSpan.Zero;
         var rows = new (string, string)[]
         {
-            ("Net PnL", Money(m.NetProfit)), ("Gross profit", Money(m.GrossProfit)), ("Gross loss", Money(-m.GrossLoss)), ("Commissions", Money(-m.Commission)),
+            (s.CostsComplete ? "Net PnL" : "Net PnL (known costs)", Money(m.NetProfit)), ("Gross profit", Money(m.GrossProfit)), ("Gross loss", Money(-m.GrossLoss)), (s.CostsComplete ? "Commissions" : "Known commissions", Money(-m.Commission)),
             ("Trades", m.TotalTrades.ToString(Es)), ("Winners / losers", $"{m.Winners} / {m.Losers}"), ("% winners", $"{m.WinRate:0.##}%"), ("Profit factor", m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es)),
             ("Average per trade", Money(m.AverageTrade)), ("Average profit", Money(m.AverageWin)), ("Average loss", Money(m.AverageLoss)), ("Win/loss ratio", m.PayoffRatio.ToString("0.00", Es)),
             ("Largest profit", Money(m.LargestWin)), ("Largest loss", Money(m.LargestLoss)), ("Longest winning streak", m.MaxConsecutiveWins.ToString(Es)), ("Longest losing streak", m.MaxConsecutiveLosses.ToString(Es)),

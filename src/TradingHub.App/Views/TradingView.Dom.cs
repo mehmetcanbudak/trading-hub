@@ -157,7 +157,7 @@ public sealed partial class TradingView
 
     internal void DockDom() => DockSection("dom");
 
-    private string PanelTitle(string key) => _active != null ? $"{PanelName(key)} · {_active.Symbol}" : PanelName(key);
+    private string PanelTitle(string key) => _active != null ? $"{PanelName(key)} · {_active.DisplaySymbol}" : PanelName(key);
 
     private void UpdatePanelTitles()
     {

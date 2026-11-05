@@ -44,6 +44,23 @@ public sealed class ChartSettings
     public bool ShowGrid { get; set; } = true;
     public bool ShowSessionLines { get; set; } = true;
     public bool ShowInfoPanel { get; set; } = true;
+    public bool ShowClock { get; set; } = true;
+    public bool BlindReplay { get; set; }
+    public DateTime BlindReplayStart { get; set; }
+
+    public string ReplayElapsed(DateTime utc)
+    {
+        var elapsed = utc - BlindReplayStart;
+        string sign = elapsed < TimeSpan.Zero ? "−" : "+";
+        elapsed = elapsed.Duration();
+        return $"{sign}{(int)elapsed.TotalDays}d {elapsed.Hours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
+    }
+
+    /// <summary>Display recorded/received depth only; enabling display does not opt in to recording.</summary>
+    public bool ShowLiquidityHeatmap { get; set; }
+    public int HeatmapOpacity { get; set; } = 65;
+    public int HeatmapMaxAgeSeconds { get; set; } = 10;
+    public int HeatmapPriceGrouping { get; set; } = 1;
 
     /// <summary>Nombre del instrumento arriba a la izquierda del gráfico (ya está en la barra; por defecto no).</summary>
     public bool ShowLegendTitle { get; set; }

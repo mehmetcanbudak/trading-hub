@@ -4,9 +4,20 @@ Trading Hub is source-available under [MIT with the Commons Clause](LICENSE), co
 
 ## Community source adaptations
 
-Selected chart/search, indicators, Interactive Brokers data/import and assistant/research adaptations originate from [PANASV/trading-hub](https://github.com/PANASV/trading-hub/tree/cdb84ea16eee7ac8d6c1b74136d2eeacedadf834), pin `cdb84ea16eee7ac8d6c1b74136d2eeacedadf834`, and [jjuangutierrez/trading-hub](https://github.com/jjuangutierrez/trading-hub/tree/8ceaf4c43e50edb29e96bfc17ae5c8f19b7e17d9), pin `8ceaf4c43e50edb29e96bfc17ae5c8f19b7e17d9`. Credit PANASV, jjuangutierrez, ralphtradesz and Trading Hub contributors. Their MIT plus Commons Clause application-source attribution is retained; adaptations are not claims of exact behavioral equivalence. TradeDock translation provenance is already inherited. KVP remains deferred; Dham runtime and Intel imports are not selected.
+Selected chart/search, indicators, Interactive Brokers data/import and assistant/research adaptations originate from [PANASV/trading-hub](https://github.com/PANASV/trading-hub/tree/cdb84ea16eee7ac8d6c1b74136d2eeacedadf834), pin `cdb84ea16eee7ac8d6c1b74136d2eeacedadf834`, and [jjuangutierrez/trading-hub](https://github.com/jjuangutierrez/trading-hub/tree/8ceaf4c43e50edb29e96bfc17ae5c8f19b7e17d9), pin `8ceaf4c43e50edb29e96bfc17ae5c8f19b7e17d9`. Credit PANASV, jjuangutierrez, ralphtradesz and Trading Hub contributors. Their MIT plus Commons Clause application-source attribution is retained; adaptations are not claims of exact behavioral equivalence. TradeDock translation provenance is already inherited. Dham runtime and Intel imports are not selected.
 
 Pinned community license texts are retained verbatim for [PANASV](licenses/PANASV-TradingHub-LICENSE.txt) and [jjuangutierrez](licenses/jjuangutierrez-TradingHub-LICENSE.txt), including the original copyright and Commons Clause condition.
+
+### KVP capability reference
+
+The separately approved KVP capability integration uses the exact `.22` source at commit `50220ba91613161685f84384825d855cb4dbeb76`, credited to the KVP fork contributors, ralphtradesz and Trading Hub contributors. Its downloaded source archive was 4,279,579 bytes with SHA-256 `98e109178841eee4d2fab3e52195580f135ff5688a19e64576d0c460168fccf8`. The [complete pinned license](licenses/KVP-TradingHub-LICENSE.txt) retains both the MIT grant/copyright and the Commons Clause condition; neither is replaced by this summary.
+
+Adaptations preserve existing Trading Hub application, storage, account and study identities. History/provenance, bounded depth recording, causal studies, sparse chart calculations, practice-run accounting, explicit source/model handoff, opt-in notifications/storage/proxy policy and provider safety are redesigned for this fork; the reference is not a claim of source or financial equivalence. The SMC/HTF studies are **independent implementations** of OHLC/pivot/weighted-moment concepts. No VPFM, Smart Money Concepts or `HtfStructure` third-party implementation was imported from the reference's ambiguous dependency chain. Existing Flow/Composite and separately licensed technical-library notices remain applicable.
+
+Built-in source resources and user-created forks retain their original authorship/resource identity and this notice pointer. Viewing or copying a locally imported ATAS source does not grant redistribution rights; preserve its own license and obtain permission where required. Pine conversion is assistant-authored draft text, not a compiler or an equivalence guarantee.
+
+KVP branding/directory migration, its Windows distribution/updater and Windows-only external VPFM launcher are excluded. No ILGPU/CUDA dependency or unmeasured Apple Metal acceleration is included. Measured CPU/allocation/rendering evidence and remaining provider/native-platform gates belong to the [validation dashboard](docs/en/TRANSLATION_STATUS.md), not the license attribution.
+
 
 ## Restored library families
 

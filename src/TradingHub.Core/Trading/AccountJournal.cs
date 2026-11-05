@@ -118,12 +118,15 @@ public sealed class AccountJournal
 {
     private readonly string _dir;
     private readonly object _gate = new();
+    private readonly Func<string, Stream> _openAppend;
     private readonly Dictionary<string, List<AccountFill>> _fills = new();
     private readonly Dictionary<string, HashSet<string>> _ids = new();
 
-    public AccountJournal(string dir)
+    public AccountJournal(string dir, Func<string, Stream>? openAppend = null)
     {
         _dir = dir;
+        _openAppend = openAppend ?? (static path => new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite,
+            FileShare.Read, 4096, FileOptions.WriteThrough));
         Directory.CreateDirectory(dir);
     }
 
@@ -176,9 +179,25 @@ public sealed class AccountJournal
         lock (_gate)
         {
             var list = Load(account);
-            if (!_ids[account].Add(fill.Id)) return false;
+            if (_ids[account].Contains(fill.Id)) return false;
+            using (var stream = _openAppend(FileOf(account)))
+            {
+                // A failed prior append may leave a partial last line. Preserve it, but never join a retry onto that fragment.
+                bool needsBoundary = stream.Length > 0;
+                if (needsBoundary)
+                {
+                    stream.Seek(-1, SeekOrigin.End);
+                    needsBoundary = stream.ReadByte() != '\n';
+                }
+                stream.Seek(0, SeekOrigin.End);
+                if (needsBoundary) stream.WriteByte((byte)'\n');
+                stream.Write(JsonSerializer.SerializeToUtf8Bytes(fill));
+                stream.WriteByte((byte)'\n');
+                if (stream is FileStream file) file.Flush(flushToDisk: true); else stream.Flush();
+            }
+            // Only a successful durable append acknowledges delivery. A retry after failure must not hit an in-memory duplicate.
+            _ids[account].Add(fill.Id);
             list.Add(fill);
-            File.AppendAllText(FileOf(account), JsonSerializer.Serialize(fill) + "\n");
         }
 
         Changed?.Invoke(account);

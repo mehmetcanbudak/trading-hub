@@ -5,6 +5,7 @@ using TradingHub.Common.Logging;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Feeds.Binance;
+using TradingHub.Feeds.Bybit;
 using TradingHub.Indicators;
 using TradingHub.Market;
 using TradingHub.Trading;
@@ -12,32 +13,19 @@ using TradingHub.Trading.Statistics;
 
 namespace TradingHub.App.Services;
 
-/// <summary>Carpetas de la plataforma.</summary>
-public static class AppPaths
+/// <summary>Effective application locations; opt-in configuration never changes persistent identities.</summary>
+public static partial class AppPaths
 {
-    /// <summary>Datos de la app. TRADINGHUB_DATA_DIR la cambia (las herramientas de prueba usan una carpeta aparte).</summary>
-    public static string Root { get; } = Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR") is { Length: > 0 } dir
-        ? dir
-        : TradingHub.Common.Product.AppData;
-    public static string Ticks => Path.Combine(Root, "Ticks");
+    public static string Root => TradingHub.Common.StorageLocations.Startup.AppRoot;
+    public static string MarketRoot => TradingHub.Common.StorageLocations.Startup.MarketRoot;
+    public static string Ticks => Path.Combine(MarketRoot, "Ticks");
     public static string WorkspaceFile => Path.Combine(Root, "workspace.json");
     public static string Drawings => Path.Combine(Root, "Drawings");
-    public static string Backtests => Path.Combine(Root, "Backtests");
+    public static string Backtests => TradingHub.Common.StorageLocations.Startup.BacktestsRoot;
     public static string Accounts => Path.Combine(Root, "Accounts");
 
-    /// <summary>
-    /// Carpeta visible para los indicadores propios (.cs) del usuario. TRADINGHUB_INDICATORS_DIR la cambia (pruebas); con
-    /// TRADINGHUB_DATA_DIR y sin ella, una dentro de esa carpeta: una prueba nunca escribe en la carpeta real.
-    /// </summary>
-    public static string UserIndicators { get; } = TestFolder("TRADINGHUB_INDICATORS_DIR", "Indicadores") ?? Path.Combine(TradingHub.Common.Product.Documents, "Indicadores");
-
-    /// <summary>Carpeta visible para las estrategias (.cs). TRADINGHUB_STRATEGIES_DIR la cambia (pruebas), igual que los indicadores.</summary>
-    public static string Strategies { get; } = TestFolder("TRADINGHUB_STRATEGIES_DIR", "Estrategias") ?? Path.Combine(TradingHub.Common.Product.Documents, "Estrategias");
-
-    private static string? TestFolder(string variable, string name) =>
-        Environment.GetEnvironmentVariable(variable) is { Length: > 0 } dir ? dir
-        : Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR") is { Length: > 0 } data ? Path.Combine(data, name)
-        : null;
+    public static string UserIndicators => TradingHub.Common.StorageLocations.Startup.IndicatorsRoot;
+    public static string Strategies => TradingHub.Common.StorageLocations.Startup.StrategiesRoot;
 
 
     /// <summary>Reportes del laboratorio (Markdown), dentro de la carpeta de estrategias.</summary>
@@ -117,7 +105,7 @@ public sealed class IndicatorCatalog
 }
 
 /// <summary>Preferencias generales.</summary>
-public sealed class AppSettings
+public sealed partial class AppSettings
 {
     private static readonly string FilePath = Path.Combine(AppPaths.Root, "settings.json");
 
@@ -284,7 +272,7 @@ public sealed class AppSettings
 public sealed record AccountOption(string Id, string Name, bool IsReal);
 
 /// <summary>Servicios compartidos de la aplicación.</summary>
-public sealed class AppServices
+public sealed partial class AppServices
 {
     private readonly Dictionary<string, SimBroker> _simBrokers = new();
     private readonly Dictionary<string, ITradingAccount> _realBrokers = new();
@@ -325,7 +313,7 @@ public sealed class AppServices
     public TradingHub.Feeds.Rithmic.RithmicTradingSession RithmicSessionFor(ConnectionProfile p)
     {
         if (_rithmicSessions.TryGetValue(p.Id, out var s)) return s;
-        s = new TradingHub.Feeds.Rithmic.RithmicTradingSession(Connections.RithmicSettingsOf(p));
+        s = new TradingHub.Feeds.Rithmic.RithmicTradingSession(Connections.RithmicSettingsOf(p), network: NetworkProxy.CreateFactory());
         _rithmicSessions[p.Id] = s;
         // cada ejecución queda en el historial de la cuenta (saldo, operaciones y estadísticas)
         s.FillReceived += f => Journal.Add(RithmicAccountId(p, f.Account),
@@ -346,8 +334,12 @@ public sealed class AppServices
     /// <summary>Id de una cuenta de Rithmic en Trading Hub: rithmic|conexión|cuenta.</summary>
     public static string RithmicAccountId(ConnectionProfile p, string account) => $"rithmic|{p.Id}|{account}";
 
-    public AppServices()
+    public AppServices() : this(null) { }
+
+    internal AppServices(Func<Func<TradingHub.Networking.ProxyHandlerFactory>, ConnectionManager>? connectionsFactory)
     {
+        Func<TradingHub.Networking.ProxyHandlerFactory> networkFactory = () => NetworkProxy.CreateFactory();
+        Connections = connectionsFactory == null ? new ConnectionManager(networkFactory) : connectionsFactory(networkFactory);
         Portfolio.BeginBalance = Portfolio.Balance = Settings.SimStartBalance;
         Markets = new MarketConditions(this);
         // cada estrategia que arranca en vivo arma su contexto de mercado con el último mes (no solo con el calentamiento)
@@ -364,15 +356,18 @@ public sealed class AppServices
                 else DisposeTradovate(tv);
             }
 
+            ReconfigureKvpProviders(p);
             ReplaceStaleBrokers(p);
         };
         Directory.CreateDirectory(AppPaths.Root);
         Directory.CreateDirectory(AppPaths.UserIndicators);
         Directory.CreateDirectory(AppPaths.Strategies);
         Hub.RecordingRoot = AppPaths.Ticks;
-        KlineHistory.CacheRoot = Path.Combine(AppPaths.Root, "Klines");
-        // TRADINGHUB_LIVE_DIR: cartera alternativa (pruebas)
-        TradingHub.Strategies.LiveStore.Root = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR") is { Length: > 0 } live ? live : Path.Combine(AppPaths.Root, "Live");
+        KlineHistory.CacheRoot = Path.Combine(AppPaths.MarketRoot, "Klines");
+        TradingHub.Strategies.LiveStore.Root = TradingHub.Common.StorageLocations.Startup.LiveRoot;
+        InitializeOperations();
+        InitializeReplayAlerts();
+        InitializeKvpProviders();
         // las que corrían al cerrar Trading Hub (enseguida el guardado periódico las marca detenidas): para reanudarlas al abrir
         RunningAtLastClose = TradingHub.Strategies.LiveStore.LoadRunners().Where(i => i.Running && !LiveEntry.IsManaged(i.Source)).ToList();
         Hub.RecordLive = Settings.RecordLiveData;
@@ -392,13 +387,17 @@ public sealed class AppServices
     }
 
     public AppSettings Settings { get; } = AppSettings.Load();
-    public ConnectionManager Connections { get; } = new();
+    public ConnectionManager Connections { get; }
     public MarketDataHub Hub { get; } = new();
 
     /// <summary>Condición de cada mercado (rango o tendencia y volatilidad), la misma medida que usan los filtros de contexto.</summary>
     internal MarketConditions Markets { get; }
 
-    private void OnRunnerStarted(TradingHub.Strategies.LiveStrategyRunner runner) => _ = Markets.SeedAsync(runner);
+    private void OnRunnerStarted(TradingHub.Strategies.LiveStrategyRunner runner)
+    {
+        AttachRunnerAlerts(runner);
+        _ = Markets.SeedAsync(runner);
+    }
     public Portfolio Portfolio { get; } = new() { AccountID = "SIM-1", Name = "Cuenta simulada", BeginBalance = 10_000m, Balance = 10_000m };
 
     /// <summary>Ejecuciones guardadas de cada cuenta (sobreviven al cerrar Trading Hub).</summary>
@@ -453,32 +452,44 @@ public sealed class AppServices
         // periódico (que sigue unos instantes) las marcaría detenidas, y al abrir no se reanudarían solas
         if (_closingDown) return;
         var infos = Runners.Where(r => r.Persist).Select(r => r.Info()).ToList();
+        // Preserve startup intent while native identity validation is pending. SaveRunners marks
+        // omitted records stopped; that must not silently cancel an undecided restored run.
+        foreach (var pending in RunningAtLastClose)
+            if (!infos.Any(info => info.Key == pending.Key)) infos.Add(pending);
         TradingHub.Strategies.LiveStore.SaveRunners(infos.GroupBy(i => i.Key).Select(g => g.OrderByDescending(i => i.Running).First()));
     }
 
     /// <summary>Aplica un tamaño aprobado: a la estrategia si está corriendo y a lo guardado para la próxima vez.</summary>
     public void ApplySize(string key, decimal size) => Live.ApplySize(key, size);
 
+    public bool IsShuttingDown => _closingDown || Volatile.Read(ref _shutdownCompletion) != null;
+
     public TimeSpan HistoryFor(string profileId) =>
         TimeSpan.FromHours(Math.Clamp(Connections.Find(profileId)?.HistoryHours ?? 1.5, 0.1, 24 * 60));
 
     /// <summary>Abre (o reutiliza) los datos de un instrumento de una conexión.</summary>
-    public InstrumentData Open(string profileId, Instrument instrument) =>
-        Hub.GetOrStart(Connections.GetFeed(profileId), instrument, HistoryFor(profileId));
+    public InstrumentData Open(string profileId, Instrument instrument)
+    {
+        if (IsShuttingDown) throw new InvalidOperationException("Trading Hub is shutting down; new market-data consumers are disabled.");
+        TrackOpenedInstrument(profileId, instrument);
+        return Hub.GetOrStart(Connections.GetFeed(profileId), instrument, HistoryFor(profileId));
+    }
 
     /// <summary>Abre un replay de datos guardados (no se graba ni se guarda en el espacio de trabajo).</summary>
-    public InstrumentData OpenReplay(Instrument source, DateTime startUtc, DateTime endUtc, TimeSpan preload)
-    {
-        var feed = new ReplayFeed(AppPaths.Ticks, source, startUtc, endUtc);
-        return Hub.GetOrStart(feed, feed.Instrument, preload);
-    }
+    public InstrumentData OpenReplay(Instrument source, DateTime startUtc, DateTime endUtc, TimeSpan preload) =>
+        OpenPracticeReplay(source, startUtc, endUtc, preload).Data;
 
     public SimBroker SimBrokerFor(InstrumentData data)
     {
+        if (data.Feed is ReplayFeed)
+            throw new InvalidOperationException("Practice replay owns its account, fills and balance; the shared simulated account cannot be used.");
+        if (data.Feed is AggregateFeed)
+            throw new InvalidOperationException("Composite crypto prices are data only and cannot be executed, including in the shared simulator. Use an explicitly owned practice replay.");
         if (!_simBrokers.TryGetValue(data.Instrument.Key, out var b))
         {
             b = new SimBroker(data, Portfolio, Statistics);
             _simBrokers[data.Instrument.Key] = b;
+            AttachTradingAlerts(b);
             var inst = data.Instrument;
             b.NewMyTrade += t => Journal.Add(AccountCenter.SimId, new AccountFill(Guid.NewGuid().ToString("N"), t.Time, inst.Symbol,
                 t.OrderDirection == OrderDirections.Buy, t.Volume, t.Price, inst.PointValue > 0 ? inst.PointValue : 1, t.Commission, t.Order?.Id.ToString() ?? ""));
@@ -511,10 +522,21 @@ public sealed class AppServices
     /// <summary>Cuentas con las que se puede operar este instrumento.</summary>
     public IEnumerable<AccountOption> AccountsFor(InstrumentData data)
     {
-        yield return new AccountOption("sim", "Simulated account", false);
-        foreach (var p in Connections.Enabled.Where(p => p.SupportsTrading && p.MarketDataId == data.Instrument.FeedId && !string.IsNullOrWhiteSpace(p.ApiKey)))
+        if (data.Feed is ReplayFeed)
         {
-            if (p.Testnet) yield return new AccountOption(p.Id, $"{p.Name} (testnet)", false);
+            if (ReplaySessions.TryGet(data) is { } run) yield return new AccountOption(run.AccountId, run.Account.Name, false);
+            yield break;
+        }
+        if (data.Feed is AggregateFeed) yield break;
+        yield return new AccountOption("sim", "Simulated account", false);
+        foreach (var p in Connections.Enabled.Where(p => p.SupportsTrading && p.MarketDataId == data.Instrument.FeedId && Connections.HasTradingCredentials(p)))
+        {
+            if (p.Kind == ConnectionKind.Bybit)
+            {
+                if (p.BybitEnvironment != BybitEnvironment.Real || p.AllowRealOrders)
+                    yield return new AccountOption(p.Id, BybitName(p), p.BybitEnvironment == BybitEnvironment.Real);
+            }
+            else if (p.Testnet) yield return new AccountOption(p.Id, $"{p.Name} (testnet)", false);
             else if (p.AllowRealOrders) yield return new AccountOption(p.Id, $"{p.Name} — REAL", true);
         }
 
@@ -544,6 +566,9 @@ public sealed class AppServices
 
     public ITradingAccount AccountFor(InstrumentData data, string accountId)
     {
+        if (data.Feed is ReplayFeed) return ReplaySessions.Resolve(data, accountId);
+        if (data.Feed is AggregateFeed)
+            throw new InvalidOperationException("This aggregate instrument is data only. Its composite price is not an executable venue.");
         if (accountId == "sim") return SimBrokerFor(data);
         DisposeIdleReplacedBrokers();
         string key = accountId + "|" + data.Instrument.Key;
@@ -569,7 +594,12 @@ public sealed class AppServices
         }
 
         var p = Connections.Find(accountId) ?? throw new KeyNotFoundException(accountId);
-        return Cache(key, p, new BinanceBroker(data, Connections.BinanceSettingsOf(p), p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL"));
+        if (p.Kind == ConnectionKind.Bybit)
+            return Cache(key, p, new BybitBroker(data, BybitSessionFor(p), BybitName(p)));
+        if (p.Kind is not (ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot))
+            throw new NotSupportedException("This connection provides market data only and has no order route.");
+        return Cache(key, p, new BinanceBroker(data, Connections.BinanceSettingsOf(p), p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL",
+            network: NetworkProxy.CreateFactory()));
     }
 
     /// <summary>
@@ -591,10 +621,11 @@ public sealed class AppServices
     }
 
     /// <summary>The settings a <see cref="BrokerOrigin"/> keeps, as the connection has them now (none for Tradovate, whose brokers every change rebuilds).</summary>
-    private static object? BrokerSettingsOf(ConnectionProfile p) => p switch
+    private object? BrokerSettingsOf(ConnectionProfile p) => p switch
     {
         { IsRithmic: true } => (p.RithmicSystem, p.RithmicUser),
         { Kind: ConnectionKind.Tradovate } => null,
+        { Kind: ConnectionKind.Bybit } => Connections.BybitContextOf(p),
         _ => (p.Kind, p.Testnet, p.ApiKey),
     };
 
@@ -602,6 +633,7 @@ public sealed class AppServices
     {
         _realBrokers[key] = broker;
         _brokerOrigins.AddOrUpdate(broker, new BrokerOrigin(p.Id, broker.IsReal, BrokerSettingsOf(p), transport));
+        AttachTradingAlerts(broker);
         return broker;
     }
 
@@ -623,6 +655,7 @@ public sealed class AppServices
             if (!_brokerOrigins.TryGetValue(broker, out var origin) || origin.ProfileId != p.Id
                 || (origin.Transport == null && Equals(origin.Settings, now))) continue;
             origin.Replaced = true;
+            if (broker is BybitBroker bybit) bybit.Retire();
             _realBrokers.Remove(key);
             _replacedBrokers.Add(broker);
             replaced.Add(broker);
@@ -688,6 +721,7 @@ public sealed class AppServices
             DisposeTradovate(session);
         }
         Connections.ReleaseRetiredFeeds();
+        ReleaseRetiredBybitSessions();
     }
 
     /// <summary>
@@ -699,12 +733,16 @@ public sealed class AppServices
     /// </summary>
     public string? CheckRealOrder(string accountId, ITradingAccount account, decimal position, decimal signedQuantity)
     {
+        if (IsShuttingDown && RealOrderPermission.IncreasesExposure(position, signedQuantity))
+            return "Trading Hub is shutting down: new exposure is disabled; cancellation and reducing exits remain available.";
         var p = Connections.FindForAccount(accountId);
         if (p != null && _brokerOrigins.TryGetValue(account, out var origin) && RealOrderPermission.IncreasesExposure(position, signedQuantity))
         {
             // Rithmic brokers follow their session's mode; the others keep the one they were built with
-            bool realNow = p.IsRithmic ? account.IsReal : !p.Testnet;
-            string Mode(bool real) => real ? "REAL" : p.IsRithmic ? "practice" : p.Kind == ConnectionKind.Tradovate ? "demo" : "testnet";
+            bool realNow = p.IsRithmic ? account.IsReal : p.Kind == ConnectionKind.Bybit
+                ? p.BybitEnvironment == BybitEnvironment.Real : !p.Testnet;
+            string Mode(bool real) => real ? "REAL" : p.IsRithmic ? "practice"
+                : p.Kind == ConnectionKind.Tradovate || p.Kind == ConnectionKind.Bybit && p.BybitEnvironment == BybitEnvironment.Demo ? "demo" : "testnet";
             const string Rest = ": new orders are disabled; cancel/close allowed";
             if (origin.Real != realNow) return $"{p.Name} is now {Mode(realNow)} but this account was opened as {Mode(origin.Real)}" + Rest;
             if (origin.Replaced) return $"the connection {p.Name} changed its keys, system or login after this account was opened" + Rest;
@@ -755,29 +793,101 @@ public sealed class AppServices
         }
     }
 
+    private readonly object _shutdownGate = new();
+    private TaskCompletionSource? _shutdownCompletion;
+
     public void Shutdown()
     {
+        Task shutdown = ShutdownAsync();
+        if (!shutdown.IsCompleted && Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            // Normal quits await the terminal lifetime. This idempotent native Exit fallback keeps
+            // the dispatcher alive for already-owned UI/CLI drains rather than blocking their continuations.
+            if (Avalonia.Threading.Dispatcher.UIThread.SupportsRunLoops)
+            {
+                var frame = new Avalonia.Threading.DispatcherFrame(exitWhenRequested: false);
+                _ = shutdown.ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(() => frame.Continue = false),
+                    CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                Avalonia.Threading.Dispatcher.UIThread.PushFrame(frame);
+            }
+            else
+            {
+                while (!shutdown.IsCompleted)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                    Thread.Sleep(1);
+                }
+            }
+        }
+        shutdown.GetAwaiter().GetResult();
+    }
+
+    internal Task ShutdownAsync()
+    {
+        TaskCompletionSource completion;
+        lock (_shutdownGate)
+        {
+            if (_shutdownCompletion != null) return _shutdownCompletion.Task;
+            completion = _shutdownCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        _ = CompleteShutdownAsync(completion);
+        return completion.Task;
+    }
+
+    private async Task CompleteShutdownAsync(TaskCompletionSource completion)
+    {
+        void Close(Action action)
+        {
+            try { action(); }
+            catch (Exception error) { this.LogError("Error closing", error); }
+        }
+        async Task CloseOwnedAsync(Func<Task> stop, string message)
+        {
+            try { await stop(); }
+            catch (Exception error) { this.LogError(message, error); }
+        }
         try
         {
-            StopLiveForQuit(QuitMode.CancelStops); // already done when the quit asked how to stop them
+            Close(() => StopLiveForQuit(QuitMode.CancelStops));
             TradingHub.Strategies.LiveStrategyRunner.Started -= OnRunnerStarted;
-            Sleep.Dispose();
-            foreach (var b in _realBrokers.Values) (b as IDisposable)?.Dispose();
-            foreach (var b in _replacedBrokers) (b as IDisposable)?.Dispose();
-            foreach (var rs in _rithmicSessions.Values) rs.Dispose();
-            foreach (var ts in _tradovateSessions.Values) DisposeTradovate(ts);
-            foreach (var ts in _retiredTradovateSessions) DisposeTradovate(ts);
-            Hub.Dispose();
-            Connections.DisposeAll();
-        }
-        catch (Exception ex)
-        {
-            this.LogError("Error closing", ex);
+            // Close admission/cancel every producer before awaiting any one held operation. Provider
+            // callbacks keep their journal/alert/feed dependencies until all owned operations have drained.
+            var startsDrain = CloseOwnedAsync(() => _live?.ShutdownStartsAsync() ?? Task.CompletedTask, "Error closing pending strategy starts");
+            var authoringDrain = CloseOwnedAsync(ShutdownAuthoringAsync, "Error closing authoring");
+            var researchDrain = CloseOwnedAsync(() => TradingViewResearchService.DisposeDefaultAsync().AsTask(), "Error closing authorized research");
+            var scriptDrain = CloseOwnedAsync(() => Scripts?.DisposeAsync().AsTask() ?? Task.CompletedTask, "Error closing custom indicator monitoring");
+            var historyDrain = CloseOwnedAsync(ShutdownHistoryArchivesAsync, "Error closing history archives");
+            var operationsDrain = CloseOwnedAsync(ShutdownOperationsAsync, "Error closing background history");
+            var providerDrain = CloseOwnedAsync(ShutdownKvpProvidersAsync, "Error closing provider sessions");
+            var longbridgeDrain = CloseOwnedAsync(Connections.StopLongbridgeAsync, "Error closing Longbridge authorization or data");
+            await startsDrain;
+            await authoringDrain;
+            await researchDrain;
+            await scriptDrain;
+            await historyDrain;
+            await operationsDrain;
+            await providerDrain;
+            await longbridgeDrain;
+            await CloseOwnedAsync(() => DisposeReplayAlertsAsync().AsTask(), "Error closing replay or alerts");
+            Close(Sleep.Dispose);
+            foreach (var broker in _realBrokers.Values) Close(() => (broker as IDisposable)?.Dispose());
+            foreach (var broker in _replacedBrokers) Close(() => (broker as IDisposable)?.Dispose());
+            foreach (var session in _rithmicSessions.Values) Close(session.Dispose);
+            foreach (var session in _tradovateSessions.Values) Close(() => DisposeTradovate(session));
+            foreach (var session in _retiredTradovateSessions) Close(() => DisposeTradovate(session));
+            Close(Hub.Dispose);
+            Close(Connections.DisposeAll);
         }
         finally
         {
-            // Only a true application exit owns script shutdown; hiding to the tray keeps hot reload alive.
-            Scripts?.Dispose();
+            try
+            {
+                // Preserve reviewed startup fix85c439: only true exit owns monitoring, including
+                // when another shutdown stage fails; tray hiding must keep hot reload alive.
+                if (Scripts != null) await Scripts.DisposeAsync();
+            }
+            catch (Exception error) { this.LogError("Error closing custom indicator monitoring", error); }
+            finally { completion.TrySetResult(); }
         }
     }
 }

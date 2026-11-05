@@ -13,10 +13,41 @@ public readonly record struct AppendResult(int FirstChangedBar, int NewCandles)
 /// Serie de velas con footprint construida a partir de un <see cref="TradeStore"/>.
 /// Soporta velas de tiempo, ticks, volumen, rango, delta y renko.
 /// </summary>
-public sealed class CandleSeries
+public sealed partial class CandleSeries
 {
     private readonly List<Candle> _candles = new();
     private int _processed; // cantidad de operaciones del store ya procesadas
+    private Guid _storeIdentity;
+    private long _storeCorrectionRevision = -1;
+    public Guid Identity { get; } = Guid.NewGuid();
+    public long Revision { get; private set; }
+    public long CorrectionRevision { get; private set; }
+    public string SourceIdentity { get; }
+    public int ProcessedTrades => _processed;
+    public bool HasPendingTrades(TradeStore store) => _processed < store.Count || _storeIdentity != store.Identity || _storeCorrectionRevision != store.CorrectionRevision;
+    public const int InitialBatchSize = 100_000;
+    public const int MaximumCandles = 1_000_000;
+    private DateTime _availableThrough = DateTime.MinValue;
+    public DateTime AvailableThrough => _availableThrough;
+
+    public bool AdvanceAvailability(DateTime utc)
+    {
+        var last = Last;
+        bool changed = last != null && last.HasKnownAvailability && !last.HasIncompatibleResolution && !last.IsClosed &&
+            _availableThrough < last.AvailableAt && utc >= last.AvailableAt;
+        if (utc > _availableThrough) _availableThrough = utc;
+        if (changed) { last!.Revision++; Revision++; }
+        return changed;
+    }
+
+    public bool IsResolutionCompatible(long locationTicks, TradeProvenance provenance)
+    {
+        if (provenance.ResolutionSeconds <= 0) return true;
+        if (!Period.IsTimeBased) return false;
+        var source = provenance.SourceWindow(new DateTime(locationTicks, DateTimeKind.Utc));
+        var target = TimeBucket(locationTicks);
+        return target.Start <= source.From.Ticks && target.End >= source.To.Ticks;
+    }
 
     // estado para períodos no temporales
     private long _bucketEnd;           // fin (exclusivo) del bucket temporal actual, en ticks de DateTime
@@ -27,6 +58,7 @@ public sealed class CandleSeries
     public CandleSeries(Instrument instrument, ChartPeriod period, int priceStep = 1, SessionSettings? session = null)
     {
         Instrument = instrument;
+        SourceIdentity = instrument.Key;
         Period = period;
         PriceStep = Math.Max(1, priceStep);
         Session = session ?? SessionSettings.CryptoUtc;
@@ -82,28 +114,39 @@ public sealed class CandleSeries
         _volumeInCandle = 0;
         _renkoBase = 0;
         _renkoDir = 0;
+        Revision++;
+        CorrectionRevision++;
+        _availableThrough = DateTime.MinValue;
     }
 
-    /// <summary>Reconstruye todo desde el almacén.</summary>
+    /// <summary>Rebuild synchronously for offline consumers. Interactive callers can use BeginRebuild and bounded Append batches.</summary>
     public void Rebuild(TradeStore store)
     {
+        BeginRebuild(store);
+        while (HasPendingTrades(store)) Append(store, InitialBatchSize);
+    }
+
+    public void BeginRebuild(TradeStore store)
+    {
         Clear();
-        Append(store);
+        _storeIdentity = store.Identity;
+        _storeCorrectionRevision = store.CorrectionRevision;
     }
 
     /// <summary>Procesa las operaciones nuevas del almacén.</summary>
-    public AppendResult Append(TradeStore store)
+    public AppendResult Append(TradeStore store, int maxTrades = int.MaxValue)
     {
-        if (_processed >= store.Count) return AppendResult.None;
-        int firstChanged = _candles.Count > 0 ? _candles.Count - 1 : 0;
+        if (maxTrades <= 0) throw new ArgumentOutOfRangeException(nameof(maxTrades));
+        bool corrected = _storeIdentity != store.Identity || _storeCorrectionRevision != store.CorrectionRevision || _processed > store.Count;
+        if (corrected) BeginRebuild(store);
+        if (_processed >= store.Count) return corrected ? new AppendResult(0, 0) : AppendResult.None;
+        int firstChanged = corrected ? 0 : _candles.Count > 0 ? _candles.Count - 1 : 0;
         int before = _candles.Count;
 
-        for (int i = _processed; i < store.Count; i++)
-        {
-            ProcessTrade(store, i);
-        }
-
-        _processed = store.Count;
+        int end = (int)Math.Min(store.Count, (long)_processed + maxTrades);
+        for (int i = _processed; i < end; i++) ProcessTrade(store, i);
+        _processed = end;
+        Revision++;
         int created = _candles.Count - before;
         if (_candles.Count == 0) return AppendResult.None;
         return new AppendResult(Math.Min(firstChanged, _candles.Count - 1), created);
@@ -116,7 +159,12 @@ public sealed class CandleSeries
         decimal volume = store.GetVolume(i);
         var side = store.GetSide(i);
         long row = RowOf(price);
-        bool syn = store.GetId(i) < 0; // operación armada desde velas del exchange
+        var provenance = store.GetProvenance(i);
+        bool compatible = IsResolutionCompatible(timeTicks, provenance);
+        if (!compatible) provenance = provenance with { Quality = provenance.Quality | DataQuality.Partial };
+        var location = new DateTime(timeTicks, DateTimeKind.Utc);
+        if (location > _availableThrough) _availableThrough = location;
+        bool syn = (provenance.Quality & DataQuality.Synthetic) != 0;
 
         switch (Period.Type)
         {
@@ -139,7 +187,7 @@ public sealed class CandleSeries
                     break;
                 }
 
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, provenance, compatible);
                 break;
             }
 
@@ -147,7 +195,7 @@ public sealed class CandleSeries
             {
                 int n = Math.Max(1, (int)Period.Value);
                 if (_candles.Count == 0 || _candles[^1].Trades >= n) StartCandle(new DateTime(timeTicks, DateTimeKind.Utc));
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, provenance, compatible);
                 break;
             }
 
@@ -164,7 +212,7 @@ public sealed class CandleSeries
                     }
 
                     decimal part = Math.Min(remaining, cap - _volumeInCandle);
-                    _candles[^1].AddTrade(price, row, part, side, timeTicks, i, syn);
+                    _candles[^1].AddTrade(price, row, part, side, timeTicks, i, syn, provenance, compatible);
                     _volumeInCandle += part;
                     remaining -= part;
                 }
@@ -178,7 +226,7 @@ public sealed class CandleSeries
                 var last = _candles.Count > 0 ? _candles[^1] : null;
                 if (last == null || Math.Max(last.HighTicks, price) - Math.Min(last.LowTicks, price) > range)
                     StartCandle(new DateTime(timeTicks, DateTimeKind.Utc));
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, provenance, compatible);
                 break;
             }
 
@@ -187,7 +235,7 @@ public sealed class CandleSeries
                 decimal n = Math.Max(Instrument.VolumeStep, Period.Value);
                 var last = _candles.Count > 0 ? _candles[^1] : null;
                 if (last == null || Math.Abs(last.Delta) >= n) StartCandle(new DateTime(timeTicks, DateTimeKind.Utc));
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, provenance, compatible);
                 break;
             }
 
@@ -219,7 +267,7 @@ public sealed class CandleSeries
                     }
                 }
 
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, provenance, compatible);
                 break;
             }
         }
@@ -227,8 +275,9 @@ public sealed class CandleSeries
 
     private void StartCandle(DateTime time)
     {
-        if (_candles.Count > 0) _candles[^1].IsClosed = true;
-        _candles.Add(new Candle { Time = time, LastTime = time });
+        if (_candles.Count >= MaximumCandles) throw new InvalidOperationException("The requested period exceeds the bounded candle limit. Choose a larger period or a shorter history range.");
+        if (_candles.Count > 0) { _candles[^1].IsClosed = true; _candles[^1].Revision++; }
+        _candles.Add(new Candle { Time = time, LastTime = time, SourceIdentity = SourceIdentity, CorrectionRevision = CorrectionRevision });
     }
 
     /// <summary>Calcula el inicio y fin (ticks de DateTime UTC) del bucket temporal que contiene t.</summary>
@@ -269,6 +318,9 @@ public sealed class CandleSeries
             case PeriodType.Weeks:
             {
                 var date = SessionSettings.WeekStart(Session.SessionDate(new DateTime(t, DateTimeKind.Utc)));
+                var anchor = new DateOnly(1, 1, 1);
+                int weeks = (date.DayNumber - anchor.DayNumber) / 7;
+                date = anchor.AddDays((int)(weeks / n * n * 7));
                 long s = Session.SessionStartUtc(date).Ticks;
                 long e = Session.SessionStartUtc(date.AddDays(7 * (int)n)).Ticks;
                 return (s, e);
@@ -276,7 +328,9 @@ public sealed class CandleSeries
             case PeriodType.Months:
             {
                 var date = Session.SessionDate(new DateTime(t, DateTimeKind.Utc));
-                var first = new DateOnly(date.Year, date.Month, 1);
+                long month = (date.Year - 1L) * 12 + date.Month - 1;
+                month = month / n * n;
+                var first = new DateOnly((int)(month / 12 + 1), (int)(month % 12 + 1), 1);
                 long s = Session.SessionStartUtc(first).Ticks;
                 long e = Session.SessionStartUtc(first.AddMonths((int)n)).Ticks;
                 return (s, e);
@@ -311,7 +365,9 @@ public sealed class CandleSeries
     {
         if (store.Count < 50) return 1;
         var probe = new CandleSeries(instrument, period, 1);
-        probe.Append(store);
+        // A suggestion is a bounded sample, not a second aggregation of years of ticks.
+        int first = Math.Max(0, store.Count - 100_000);
+        for (int i = first; i < store.Count; i++) probe.ProcessTrade(store, i);
         if (probe.Count < 2) return 1;
         var ranges = new List<long>();
         int from = Math.Max(0, probe.Count - 200);

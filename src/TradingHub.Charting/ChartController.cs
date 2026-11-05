@@ -1,3 +1,4 @@
+using SkiaSharp;
 using TradingHub.Charting.Drawings;
 using TradingHub.Charting.Rendering;
 using TradingHub.Common.Logging;
@@ -41,6 +42,7 @@ public sealed class ChartController
         PanelResize,
         MoveOrder,
         Bracket,
+        RectangleZoom,
     }
 
     private readonly ChartModel _model;
@@ -53,6 +55,7 @@ public sealed class ChartController
     private List<ChartPoint>? _startPoints;
     private SubPanel? _resizePanel;
     private Order? _dragOrder;
+    private ChartLayout? _zoomLayout;
 
     public ChartController(ChartModel model, ChartRenderState state)
     {
@@ -61,10 +64,87 @@ public sealed class ChartController
     }
 
     /// <summary>Herramienta de dibujo activa (null = cursor normal).</summary>
-    public DrawingKind? ActiveTool { get; set; }
+    private DrawingKind? _activeTool;
+    public DrawingKind? ActiveTool
+    {
+        get => _activeTool;
+        set
+        {
+            if (_drag == DragMode.RectangleZoom) CancelInteraction();
+            _activeTool = value;
+            RectangleZoomSelected = false;
+        }
+    }
 
     /// <summary>Si la herramienta queda activa después de dibujar (si no, vuelve al cursor).</summary>
     public bool StickyTool { get; set; }
+    public bool RectangleZoomSelected { get; private set; }
+    public bool IsDragging => _drag != DragMode.None;
+
+    public void SelectRectangleZoom()
+    {
+        CancelInteraction();
+        ActiveTool = null;
+        RectangleZoomSelected = true;
+        ToolFinished?.Invoke();
+    }
+
+    public void ResetView()
+    {
+        CancelInteraction();
+        _model.Viewport.BarWidth = _model.Settings.Style == ChartStyle.Footprint ? 110 : 8;
+        _model.Viewport.ScrollBars = 0;
+        _model.Viewport.AutoScale = true;
+        _model.Invalidate();
+    }
+
+    public void ToggleAutoScale()
+    {
+        var viewport = _model.Viewport;
+        viewport.AutoScale = !viewport.AutoScale;
+        if (!viewport.AutoScale && L is { } layout)
+        {
+            viewport.PriceTop = layout.Main.Top;
+            viewport.PriceBottom = layout.Main.Bottom;
+        }
+        _model.Invalidate();
+    }
+
+    public void CancelInteraction()
+    {
+        if ((_drag == DragMode.CreateDrawing || _pendingSecondClick) && _active != null) _model.Drawings.Remove(_active);
+        if (_drag == DragMode.MoveDrawing && _active != null && _startPoints != null) _active.Points = _startPoints;
+        _drag = DragMode.None;
+        _dragOrder = null;
+        _active = null;
+        _startPoints = null;
+        _pendingSecondClick = false;
+        RectangleZoomSelected = false;
+        _zoomLayout = null;
+        _state.ZoomRectangle = null;
+        _state.DragOrder = null;
+        _state.BracketDrag = null;
+        _model.Invalidate();
+    }
+
+    public bool ZoomToRectangle(ChartLayout layout, SKRect rectangle)
+    {
+        var plot = layout.Main.Rect;
+        float left = Math.Clamp(rectangle.Left, plot.Left, plot.Right), right = Math.Clamp(rectangle.Right, plot.Left, plot.Right);
+        float top = Math.Clamp(rectangle.Top, plot.Top, plot.Bottom), bottom = Math.Clamp(rectangle.Bottom, plot.Top, plot.Bottom);
+        if (right - left < 8 || bottom - top < 8 || layout.Count == 0) return false;
+        double first = layout.BarAtExact(left), last = layout.BarAtExact(right);
+        double width = Math.Clamp(plot.Width / (last - first), ChartViewport.MinBarWidth, ChartViewport.MaxBarWidth);
+        var viewport = _model.Viewport;
+        viewport.BarWidth = width;
+        double anchor = (first + last) / 2;
+        viewport.ScrollBars = layout.Count - 1 - anchor + viewport.RightMarginBars + 0.5 - plot.Width / (2 * width);
+        viewport.PriceTop = layout.Main.ValueAt(top);
+        viewport.PriceBottom = layout.Main.ValueAt(bottom);
+        viewport.AutoScale = false;
+        _model.Invalidate();
+        return true;
+    }
 
     public ChartDrawing? Selected => _model.Drawings.FirstOrDefault(d => d.Selected);
 
@@ -142,7 +222,7 @@ public sealed class ChartController
         _state.MouseY = y;
 
         // eje de precios
-        if (l.PriceAxis.Contains(x, y))
+        if (button == PointerButton.Left && l.PriceAxis.Contains(x, y))
         {
             if (clicks >= 2)
             {
@@ -158,7 +238,7 @@ public sealed class ChartController
         }
 
         // eje de tiempo
-        if (l.TimeAxis.Contains(x, y))
+        if (button == PointerButton.Left && l.TimeAxis.Contains(x, y))
         {
             if (clicks >= 2)
             {
@@ -214,6 +294,16 @@ public sealed class ChartController
             }
         }
 
+        // A navigation gesture must never pick up an order/position line underneath it.
+        if (button == PointerButton.Left && ActiveTool == null && l.Main.Rect.Contains(x, y) &&
+            (RectangleZoomSelected || (mods & (InputModifiers.Control | InputModifiers.Command)) != 0))
+        {
+            _drag = DragMode.RectangleZoom;
+            _zoomLayout = l;
+            _state.ZoomRectangle = new SKRect(x, y, x, y);
+            _model.Invalidate();
+            return;
+        }
         // indicadores (por si quieren el clic)
         if (button == PointerButton.Left && ForwardToIndicators(x, y, button, clicks, mods, MouseKind.Down)) return;
 
@@ -282,7 +372,7 @@ public sealed class ChartController
             for (int i = _model.Drawings.Count - 1; i >= 0; i--)
             {
                 var d = _model.Drawings[i];
-                if (!d.HitTest(l, _model.Series, x, y, out int handle)) continue;
+                if (!d.HitTest(l, _model.Series, _state.FindDrawingRuntime(d), x, y, out int handle)) continue;
                 foreach (var o in _model.Drawings) o.Selected = false;
                 d.Selected = true;
                 if (clicks == 2) // un triple clic no abre dos paneles
@@ -332,6 +422,13 @@ public sealed class ChartController
 
         switch (_drag)
         {
+            case DragMode.RectangleZoom when _zoomLayout is { } zoom:
+            {
+                float endX = Math.Clamp(x, zoom.Main.Rect.Left, zoom.Main.Rect.Right);
+                float endY = Math.Clamp(y, zoom.Main.Rect.Top, zoom.Main.Rect.Bottom);
+                _state.ZoomRectangle = new SKRect(Math.Min(_downX, endX), Math.Min(_downY, endY), Math.Max(_downX, endX), Math.Max(_downY, endY));
+                break;
+            }
             case DragMode.Pan:
             {
                 vp.ScrollBars = _startScroll + (x - _downX) / vp.BarWidth;
@@ -422,6 +519,18 @@ public sealed class ChartController
 
     public void MouseUp(float x, float y, PointerButton button, InputModifiers mods)
     {
+        if (_drag == DragMode.RectangleZoom)
+        {
+            MouseMove(x, y, mods);
+            if (_zoomLayout is { } zoom && _state.ZoomRectangle is { } rectangle) ZoomToRectangle(zoom, rectangle);
+            _state.ZoomRectangle = null;
+            _zoomLayout = null;
+            _drag = DragMode.None;
+            RectangleZoomSelected = false;
+            ToolFinished?.Invoke();
+            _model.Invalidate();
+            return;
+        }
         if (_drag is DragMode.MoveOrder or DragMode.Bracket && L is { } lu)
             _state.DragPrice = _model.Instrument.RoundPrice((decimal)lu.Main.ValueAt(y));
 
@@ -481,6 +590,7 @@ public sealed class ChartController
     public bool TryCompletePending(float x, float y, InputModifiers mods)
     {
         if (!_pendingSecondClick || _active == null) return false;
+        if (L is not { } layout || !layout.Main.Rect.Contains(x, y)) return false;
         _active.Points[^1] = PointAt(x, y, mods);
         _pendingSecondClick = false;
         FinishDrawing();
@@ -571,22 +681,11 @@ public sealed class ChartController
                 return true;
             }
             case "Escape":
-                // cancela un arrastre de orden o de stop/objetivo
-                if (_drag is DragMode.MoveOrder or DragMode.Bracket)
-                {
-                    _dragOrder = null;
-                    _state.DragOrder = null;
-                    _state.BracketDrag = null;
-                    _drag = DragMode.None;
-                    _model.Invalidate();
-                    return true;
-                }
-
+                bool wasDrawing = ActiveTool != null || _active != null;
+                CancelInteraction();
                 ActiveTool = null;
-                if (_pendingSecondClick && _active != null) _model.Drawings.Remove(_active);
-                _pendingSecondClick = false;
-                _active = null;
                 foreach (var d in _model.Drawings) d.Selected = false;
+                if (wasDrawing) DrawingsChanged?.Invoke();
                 ToolFinished?.Invoke();
                 _model.Invalidate();
                 return true;
@@ -642,7 +741,7 @@ public sealed class ChartController
         else
         {
             double tick = (double)_model.Instrument.TickSize;
-            price = Math.Round(price / tick) * tick;
+            if (tick > 0) price = Math.Round(price / tick, MidpointRounding.AwayFromZero) * tick;
         }
 
         return new ChartPoint(time, price);
@@ -713,8 +812,9 @@ public sealed class ChartController
         else if (l.TimeAxis.Contains(x, y)) Cursor = StdCursor.SizeWE;
         else if (l.Panels.Skip(1).Any(p => Math.Abs(y - p.Rect.Top) <= 3)) Cursor = StdCursor.SizeNS;
         else if (_drag == DragMode.Pan) Cursor = StdCursor.SizeAll;
+        else if (_drag == DragMode.RectangleZoom || RectangleZoomSelected) Cursor = StdCursor.Cross;
         else if (_drag is DragMode.MoveOrder or DragMode.Bracket || (ActiveTool == null && (OrderAt(x, y) != null || HandleAt(x, y, false) != null))) Cursor = StdCursor.SizeNS;
-        else if (_model.Drawings.Any(d => d.HitTest(l, _model.Series, x, y, out _))) Cursor = StdCursor.Hand;
+        else if (_model.Drawings.Any(d => d.HitTest(l, _model.Series, _state.FindDrawingRuntime(d), x, y, out _))) Cursor = StdCursor.Hand;
         else
         {
             var c = IndicatorCursor(x, y);

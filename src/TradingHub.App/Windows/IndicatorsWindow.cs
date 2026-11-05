@@ -74,9 +74,13 @@ public sealed class IndicatorsWindow : Window
         var add = Ui.Button("Add to chart", MaterialIconKind.Plus, AddSelected, "primary");
         add.HorizontalAlignment = HorizontalAlignment.Stretch;
         add.HorizontalContentAlignment = HorizontalAlignment.Center;
-        add.Margin = new Thickness(0, 10, 0, 0);
-        DockPanel.SetDock(add, Dock.Bottom);
-        left.Children.Add(add);
+        var source = Ui.Button("View source / edit", MaterialIconKind.CodeBraces, () => _ = SourceSelectedAsync());
+        source.HorizontalAlignment = HorizontalAlignment.Stretch;
+        ToolTip.SetTip(source, "Built-ins are read only and can be copied separately. Custom sources open in the editor.");
+        var libraryActions = Ui.V(6, source, add);
+        libraryActions.Margin = new Thickness(0, 10, 0, 0);
+        DockPanel.SetDock(libraryActions, Dock.Bottom);
+        left.Children.Add(libraryActions);
         _available.DoubleTapped += (_, _) => AddSelected();
         _available.Margin = new Thickness(0, 8, 0, 0);
         left.Children.Add(Ui.Card(_available, 4));
@@ -194,6 +198,30 @@ public sealed class IndicatorsWindow : Window
 
         if (_model.Indicators.Count == 0)
             _onChart.Items.Add(new ListBoxItem { Content = new TextBlock { Text = "No indicators. Select one from the library and click Add.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap }, IsEnabled = false });
+    }
+
+    private async Task SourceSelectedAsync()
+    {
+        if (_available.SelectedItem is not ListBoxItem { Tag: IndicatorInfo info }) return;
+        try
+        {
+            if (info.Source == UserScripts.Source)
+            {
+                var files = await Task.Run(() => IndicatorSources.UserFiles(info.Type, AppPaths.UserIndicators));
+                if (files.Count == 0) throw new InvalidOperationException("The exact custom source could not be located. Its type or files may have changed; recompile and select it again.");
+                new CodeEditorWindow(_svc, CodeKind.Indicator, open: files[0]).Show(this);
+            }
+            else
+            {
+                await Task.Run(() => IndicatorSources.ForAssembly(info.Type.Assembly).View(info.Type.FullName!));
+                new CodeEditorWindow(_svc, CodeKind.Indicator, builtIn: info.Type).Show(this);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorText.Text = "Could not open indicator source: " + ex.Message;
+            _errorText.IsVisible = true;
+        }
     }
 
     private void AddSelected()

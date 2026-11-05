@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Drawing;
 using TradingHub.Indicators.Drawing;
+using TradingHub.Rendering.Context;
 
 namespace TradingHub.Indicators.Native;
 
@@ -73,6 +74,8 @@ public enum VwapAnchor
     [Display(Name = "Session (day)")] Session,
     [Display(Name = "Week")] Week,
     [Display(Name = "Month")] Month,
+    [Display(Name = "Quarter")] Quarter,
+    [Display(Name = "Year")] Year,
 }
 
 [DisplayName("VWAP with bands")]
@@ -80,15 +83,15 @@ public enum VwapAnchor
 [Description("VWAP anchored to the session, week or month with up to three volume-weighted standard-deviation bands.")]
 public class SessionVwap : Indicator
 {
-    private readonly ValueDataSeries _vwap = new("VWAP", "VWAP") { Color = Color.FromArgb(255, 255, 255, 255), Width = 2 };
-    private readonly ValueDataSeries _up1 = new("Up1", "+1σ") { Color = Color.FromArgb(200, 70, 170, 255), LineDashStyle = LineDashStyle.Dash };
-    private readonly ValueDataSeries _dn1 = new("Dn1", "-1σ") { Color = Color.FromArgb(200, 70, 170, 255), LineDashStyle = LineDashStyle.Dash };
-    private readonly ValueDataSeries _up2 = new("Up2", "+2σ") { Color = Color.FromArgb(200, 255, 120, 60), LineDashStyle = LineDashStyle.Dash };
-    private readonly ValueDataSeries _dn2 = new("Dn2", "-2σ") { Color = Color.FromArgb(200, 255, 120, 60), LineDashStyle = LineDashStyle.Dash };
-    private readonly ValueDataSeries _up3 = new("Up3", "+3σ") { Color = Color.FromArgb(200, 240, 82, 90), LineDashStyle = LineDashStyle.Dot };
-    private readonly ValueDataSeries _dn3 = new("Dn3", "-3σ") { Color = Color.FromArgb(200, 240, 82, 90), LineDashStyle = LineDashStyle.Dot };
-    private decimal _sumPv, _sumV, _sumP2v;
-    private int _sessionStart;
+    private readonly OptionalValueDataSeries _vwap = new("VWAP", "VWAP") { Color = Color.FromArgb(255, 255, 255, 255), Width = 2 };
+    private readonly OptionalValueDataSeries _up1 = new("Up1", "+1σ") { Color = Color.FromArgb(200, 70, 170, 255), LineDashStyle = LineDashStyle.Dash };
+    private readonly OptionalValueDataSeries _dn1 = new("Dn1", "-1σ") { Color = Color.FromArgb(200, 70, 170, 255), LineDashStyle = LineDashStyle.Dash };
+    private readonly OptionalValueDataSeries _up2 = new("Up2", "+2σ") { Color = Color.FromArgb(200, 255, 120, 60), LineDashStyle = LineDashStyle.Dash };
+    private readonly OptionalValueDataSeries _dn2 = new("Dn2", "-2σ") { Color = Color.FromArgb(200, 255, 120, 60), LineDashStyle = LineDashStyle.Dash };
+    private readonly OptionalValueDataSeries _up3 = new("Up3", "+3σ") { Color = Color.FromArgb(200, 240, 82, 90), LineDashStyle = LineDashStyle.Dot };
+    private readonly OptionalValueDataSeries _dn3 = new("Dn3", "-3σ") { Color = Color.FromArgb(200, 240, 82, 90), LineDashStyle = LineDashStyle.Dot };
+    private readonly List<(WeightedStudyMoments Moments, StudyCoverage Coverage)> _states = new();
+    private bool _allowEstimated = true;
     private decimal _k1 = 1, _k2 = 2, _k3 = 3;
     private VwapAnchor _anchor = VwapAnchor.Session;
 
@@ -101,6 +104,7 @@ public class SessionVwap : Indicator
         DataSeries.Add(_dn2);
         DataSeries.Add(_up3);
         DataSeries.Add(_dn3);
+        EnableCustomDrawing = true; SubscribeToDrawingEvents(DrawingLayouts.Final);
     }
 
     [Display(Name = "Reset every", GroupName = "Calculation", Order = 1)]
@@ -117,76 +121,48 @@ public class SessionVwap : Indicator
     [Display(Name = "Band 3 (σ, 0 = hidden)", GroupName = "Bands", Order = 30)]
     [Range(0, 10)]
     public decimal Band3 { get => _k3; set { _k3 = value; RecalculateValues(); } }
+    [Display(Name = "Allow estimated HLC3 fallback", GroupName = "Calculation")]
+    public bool AllowEstimated { get => _allowEstimated; set { _allowEstimated = value; RecalculateValues(); } }
+    [Browsable(false)] public StudyCoverage Coverage => _states.Count == 0 ? 0 : _states[^1].Coverage;
+    [Browsable(false)] public string Status => FootprintStudyData.Label(Coverage);
 
+    private StudyTimeFrame AnchorFrame => _anchor switch
+    {
+        VwapAnchor.Week => StudyTimeFrame.Week, VwapAnchor.Month => StudyTimeFrame.Month,
+        VwapAnchor.Quarter => StudyTimeFrame.Quarter, VwapAnchor.Year => StudyTimeFrame.Year, _ => StudyTimeFrame.Day
+    };
     private bool IsNewPeriod(int bar) => _anchor switch
     {
         VwapAnchor.Week => IsNewWeek(bar),
         VwapAnchor.Month => IsNewMonth(bar),
+        VwapAnchor.Quarter => StudyMath.PeriodKey(GetCandle(bar), StudyTimeFrame.Quarter) != StudyMath.PeriodKey(GetCandle(bar - 1), StudyTimeFrame.Quarter),
+        VwapAnchor.Year => GetCandle(bar).SessionDate.Year != GetCandle(bar - 1).SessionDate.Year,
         _ => IsNewSession(bar),
     };
-
-    protected override void OnRecalculate()
-    {
-        _sumPv = _sumV = _sumP2v = 0;
-        _sessionStart = 0;
-    }
-
+    protected override void OnRecalculate() => _states.Clear();
     protected override void OnCalculate(int bar, decimal value)
     {
-        if (bar == 0 || IsNewPeriod(bar))
+        int target = bar;
+        if (bar < _states.Count - 1) { _states.Clear(); Clear(); }
+        if (_states.Count == bar + 1) _states.RemoveAt(bar);
+        for (int b = _states.Count; b <= target; b++)
         {
-            if (bar != _sessionStart || bar == 0)
-            {
-                _sessionStart = bar;
-                if (bar > 0) _vwap.SetPointOfEndLine(bar - 1);
-                foreach (var s in new[] { _up1, _dn1, _up2, _dn2, _up3, _dn3 }) if (bar > 0) s.SetPointOfEndLine(bar - 1);
-            }
+            bool reset = b == 0 || IsNewPeriod(b);
+            var state = reset ? (new WeightedStudyMoments(), StudyCoverage.Missing) : _states[b - 1];
+            var contribution = StudyMath.Vwap(GetCandle(b), StudyVwapSource.MeasuredPriceLevels, AllowEstimated, out var coverage);
+            if (!StudyMath.IsContained(GetCandle(b), AnchorFrame)) coverage |= StudyCoverage.MissingBars;
+            if (b == 0 && !StudyMath.IsPeriodOpening(GetCandle(b), AnchorFrame)) coverage |= StudyCoverage.Partial;
+            state.Item1.Merge(contribution); state.Item2 |= coverage; _states.Add(state);
+            bool available = StudyMath.HasValue(state.Item1, state.Item2); decimal vwap = state.Item1.Mean, sd = state.Item1.Deviation;
+            _vwap.Set(b, vwap, available);
+            _up1.Set(b, vwap + _k1 * sd, available && _k1 > 0); _dn1.Set(b, vwap - _k1 * sd, available && _k1 > 0);
+            _up2.Set(b, vwap + _k2 * sd, available && _k2 > 0); _dn2.Set(b, vwap - _k2 * sd, available && _k2 > 0);
+            _up3.Set(b, vwap + _k3 * sd, available && _k3 > 0); _dn3.Set(b, vwap - _k3 * sd, available && _k3 > 0);
+            if (reset && b > 0) foreach (var series in DataSeries) ((ValueDataSeries)series).SetPointOfEndLine(b - 1);
         }
-
-        // recalcula la sesión completa hasta esta barra (la última barra cambia con cada tick)
-        if (bar == _sessionStart)
-        {
-            _sumPv = _sumV = _sumP2v = 0;
-        }
-
-        decimal pv = 0, v = 0, p2v = 0;
-        var c = GetCandle(bar);
-        foreach (var lvl in c.GetAllPriceLevels())
-        {
-            pv += lvl.Price * lvl.Volume;
-            p2v += lvl.Price * lvl.Price * lvl.Volume;
-            v += lvl.Volume;
-        }
-
-        if (v == 0)
-        {
-            decimal tp = (c.High + c.Low + c.Close) / 3;
-            pv = tp * c.Volume;
-            p2v = tp * tp * c.Volume;
-            v = c.Volume;
-        }
-
-        // acumulado hasta la barra anterior + esta barra
-        decimal accPv = _sumPv + pv, accV = _sumV + v, accP2v = _sumP2v + p2v;
-        if (bar < CurrentBar - 1)
-        {
-            _sumPv = accPv;
-            _sumV = accV;
-            _sumP2v = accP2v;
-        }
-
-        if (accV <= 0) return;
-        decimal vwap = accPv / accV;
-        decimal variance = Math.Max(0, accP2v / accV - vwap * vwap);
-        decimal sd = (decimal)Math.Sqrt((double)variance);
-        _vwap[bar] = vwap;
-        _up1[bar] = _k1 > 0 ? vwap + _k1 * sd : 0;
-        _dn1[bar] = _k1 > 0 ? vwap - _k1 * sd : 0;
-        _up2[bar] = _k2 > 0 ? vwap + _k2 * sd : 0;
-        _dn2[bar] = _k2 > 0 ? vwap - _k2 * sd : 0;
-        _up3[bar] = _k3 > 0 ? vwap + _k3 * sd : 0;
-        _dn3[bar] = _k3 > 0 ? vwap - _k3 * sd : 0;
     }
+    protected override void OnRender(TradingHub.Rendering.Context.RenderContext context, DrawingLayouts layout)
+    { if (ChartInfo != null) FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"VWAP: {Status}", Color.LightSkyBlue); }
 }
 
 /// <summary>Volumen por vela, coloreado según el delta.</summary>
@@ -194,7 +170,7 @@ public class SessionVwap : Indicator
 [Category(IndicatorCategories.VolumeOrderFlow)]
 public class VolumeBars : Indicator
 {
-    private readonly ValueDataSeries _vol = new("Volume", "Volume") { VisualType = VisualMode.Histogram, Color = Color.FromArgb(255, 110, 120, 140) };
+    private readonly OptionalValueDataSeries _vol = new("Volume", "Volume") { VisualType = VisualMode.Histogram, Color = Color.FromArgb(255, 110, 120, 140), ShowZeroValue = true };
 
     public VolumeBars() : base(true)
     {
@@ -214,8 +190,8 @@ public class VolumeBars : Indicator
     protected override void OnCalculate(int bar, decimal value)
     {
         var c = GetCandle(bar);
-        _vol[bar] = c.Volume;
-        bool up = ByDelta ? c.Delta >= 0 : c.Close >= c.Open;
+        _vol.Set(bar, c.Volume, c.CanCalculateCausally);
+        bool up = ByDelta && StudyMath.TryDelta(c, false, out var delta, out _) ? delta >= 0 : c.Close >= c.Open;
         _vol.Colors[bar] = up ? UpColor : DownColor;
     }
 }
@@ -231,9 +207,14 @@ public class DeltaBars : Indicator
         [Display(Name = "Candles (with delta high/low)")] Candles,
     }
 
-    private readonly ValueDataSeries _delta = new("Delta", "Delta") { VisualType = VisualMode.Histogram };
+    private readonly OptionalValueDataSeries _delta = new("Delta", "Delta") { VisualType = VisualMode.Histogram, ShowZeroValue = true };
     private readonly CandleDataSeries _candles = new("DeltaCandles", "Delta candles") { DrawCandleBorder = false };
     private DeltaView _view = DeltaView.Histogram;
+    private bool _allowInferred;
+    [Display(Name = "Allow explicitly inferred aggressors", GroupName = "Fidelity")]
+    public bool AllowInferredAggressors { get => _allowInferred; set { _allowInferred = value; RecalculateValues(); } }
+    [Browsable(false)] public StudyCoverage Coverage { get; private set; }
+    [Browsable(false)] public string Status => FootprintStudyData.Label(Coverage) + ((Coverage & StudyCoverage.Compact) != 0 ? "; compact delta extrema unavailable" : "");
 
     public DeltaBars() : base(true)
     {
@@ -241,6 +222,7 @@ public class DeltaBars : Indicator
         DataSeries[0] = _delta;
         DataSeries.Add(_candles);
         LineSeries.Add(new LineSeries("Zero", "Zero") { Value = 0, Color = Color.FromArgb(120, 140, 140, 150), LineDashStyle = LineDashStyle.Solid });
+        EnableCustomDrawing = true; SubscribeToDrawingEvents(DrawingLayouts.Final);
     }
 
     [Display(Name = "View", GroupName = "Visualization", Order = 10)]
@@ -255,53 +237,30 @@ public class DeltaBars : Indicator
     protected override void OnCalculate(int bar, decimal value)
     {
         var c = GetCandle(bar);
+        bool available = StudyMath.TryDelta(c, AllowInferredAggressors, out var delta, out var coverage); Coverage = coverage;
+        if (!available) { _delta.SetUnavailable(bar); _candles[bar] = null; return; }
         if (_view == DeltaView.Histogram)
         {
             _delta.VisualType = VisualMode.Histogram;
             _candles.Visible = false;
-            _delta[bar] = c.Delta;
-            _delta.Colors[bar] = c.Delta >= 0 ? PositiveColor : NegativeColor;
+            _delta.Set(bar, delta);
+            _delta.Colors[bar] = delta >= 0 ? PositiveColor : NegativeColor;
         }
         else
         {
             _delta.VisualType = VisualMode.OnlyValueOnAxis;
-            _delta[bar] = c.Delta;
+            _delta.Set(bar, delta);
             _candles.Visible = true;
             _candles.UpCandleColor = PositiveColor;
             _candles.DownCandleColor = NegativeColor;
-            _candles[bar] = new Candle(0, c.MaxDelta, c.MinDelta, c.Delta);
+            bool extrema = !c.HasCompactTrades && !c.HasInferredSide;
+            _candles[bar] = new Candle(0, extrema ? Math.Max(c.MaxDelta, Math.Max(0, delta)) : Math.Max(0, delta), extrema ? Math.Min(c.MinDelta, Math.Min(0, delta)) : Math.Min(0, delta), delta);
         }
     }
+    protected override void OnRender(TradingHub.Rendering.Context.RenderContext context, DrawingLayouts layout)
+    { if (Container != null) FootprintStudyData.Legend(context, Container.Region, 2, $"Delta: {Status}", Color.LightSkyBlue); }
 }
 
-/// <summary>Delta acumulado (CVD) en velas.</summary>
-[DisplayName("Cumulative delta (CVD)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
-public class CumulativeDeltaCandles : Indicator
-{
-    private readonly CandleDataSeries _cvd = new("CVD", "Cumulative delta") { DrawCandleBorder = false };
-    private readonly ValueDataSeries _value = new("Value", "Value") { VisualType = VisualMode.OnlyValueOnAxis, Color = Color.FromArgb(255, 200, 200, 210) };
-    private bool _resetDaily;
-
-    public CumulativeDeltaCandles() : base(true)
-    {
-        Panel = IndicatorDataProvider.NewPanel;
-        DataSeries[0] = _value;
-        DataSeries.Add(_cvd);
-    }
-
-    [Display(Name = "Reset each session", GroupName = "Calculation", Order = 10)]
-    public bool ResetDaily { get => _resetDaily; set { _resetDaily = value; RecalculateValues(); } }
-
-    protected override void OnCalculate(int bar, decimal value)
-    {
-        var c = GetCandle(bar);
-        decimal open = bar == 0 ? 0 : _cvd[bar - 1].Close;
-        if (_resetDaily && IsNewSession(bar)) open = 0;
-        _cvd[bar] = new Candle(open, open + c.MaxDelta, open + c.MinDelta, open + c.Delta);
-        _value[bar] = open + c.Delta;
-    }
-}
 
 /// <summary>RSI de Wilder.</summary>
 [DisplayName("RSI")]

@@ -19,6 +19,20 @@ internal static class Program
         }
 
         bool headless = args.Contains("--mcp");
+        // Only the desktop applies an explicitly staged relocation, before paths or a writer context are frozen.
+        try
+        {
+            if (!headless) _ = Services.StoragePreferences.ApplyPendingRelocation();
+            _ = TradingHub.Common.StorageLocations.Startup;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            string message = "Trading Hub could not open its explicitly selected storage. No empty replacement account or data store was created. Restore the selected location or correct the storage selection before restarting. " + error.Message;
+            if (headless) Console.Error.WriteLine(message);
+            else Services.SingleInstance.ReportStartupError(message);
+            Environment.ExitCode = 2;
+            return;
+        }
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog.Write(e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) =>

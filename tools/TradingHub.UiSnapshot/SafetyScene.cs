@@ -95,7 +95,10 @@ internal static partial class SafetyScene
         }
 
         var svc = App.Services;
-        Check(!Path.GetFullPath(AppPaths.Root).StartsWith(Path.GetFullPath(TradingHub.Common.Product.AppData), StringComparison.Ordinal), "uses isolated application data");
+        string actualDataRoot = Path.GetFullPath(AppPaths.Root);
+        string productionDataRoot = Path.GetFullPath(TradingHub.Common.Product.DefaultAppData);
+        Check(!actualDataRoot.Equals(productionDataRoot, StringComparison.OrdinalIgnoreCase) &&
+            !actualDataRoot.StartsWith(productionDataRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "uses isolated application data");
         Check(Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE") is { Length: > 0 }, "uses the fake keychain file");
 
         // ================================================================ S7: dangerous dialogs default to Cancel
@@ -272,11 +275,25 @@ internal static partial class SafetyScene
         window.Navigate("trading");
         pump(0.3);
         var tv = window.Trading;
-        var chart = tv.ActiveTab!;
+        using var safetyEndpoint = new FakeHttpServer();
+        safetyEndpoint.OnHttp = request => request.Route switch
+        {
+            "/fapi/v1/time" => (200, "{\"serverTime\":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "}"),
+            "/fapi/v1/openOrders" or "/fapi/v1/openAlgoOrders" or "/fapi/v2/positionRisk" => (200, "[]"),
+            _ => (400, "{\"code\":-1000,\"msg\":\"Explicit safety fixture endpoint: request refused\"}"),
+        };
+        using var safetyNetwork = new FixtureEnvironmentOverride("TRADINGHUB_BINANCE_REST", safetyEndpoint.Http);
+        var dataProfile = new ConnectionProfile { Id = "safety-market", Kind = ConnectionKind.BinanceFutures, Name = "Isolated safety market", HistoryHours = 2 };
+        var instrument = new Instrument { FeedId = BinanceFeed.FuturesId, Symbol = "SIM-BTC", TickSize = 0.1m, VolumeStep = 1, PointValue = 1, BaseAsset = "BTC", QuoteAsset = "USDT" };
+        var market = new KvpSceneFeed(dataProfile.Id, instrument) { Now = DateTime.UtcNow };
+        for (int i = 0; i < 60; i++) market.Trades.Add(new Trade(i + 1, market.Now.AddMinutes(i - 60), 100 + i % 2, 1, TradeSide.Buy));
+        KvpSceneFeed.Register(svc, dataProfile, market);
+        var opening = tv.NewTabAsync(dataProfile.Id, instrument.Symbol, ChartPeriod.M1);
+        Wait(opening, 20);
+        var chart = opening.GetAwaiter().GetResult();
         var model = chart.Model!;
         var inst = model.Instrument;
-        // the connection of the fake REAL account: an inert kind (no market data, no network) with real orders allowed
-        var realProfile = new ConnectionProfile { Id = "safety-real", Kind = ConnectionKind.Databento, Name = "Fixture REAL", AllowRealOrders = true, Testnet = false };
+        var realProfile = new ConnectionProfile { Id = "safety-real", Kind = ConnectionKind.BinanceFutures, Name = "Fixture REAL", ApiKey = "fixture-cached-account-only", AllowRealOrders = true, Testnet = false };
         svc.Connections.Profiles.Add(realProfile);
         var inner = new SimBroker(model.Data, new Portfolio { AccountID = "SAFETY-REAL", Name = "Fixture REAL", BeginBalance = 10_000m, Balance = 10_000m }, new TradingStatistics()) { Name = "Fixture REAL" };
         var real = new FixtureRealAccount(inner);
@@ -387,7 +404,7 @@ internal static partial class SafetyScene
             var file = svc.Strategies.Files.First();
             LiveStrategyRunner? Launch(string accountId)
             {
-                var launch = svc.Live.LaunchAsync(new LiveLaunch { File = file, ProfileId = "sim", Instrument = inst, AccountId = accountId, Period = ChartPeriod.H1 });
+                var launch = svc.Live.LaunchAsync(new LiveLaunch { File = file, ProfileId = dataProfile.Id, Instrument = inst, AccountId = accountId, Period = ChartPeriod.H1 });
                 Wait(launch, 120);
                 if (!launch.IsCompletedSuccessfully) return null;
                 if (launch.Result.Runner == null) Console.WriteLine("  launch: " + launch.Result.Message);
@@ -504,7 +521,7 @@ internal static partial class SafetyScene
 
                 // a live strategy runs on the same account (paused: it opens nothing)
                 if (svc.Strategies.Files.Count == 0) svc.Strategies.Refresh();
-                var launch = svc.Live.LaunchAsync(new LiveLaunch { File = svc.Strategies.Files.First(), ProfileId = "sim", Instrument = inst, AccountId = bp.Id, Period = ChartPeriod.H1, Paused = true });
+                var launch = svc.Live.LaunchAsync(new LiveLaunch { File = svc.Strategies.Files.First(), ProfileId = dataProfile.Id, Instrument = inst, AccountId = bp.Id, Period = ChartPeriod.H1, Paused = true });
                 Wait(launch, 120);
                 runner = launch.IsCompletedSuccessfully ? launch.Result.Runner : null;
                 Check(runner != null && ReferenceEquals(runner.Account, first),
@@ -794,6 +811,19 @@ internal static partial class SafetyScene
             foreach (var (name, value) in previous) Environment.SetEnvironmentVariable(name, value);
         }
     }
+
+    private sealed class FixtureEnvironmentOverride : IDisposable
+    {
+        private readonly string _name;
+        private readonly string? _previous;
+        public FixtureEnvironmentOverride(string name, string value)
+        {
+            _name = name;
+            _previous = Environment.GetEnvironmentVariable(name);
+            Environment.SetEnvironmentVariable(name, value);
+        }
+        public void Dispose() => Environment.SetEnvironmentVariable(_name, _previous);
+    }
 }
 
 /// <summary>A local simulated account that reports itself as REAL: its orders fill in memory and never leave the process.</summary>
@@ -908,6 +938,7 @@ internal static partial class SafetyScene
         // what Avalonia 11.3.22 keeps as Application.ApplicationLifetime (its setter refuses changes after startup)
         var lifetimeField = typeof(Avalonia.Application).GetField("_applicationLifetime", Private)!;
         var previousLifetime = lifetimeField.GetValue(app);
+        var previousQuit = App.Quit;
         bool autoResume = svc.Settings.AutoResumeLive;
         var parked = svc.Runners.ToList();
         svc.Runners.Clear();
@@ -967,11 +998,14 @@ internal static partial class SafetyScene
             List<Order> Protection(ITradingAccount account) =>
                 account.ActiveOrders.Where(o => o.Direction == OrderDirections.Sell && o.Type is OrderTypes.Stop or OrderTypes.Limit).ToList();
 
-            // the app's own quit wiring for a desktop lifetime (⌘Q's shutdown request and the exit), fresh for each case
+            // Finite protection-state-machine proof: this reused fixture records terminal exit but deliberately
+            // retains services for the next simulated process. Real disposal is exercised by kvp-shutdown.
             FixtureDesktopLifetime Desktop()
             {
                 var desktop = FixtureDesktopLifetime.For(window);
-                App.UseQuit(desktop.Lifetime);
+                var quit = new QuitFlow(svc, () => window, new FixtureQuitTerminal(desktop));
+                desktop.Lifetime.ShutdownRequested += quit.OnShutdownRequested;
+                typeof(App).GetProperty("Quit", BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, quit);
                 return desktop;
             }
 
@@ -1184,8 +1218,8 @@ internal static partial class SafetyScene
                 desktop = Desktop();
                 bool allowed = desktop.RequestShutdown();
                 dialog = Find(QuitTitle, 1.5);
-                Check(flat is { OwnPosition: 0 } && !flat.IsRunning && allowed && dialog == null && desktop.Shutdowns == 0,
-                    "no positions: ⌘Q is not canceled; it stops the strategies within the request and lets the app close itself, as before");
+                Check(flat is { OwnPosition: 0 } && !flat.IsRunning && !allowed && dialog == null && desktop.Shutdowns == 1,
+                    "no positions: the platform request is canceled, then the asynchronous terminal operation stops the strategy and exits without a dialog");
             });
 
             Part("restart with new parameters keeps and adopts", () =>
@@ -1364,6 +1398,7 @@ internal static partial class SafetyScene
         {
             Reopen();
             lifetimeField.SetValue(app, previousLifetime);
+            typeof(App).GetProperty("Quit", BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, previousQuit);
             svc.Settings.AutoResumeLive = autoResume;
             svc.RunningAtLastClose = new();
             slow?.CancelHeld();
@@ -1390,6 +1425,20 @@ internal static partial class SafetyScene
 
         Console.WriteLine($"Safety quit scenario: {checks} checks, {failures} failures.");
         return failures;
+    }
+}
+
+/// <summary>A terminal adapter only for repeatedly reused protection fixtures; it does not certify service disposal.</summary>
+internal sealed class FixtureQuitTerminal(FixtureDesktopLifetime desktop) : IQuitTerminalLifetime
+{
+    private bool _completed;
+    public Task CompleteAsync(Action? beforeExit)
+    {
+        if (_completed) return Task.CompletedTask;
+        _completed = true;
+        beforeExit?.Invoke();
+        desktop.Lifetime.Shutdown();
+        return Task.CompletedTask;
     }
 }
 

@@ -1,4 +1,5 @@
 using TradingHub.Data;
+using TradingHub.Market;
 
 namespace TradingHub.Indicators
 {
@@ -11,6 +12,11 @@ namespace TradingHub.Indicators
         public decimal Ask { get; set; }
         public decimal Between { get; set; }
         public decimal Ticks { get; set; }
+        public bool IsAggregated { get; set; }
+        public DataQuality Quality { get; set; }
+        public int ResolutionSeconds { get; set; }
+        /// <summary>Partial aggregate coverage cannot establish a complete constituent-event count.</summary>
+        public bool HasTradeCount => Ticks > 0 && (!IsAggregated || (Quality & DataQuality.Partial) == 0);
 
         /// <summary>"Tiempo" en el nivel (en Trading Hub, cantidad de operaciones como aproximación).</summary>
         public int Time { get; set; }
@@ -83,7 +89,42 @@ namespace TradingHub.Indicators
         /// <summary>At least one observed footprint row; mixed aggregate history may also be present.</summary>
         public bool HasObservedFootprint => !_c.Levels.IsEmpty;
         /// <summary>All contributions in this candle came from observed trades, not aggregate bars.</summary>
-        public bool IsFootprintComplete => _c.HasRealTrades && !_c.HasSyntheticTrades;
+        public bool IsFootprintComplete => _c.IsFootprintComplete;
+        public bool HasAggregatedFootprint => !_c.AggregatedLevels.IsEmpty;
+        public bool HasRawTrades => _c.HasRealTrades;
+        public bool HasCompactTrades => _c.HasCompactTrades;
+        public bool IsSynthetic => _c.IsSynthetic;
+        public bool HasInferredSide => _c.HasInferredSide;
+        public DataQuality Quality => _c.Quality;
+        public int ResolutionSeconds => _c.ResolutionSeconds;
+        public decimal ProfileRowSize => _series.RowSize;
+        public decimal MarketTickSize => _series.Instrument.TickSize;
+        public DateTime AvailableAt => _c.AvailableAt;
+        public bool HasKnownAvailability => _c.HasKnownAvailability;
+        public bool IsTimeResolutionCompatible => !_c.HasIncompatibleResolution;
+        public bool CanCalculateCausally => _c.Trades > 0 && HasKnownAvailability && IsTimeResolutionCompatible &&
+            (_c.IsClosed || _c.AvailableAt <= _series.AvailableThrough);
+        public bool IsTimeResolutionContained(DateTime startUtc, DateTime endUtc)
+        {
+            if (_c.Trades == 0 || !HasKnownAvailability || !IsTimeResolutionCompatible ||
+                startUtc > _c.EarliestSourceTime || _c.EarliestSourceTime >= endUtc || _c.AvailableAt > endUtc) return false;
+            if (_series.Period.IsTimeBased)
+            {
+                var bucket = _series.TimeBucket(_c.Time.Ticks);
+                return startUtc.Ticks <= bucket.Start && bucket.End <= endUtc.Ticks;
+            }
+            return startUtc <= _c.Time && _c.LastTime < endUtc;
+        }
+        public string SourceIdentity => _c.SourceIdentity ?? _series.SourceIdentity;
+        public string SeriesSourceIdentity => _series.SourceIdentity;
+        public long Revision => _c.Revision;
+        public long CorrectionRevision => _c.CorrectionRevision;
+        public Guid SeriesIdentity => _series.Identity;
+        public int ObservedTrades => _c.ObservedTrades;
+        public long AggregatedTrades => _c.AggregatedTrades;
+        public DateOnly SessionDate => _series.Session.SessionDate(_c.Time);
+        public TimeZoneInfo SessionTimeZone => _series.Session.TimeZone;
+        public DateTime SessionStartUtc(DateOnly date) => _series.Session.SessionStartUtc(date);
         public bool IsCandleFinished => _c.IsClosed;
         public decimal MaxTradeVolume => _c.MaxTradeVolume;
 
@@ -91,7 +132,7 @@ namespace TradingHub.Indicators
         public bool IsBullish => Close > Open;
         public bool IsBearish => Close < Open;
 
-        private PriceVolumeInfo Make(long row, in LevelData d) => new()
+        private PriceVolumeInfo Make(long row, in LevelData d, bool aggregated = false) => new()
         {
             Price = _series.RowPrice(row),
             Volume = d.Volume,
@@ -100,6 +141,9 @@ namespace TradingHub.Indicators
             Between = d.Between,
             Ticks = d.Trades,
             Time = d.Trades,
+            IsAggregated = aggregated,
+            Quality = (aggregated ? DataQuality.Compact : DataQuality.Raw) | (_c.Quality & (DataQuality.InferredSide | DataQuality.Partial)),
+            ResolutionSeconds = aggregated ? _c.ResolutionSeconds : 0,
         };
 
         /// <summary>Nivel de precio exacto (o null si no hubo operaciones ahí).</summary>
@@ -122,6 +166,9 @@ namespace TradingHub.Indicators
             reuse.Between = d.Between;
             reuse.Ticks = d.Trades;
             reuse.Time = d.Trades;
+            reuse.IsAggregated = false;
+            reuse.Quality = DataQuality.Raw | (_c.Quality & (DataQuality.InferredSide | DataQuality.Partial));
+            reuse.ResolutionSeconds = 0;
             return reuse;
         }
 
@@ -159,6 +206,36 @@ namespace TradingHub.Indicators
         public IEnumerable<PriceVolumeInfo> GetAllPriceLevels()
         {
             foreach (var (row, d) in _c.Levels.Enumerate()) yield return Make(row, d);
+        }
+
+        /// <summary>Measured compact bucket totals at their declared resolution, not observed individual prints.</summary>
+        public IEnumerable<PriceVolumeInfo> GetAggregatedPriceLevels()
+        {
+            foreach (var (row, data) in _c.AggregatedLevels.Enumerate()) yield return Make(row, data, aggregated: true);
+        }
+
+        public List<PriceVolumeInfo> GetAggregatedPriceLevelsList() => GetAggregatedPriceLevels().ToList();
+
+        /// <summary>Observed plus measured aggregate rows; excludes all candle-derived estimates.</summary>
+        public IEnumerable<PriceVolumeInfo> GetProfilePriceLevels()
+        {
+            if (!HasAggregatedFootprint)
+            {
+                foreach (var level in GetAllPriceLevels()) yield return level;
+                yield break;
+            }
+            var rows = new SortedDictionary<long, LevelData>();
+            foreach (var (row, data) in _c.Levels.Enumerate()) rows[row] = data;
+            foreach (var (row, data) in _c.AggregatedLevels.Enumerate())
+            {
+                rows.TryGetValue(row, out var previous);
+                previous.Ask += data.Ask;
+                previous.Bid += data.Bid;
+                previous.Between += data.Between;
+                previous.Trades += data.Trades;
+                rows[row] = previous;
+            }
+            foreach (var (row, data) in rows) yield return Make(row, data, aggregated: true);
         }
 
         /// <summary>Niveles ordenados por precio (lista materializada).</summary>
@@ -202,30 +279,21 @@ namespace TradingHub.Indicators
         /// <summary>Área de valor (70% del volumen por defecto) alrededor del POC.</summary>
         public (decimal High, decimal Low) GetValueArea(decimal percent = 70m)
         {
-            var levels = _c.Levels;
-            if (levels.IsEmpty) return (High, Low);
-            decimal total = 0;
-            foreach (var (_, d) in levels.Enumerate()) total += d.Volume;
-            decimal target = total * percent / 100m;
-            long up = _c.PocRow, dn = _c.PocRow;
-            decimal acc = levels.Get(_c.PocRow).Volume;
-            while (acc < target && (up < levels.MaxRow || dn > levels.MinRow))
+            var levels = _c.Levels.Enumerate().OrderBy(x => x.Row).ToList();
+            if (levels.Count == 0) return (High, Low);
+            decimal total = levels.Sum(x => x.Data.Volume);
+            decimal target = total * Math.Clamp(percent, 0, 100) / 100m;
+            int poc = levels.FindIndex(x => x.Row == _c.PocRow);
+            if (poc < 0) return (High, Low);
+            int up = poc, down = poc;
+            decimal accumulated = levels[poc].Data.Volume;
+            while (accumulated < target && (up + 1 < levels.Count || down > 0))
             {
-                decimal vu = up < levels.MaxRow ? levels.Get(up + 1).Volume : -1;
-                decimal vd = dn > levels.MinRow ? levels.Get(dn - 1).Volume : -1;
-                if (vu >= vd)
-                {
-                    up++;
-                    acc += Math.Max(0, vu);
-                }
-                else
-                {
-                    dn--;
-                    acc += Math.Max(0, vd);
-                }
+                decimal above = up + 1 < levels.Count ? levels[up + 1].Data.Volume : -1;
+                decimal below = down > 0 ? levels[down - 1].Data.Volume : -1;
+                accumulated += above >= below ? levels[++up].Data.Volume : levels[--down].Data.Volume;
             }
-
-            return (_series.RowPrice(up), _series.RowPrice(dn));
+            return (_series.RowPrice(levels[up].Row), _series.RowPrice(levels[down].Row));
         }
 
         public override string ToString() => $"{Time:yyyy-MM-dd HH:mm} O:{Open} H:{High} L:{Low} C:{Close} V:{Volume}";

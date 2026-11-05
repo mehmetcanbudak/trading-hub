@@ -8,6 +8,7 @@ using System.Web;
 using ModelContextProtocol.Authentication;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using TradingHub.Networking;
 
 namespace TradingHub.App.Services;
 
@@ -98,7 +99,8 @@ public sealed class TradingViewResearchSdk : ITradingViewResearchTransport
     public static async Task<TradingViewResearchSdk> ConnectAsync(TradingViewResearchConnection connection,
         ITokenCache cache, CancellationToken cancellationToken = default,
         HttpClient? httpClient = null,
-        Func<AuthorizationCallbackContext, CancellationToken, Task<AuthorizationResult?>>? authorization = null)
+        Func<AuthorizationCallbackContext, CancellationToken, Task<AuthorizationResult?>>? authorization = null,
+        ProxyHandlerFactory? network = null)
     {
         ResearchLoopbackCallback? callback = connection.Interactive && authorization == null ? new() : null;
         var options = new ClientOAuthOptions
@@ -121,7 +123,7 @@ public sealed class TradingViewResearchSdk : ITradingViewResearchTransport
             TransportMode = HttpTransportMode.StreamableHttp,
             OAuth = options,
             MaxReconnectionAttempts = 0
-        }, httpClient ?? new HttpClient(new ResearchHttpsHandler(connection.Endpoint)), ownsHttpClient: httpClient == null);
+        }, httpClient ?? new HttpClient(new ResearchHttpsHandler(connection.Endpoint, network)), ownsHttpClient: httpClient == null);
         TradingViewResearchSdk? result = null;
         bool changedBeforeAttach = false;
         var connectionGate = new object();
@@ -184,12 +186,13 @@ public sealed class TradingViewResearchSdk : ITradingViewResearchTransport
         await _transport.DisposeAsync().ConfigureAwait(false);
     }
 
-    public static async Task<string> RevokeTokensAsync(string saved, CancellationToken cancellationToken = default, HttpClient? httpClient = null)
+    public static async Task<string> RevokeTokensAsync(string saved, CancellationToken cancellationToken = default,
+        HttpClient? httpClient = null, ProxyHandlerFactory? network = null)
     {
         var tokens = JsonSerializer.Deserialize<TokenContainer>(saved) ?? throw new TradingViewResearchException("Saved authorization was invalid.");
         if (!Uri.TryCreate(tokens.AuthorizationServer, UriKind.Absolute, out var issuer) || issuer.Scheme != "https")
             return "No supported server revocation metadata is available. Remove the app grant in TradingView account settings if needed.";
-        using var ownedHttp = httpClient == null ? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) : null;
+        using var ownedHttp = httpClient == null ? new HttpClient(CreateResearchHandler(network)) : null;
         var http = httpClient ?? ownedHttp!;
         string path = issuer.AbsolutePath.TrimEnd('/');
         var locations = new[] {
@@ -233,7 +236,14 @@ public sealed class TradingViewResearchSdk : ITradingViewResearchTransport
         return "Server token revocation completed.";
     }
 
-    private sealed class ResearchHttpsHandler(Uri resource) : DelegatingHandler(new HttpClientHandler { AllowAutoRedirect = false })
+    private static SocketsHttpHandler CreateResearchHandler(ProxyHandlerFactory? network)
+    {
+        var handler = (network ?? new ProxyHandlerFactory(new NetworkProxyPolicy())).CreateHandler();
+        handler.AllowAutoRedirect = false;
+        return handler;
+    }
+
+    private sealed class ResearchHttpsHandler(Uri resource, ProxyHandlerFactory? network) : DelegatingHandler(CreateResearchHandler(network))
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {

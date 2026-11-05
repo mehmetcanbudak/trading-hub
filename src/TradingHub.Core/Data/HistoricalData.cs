@@ -33,10 +33,12 @@ public static class HistoricalData
             foreach (var symDir in Directory.EnumerateDirectories(feedDir))
             {
                 var days = new List<DayData>();
-                foreach (var f in Directory.EnumerateFiles(symDir, "*.vtk"))
+                foreach (var group in Directory.EnumerateFiles(symDir).Where(p => p.EndsWith(".vtk", StringComparison.Ordinal) || p.EndsWith(".vtk.br", StringComparison.Ordinal))
+                    .GroupBy(p => Path.GetFileNameWithoutExtension(p.EndsWith(".br", StringComparison.Ordinal) ? Path.GetFileNameWithoutExtension(p) : p)))
                 {
-                    if (!DateOnly.TryParseExact(Path.GetFileNameWithoutExtension(f), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) continue;
-                    days.Add(new DayData(d, f, new FileInfo(f).Length));
+                    if (!DateOnly.TryParseExact(group.Key, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) continue;
+                    var selected = group.OrderBy(p => p.EndsWith(".br", StringComparison.Ordinal)).First();
+                    days.Add(new DayData(d, selected, group.Sum(p => new FileInfo(p).Length)));
                 }
 
                 if (days.Count == 0) continue;
@@ -64,6 +66,8 @@ public static class HistoricalData
         {
             var p = TickFile.DayPath(root, feedId, symbol, d);
             if (File.Exists(p)) File.Delete(p);
+            var archive = TickArchive.PathFor(p);
+            if (File.Exists(archive)) File.Delete(archive);
             if (feedId == IbBarImport.FeedId)
             {
                 var barPath = TickFile.DayPath(root, IbBarStore.BarFolder, symbol, d);
@@ -90,24 +94,93 @@ public static class HistoricalData
         }
     }
 
+    /// <summary>
+    /// Read by source availability rather than chart location. Earlier stored days are examined too:
+    /// a long candle can open before the requested start and become available inside it.
+    /// Matching events are bounded; cancellation remains observable while scanning stored days.
+    /// </summary>
+    public static List<Trade> ReadAvailable(string root, string feedId, string symbol, DateTime fromUtc, DateTime toUtc,
+        CancellationToken ct = default, int maxEvents = 2_000_000)
+    {
+        if (maxEvents <= 0) throw new ArgumentOutOfRangeException(nameof(maxEvents));
+        var window = new HistoryWindow(maxEvents);
+        if (toUtc <= fromUtc) return [];
+        foreach (var day in HistorySources.AvailableDays(root, feedId, symbol))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) >= toUtc) break;
+            foreach (var trade in HistorySources.EnumerateDay(root, feedId, symbol, day, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!trade.HasKnownAvailability && trade.Time < toUtc)
+                    throw new InvalidDataException("Stored source availability is unknown. Reimport the source with declared timing before causal replay.");
+                var available = trade.AvailableAt;
+                window.Observe(trade, available >= fromUtc && available < toUtc);
+                if (window.Truncated)
+                    throw new InvalidDataException("The selected availability range exceeds the bounded replay event capacity. Select a shorter range.");
+            }
+        }
+        var result = window.Finish();
+        result.Sort(static (left, right) =>
+        {
+            int order = left.AvailableAt.CompareTo(right.AvailableAt);
+            if (order == 0) order = left.Time.CompareTo(right.Time);
+            return order != 0 ? order : left.Id.CompareTo(right.Id);
+        });
+        return result;
+    }
+
     /// <summary>Guarda un día completo (se mezcla con lo que ya hubiera, sin duplicar).</summary>
     /// <param name="replace">El día bajado está completo: reemplaza lo grabado en vivo en vez de mezclarlo (no duplica).</param>
     public static void WriteDay(string root, Instrument instrument, DateOnly day, IReadOnlyList<Trade> trades, bool replace = false)
     {
         var path = TickFile.DayPath(root, instrument.FeedId, instrument.Symbol, day);
+        if (trades.Any(t => t.Id < 0 && (t.Provenance.Quality & DataQuality.Compact) != 0))
+            throw new ArgumentException("Display summaries cannot replace lossless tick history.", nameof(trades));
         var all = new List<Trade>(trades.Count);
-        if (!replace && File.Exists(path)) all.AddRange(TickFile.Read(path));
-        all.AddRange(trades);
+        var existing = TickArchive.Resolve(path);
+        bool rawReplacement = replace && trades.All(t => t.IsObservedTrade);
+        var previous = existing != null && !rawReplacement ? HistorySources.ReadSourceFile(existing, instrument.FeedId, instrument.Symbol, requireComplete: true) : null;
+        if (!rawReplacement && previous != null) all.AddRange(previous);
+        string sourceIdentity = HistorySources.DefaultSourceIdentity(instrument.FeedId, instrument.Symbol);
+        foreach (var trade in trades)
+            all.Add(trade.Provenance.SourceIdentity != null ? trade :
+                new Trade(trade.Id, trade.Time, trade.Price, trade.Volume, trade.Side, trade.Provenance with { SourceIdentity = sourceIdentity }));
         all = TickFile.SortAndDedupe(all);
-        string tmp = path + ".tmp";
-        if (File.Exists(tmp)) File.Delete(tmp);
-        using (var w = new TickFile.Writer(tmp, instrument))
+        // Finer measurements win for the entire source window, not just the proxy's arbitrary print minute.
+        var recordedTimes = all.Where(t => t.Provenance.IsMeasured).Select(t => t.Time.Ticks).Order().ToList();
+        all.RemoveAll(t => OverlapsMeasured(t, recordedTimes));
+        if (previous != null && all.Count == previous.Count && all.Zip(previous).All(pair =>
+            pair.First.Id == pair.Second.Id && pair.First.Time == pair.Second.Time && pair.First.Price == pair.Second.Price &&
+            pair.First.Volume == pair.Second.Volume && pair.First.Side == pair.Second.Side && pair.First.Provenance == pair.Second.Provenance)) return;
+        string tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
         {
-            foreach (var t in all)
-                if (DateOnly.FromDateTime(t.Time) == day) w.Write(t);
+            using (var w = new TickFile.Writer(tmp, instrument, includeProvenance: true))
+                foreach (var t in all)
+                    if (DateOnly.FromDateTime(t.Time) == day) w.Write(t);
+            File.Move(tmp, path, overwrite: true);
         }
+        finally { if (File.Exists(tmp)) File.Delete(tmp); }
+    }
 
-        File.Move(tmp, path, overwrite: true);
+    internal static bool OverlapsMeasured(in Trade trade, List<long> recordedTimes)
+    {
+        if (trade.Provenance.IsMeasured || recordedTimes.Count == 0) return false;
+        long from, to;
+        if (trade.Provenance.ResolutionSeconds > 0)
+        {
+            var window = trade.Provenance.SourceWindow(trade.Time);
+            from = window.From.Ticks; to = window.To.Ticks;
+        }
+        else
+        {
+            from = trade.Time.Ticks / TimeSpan.TicksPerMinute * TimeSpan.TicksPerMinute;
+            to = Math.Min(DateTime.MaxValue.Ticks, from + TimeSpan.TicksPerMinute);
+        }
+        int index = recordedTimes.BinarySearch(from);
+        if (index < 0) index = ~index;
+        return index < recordedTimes.Count && recordedTimes[index] < to;
     }
 }
 
@@ -117,9 +190,7 @@ public static class HistoricalData
 /// </summary>
 public static class PublicArchives
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(10) };
-
-    static PublicArchives() => Http.DefaultRequestHeaders.UserAgent.ParseAdd("TradingHub/0.2");
+    private static readonly Lazy<HttpClient> DefaultHttp = new(() => new HttpClient { Timeout = TimeSpan.FromMinutes(10) });
 
     public static bool Supports(string feedId) => feedId is "binance-futures" or "binance-spot" or "bybit-linear";
 
@@ -136,10 +207,14 @@ public static class PublicArchives
     }
 
     /// <summary>Descarga un día. Devuelve null si el archivo todavía no está publicado (404).</summary>
-    public static async Task<List<Trade>?> DownloadDayAsync(Instrument instrument, DateOnly day, IProgress<double>? progress, CancellationToken ct)
+    public static async Task<List<Trade>?> DownloadDayAsync(Instrument instrument, DateOnly day, IProgress<double>? progress, CancellationToken ct,
+        HttpClient? http = null, Uri? baseOrigin = null)
     {
         var url = DailyUrl(instrument.FeedId, instrument.Symbol, day) ?? throw new NotSupportedException("This connection has no public archives.");
-        using var resp = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        if (baseOrigin != null) url = new Uri(baseOrigin, new Uri(url).PathAndQuery).AbsoluteUri;
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.UserAgent.ParseAdd("TradingHub/0.2");
+        using var resp = await (http ?? DefaultHttp.Value).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();
         long total = resp.Content.Headers.ContentLength ?? 0;
@@ -158,12 +233,12 @@ public static class PublicArchives
         }
 
         ms.Position = 0;
-        var trades = instrument.FeedId == "bybit-linear" ? ParseBybit(ms) : ParseBinance(ms);
+        var trades = instrument.FeedId == "bybit-linear" ? ParseBybit(ms, instrument.FeedId) : ParseBinance(ms, instrument.FeedId);
         progress?.Report(1);
         return trades;
     }
 
-    private static List<Trade> ParseBinance(Stream zipStream)
+    private static List<Trade> ParseBinance(Stream zipStream, string sourceIdentity)
     {
         using var zip = new ZipArchive(zipStream, ZipArchiveMode.Read);
         var entry = zip.Entries.First(e => e.FullName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase));
@@ -178,20 +253,24 @@ public static class PublicArchives
             long id = long.Parse(Next(ref span), CultureInfo.InvariantCulture);
             decimal price = decimal.Parse(Next(ref span), NumberStyles.Float, CultureInfo.InvariantCulture);
             decimal qty = decimal.Parse(Next(ref span), NumberStyles.Float, CultureInfo.InvariantCulture);
-            Next(ref span);
-            Next(ref span);
+            long firstTradeId = long.Parse(Next(ref span), CultureInfo.InvariantCulture);
+            long lastTradeId = long.Parse(Next(ref span), CultureInfo.InvariantCulture);
             long ts = long.Parse(Next(ref span), CultureInfo.InvariantCulture);
             var makerSpan = Next(ref span);
             bool buyerIsMaker = makerSpan.Equals("true", StringComparison.OrdinalIgnoreCase) || makerSpan.Equals("True", StringComparison.Ordinal);
             // spot publica microsegundos desde 2025
             var time = ts > 100_000_000_000_000 ? DateTime.UnixEpoch.AddTicks(ts * 10) : DateTime.UnixEpoch.AddMilliseconds(ts);
-            list.Add(new Trade(id, time, price, qty, buyerIsMaker ? TradeSide.Sell : TradeSide.Buy));
+            int count = checked((int)(lastTradeId - firstTradeId + 1));
+            if (count <= 0) throw new InvalidDataException("Invalid Binance aggregate trade range.");
+            list.Add(new Trade(id, time, price, qty, buyerIsMaker ? TradeSide.Sell : TradeSide.Buy,
+                new TradeProvenance(count == 1 ? DataQuality.Raw : DataQuality.Compact, SourceIdentity: sourceIdentity, ObservedTradeCount: count,
+                    SourceEventId: id.ToString(CultureInfo.InvariantCulture))));
         }
 
         return list;
     }
 
-    private static List<Trade> ParseBybit(Stream gzStream)
+    private static List<Trade> ParseBybit(Stream gzStream, string sourceIdentity)
     {
         using var gz = new GZipStream(gzStream, CompressionMode.Decompress);
         using var reader = new StreamReader(gz);
@@ -204,15 +283,24 @@ public static class PublicArchives
             if (line.Length == 0 || !char.IsDigit(line[0])) continue;
             // timestamp(s), símbolo, lado, tamaño, precio, ...
             var span = line.AsSpan();
-            double secs = double.Parse(Next(ref span), CultureInfo.InvariantCulture);
+            decimal secs = decimal.Parse(Next(ref span), NumberStyles.Float, CultureInfo.InvariantCulture);
             Next(ref span);
             var side = Next(ref span);
+            TradeSide aggressor = side.SequenceEqual("Buy") ? TradeSide.Buy : side.SequenceEqual("Sell") ? TradeSide.Sell : TradeSide.None;
             decimal size = decimal.Parse(Next(ref span), NumberStyles.Float, CultureInfo.InvariantCulture);
             decimal price = decimal.Parse(Next(ref span), NumberStyles.Float, CultureInfo.InvariantCulture);
-            long ms = (long)Math.Round(secs * 1000);
+            Next(ref span); // tick direction is not an event identity
+            string nativeId = Next(ref span).ToString();
+            bool hasNativeId = nativeId.Length > 0;
+            long ticks = checked((long)decimal.Round(secs * TimeSpan.TicksPerSecond));
+            long ms = checked((long)decimal.Round(secs * 1000));
             seq = ms == lastMs ? seq + 1 : 0;
             lastMs = ms;
-            list.Add(new Trade(ms * 1000 + seq, DateTime.UnixEpoch.AddMilliseconds(ms), price, size, side.SequenceEqual("Buy") ? TradeSide.Buy : TradeSide.Sell));
+            var quality = DataQuality.Raw | (hasNativeId ? DataQuality.None : DataQuality.Partial) |
+                (aggressor == TradeSide.None ? DataQuality.InferredSide | DataQuality.Partial : DataQuality.None);
+            var provenance = new TradeProvenance(quality, SourceIdentity: sourceIdentity,
+                SourceEventId: hasNativeId ? nativeId : $"observation:{Guid.NewGuid():N}");
+            list.Add(new Trade(ms * 1000 + seq, DateTime.UnixEpoch.AddTicks(ticks), price, size, aggressor, provenance));
         }
 
         // el archivo de Bybit viene del más nuevo al más viejo en algunos días

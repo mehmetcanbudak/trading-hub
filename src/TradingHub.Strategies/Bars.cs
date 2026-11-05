@@ -16,7 +16,20 @@ public sealed class Bar
     public decimal Volume { get; internal set; }
     public bool HasRealTrades { get; internal set; }
     public bool HasSyntheticTrades { get; internal set; }
-    public bool IsSynthetic => HasSyntheticTrades && !HasRealTrades;
+    public bool HasCompactTrades { get; internal set; }
+    public DataQuality Quality { get; internal set; }
+    public int ResolutionSeconds { get; internal set; }
+    public string? SourceIdentity { get; internal set; }
+    public long CorrectionRevision { get; internal set; }
+    public int ObservedTrades { get; internal set; }
+    public long AggregatedTrades { get; internal set; }
+    public DateTime AvailableAt { get; internal set; }
+    public bool HasKnownAvailability { get; internal set; } = true;
+    public bool IsTimeResolutionCompatible { get; internal set; } = true;
+    public bool HasInferredSide => (Quality & DataQuality.InferredSide) != 0;
+    public bool HasAggregatedFootprint => _aggregatedLevels is { Count: > 0 };
+    public bool IsFootprintComplete => HasRealTrades && !HasCompactTrades && !HasSyntheticTrades && (Quality & DataQuality.Partial) == 0;
+    public bool IsSynthetic => HasSyntheticTrades && !HasRealTrades && !HasCompactTrades;
     public bool HasObservedPoc { get; internal set; }
     public bool HasObservedFootprint => _levels is { Count: > 0 };
 
@@ -25,6 +38,7 @@ public sealed class Bar
 
     /// <summary>Source-reported/inferred sell volume; includes estimated allocations when HasSyntheticTrades is true.</summary>
     public decimal SellVolume { get; internal set; }
+    public decimal BetweenVolume { get; internal set; }
 
     /// <summary>Aggregate side balance; includes synthetic allocation estimates when HasSyntheticTrades is true.</summary>
     public decimal Delta => BuyVolume - SellVolume;
@@ -38,6 +52,9 @@ public sealed class Bar
 
     /// <summary>Observed trades only, when UseFootprint is enabled. Synthetic aggregates never create levels.</summary>
     public IReadOnlyDictionary<decimal, (decimal Buy, decimal Sell)> Levels => _levels ?? Empty;
+    public IReadOnlyDictionary<decimal, (decimal Buy, decimal Sell)> AggregatedLevels => _aggregatedLevels ?? Empty;
+    public IReadOnlyDictionary<decimal, decimal> BetweenLevels => _betweenLevels ?? EmptyBetween;
+    public IReadOnlyDictionary<decimal, decimal> AggregatedBetweenLevels => _aggregatedBetweenLevels ?? EmptyBetween;
 
     public bool IsBullish => Close > Open;
     public bool IsBearish => Close < Open;
@@ -46,6 +63,9 @@ public sealed class Bar
     public decimal Typical => (High + Low + Close) / 3;
 
     internal Dictionary<decimal, (decimal Buy, decimal Sell)>? _levels;
+    internal Dictionary<decimal, (decimal Buy, decimal Sell)>? _aggregatedLevels;
+    internal Dictionary<decimal, decimal>? _betweenLevels, _aggregatedBetweenLevels;
+    private static readonly Dictionary<decimal, decimal> EmptyBetween = new();
     private static readonly Dictionary<decimal, (decimal, decimal)> Empty = new();
 
     public override string ToString() => $"#{Index} {Time:yyyy-MM-dd HH:mm} O {Open} H {High} L {Low} C {Close} V {Volume} Δ {Delta}";
@@ -79,21 +99,25 @@ internal sealed class BarBuilder
     private long _bucketEnd;
     private Bar? _current;
     private long _highT, _lowT;
+    private long _firstTimeTicks, _lastTimeTicks;
     private int _index;
     private decimal _pocVolume;
 
-    public BarBuilder(Instrument instrument, ChartPeriod period, SessionSettings session, bool footprint)
+    public BarBuilder(Instrument instrument, ChartPeriod period, SessionSettings session, bool footprint, CandleSeries? timeHelper = null)
     {
         _instrument = instrument;
         _period = period;
         _footprint = footprint;
         if (period.Type is PeriodType.Seconds or PeriodType.Minutes or PeriodType.Hours or PeriodType.Days or PeriodType.Weeks or PeriodType.Months)
-            _timeHelper = new CandleSeries(instrument, period, 1, session);
+            _timeHelper = timeHelper ?? new CandleSeries(instrument, period, 1, session);
         else if (period.Type is not (PeriodType.Tick or PeriodType.Volume or PeriodType.Range or PeriodType.Delta))
             throw new NotSupportedException($"Period {period.DisplayName} is unavailable in backtests (use time, tick, volume, range or delta bars).");
     }
 
     public Bar? Current => _current;
+
+    public bool IsResolutionCompatible(long locationTicks, TradeProvenance provenance) =>
+        provenance.ResolutionSeconds <= 0 || _timeHelper?.IsResolutionCompatible(locationTicks, provenance) == true;
 
     /// <summary>
     /// Si esta operación abre una vela nueva, cierra la actual y la devuelve (todavía sin agregar la
@@ -103,19 +127,37 @@ internal sealed class BarBuilder
     {
         if (_current == null || !ShouldStartNew(timeTicks, priceTicks)) return null;
         var closed = _current;
-        Finish(closed);
         _current = null;
         return closed;
     }
 
     /// <summary>Agrega la operación a la vela en formación (la crea si hace falta).</summary>
-    public void Append(long timeTicks, long priceTicks, decimal volume, TradeSide side, bool synthetic)
+    public void Append(long timeTicks, long priceTicks, decimal volume, TradeSide side, bool synthetic) =>
+        Append(timeTicks, priceTicks, volume, side, new TradeProvenance(synthetic ? DataQuality.Synthetic | DataQuality.InferredSide : DataQuality.Raw));
+
+    public void Append(long timeTicks, long priceTicks, decimal volume, TradeSide side, TradeProvenance provenance)
     {
         if (_current == null) Start(timeTicks, priceTicks);
         var b = _current!;
         decimal price = _instrument.FromTicks(priceTicks);
-        if (synthetic) b.HasSyntheticTrades = true;
-        else
+        bool observed = provenance.IsObservedTrade;
+        bool compact = (provenance.Quality & DataQuality.Compact) != 0 && (provenance.Quality & DataQuality.Synthetic) == 0;
+        b.Quality |= provenance.Quality;
+        b.ResolutionSeconds = Math.Max(b.ResolutionSeconds, provenance.ResolutionSeconds);
+        b.CorrectionRevision = Math.Max(b.CorrectionRevision, provenance.CorrectionRevision);
+        if (b.SourceIdentity == null) b.SourceIdentity = provenance.SourceIdentity;
+        else if (provenance.SourceIdentity != null && b.SourceIdentity != provenance.SourceIdentity) b.SourceIdentity = "mixed";
+        var location = new DateTime(timeTicks, DateTimeKind.Utc);
+        DateTime available = provenance.AvailabilityTime(location);
+        if (available > b.AvailableAt) b.AvailableAt = available;
+        b.HasKnownAvailability &= provenance.HasKnownAvailability;
+        b.IsTimeResolutionCompatible &= provenance.ResolutionSeconds <= 0 ||
+            _timeHelper?.IsResolutionCompatible(timeTicks, provenance) == true;
+        b.HasCompactTrades |= compact;
+        b.HasSyntheticTrades |= (provenance.Quality & DataQuality.Synthetic) != 0;
+        if (observed) b.ObservedTrades++;
+        else if (compact) b.AggregatedTrades += provenance.ObservedTradeCount;
+        if (observed)
         {
             if (!b.HasRealTrades) b.PocPrice = price;
             b.HasRealTrades = true;
@@ -132,24 +174,34 @@ internal sealed class BarBuilder
             b.Low = price;
         }
 
-        b.Close = price;
+        if (timeTicks < _firstTimeTicks) { _firstTimeTicks = timeTicks; b.Open = price; }
+        if (timeTicks >= _lastTimeTicks) { _lastTimeTicks = timeTicks; b.Close = price; b.CloseTime = location; }
         b.Volume += volume;
         if (side == TradeSide.Buy) b.BuyVolume += volume;
         else if (side == TradeSide.Sell) b.SellVolume += volume;
+        else b.BetweenVolume += volume;
         decimal d = b.Delta;
-        if (d > b.MaxDelta) b.MaxDelta = d;
-        if (d < b.MinDelta) b.MinDelta = d;
+        if (b.Trades == 0) b.MaxDelta = b.MinDelta = d;
+        else { if (d > b.MaxDelta) b.MaxDelta = d; if (d < b.MinDelta) b.MinDelta = d; }
         b.Trades++;
-        b.CloseTime = new DateTime(timeTicks, DateTimeKind.Utc);
-        if (_footprint && !synthetic)
+        if (_footprint && (observed || compact))
         {
-            b._levels ??= new Dictionary<decimal, (decimal Buy, decimal Sell)>();
-            b._levels.TryGetValue(price, out var lv);
-            lv = side == TradeSide.Buy ? (lv.Buy + volume, lv.Sell) : side == TradeSide.Sell ? (lv.Buy, lv.Sell + volume) : (lv.Buy + volume / 2, lv.Sell + volume / 2);
-            b._levels[price] = lv;
-            if (lv.Buy + lv.Sell > _pocVolume)
+            var levels = observed ? b._levels ??= new Dictionary<decimal, (decimal Buy, decimal Sell)>() : b._aggregatedLevels ??= new Dictionary<decimal, (decimal Buy, decimal Sell)>();
+            levels.TryGetValue(price, out var lv);
+            lv = side == TradeSide.Buy ? (lv.Buy + volume, lv.Sell) : side == TradeSide.Sell ? (lv.Buy, lv.Sell + volume) : lv;
+            levels[price] = lv;
+            var between = observed ? b._betweenLevels : b._aggregatedBetweenLevels;
+            decimal unknown = 0;
+            between?.TryGetValue(price, out unknown);
+            if (side == TradeSide.None)
             {
-                _pocVolume = lv.Buy + lv.Sell;
+                between ??= new Dictionary<decimal, decimal>();
+                if (observed) b._betweenLevels = between; else b._aggregatedBetweenLevels = between;
+                unknown += volume; between[price] = unknown;
+            }
+            if (observed && lv.Buy + lv.Sell + unknown > _pocVolume)
+            {
+                _pocVolume = lv.Buy + lv.Sell + unknown;
                 b.PocPrice = price;
                 b.HasObservedPoc = true;
             }
@@ -160,7 +212,6 @@ internal sealed class BarBuilder
     public Bar? Flush()
     {
         var b = _current;
-        if (b != null) Finish(b);
         _current = null;
         return b;
     }
@@ -191,11 +242,8 @@ internal sealed class BarBuilder
         decimal price = _instrument.FromTicks(priceTicks);
         _current = new Bar { Index = _index++, Time = open, CloseTime = open, Open = price, High = price, Low = price, Close = price };
         _highT = _lowT = priceTicks;
+        _firstTimeTicks = _lastTimeTicks = timeTicks;
         _pocVolume = 0;
     }
 
-    private static void Finish(Bar b)
-    {
-        if (b.HasRealTrades && b.PocPrice == 0) b.PocPrice = b.Close;
-    }
 }

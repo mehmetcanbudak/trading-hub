@@ -26,6 +26,7 @@ public sealed class ChartRenderState
     /// <summary>Full warning disclosed by the chart view when its readable overlay cannot fit.</summary>
     public string? CompactRecordingWarning { get; set; }
     public SKRect? CompactRecordingWarningBounds { get; set; }
+    public SKRect? ZoomRectangle { get; set; }
 
     /// <summary>Orden que se está arrastrando y el precio donde quedaría.</summary>
     public Order? DragOrder { get; set; }
@@ -45,6 +46,36 @@ public sealed class ChartRenderState
 
     /// <summary>La ✕ de la etiqueta de la operación resaltada (saca el resaltado).</summary>
     public SKRect? FocusTradeClose { get; set; }
+
+    private readonly Dictionary<Guid, ChartDrawingRuntime> _drawingRuntime = new();
+    private readonly List<Guid> _retiredDrawings = new();
+    private uint _drawingFrame;
+
+    public ChartDrawingRuntime? FindDrawingRuntime(ChartDrawing drawing) => _drawingRuntime.GetValueOrDefault(drawing.Id);
+
+    internal void BeginDrawingFrame() => _drawingFrame++;
+
+    internal ChartDrawingRuntime DrawingRuntimeFor(ChartDrawing drawing)
+    {
+        if (!_drawingRuntime.TryGetValue(drawing.Id, out var runtime))
+            _drawingRuntime[drawing.Id] = runtime = new ChartDrawingRuntime();
+        runtime.RenderFrame = _drawingFrame;
+        return runtime;
+    }
+
+    internal void EndDrawingFrame()
+    {
+        foreach (var entry in _drawingRuntime)
+            if (entry.Value.RenderFrame != _drawingFrame) _retiredDrawings.Add(entry.Key);
+        foreach (var id in _retiredDrawings) _drawingRuntime.Remove(id);
+        _retiredDrawings.Clear();
+    }
+
+    public void ClearDrawingRuntime()
+    {
+        _drawingRuntime.Clear();
+        _retiredDrawings.Clear();
+    }
 }
 
 public enum LegendAction
@@ -74,6 +105,7 @@ public sealed class ChartRenderer
     private readonly FootprintRenderer _footprint = new();
     private readonly CandleRenderer _candles = new();
     private readonly SeriesRenderer _series = new();
+    private readonly LiquidityHeatmapRenderer _heatmap = new();
     private readonly SKPaint _fill = new() { IsAntialias = false, Style = SKPaintStyle.Fill };
     private readonly SKPaint _stroke = new() { IsAntialias = false, Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
     private readonly SKPaint _text = new() { IsAntialias = true };
@@ -86,6 +118,25 @@ public sealed class ChartRenderer
     private SKFont? _recordingWarningFont;
     private float _recordingWarningHeight, _recordingWarningPadding, _recordingWarningInset;
     private bool _recordingWarningUsesPlot, _recordingWarningCompact;
+    private (string? Recording, string? History, string? Error) _dataWarningSources;
+    private string? _dataWarning;
+
+    /// <summary>Current data authority, independent of the last rendered warning/tooltip geometry.</summary>
+    public string? CurrentDataWarning(ChartModel model)
+    {
+        var sources = (model.Data.RecordingWarning, model.Data.HistoryWarning, model.Data.HistoryError);
+        if (sources == _dataWarningSources) return _dataWarning;
+        _dataWarningSources = sources;
+        var parts = new List<string>(3);
+        if (!string.IsNullOrWhiteSpace(sources.RecordingWarning)) parts.Add(sources.RecordingWarning);
+        if (!string.IsNullOrWhiteSpace(sources.HistoryWarning) && sources.HistoryWarning != sources.RecordingWarning) parts.Add(sources.HistoryWarning);
+        if (!string.IsNullOrWhiteSpace(sources.HistoryError)) parts.Add("Error: " + sources.HistoryError);
+        return _dataWarning = parts.Count == 0 ? null : string.Join("\n", parts);
+    }
+
+    public static string TranslateDataWarning(string warning) => warning.Contains('\n')
+        ? string.Join("\n", warning.Split('\n').Select(UiText.Tr))
+        : UiText.Tr(warning);
 
     public ChartLayout Render(SKCanvas canvas, ChartModel model, float width, float height, ChartRenderState? state = null)
     {
@@ -95,6 +146,7 @@ public sealed class ChartRenderer
         state.FocusTradeClose = null;
         state.CompactRecordingWarning = null;
         state.CompactRecordingWarningBounds = null;
+        state.BeginDrawingFrame();
         var t = model.Theme;
         var layout = ComputeLayout(model, width, height);
         model.LastLayout = layout;
@@ -115,13 +167,14 @@ public sealed class ChartRenderer
             canvas.Save();
             canvas.ClipRect(panel.Rect);
             if (model.Settings.ShowGrid) DrawGrid(canvas, model, layout, panel, timeTicks);
-            if (panel.IsPrice) DrawMainPanel(canvas, model, layout, panel, axisLabels);
+            if (panel.IsPrice) DrawMainPanel(canvas, model, layout, panel, axisLabels, state);
             else DrawSubPanel(canvas, model, layout, panel, axisLabels);
             canvas.Restore();
 
             // renders personalizados de indicadores (pueden pintar sobre el eje)
             DrawCustomRenders(canvas, model, layout, panel, width, height, above: true);
         }
+        state.EndDrawingFrame();
 
         // separadores de paneles
         _stroke.Color = t.PanelSeparator;
@@ -140,6 +193,14 @@ public sealed class ChartRenderer
         if (state.Crosshair) DrawCrosshair(canvas, model, layout, state);
         DrawOverlay(canvas, model, layout, state);
         DrawGoLatest(canvas, model, layout, state);
+        if (state.ZoomRectangle is { } rectangle)
+        {
+            _fill.Color = t.Selection.WithAlpha(35);
+            _stroke.Color = t.Selection;
+            _stroke.StrokeWidth = 1;
+            canvas.DrawRect(rectangle, _fill);
+            canvas.DrawRect(rectangle, _stroke);
+        }
         model.ClearDirty();
         return layout;
     }
@@ -294,10 +355,11 @@ public sealed class ChartRenderer
 
     // =================================================================== paneles
 
-    private void DrawMainPanel(SKCanvas canvas, ChartModel model, ChartLayout layout, PanelLayout main, List<AxisLabel> axisLabels)
+    private void DrawMainPanel(SKCanvas canvas, ChartModel model, ChartLayout layout, PanelLayout main, List<AxisLabel> axisLabels, ChartRenderState state)
     {
         var slots = model.Indicators.Where(s => s.Panel == null).ToList();
         if (model.Settings.ShowSessionLines) DrawSessionLines(canvas, model, layout, main);
+        if (model.Settings.ShowLiquidityHeatmap) _heatmap.Render(canvas, model, layout, main);
 
         _series.RenderBands(canvas, layout, main, slots);
         DrawCustomRendersCore(canvas, model, layout, main, slots, above: false);
@@ -319,7 +381,11 @@ public sealed class ChartRenderer
         _series.RenderDrawingObjects(canvas, model, layout, main, slots);
 
         int decimals = Instrument_Decimals(model);
-        foreach (var d in model.Drawings) d.Render(canvas, layout, model.Series, model.Theme, decimals);
+        foreach (var d in model.Drawings)
+        {
+            var runtime = d.Kind is DrawingKind.AnchoredVwap or DrawingKind.FixedRangeProfile ? state.DrawingRuntimeFor(d) : null;
+            d.Render(canvas, layout, model.Series, model.Theme, decimals, runtime, model.Data.Trades, model.DataGeneration, model.Settings.BlindReplay);
+        }
 
         if (model.Settings.ShowLastPriceLine && model.Series.Count > 0)
         {
@@ -1164,6 +1230,13 @@ public sealed class ChartRenderer
         var res = new List<(float, string, bool)>();
         var series = model.Series;
         if (series.Count == 0 || layout.LastVisible < layout.FirstVisible) return res;
+        if (model.Settings.BlindReplay)
+        {
+            int stride = Math.Max(1, (int)Math.Ceiling(100 / layout.BarWidth));
+            for (int i = layout.FirstVisible; i <= layout.LastVisible && i < series.Count; i += stride)
+                res.Add((layout.CenterX(i), model.Settings.ReplayElapsed(series[i].Time), false));
+            return res;
+        }
         var tz = model.Settings.TimeZone;
         var es = TradingHub.Common.UiCulture.Current;
 
@@ -1298,7 +1371,7 @@ public sealed class ChartRenderer
         if (settings.ShowLegendTitle)
         {
             _text.Color = t.Text;
-            string head = $"{model.Instrument.Symbol}  ·  {model.Period.DisplayName}  ·  {model.Instrument.Exchange}";
+            string head = settings.BlindReplay ? $"Practice · {model.Period.DisplayName}" : $"{model.Instrument.Symbol}  ·  {model.Period.DisplayName}  ·  {model.Instrument.Exchange}";
             canvas.DrawUiText(head, x, y, title, _text);
             y += 17;
         }
@@ -1534,7 +1607,8 @@ public sealed class ChartRenderer
         if (bar >= 0 && bar < model.Series.Count)
         {
             var local = TimeZoneInfo.ConvertTimeFromUtc(model.Series[bar].Time, model.Settings.TimeZone);
-            string ts = local.ToString(model.Period.IsTimeBased && model.Period.ApproxDuration >= TimeSpan.FromDays(1) ? "ddd dd MMM yyyy" : "ddd dd MMM  HH:mm:ss", TradingHub.Common.UiCulture.Current);
+            string ts = model.Settings.BlindReplay ? model.Settings.ReplayElapsed(model.Series[bar].Time) :
+                local.ToString(model.Period.IsTimeBased && model.Period.ApproxDuration >= TimeSpan.FromDays(1) ? "ddd dd MMM yyyy" : "ddd dd MMM  HH:mm:ss", TradingHub.Common.UiCulture.Current);
             float w = RenderContext.MeasureWidth(font, ts) + 12;
             var r = new SKRect(cx - w / 2, layout.TimeAxis.Top + 1, cx + w / 2, layout.TimeAxis.Bottom - 1);
             _fill.Color = t.CrosshairLabelBack;
@@ -1578,7 +1652,8 @@ public sealed class ChartRenderer
         if (x >= layout.Plot.Left && x <= layout.Plot.Right)
         {
             var local = TimeZoneInfo.ConvertTimeFromUtc(time, model.Settings.TimeZone);
-            string ts = local.ToString(model.Period.IsTimeBased && model.Period.ApproxDuration >= TimeSpan.FromDays(1) ? "ddd dd MMM yyyy" : "ddd dd MMM  HH:mm", TradingHub.Common.UiCulture.Current);
+            string ts = model.Settings.BlindReplay ? model.Settings.ReplayElapsed(time) :
+                local.ToString(model.Period.IsTimeBased && model.Period.ApproxDuration >= TimeSpan.FromDays(1) ? "ddd dd MMM yyyy" : "ddd dd MMM  HH:mm", TradingHub.Common.UiCulture.Current);
             float w = RenderContext.MeasureWidth(font, ts) + 12;
             var r = new SKRect(x - w / 2, layout.TimeAxis.Top + 1, x + w / 2, layout.TimeAxis.Bottom - 1);
             _fill.Color = t.CrosshairLabelBack;
@@ -1601,12 +1676,12 @@ public sealed class ChartRenderer
         if (msg == null)
         {
             if (model.Data.IsLoadingHistory) msg = $"Loading history…  {model.Data.HistoryProgress * 100:0}%";
-            else if (model.Series.Count == 0) msg = model.Data.HistoryError != null ? "Error: " + model.Data.HistoryError : "Waiting for data…";
-            else if (model.Data.RecordingWarning is { } warning)
+            else if (CurrentDataWarning(model) is { } warning)
             {
                 DrawRecordingWarning(canvas, model, layout, state, warning);
                 return;
             }
+            else if (model.Series.Count == 0) msg = "Waiting for data…";
         }
 
         if (msg == null) return;
@@ -1626,8 +1701,8 @@ public sealed class ChartRenderer
     private void DrawRecordingWarning(SKCanvas canvas, ChartModel model, ChartLayout layout, ChartRenderState state, string warning)
     {
         var main = layout.Main.Rect;
-        string text = UiText.Tr(warning);
-        string compactText = UiText.Tr("Not recording");
+        string text = TranslateDataWarning(warning);
+        string compactText = UiText.Tr(model.Data.HistoryWarning != null || model.Data.HistoryError != null ? "Data warning" : "Not recording");
         var baseFont = RenderContext.GetFont(model.Theme.FontFamily, 15, true, false);
         var matrix = canvas.TotalMatrix;
         RecordingWarningLayoutKey Key(SKFont actual)

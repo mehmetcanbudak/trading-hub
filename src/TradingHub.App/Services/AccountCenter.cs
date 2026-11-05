@@ -1,5 +1,6 @@
 using System.Globalization;
 using TradingHub.Feeds.Rithmic;
+using TradingHub.Feeds.Bybit;
 using TradingHub.Trading;
 
 namespace TradingHub.App.Services;
@@ -9,14 +10,16 @@ public enum AccountKind
     Sim,
     Rithmic,
     Tradovate,
+    Bybit,
+    Replay,
 }
 
 /// <summary>Una cuenta para la sección Cuenta.</summary>
 /// <param name="CanTrade">New orders allowed (always on simulated, practice and demo accounts); cancel and close never need it.</param>
-public sealed record AccountEntry(string Id, string Name, AccountKind Kind, bool IsReal, bool CanTrade, ConnectionProfile? Profile = null, string RithmicAccount = "");
+public sealed record AccountEntry(string Id, string Name, AccountKind Kind, bool IsReal, bool CanTrade, ConnectionProfile? Profile = null, string RithmicAccount = "", string BybitContextIdentity = "");
 
 /// <summary>Posición de un contrato (las que quedaron planas hoy también figuran).</summary>
-public sealed record PositionLine(string Key, string Symbol, decimal Net, decimal AvgPrice, decimal OpenPnl, decimal ClosedPnl, object? Ref = null);
+public sealed record PositionLine(string Key, string Symbol, decimal Net, decimal AvgPrice, decimal OpenPnl, decimal ClosedPnl, object? Ref = null, bool ClosedPnlKnown = true);
 
 /// <summary>Una orden de hoy, activa o terminada.</summary>
 public sealed record OrderLine(string Key, DateTime Time, string Symbol, bool Buy, string Type, decimal Quantity, decimal Price, decimal Filled, decimal AvgFill, string Status, bool Active, object? Ref = null);
@@ -27,6 +30,13 @@ public sealed class AccountSnapshot
     public required AccountEntry Account { get; init; }
     public string Status { get; set; } = "";
     public bool Connected { get; set; } = true;
+    public bool FinancialsKnown { get; set; } = true;
+    public bool CostsComplete { get; set; } = true;
+    public bool OpenPnlKnown { get; set; } = true;
+    public bool RealizedPnlKnown { get; set; } = true;
+    public bool AnalysisKnown { get; set; } = true;
+    public bool PositionsKnown { get; set; } = true;
+    public bool OrdersKnown { get; set; } = true;
     public decimal? Balance { get; set; }
     public decimal? StartBalance { get; set; }
     public decimal OpenPnl { get; set; }
@@ -38,6 +48,7 @@ public sealed class AccountSnapshot
     public List<PositionLine> Positions { get; } = new();
     public List<OrderLine> Orders { get; } = new();
     public IReadOnlyList<AccountFill> Fills { get; set; } = Array.Empty<AccountFill>();
+    public long ExecutionRevision { get; set; }
     public RoundTripResult Analysis { get; set; } = RoundTrips.Analyze(Array.Empty<AccountFill>());
 }
 
@@ -48,7 +59,7 @@ public sealed class AccountSnapshot
 public sealed class AccountCenter
 {
     private readonly AppServices _svc;
-    private readonly Dictionary<string, (int Count, RoundTripResult Result)> _cache = new();
+    private readonly Dictionary<string, (int Count, long ExecutionRevision, RoundTripResult Result)> _cache = new();
 
     public AccountCenter(AppServices svc)
     {
@@ -102,17 +113,36 @@ public sealed class AccountCenter
             }
         }
 
+        foreach (var p in _svc.Connections.Enabled.Where(p => p.Kind == ConnectionKind.Bybit))
+            _svc.EnsureBybitAccountRegistered(p);
+        foreach (var (profile, session) in _svc.BybitContexts)
+        {
+            bool current = _svc.IsCurrentBybitContext(profile, session);
+            string id = current ? profile.Id : "bybit-retired|" + profile.Id + "|" + session.ContextIdentity;
+            string name = $"{profile.Name} ({session.Settings.EnvironmentName})" + (current ? "" : " — previous credentials; reduce/cancel only");
+            list.Add(new AccountEntry(id, name, AccountKind.Bybit, session.IsReal, current && profile.Enabled && (!session.IsReal || profile.AllowRealOrders),
+                profile, BybitContextIdentity: session.ContextIdentity));
+        }
+        foreach (var issue in _svc.BybitRecoveryIssues)
+        {
+            var profile = _svc.Connections.Profiles.FirstOrDefault(p => p.Id == issue.ProfileId) ??
+                new ConnectionProfile { Id = issue.ProfileId, Name = "Retired Bybit " + issue.ProfileId, Kind = ConnectionKind.Bybit, Enabled = false };
+            list.Add(new AccountEntry("bybit-unresolved|" + issue.ProfileId + "|" + issue.ContextIdentity, profile.Name + " — recovery unavailable",
+                AccountKind.Bybit, true, false, profile, BybitContextIdentity: issue.ContextIdentity));
+        }
+        list.AddRange(_svc.ReplaySessions.Entries);
+
         return list;
     }
 
-    /// <summary>Operaciones y resultados de la cuenta (se recalcula solo cuando hay ejecuciones nuevas).</summary>
-    public RoundTripResult Analysis(string accountId, IReadOnlyList<AccountFill> fills)
+    /// <summary>Reuses immutable fill analysis until its count or the producer's execution-content revision changes.</summary>
+    public RoundTripResult Analysis(string accountId, IReadOnlyList<AccountFill> fills, long executionRevision = 0)
     {
         lock (_cache)
         {
-            if (_cache.TryGetValue(accountId, out var c) && c.Count == fills.Count) return c.Result;
+            if (_cache.TryGetValue(accountId, out var c) && c.Count == fills.Count && c.ExecutionRevision == executionRevision) return c.Result;
             var r = RoundTrips.Analyze(fills);
-            _cache[accountId] = (fills.Count, r);
+            _cache[accountId] = (fills.Count, executionRevision, r);
             return r;
         }
     }
@@ -129,13 +159,50 @@ public sealed class AccountCenter
 
     public AccountSnapshot Snapshot(AccountEntry a)
     {
+        if (a.Kind == AccountKind.Replay) return _svc.ReplaySessions.Snapshot(a.Id);
         var s = new AccountSnapshot { Account = a };
-        s.Fills = _svc.Journal.FillsOf(a.Id);
-        s.Analysis = Analysis(a.Id, s.Fills);
+        BybitTradingSession? bybit = null;
+        if (a.Kind == AccountKind.Bybit)
+        {
+            bybit = a.BybitContextIdentity.Length > 0 ? _svc.FindBybitContext(a.Profile!.Id, a.BybitContextIdentity) : _svc.BybitSessionFor(a.Profile!);
+            if (bybit == null)
+            {
+                s.Connected = s.FinancialsKnown = s.CostsComplete = s.OpenPnlKnown = s.RealizedPnlKnown = s.AnalysisKnown = s.PositionsKnown = s.OrdersKnown = false;
+                s.Status = _svc.BybitRecoveryIssues.FirstOrDefault(i => i.ProfileId == a.Profile!.Id && i.ContextIdentity == a.BybitContextIdentity)?.Message ??
+                    "The selected Bybit credential context is unavailable; exposure is unknown.";
+                return s;
+            }
+            if (bybit.PersistentAccountIdentity == null)
+            {
+                s.Connected = s.FinancialsKnown = s.CostsComplete = s.OpenPnlKnown = s.RealizedPnlKnown =
+                    s.AnalysisKnown = s.PositionsKnown = s.OrdersKnown = false;
+                s.Status = bybit.LastError ?? "Bybit account identity is not verified; persistent account history is deferred.";
+                return s;
+            }
+        }
+        var executionState = bybit?.GetExecutionState() ??
+            (Executions: (IReadOnlyList<BybitExecution>)Array.Empty<BybitExecution>(), Revision: 0L);
+        s.ExecutionRevision = executionState.Revision;
+        string journalId = bybit != null ? AppServices.BybitJournalId(a.Profile!.Id, bybit) : a.Id;
+        var fills = _svc.Journal.FillsOf(journalId);
+        if (bybit != null)
+        {
+            var actual = fills.ToDictionary(fill => fill.Id, StringComparer.Ordinal);
+            foreach (var fill in executionState.Executions)
+            {
+                string id = "bybit-" + fill.Symbol + "-" + fill.OrderId + "-" + fill.Id;
+                actual[id] = new AccountFill(id, fill.Time, fill.Symbol, fill.Buy, fill.Quantity, fill.Price, 1,
+                    fill.HasQuoteFee ? fill.Fee!.Value : 0, fill.OrderId);
+            }
+            s.Fills = actual.Values.OrderBy(fill => fill.Time).ThenBy(fill => fill.Id, StringComparer.Ordinal).ToArray();
+            s.Analysis = Analysis(journalId, s.Fills, executionState.Revision);
+        }
+        else { s.Fills = fills; s.Analysis = Analysis(journalId, fills); }
         s.TradesToday = s.Analysis.Trades.Count(t => IsToday(t.CloseTime));
         decimal realizedToday = s.Analysis.Realized.Where(x => IsToday(x.Time)).Sum(x => x.Net);
         if (a.Kind == AccountKind.Sim) FillSim(s, realizedToday);
         else if (a.Kind == AccountKind.Tradovate) FillTradovate(s, realizedToday);
+        else if (a.Kind == AccountKind.Bybit) FillBybit(s, bybit!, executionState.Executions);
         else FillRithmic(s, realizedToday);
         return s;
     }
@@ -249,6 +316,44 @@ public sealed class AccountCenter
         s.MarginBalance = cash?.InitialMargin;
     }
 
+    private void FillBybit(AccountSnapshot snapshot, BybitTradingSession session, IReadOnlyList<BybitExecution> executions)
+    {
+        snapshot.Connected = session.SnapshotReady;
+        snapshot.PositionsKnown = session.PositionReady;
+        snapshot.OrdersKnown = session.OrdersReady;
+        var metrics = BybitAccountMetrics.From(session, TimeZone, DateTime.UtcNow);
+        snapshot.OpenPnlKnown = metrics.OpenPnl.HasValue;
+        snapshot.RealizedPnlKnown = metrics.ReportedRealizedToday.HasValue;
+        snapshot.AnalysisKnown = metrics.HasCompleteOpeningBasis;
+        snapshot.FinancialsKnown = snapshot.OpenPnlKnown && snapshot.RealizedPnlKnown && session.ExecutionsReady;
+        var costs = executions.ToDictionary(fill => "bybit-" + fill.Symbol + "-" + fill.OrderId + "-" + fill.Id, StringComparer.Ordinal);
+        snapshot.CostsComplete = session.ExecutionsReady && snapshot.Fills.All(fill => costs.TryGetValue(fill.Id, out var execution) && execution.HasQuoteFee);
+        snapshot.Status = session.StatusText + $"; executions available since {session.ExecutionCoverageStart:yyyy-MM-dd HH:mm} UTC";
+        snapshot.Status += ". USDT-contract PnL is provider-reported; wallet equity is the entire UTA account in USD. " + metrics.Warning;
+        if (!snapshot.CostsComplete)
+            snapshot.Status += ". Some execution fees or their currencies are unavailable/unconverted; displayed net excludes those costs.";
+        foreach (var position in session.Positions)
+            snapshot.Positions.Add(new PositionLine(position.Symbol, position.Symbol, position.Size, position.AvgPrice, position.UnrealizedPnl, 0, (session, position), ClosedPnlKnown: false));
+        foreach (var order in session.Orders)
+        {
+            string status = session.IsSubmissionUnknown(order) ? "Submission unknown"
+                : session.IsReplacementPending(order) ? "Amendment awaiting confirmation"
+                : order.State == OrderStates.Active ? order.Filled > 0 ? "Partial" : "Active"
+                : order.Status == OrderStatus.Filled ? "Filled"
+                : order.Status == OrderStatus.Rejected ? "Rejected" : order.Filled > 0 ? "Canceled (partial)" : "Canceled";
+            snapshot.Orders.Add(new OrderLine(order.ExchangeOrderId.Length > 0 ? order.ExchangeOrderId : "bybit-pending-" + order.Id,
+                order.Time, order.Security.Code, order.Direction == OrderDirections.Buy, TypeName(order.Type), order.QuantityToFill,
+                order.Type == OrderTypes.Stop ? order.TriggerPrice : order.Price, order.Filled, session.AverageFillFor(order), status,
+                order.State == OrderStates.Active, (session, order)));
+        }
+        snapshot.Balance = session.Wallet?.Equity;
+        snapshot.Available = session.Wallet?.Available;
+        snapshot.MarginBalance = session.Wallet?.WalletBalance;
+        snapshot.OpenPnl = metrics.OpenPnl ?? 0;
+        snapshot.RealizedToday = metrics.ReportedRealizedToday ?? 0;
+        snapshot.DayPnl = snapshot.RealizedToday + snapshot.OpenPnl;
+    }
+
     /// <summary>Valor del punto de un contrato de futuros por su símbolo (ESZ6 → ES → 50).</summary>
     public static decimal PointValueOf(string contract) => RithmicFeed.PointValueOfContract(contract);
 
@@ -266,6 +371,16 @@ public sealed class AccountCenter
             b.Cancel(order);
             return;
         }
+        if (o.Ref is (BybitTradingSession bybit, Order bybitOrder))
+        {
+            bybit.Cancel(bybitOrder);
+            return;
+        }
+        if (a.Kind == AccountKind.Replay && o.Ref is (ITradingAccount replay, Order replayOrder))
+        {
+            replay.Cancel(replayOrder);
+            return;
+        }
 
         if (a.Kind == AccountKind.Rithmic)
             await _svc.RithmicSessionFor(a.Profile!).CancelAsync(a.RithmicAccount, o.Key, CancellationToken.None).ConfigureAwait(false);
@@ -277,7 +392,7 @@ public sealed class AccountCenter
     /// Closes a contract's position at market, canceling its orders first (like Chart Trader's Close). Closing only
     /// reduces, so it stays available on real accounts even with real orders disabled (the Account page confirms it first).
     /// </summary>
-    /// <returns>null once the close is sent; otherwise why nothing was sent, for the status bar.</returns>
+    /// <returns>null when the broker accepts the request; otherwise a pending/failure explanation for the status bar.</returns>
     public async Task<string?> CloseAsync(AccountEntry a, PositionLine p)
     {
         if (p.Net == 0) return NothingToClose(p.Symbol, 0);
@@ -285,6 +400,22 @@ public sealed class AccountCenter
         {
             b.Flatten();
             return null;
+        }
+        if (a.Kind == AccountKind.Replay && p.Ref is ITradingAccount replay)
+        {
+            replay.Flatten();
+            return null;
+        }
+        if (a.Kind == AccountKind.Bybit && p.Ref is (BybitTradingSession bybit, BybitPosition position))
+        {
+            await bybit.RefreshAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!bybit.PositionReady) return "Bybit position is unknown; no close quantity was guessed.";
+            decimal net = bybit.PositionFor(position.Symbol)?.Size ?? 0;
+            if (net == 0) return NothingToClose(position.Symbol, 0);
+            if (Math.Sign(net) != Math.Sign(p.Net)) return "Bybit position changed side; check the new position before closing.";
+            var instrument = await bybit.GetInstrumentAsync(position.Symbol, CancellationToken.None).ConfigureAwait(false);
+            bybit.Flatten(instrument);
+            return bybit.LastError ?? "Bybit close requested; check position and order status for confirmation.";
         }
 
         if (a.Kind == AccountKind.Tradovate && p.Ref is TradingHub.Feeds.Tradovate.TradovatePositionState tp)

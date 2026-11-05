@@ -3,215 +3,290 @@ using TradingHub.Market;
 
 namespace TradingHub.Strategies;
 
-/// <summary>
-/// Operaciones de un rango en memoria, en columnas compactas (~25 bytes por tick). Se carga una vez
-/// y la comparten todas las corridas de una optimización. <see cref="Slice"/> no copia.
-/// </summary>
+/// <summary>Immutable columnar history shared by optimization runs. Slices retain original event identities and source quality without copying.</summary>
 public sealed class TickData
 {
-    private readonly long[] _times;
-    private readonly long[] _prices;
-    private readonly double[] _volumes;
+    private readonly long[] _ids, _times, _prices;
+    private readonly decimal[] _volumes;
     private readonly byte[] _sides;
-    // Side occupies the low bits; the high bit preserves aggregate/synthetic origin without an ID array.
-    private const byte SyntheticFlag = 0x80;
-    private static byte EncodeSide(TradeSide side, bool synthetic) => (byte)((byte)side | (synthetic ? SyntheticFlag : 0));
+    private readonly ushort[] _quality;
+    private readonly TradeProvenance[] _provenance;
+    private readonly string?[]? _eventIds;
+    private readonly long _eventIdTextBytes;
+    private readonly Timeline _timeline;
+    private int[]? _causalOrder;
+    private bool _causalOrderReady;
+    private Summary? _summary;
+    private sealed record Summary(DataQuality Quality, int ResolutionSeconds, long CorrectionRevision, string SourceIdentity, bool HasKnownAvailability);
 
-    private TickData(Instrument instrument, long[] times, long[] prices, double[] volumes, byte[] sides, int start, int end, bool compressed = false)
+    private TickData(Instrument instrument, long[] ids, long[] times, long[] prices, decimal[] volumes, byte[] sides, ushort[] quality, TradeProvenance[] provenance, string?[]? eventIds, long eventIdTextBytes, int start, int end, bool compressed, Timeline? timeline = null)
     {
-        Instrument = instrument;
-        _times = times;
-        _prices = prices;
-        _volumes = volumes;
-        _sides = sides;
-        Start = start;
-        End = end;
-        Compressed = compressed;
+        Instrument = instrument; _ids = ids; _times = times; _prices = prices; _volumes = volumes; _sides = sides;
+        _quality = quality; _provenance = provenance; Start = start; End = end; Compressed = compressed;
+        _eventIds = eventIds; _eventIdTextBytes = eventIdTextBytes;
+        _timeline = timeline ?? new Timeline(times, quality, provenance);
     }
-
-    /// <summary>
-    /// Las operaciones seguidas al mismo precio, del mismo lado y en el mismo segundo están juntas en una (con el volumen
-    /// sumado): ver <see cref="Compress"/>.
-    /// </summary>
-    public bool Compressed { get; }
-
-    /// <summary>
-    /// Junta las operaciones seguidas al mismo precio, del mismo lado y en el mismo segundo (suma el volumen). Las velas de
-    /// tiempo o de rango quedan iguales (apertura, máximo, mínimo, cierre, volumen, delta y footprint) y las órdenes se
-    /// llenan en los mismos precios, con muchos menos eventos que recorrer. Cambia la cantidad de operaciones de cada vela:
-    /// no sirve para velas por cantidad de operaciones, de volumen o de delta, ni para estrategias que miran cada tick.
-    /// </summary>
-    public TickData Compress()
-    {
-        if (Compressed) return this;
-        int n = 0;
-        for (int i = Start; i < End; i++)
-            if (i == Start || !SameRun(i - 1, i)) n++;
-        var times = new long[n];
-        var prices = new long[n];
-        var volumes = new double[n];
-        var sides = new byte[n];
-        int k = -1;
-        for (int i = Start; i < End; i++)
-        {
-            if (i > Start && SameRun(i - 1, i))
-            {
-                volumes[k] += _volumes[i];
-                continue;
-            }
-
-            k++;
-            times[k] = _times[i];
-            prices[k] = _prices[i];
-            volumes[k] = _volumes[i];
-            sides[k] = _sides[i];
-        }
-
-        return new TickData(Instrument, times, prices, volumes, sides, 0, n, compressed: true);
-    }
-
-    private bool SameRun(int a, int b) =>
-        _prices[a] == _prices[b] && _sides[a] == _sides[b] && _times[a] / TimeSpan.TicksPerSecond == _times[b] / TimeSpan.TicksPerSecond;
 
     public Instrument Instrument { get; }
+    public bool Compressed { get; }
     public int Start { get; }
     public int End { get; }
     public int Count => End - Start;
     public DateTime FirstTime => Count > 0 ? new DateTime(_times[Start], DateTimeKind.Utc) : DateTime.MinValue;
     public DateTime LastTime => Count > 0 ? new DateTime(_times[End - 1], DateTimeKind.Utc) : DateTime.MinValue;
-    public long MemoryBytes => (long)_times.Length * 25;
-
-    public long TimeTicks(int i) => _times[i];
-    public long PriceTicks(int i) => _prices[i];
-    public decimal Volume(int i) => (decimal)_volumes[i];
-    public TradeSide Side(int i) => (TradeSide)(_sides[i] & ~SyntheticFlag);
-    /// <summary>True for bar-derived proxy events, not observed individual trades. Views and compression preserve this flag.</summary>
-    public bool IsSynthetic(int i) => (_sides[i] & SyntheticFlag) != 0;
-
-    /// <summary>Derived event identity; its sign preserves provenance, not the original provider's trade ID.</summary>
-    public Trade Get(int i) => new(IsSynthetic(i) ? -1L - i : i, new DateTime(_times[i], DateTimeKind.Utc), Instrument.FromTicks(_prices[i]), (decimal)_volumes[i], Side(i));
-
-    /// <summary>Sub-rango por tiempo (sin copiar).</summary>
-    public TickData Slice(DateTime fromUtc, DateTime toUtc)
+    public long MemoryBytes => (long)_times.Length * (8 + 8 + 8 + 16 + 1 + 2) + (long)(_eventIds?.Length ?? 0) * IntPtr.Size +
+        _eventIdTextBytes + _timeline.MemoryBytes + (long)(_causalOrder?.Length ?? 0) * sizeof(int);
+    public long Id(int index) => _ids[index];
+    public long TimeTicks(int index) => _times[index];
+    public long PriceTicks(int index) => _prices[index];
+    public decimal Volume(int index) => _volumes[index];
+    public TradeSide Side(int index) => (TradeSide)_sides[index];
+    public TradeProvenance Provenance(int index)
     {
-        int a = Lower(fromUtc.Ticks), b = Lower(toUtc.Ticks);
-        return new TickData(Instrument, _times, _prices, _volumes, _sides, a, b, Compressed);
+        var provenance = _provenance[_quality[index]];
+        return _eventIds?[index] is { } eventId ? provenance with { SourceEventId = eventId } : provenance;
     }
+    public bool IsSynthetic(int index) => (Provenance(index).Quality & DataQuality.Synthetic) != 0;
+    public bool IsCompact(int index) => (Provenance(index).Quality & DataQuality.Compact) != 0;
+    public bool IsObservedTrade(int index) => Provenance(index).IsObservedTrade;
+    public DataQuality Quality => GetSummary().Quality;
+    public int ResolutionSeconds => GetSummary().ResolutionSeconds;
+    public long CorrectionRevision => GetSummary().CorrectionRevision;
+    public string SourceIdentity => GetSummary().SourceIdentity;
+    public bool HasKnownAvailability => GetSummary().HasKnownAvailability;
 
-    private int Lower(long t)
+    public Trade Get(int index) => new(_ids[index], new DateTime(_times[index], DateTimeKind.Utc), Instrument.FromTicks(_prices[index]), _volumes[index], Side(index), Provenance(index));
+
+    internal long AvailableTimeTicks(int index) => _timeline.At(index);
+
+    internal int[]? GetCausalOrder()
     {
-        int lo = Start, hi = End;
-        while (lo < hi)
+        if (ResolutionSeconds == 0) return null;
+        if (Volatile.Read(ref _causalOrderReady)) return _causalOrder;
+        lock (_timeline.Gate)
         {
-            int mid = (lo + hi) >>> 1;
-            if (_times[mid] < t) lo = mid + 1;
-            else hi = mid;
-        }
-
-        return lo;
-    }
-
-    /// <summary>
-    /// Carga de disco las operaciones de un instrumento entre dos instantes. Con <paramref name="compress"/> las junta
-    /// mientras carga (como <see cref="Compress"/>), sin tener nunca en memoria todas las originales.
-    /// </summary>
-    public static TickData Load(string root, Instrument instrument, DateTime fromUtc, DateTime toUtc, IProgress<double>? progress, CancellationToken ct, bool compress = false)
-    {
-        var days = new List<DateOnly>();
-        for (var d = DateOnly.FromDateTime(fromUtc); d <= DateOnly.FromDateTime(toUtc); d = d.AddDays(1)) days.Add(d);
-
-        int n = 0, cap = 1 << 20;
-        var times = new long[cap];
-        var prices = new long[cap];
-        var volumes = new double[cap];
-        var sides = new byte[cap];
-        for (int k = 0; k < days.Count; k++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var list = HistorySources.ReadDay(root, instrument.FeedId, instrument.Symbol, days[k]);
-            if (list.Count > 0)
+            if (_causalOrderReady) return _causalOrder;
+            var available = _timeline.Values;
+            for (int i = Start + 1; i < End; i++)
             {
-                foreach (var t in list)
+                if (available[i] >= available[i - 1]) continue;
+                var order = new int[Count];
+                for (int offset = 0; offset < order.Length; offset++) order[offset] = Start + offset;
+                Array.Sort(order, (left, right) =>
                 {
-                    if (t.Time < fromUtc || t.Time >= toUtc) continue;
-                    if (n == cap)
-                    {
-                        cap *= 2;
-                        Array.Resize(ref times, cap);
-                        Array.Resize(ref prices, cap);
-                        Array.Resize(ref volumes, cap);
-                        Array.Resize(ref sides, cap);
-                    }
+                    int compare = available[left].CompareTo(available[right]);
+                    return compare != 0 ? compare : left.CompareTo(right);
+                });
+                _causalOrder = order;
+                break;
+            }
+            Volatile.Write(ref _causalOrderReady, true);
+            return _causalOrder;
+        }
+    }
 
-                    // si quedó algo fuera de orden por tiempo, se acomoda manteniendo el orden por id
-                    long ticks = t.Time.Ticks;
-                    if (n > 0 && ticks < times[n - 1]) ticks = times[n - 1];
-                    long price = instrument.ToTicks(t.Price);
-                    byte side = EncodeSide(t.Side, KlineHistory.IsSynthetic(t.Id));
-                    if (compress && n > 0 && prices[n - 1] == price && sides[n - 1] == side && times[n - 1] / TimeSpan.TicksPerSecond == ticks / TimeSpan.TicksPerSecond)
-                    {
-                        volumes[n - 1] += (double)t.Volume;
-                        continue;
-                    }
-
-                    times[n] = ticks;
-                    prices[n] = price;
-                    volumes[n] = (double)t.Volume;
-                    sides[n] = side;
-                    n++;
+    private sealed class Timeline(long[] times, ushort[] quality, TradeProvenance[] provenance)
+    {
+        public object Gate { get; } = new();
+        private long[]? _values;
+        public long MemoryBytes => (long)(Volatile.Read(ref _values)?.Length ?? 0) * sizeof(long);
+        public long At(int index)
+        {
+            var values = Volatile.Read(ref _values);
+            if (values != null) return values[index];
+            return provenance[quality[index]].ResolutionSeconds <= 0 ? times[index] : Values[index];
+        }
+        public long[] Values
+        {
+            get
+            {
+                var values = Volatile.Read(ref _values);
+                if (values != null) return values;
+                lock (Gate)
+                {
+                    if (_values != null) return _values;
+                    values = new long[times.Length];
+                    for (int i = 0; i < times.Length; i++)
+                        values[i] = provenance[quality[i]].AvailabilityTime(new DateTime(times[i], DateTimeKind.Utc)).Ticks;
+                    Volatile.Write(ref _values, values);
+                    return values;
                 }
             }
-
-            progress?.Report((k + 1.0) / days.Count);
         }
-
-        if (compress && n < times.Length)
-        {
-            // las comprimidas suelen ocupar mucho menos que lo reservado: se recorta
-            Array.Resize(ref times, n);
-            Array.Resize(ref prices, n);
-            Array.Resize(ref volumes, n);
-            Array.Resize(ref sides, n);
-        }
-
-        return new TickData(instrument, times, prices, volumes, sides, 0, n, compress);
     }
 
-    /// <summary>Crea datos desde una lista (pruebas y datos sintéticos).</summary>
-    /// <summary>Copia la historia que tiene cargada un gráfico (sin pasar por objetos Trade).</summary>
+    private Summary GetSummary()
+    {
+        var summary = Volatile.Read(ref _summary);
+        if (summary != null) return summary;
+        lock (_timeline.Gate)
+        {
+            if (_summary != null) return _summary;
+            DataQuality quality = DataQuality.None;
+            int resolution = 0; long correction = 0; string? source = null;
+            bool known = true;
+            for (int i = Start; i < End; i++)
+            {
+                var provenance = _provenance[_quality[i]];
+                known &= provenance.HasKnownAvailability;
+                quality |= provenance.Quality; resolution = Math.Max(resolution, provenance.ResolutionSeconds); correction = Math.Max(correction, provenance.CorrectionRevision);
+                var identity = provenance.SourceIdentity;
+                if (source == null) source = identity;
+                else if (identity != null && source != identity) source = "mixed";
+            }
+            summary = new Summary(quality, resolution, correction, source ?? Instrument.Key, known);
+            Volatile.Write(ref _summary, summary);
+            return summary;
+        }
+    }
+
+    /// <summary>Coalesces same-price/side runs within one second into measured compact events, never individual observed trades. Point runs use their last actual timestamp; interval summaries retain their source window.</summary>
+    public TickData Compress()
+    {
+        if (Compressed) return this;
+        var builder = new Builder(Instrument, Math.Min(Count, 1 << 20));
+        for (int i = Start; i < End; i++) builder.Add(Get(i), compress: true);
+        return builder.Finish(compressed: true);
+    }
+
+    public TickData Slice(DateTime fromUtc, DateTime toUtc) =>
+        new(Instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance, _eventIds, _eventIdTextBytes, Lower(fromUtc.Ticks), Lower(toUtc.Ticks), Compressed, _timeline);
+
+    private int Lower(long time)
+    {
+        int low = Start, high = End;
+        while (low < high) { int mid = (low + high) >>> 1; if (_times[mid] < time) low = mid + 1; else high = mid; }
+        return low;
+    }
+
+    public static TickData Load(string root, Instrument instrument, DateTime fromUtc, DateTime toUtc, IProgress<double>? progress, CancellationToken ct, bool compress = false)
+    {
+        var builder = new Builder(instrument, 1 << 20);
+        int days = Math.Max(1, DateOnly.FromDateTime(toUtc).DayNumber - DateOnly.FromDateTime(fromUtc).DayNumber + 1), done = 0;
+        for (var day = DateOnly.FromDateTime(fromUtc); day <= DateOnly.FromDateTime(toUtc); day = day.AddDays(1))
+        {
+            ct.ThrowIfCancellationRequested();
+            foreach (var trade in HistorySources.ReadDay(root, instrument.FeedId, instrument.Symbol, day))
+            {
+                if (trade.Time < fromUtc || trade.Time >= toUtc) continue;
+                builder.Add(trade, compress);
+            }
+            progress?.Report(++done / (double)days);
+        }
+        return builder.Finish(compress);
+    }
+
     public static TickData FromStore(TradeStore store)
     {
-        int n = store.Count;
-        var times = new long[n];
-        var prices = new long[n];
-        var volumes = new double[n];
-        var sides = new byte[n];
-        for (int i = 0; i < n; i++)
-        {
-            times[i] = store.GetTimeTicks(i);
-            prices[i] = store.GetPriceTicks(i);
-            volumes[i] = (double)store.GetVolume(i);
-            sides[i] = EncodeSide(store.GetSide(i), KlineHistory.IsSynthetic(store.GetId(i)));
-        }
-
-        return new TickData(store.Instrument, times, prices, volumes, sides, 0, n);
+        var builder = new Builder(store.Instrument, store.Count);
+        for (int i = 0; i < store.Count; i++) builder.Add(store.Get(i), compress: false);
+        return builder.Finish(compressed: false);
     }
 
     public static TickData FromTrades(Instrument instrument, IReadOnlyList<Trade> trades)
     {
-        int n = trades.Count;
-        var times = new long[n];
-        var prices = new long[n];
-        var volumes = new double[n];
-        var sides = new byte[n];
-        for (int i = 0; i < n; i++)
+        var builder = new Builder(instrument, trades.Count);
+        foreach (var trade in trades) builder.Add(trade, compress: false);
+        return builder.Finish(compressed: false);
+    }
+
+    private sealed class Builder
+    {
+        private const int MaximumEvents = 30_000_000;
+        private readonly Instrument _instrument;
+        private long[] _ids, _times, _prices;
+        private decimal[] _volumes;
+        private byte[] _sides;
+        private ushort[] _quality;
+        private string?[]? _eventIds;
+        private long _eventIdTextBytes;
+        private readonly List<TradeProvenance> _provenance = new();
+        private readonly Dictionary<TradeProvenance, ushort> _indices = new();
+        private int _count;
+        private TradeProvenance _lastProvenance;
+        private bool _pendingProvenance;
+
+        public Builder(Instrument instrument, int capacity)
         {
-            times[i] = trades[i].Time.Ticks;
-            prices[i] = instrument.ToTicks(trades[i].Price);
-            volumes[i] = (double)trades[i].Volume;
-            sides[i] = EncodeSide(trades[i].Side, KlineHistory.IsSynthetic(trades[i].Id));
+            _instrument = instrument;
+            capacity = Math.Clamp(capacity, 1, MaximumEvents);
+            _ids = new long[capacity]; _times = new long[capacity]; _prices = new long[capacity]; _volumes = new decimal[capacity]; _sides = new byte[capacity]; _quality = new ushort[capacity];
         }
 
-        return new TickData(instrument, times, prices, volumes, sides, 0, n);
+        public void Add(in Trade trade, bool compress)
+        {
+            long time = trade.Time.Ticks, price = _instrument.ToTicks(trade.Price);
+            if (_count > 0 && time < _times[_count - 1]) throw new InvalidDataException("Backtest history must be chronologically ordered; timestamps are never clamped into invented order.");
+            var provenance = trade.Provenance;
+            if (compress && (provenance.ResolutionSeconds > 0 || provenance.HasKnownAvailability && provenance.IsMeasured))
+            {
+                if (_count > 0 && _prices[_count - 1] == price && _sides[_count - 1] == (byte)trade.Side && _times[_count - 1] / TimeSpan.TicksPerSecond == time / TimeSpan.TicksPerSecond)
+                {
+                    var previous = _lastProvenance;
+                    static TradeProvenance Aggregate(TradeProvenance value) => value with
+                    {
+                        Quality = value.IsObservedTrade ? (value.Quality & ~DataQuality.Raw) | DataQuality.Compact : value.Quality,
+                        ObservedTradeCount = 0, SourceEventId = null,
+                    };
+                    if (Aggregate(previous) == Aggregate(provenance))
+                    {
+                        _volumes[_count - 1] += trade.Volume;
+                        _lastProvenance = Aggregate(previous) with { ObservedTradeCount = checked(previous.ObservedTradeCount + provenance.ObservedTradeCount) };
+                        // A repeated point run is fully known at its last actual point, not at an invented second-end.
+                        // Keeping interval resolution unchanged also keeps coarse source-window execution fences intact.
+                        if (provenance.ResolutionSeconds == 0) _times[_count - 1] = time;
+                        _pendingProvenance = true;
+                        if (_eventIds?[_count - 1] is { } priorEventId)
+                        {
+                            _eventIdTextBytes -= 32L + 2L * priorEventId.Length;
+                            _eventIds[_count - 1] = null;
+                        }
+                        if ((previous.Quality & DataQuality.Synthetic) == 0) _ids[_count - 1] = CompactHistory.CompressedIdBase + _count - 1;
+                        return;
+                    }
+                }
+            }
+            FlushProvenance();
+            if (_count == MaximumEvents) throw new InvalidDataException("The requested backtest exceeds the bounded event capacity. Select a shorter range or explicitly compress the input.");
+            if (_count == _times.Length)
+            {
+                int capacity = (int)Math.Min(MaximumEvents, _count * 2L);
+                Array.Resize(ref _ids, capacity); Array.Resize(ref _times, capacity); Array.Resize(ref _prices, capacity); Array.Resize(ref _volumes, capacity); Array.Resize(ref _sides, capacity); Array.Resize(ref _quality, capacity);
+                if (_eventIds != null) Array.Resize(ref _eventIds, capacity);
+            }
+            _ids[_count] = trade.Id;
+            _times[_count] = time; _prices[_count] = price; _volumes[_count] = trade.Volume; _sides[_count] = (byte)trade.Side; _quality[_count] = Index(provenance);
+            if (!string.IsNullOrEmpty(provenance.SourceEventId))
+            {
+                _eventIds ??= new string?[_times.Length];
+                _eventIds[_count] = provenance.SourceEventId;
+                _eventIdTextBytes += 32L + 2L * provenance.SourceEventId.Length;
+            }
+            _lastProvenance = provenance;
+            _count++;
+        }
+
+        private void FlushProvenance()
+        {
+            if (!_pendingProvenance) return;
+            _quality[_count - 1] = Index(_lastProvenance);
+            _pendingProvenance = false;
+        }
+
+        private ushort Index(TradeProvenance provenance)
+        {
+            provenance = provenance with { SourceEventId = null };
+            if (_indices.TryGetValue(provenance, out ushort index)) return index;
+            if (_provenance.Count > ushort.MaxValue) throw new InvalidDataException("The range contains too many distinct provenance revisions; select a shorter range.");
+            index = (ushort)_provenance.Count; _provenance.Add(provenance); _indices.Add(provenance, index); return index;
+        }
+
+        public TickData Finish(bool compressed)
+        {
+            FlushProvenance();
+            Array.Resize(ref _ids, _count); Array.Resize(ref _times, _count); Array.Resize(ref _prices, _count); Array.Resize(ref _volumes, _count); Array.Resize(ref _sides, _count); Array.Resize(ref _quality, _count);
+            if (_eventIds != null) Array.Resize(ref _eventIds, _count);
+            return new TickData(_instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance.ToArray(), _eventIds, _eventIdTextBytes, 0, _count, compressed);
+        }
     }
 }

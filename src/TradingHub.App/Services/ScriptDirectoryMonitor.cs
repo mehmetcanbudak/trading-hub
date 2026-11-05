@@ -3,6 +3,7 @@ using TradingHub.Scripting;
 
 namespace TradingHub.App.Services;
 
+// Reconciled from reviewed startup fix 85c43954ebd4cf6acccda850cc86f356c2bdf9f5.
 internal readonly struct CapturedScriptSource(string path, byte[] bytes)
 {
     // The monitor owns these bytes and never modifies them after publication.
@@ -24,11 +25,12 @@ internal readonly record struct ScriptDirectorySnapshot(long Version, IReadOnlyL
     }
 }
 
-// Capture reconciles edits before an explicit compilation; Version rejects stale queued notifications.
+// Capture reconciles explicit compilations; Version rejects stale queued notifications and compiler results.
 internal interface IScriptDirectoryMonitor : IDisposable
 {
     long Version { get; }
     ScriptDirectorySnapshot Capture();
+    Task StopAsync();
 }
 
 internal static class ScriptDirectoryFiles
@@ -55,7 +57,9 @@ internal sealed class NativeScriptDirectoryMonitor : IScriptDirectoryMonitor
 {
     private readonly string _folder;
     private readonly FileSystemWatcher _watcher;
+    private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _version;
+    private int _stopping;
 
     internal NativeScriptDirectoryMonitor(string folder, Action changed)
     {
@@ -70,6 +74,7 @@ internal sealed class NativeScriptDirectoryMonitor : IScriptDirectoryMonitor
 
         void Changed(object sender, FileSystemEventArgs args)
         {
+            if (Volatile.Read(ref _stopping) != 0) return;
             if (!ScriptDirectoryFiles.IsIncluded(args.FullPath) &&
                 (args is not RenamedEventArgs renamed || !ScriptDirectoryFiles.IsIncluded(renamed.OldFullPath))) return;
             Interlocked.Increment(ref _version);
@@ -83,7 +88,17 @@ internal sealed class NativeScriptDirectoryMonitor : IScriptDirectoryMonitor
         long version = Version;
         return new(version, ScriptDirectoryFiles.Capture(_folder));
     }
-    public void Dispose() => _watcher.Dispose();
+    public Task StopAsync()
+    {
+        if (Interlocked.Exchange(ref _stopping, 1) == 0) _ = CompleteStopAsync();
+        return _drained.Task;
+    }
+    private async Task CompleteStopAsync()
+    {
+        try { await Task.Run(_watcher.Dispose).ConfigureAwait(false); _drained.TrySetResult(); }
+        catch (Exception error) { _drained.TrySetException(error); }
+    }
+    public void Dispose() => StopAsync().GetAwaiter().GetResult();
 }
 
 internal sealed class ContentScriptDirectoryMonitor : IScriptDirectoryMonitor
@@ -95,6 +110,7 @@ internal sealed class ContentScriptDirectoryMonitor : IScriptDirectoryMonitor
     private readonly CancellationTokenSource _stop = new();
     private readonly CancellationToken _token;
     private readonly Task _worker;
+    private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Dictionary<string, byte[]> _contents = new(StringComparer.Ordinal);
     private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
     private readonly List<KeyValuePair<string, byte[]>> _updates = new();
@@ -191,8 +207,9 @@ internal sealed class ContentScriptDirectoryMonitor : IScriptDirectoryMonitor
                 {
                     long before = Version;
                     var snapshot = Capture();
+                    bool recovered = unavailable;
                     unavailable = false;
-                    if (snapshot.Version != before) _changed();
+                    if (snapshot.Version != before || recovered) _changed();
                 }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException)
                 {
@@ -204,19 +221,24 @@ internal sealed class ContentScriptDirectoryMonitor : IScriptDirectoryMonitor
         catch (OperationCanceledException) when (_token.IsCancellationRequested) { }
     }
 
-    public void Dispose()
+    public Task StopAsync()
+    {
+        if (Interlocked.Exchange(ref _stopping, 1) != 0) return _drained.Task;
+        Exception? failure = null;
+        try { _stop.Cancel(); }
+        catch (Exception error) { failure = error; }
+        _ = CompleteStopAsync(failure);
+        return _drained.Task;
+    }
+    private async Task CompleteStopAsync(Exception? failure)
     {
         // Neither cancellation nor the drain holds the scan gate, and this worker never awaits UI work.
-        if (Interlocked.Exchange(ref _stopping, 1) != 0)
-        {
-            _worker.GetAwaiter().GetResult();
-            return;
-        }
-        try
-        {
-            _stop.Cancel();
-            _worker.GetAwaiter().GetResult();
-        }
-        finally { _stop.Dispose(); }
+        try { await _worker.ConfigureAwait(false); }
+        catch (Exception error) { failure = failure == null ? error : new AggregateException(failure, error); }
+        try { _stop.Dispose(); }
+        catch (Exception error) { failure = failure == null ? error : new AggregateException(failure, error); }
+        if (failure == null) _drained.TrySetResult();
+        else _drained.TrySetException(failure);
     }
+    public void Dispose() => StopAsync().GetAwaiter().GetResult();
 }

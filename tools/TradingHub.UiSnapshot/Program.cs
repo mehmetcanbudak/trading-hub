@@ -13,6 +13,8 @@ if (args is ["--check-script-monitor"])
 
 if (args is ["--check-english", var sourceRoot])
     return TradingHub.UiSnapshot.EnglishLocalizationAudit.Run(sourceRoot);
+if (args is ["--source-fingerprints", var reviewRoot, var reviewInput, var reviewOutput])
+    return TradingHub.UiSnapshot.SourceReviewFingerprint.Run(reviewRoot, reviewInput, reviewOutput);
 
 string outDir = args.Length > 0 ? args[0] : "ui-snapshots";
 double seconds = args.Length > 1 && double.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : 6;
@@ -32,6 +34,11 @@ for (int i = 2; i < args.Length; i++)
 }
 
 if (pages.Count == 0) pages.Add("trading");
+if (pages.Count > 1 && pages.Any(page => page is "kvp-shutdown" or "kvp-shutdown-platform"))
+{
+    Console.Error.WriteLine("Shutdown scenes require a standalone fixture process because they really dispose the application.");
+    return 2;
+}
 
 // Resolve parent symlinks as well: an explicit test override must never alias production storage.
 static string CanonicalPath(string path)
@@ -46,7 +53,7 @@ static string CanonicalPath(string path)
     }
     return resolved.TrimEnd(Path.DirectorySeparatorChar);
 }
-var protectedRoots = new[] { TradingHub.Common.Product.AppData, Path.Combine(TradingHub.Common.Product.Documents, "Estrategias"), Path.Combine(TradingHub.Common.Product.Documents, "Indicadores") }.Select(CanonicalPath).ToArray();
+var protectedRoots = new[] { TradingHub.Common.Product.DefaultAppData, TradingHub.Common.Product.DefaultDocuments }.Select(CanonicalPath).ToArray();
 var overrides = new[] { "TRADINGHUB_DATA_DIR", "TRADINGHUB_STRATEGIES_DIR", "TRADINGHUB_INDICATORS_DIR", "TRADINGHUB_BACKTESTS_DIR", "TRADINGHUB_LIVE_DIR", "TRADINGHUB_KEYCHAIN_FILE" }
     .Select(Environment.GetEnvironmentVariable).OfType<string>().Where(p => p.Length > 0).Append(outDir);
 foreach (var path in overrides)
@@ -83,83 +90,24 @@ for (var until = DateTime.UtcNow.AddMinutes(20); snapLock == null;)
 // nunca tocar la energía de la Mac ni pedir permisos de administrador desde una herramienta
 Environment.SetEnvironmentVariable("TRADINGHUB_SLEEP_GUARD", "off");
 
-// nunca el llavero real desde una herramienta: ni la contraseña de Rithmic ni las claves de los exchanges
-// (además, entrar con el usuario real desde acá puede desconectar la sesión del Trading Hub abierto)
-if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE")))
-    Environment.SetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE", Path.Combine(Path.GetTempPath(), "tradinghub-snap-keychain.json"));
+// Start with owned, empty fixture stores. Never copy settings, scripts, history or secrets from a personal profile.
+string fixtureRoot = Path.Combine(Path.GetFullPath(outDir), "fixture-" + Guid.NewGuid().ToString("N"));
+foreach (var (variable, relative) in new[]
+{
+    ("TRADINGHUB_DATA_DIR", "Data"),
+    ("TRADINGHUB_STRATEGIES_DIR", "Strategies"),
+    ("TRADINGHUB_INDICATORS_DIR", "Indicators"),
+    ("TRADINGHUB_BACKTESTS_DIR", "Backtests"),
+    ("TRADINGHUB_LIVE_DIR", "Live"),
+    ("TRADINGHUB_KEYCHAIN_FILE", "fake-keychain.json"),
+})
+{
+    if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(variable)))
+        Environment.SetEnvironmentVariable(variable, Path.Combine(fixtureRoot, relative));
+    string resolved = Environment.GetEnvironmentVariable(variable)!;
+    Directory.CreateDirectory(variable == "TRADINGHUB_KEYCHAIN_FILE" ? Path.GetDirectoryName(resolved)! : resolved);
+}
 using var fakeRithmic = FakeMarket();
-
-// las estrategias también en una copia: una herramienta nunca escribe en la carpeta real del usuario
-// (hay escenas que crean estrategias y las mueven de carpeta)
-if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_STRATEGIES_DIR")))
-{
-    var realStrategies = Path.Combine(TradingHub.Common.Product.Documents, "Estrategias");
-    var snapStrategies = Path.Combine(Path.GetTempPath(), "tradinghub-snap-estrategias");
-    if (Directory.Exists(snapStrategies)) Directory.Delete(snapStrategies, true);
-    Directory.CreateDirectory(snapStrategies);
-    if (Directory.Exists(realStrategies))
-        foreach (var f in Directory.EnumerateFiles(realStrategies, "*.cs"))
-            File.Copy(f, Path.Combine(snapStrategies, Path.GetFileName(f)));
-    Environment.SetEnvironmentVariable("TRADINGHUB_STRATEGIES_DIR", snapStrategies);
-}
-
-// y los indicadores propios: hay escenas que escriben indicadores de prueba y el Trading Hub abierto vigila la carpeta real
-if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_INDICATORS_DIR")))
-{
-    var realIndicators = Path.Combine(TradingHub.Common.Product.Documents, "Indicadores");
-    var snapIndicators = Path.Combine(Path.GetTempPath(), "tradinghub-snap-indicadores");
-    if (Directory.Exists(snapIndicators)) Directory.Delete(snapIndicators, true);
-    Directory.CreateDirectory(snapIndicators);
-    if (Directory.Exists(realIndicators))
-        foreach (var f in Directory.EnumerateFiles(realIndicators, "*.cs", SearchOption.AllDirectories))
-        {
-            var rel = Path.GetRelativePath(realIndicators, f);
-            var unixRel = rel.Replace(Path.DirectorySeparatorChar, '/'); // en Windows las carpetas van con «\»
-            if (unixRel.Contains("/bin/") || unixRel.Contains("/obj/")) continue;
-            var dst = Path.Combine(snapIndicators, rel);
-            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-            File.Copy(f, dst);
-        }
-
-    Environment.SetEnvironmentVariable("TRADINGHUB_INDICATORS_DIR", snapIndicators);
-}
-
-// nunca sobre los datos reales: un Trading Hub abierto graba en esa carpeta y dos procesos escribiendo los mismos
-// archivos los dañan. Se copia solo la configuración y el espacio de trabajo a una carpeta temporal.
-if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR")))
-{
-    var realRoot = TradingHub.Common.Product.AppData;
-    var snapRoot = Path.Combine(Path.GetTempPath(), "tradinghub-snap-data");
-    Directory.CreateDirectory(snapRoot);
-    foreach (var f in new[] { "settings.json", "workspace.json", "connections.json" })
-    {
-        var src = Path.Combine(realRoot, f);
-        if (File.Exists(src)) File.Copy(src, Path.Combine(snapRoot, f), overwrite: true);
-    }
-
-    // copias (nunca los originales) de lo ya bajado, para no volver a pedir años de datos al exchange
-    foreach (var dir in new[] { "Klines", "Ticks", "Drawings" })
-    {
-        var src = Path.Combine(realRoot, dir);
-        if (!Directory.Exists(src)) continue;
-        foreach (var f in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
-        {
-            if (Path.GetFileName(f).StartsWith('.')) continue; // candados de grabación
-            // Rithmic va al servidor falso; Databento tampoco se copia (pesa cientos de MB y cambiaría lo que prueban las escenas)
-            if (Path.GetRelativePath(src, f) is var rel && (rel.StartsWith("rithmic", StringComparison.Ordinal) || rel.StartsWith("databento", StringComparison.Ordinal))) continue;
-            var dst = Path.Combine(snapRoot, dir, Path.GetRelativePath(src, f));
-            if (File.Exists(dst) && File.GetLastWriteTimeUtc(dst) >= File.GetLastWriteTimeUtc(f)) continue;
-            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-            File.Copy(f, dst, overwrite: true);
-        }
-    }
-
-    // el historial de las cuentas de prueba empieza de cero en cada corrida
-    if (Directory.Exists(Path.Combine(snapRoot, "Accounts"))) Directory.Delete(Path.Combine(snapRoot, "Accounts"), true);
-
-    // Rithmic contra un servidor de mentira (usuario demo, cuenta ACC1) y sin claves de exchanges
-    Environment.SetEnvironmentVariable("TRADINGHUB_DATA_DIR", snapRoot);
-}
 SanitizeConnections(Path.Combine(Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR")!, "connections.json"),
     fakeRithmic.Uri, Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE")!);
 
@@ -199,8 +147,10 @@ static void SanitizeConnections(string path, string fakeUri, string keychainFile
             if (node is not System.Text.Json.Nodes.JsonObject o) continue;
             o["ApiKey"] = "";
             o["AllowRealOrders"] = false;
-            if (Enum.TryParse<TradingHub.App.Services.ConnectionKind>(o["Kind"]?.ToString(), out var kind)
-                && kind is TradingHub.App.Services.ConnectionKind.Rithmic or TradingHub.App.Services.ConnectionKind.AmpFutures)
+            Enum.TryParse<TradingHub.App.Services.ConnectionKind>(o["Kind"]?.ToString(), out var kind);
+            // New provider scenes inject their own fakes. No default public or authenticated network provider is enabled.
+            o["Enabled"] = kind == TradingHub.App.Services.ConnectionKind.Simulator;
+            if (kind is TradingHub.App.Services.ConnectionKind.Rithmic or TradingHub.App.Services.ConnectionKind.AmpFutures)
             {
                 o["Enabled"] = true;
                 o["RithmicUri"] = fakeUri;
@@ -223,7 +173,8 @@ var sceneLang = TradingHub.App.Localization.Lang.Current;
 var sceneSettings = TradingHub.App.Services.AppSettings.Load();
 sceneSettings.Language = sceneLang;
 sceneSettings.Save();
-AppBuilder.Configure<App>()
+AppBuilder.Configure<App>(() => pages.Any(page => page is "kvp-shutdown" or "kvp-shutdown-platform")
+        ? new App(KvpShutdownScene.CreateServices) : new App())
     .UseSkia()
     .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
     .SetupWithoutStarting();
@@ -314,7 +265,7 @@ if (Environment.GetEnvironmentVariable("TRADINGHUB_SNAP_DEBUG") == "1")
 int exitCode = 0;
 foreach (var page in pages)
 {
-    int? nonKvpResult = page switch
+    int? sceneResult = page switch
     {
         "nonkvp-search-zoom" => NonKvpSearchZoomScene.Run(window, Pump, outDir),
         "nonkvp-studies" => NonKvpStudiesScene.Run(window, Pump, outDir),
@@ -322,9 +273,21 @@ foreach (var page in pages)
         "nonkvp-ib" => NonKvpIbDataScene.Run(window, Pump, outDir),
         "nonkvp-assistant" => NonKvpAssistantScene.Run(window, Pump, outDir),
         "nonkvp-tradingview" => NonKvpTradingViewScene.Run(window, Pump, outDir),
+        "kvp-operations" => KvpOperationsScene.Run(window, Pump, outDir),
+        "kvp-proxy" => KvpProxyScene.Run(window, Pump, outDir),
+        "kvp-performance" => KvpPerformanceScene.Run(window, Pump, outDir),
+        "kvp-chart" => KvpChartScene.Run(window, Pump, outDir),
+        "kvp-chart-accounts" => KvpChartAccountsScene.Run(window, Pump, outDir),
+        "kvp-studies" => KvpStudiesScene.Run(window, Pump, outDir),
+        "kvp-authoring" => KvpAuthoringScene.Run(window, Pump, outDir),
+        "kvp-providers" => KvpProvidersScene.Run(window, Pump, outDir),
+        "kvp-replay-alerts" => KvpReplayAlertsScene.Run(window, Pump, outDir),
+        "kvp-depth-history" => KvpDepthHistoryScene.Run(window, Pump, outDir),
+        "kvp-shutdown" => KvpShutdownScene.Run(window, Pump, outDir),
+        "kvp-shutdown-platform" => KvpShutdownScene.Run(window, Pump, outDir, platformRequest: true),
         _ => null,
     };
-    if (nonKvpResult is { } result)
+    if (sceneResult is { } result)
     {
         exitCode += result;
         continue;
@@ -841,7 +804,7 @@ foreach (var page in pages)
             trChart.Trader?.Refresh();
             Pump(0.5);
             using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_trader_cross.png"));
-            var flat = tv.AccountActionAsync(trChart, a => a.Flatten(), "cerrada");
+            var flat = tv.AccountActionAsync(trChart, a => a.Flatten(), "Close position");
             while (!flat.IsCompleted) Pump(0.05);
             Pump(1);
             Console.WriteLine($"Cerrada: {target.Instrument.Symbol} posición {target.Position.Volume}");
@@ -970,7 +933,7 @@ foreach (var page in pages)
             var others = tv.Tabs.Where(t => !ReferenceEquals(t, ch) && t.Model != null).Select(t => t.Model!.Theme.BackgroundTop.ToString()).Distinct();
             Console.WriteLine($"Colores: este gráfico fondo {ch.Model.Theme.BackgroundTop} · los otros {string.Join(", ", others)}");
 
-            var flat = tv.AccountActionAsync(ch, a => a.Flatten(), "cerrada");
+            var flat = tv.AccountActionAsync(ch, a => a.Flatten(), "Close position");
             while (!flat.IsCompleted) Pump(0.05);
             PumpPush(1.5);
             Console.WriteLine($"Cerrada: {crossAcc.Instrument.Symbol} posición {crossAcc.Position.Volume}");
@@ -1210,6 +1173,11 @@ foreach (var page in pages)
     ReportUntranslated(window, page);
 }
 
-App.Services.Shutdown();
+Task shutdown = App.Services.ShutdownAsync();
+while (!shutdown.IsCompleted) Pump(0.02);
+shutdown.GetAwaiter().GetResult();
+Task privateStoreShutdown = TradingHub.App.Services.Keychain.ShutdownAsync();
+while (!privateStoreShutdown.IsCompleted) Pump(0.02);
+privateStoreShutdown.GetAwaiter().GetResult();
 GC.KeepAlive(snapLock); // el candado vale hasta el final
 return exitCode;

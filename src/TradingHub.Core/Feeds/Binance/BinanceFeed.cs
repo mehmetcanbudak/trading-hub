@@ -20,6 +20,10 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
 
     private readonly bool _futures;
     private readonly HttpClient _http;
+    private readonly bool _ownsHttpClient;
+    private readonly HttpClient _archives;
+    private readonly Action<ClientWebSocketOptions>? _configureSocket;
+    private readonly Func<Uri, CancellationToken, Task<WebSocket>>? _connectWebSocket;
     private readonly SemaphoreSlim _rate = new(1, 1);
     private int _usedWeight;
     private DateTime _weightMinute = DateTime.UtcNow;
@@ -28,18 +32,26 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly CancellationTokenSource _lifetime = new();
 
+    /// <summary>Injected HTTP and a separate archive client remain caller-owned unless primary-client ownership is explicitly requested.</summary>
     public BinanceFeed(bool futures, HttpMessageHandler? handler = null, Uri? restOrigin = null,
-        Func<DateTime>? utcNow = null, Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<DateTime>? utcNow = null, Func<TimeSpan, CancellationToken, Task>? delay = null,
+        HttpClient? httpClient = null, Action<ClientWebSocketOptions>? configureSocket = null,
+        bool ownsHttpClient = false, HttpClient? archiveHttpClient = null,
+        Func<Uri, CancellationToken, Task<WebSocket>>? connectWebSocket = null)
     {
         _futures = futures;
         _restOrigin = restOrigin;
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
         _delay = delay ?? ((duration, ct) => Task.Delay(duration, ct));
-        _http = new HttpClient(handler ?? new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.All, PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
+        _http = httpClient ?? new HttpClient(handler ?? new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.All, PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
         {
             Timeout = TimeSpan.FromSeconds(20),
         };
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("TradingHub/0.1");
+        _ownsHttpClient = httpClient == null || ownsHttpClient;
+        _archives = archiveHttpClient ?? httpClient ?? Archives;
+        _configureSocket = configureSocket;
+        _connectWebSocket = connectWebSocket;
+        if (httpClient == null) _http.DefaultRequestHeaders.UserAgent.ParseAdd("TradingHub/0.1");
     }
 
     public string Id => _futures ? FuturesId : SpotId;
@@ -197,7 +209,7 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
         string url = $"https://data.binance.vision/data/{kind}/monthly/klines/{symbol}/{interval}/{symbol}-{interval}-{month:yyyy-MM}.zip";
         try
         {
-            using var resp = await Archives.GetAsync(url, ct).ConfigureAwait(false);
+            using var resp = await _archives.GetAsync(url, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode) return null;
             var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
@@ -269,14 +281,24 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
         ? decimal.Parse(e.GetString()!, NumberStyles.Float, CultureInfo.InvariantCulture)
         : e.GetDecimal();
 
-    private static Trade ParseAggTrade(JsonElement t)
+    private Trade ParseAggTrade(JsonElement t)
     {
         long id = t.GetProperty("a").GetInt64();
         decimal price = Dec(t.GetProperty("p"));
         decimal qty = Dec(t.GetProperty("q"));
         long time = t.GetProperty("T").GetInt64();
         bool buyerIsMaker = t.GetProperty("m").GetBoolean();
-        return new Trade(id, DateTimeOffset.FromUnixTimeMilliseconds(time).UtcDateTime, price, qty, buyerIsMaker ? TradeSide.Sell : TradeSide.Buy);
+        int count = 1;
+        bool compact = false;
+        if (t.TryGetProperty("f", out var first) && t.TryGetProperty("l", out var last))
+        {
+            long underlying = last.GetInt64() - first.GetInt64() + 1;
+            count = (int)Math.Clamp(underlying, 1, int.MaxValue);
+            compact = underlying > 1;
+        }
+        return new Trade(id, DateTimeOffset.FromUnixTimeMilliseconds(time).UtcDateTime, price, qty, buyerIsMaker ? TradeSide.Sell : TradeSide.Buy,
+            new TradeProvenance(compact ? DataQuality.Compact : DataQuality.Raw, SourceIdentity: Id, ObservedTradeCount: count,
+                SourceEventId: id.ToString(CultureInfo.InvariantCulture)));
     }
 
     public async Task LoadTradesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, long? fromId,
@@ -378,30 +400,32 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
         while (!ct.IsCancellationRequested)
         {
             var url = $"{bases[baseIdx % bases.Length]}/stream?streams={streams}";
-            using var ws = new ClientWebSocket();
-            // pings propios cada 15 s: si el servidor no contesta en 10 s la conexión está muerta
-            // (se cayó el Wi-Fi, la Mac durmió...) y se reconecta sola
-            ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
-            ws.Options.KeepAliveTimeout = TimeSpan.FromSeconds(10);
             var conn = sub.BeginConnection();
             var book = new OrderBookBuilder();
             var buffer = new List<JsonElement>();
             long lastU = -1;
+            long? lastPublishedU = null;
+            long? firstPendingU = null;
+            bool sequenceGapPending = false;
             bool synced = false;
             Task<JsonDocument>? snapshotTask = null;
             var docs = new List<JsonDocument>();
             DateTime lastPublish = DateTime.MinValue;
+            // Depth timestamps remain local receipt/publication time; exchange sequence ranges are separate.
+            DateTime lastBookAt = DateTime.MinValue;
             bool receivedAny = false;
             string reason = "connection lost";
 
             try
             {
                 if (!everConnected) sub.SetChannel(channel, FeedStatus.Connecting, "Connecting to " + DisplayName + "…");
+                WebSocket ws;
                 using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(conn.Token))
                 {
                     connectCts.CancelAfter(TimeSpan.FromSeconds(15));
-                    await ws.ConnectAsync(new Uri(url), connectCts.Token).ConfigureAwait(false);
+                    ws = await ConnectSocketAsync(new Uri(url), connectCts.Token).ConfigureAwait(false);
                 }
+                using var ownedSocket = ws;
 
                 // rellena el hueco si nos desconectamos (antes de leer el vivo, así no se desordena)
                 if (lastTradeId >= 0)
@@ -474,6 +498,8 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
                         if (!snapshotTask.IsCompleted) continue;
                         using var snap = await snapshotTask.ConfigureAwait(false);
                         long lastUpdateId = snap.RootElement.GetProperty("lastUpdateId").GetInt64();
+                        lastU = lastUpdateId;
+                        firstPendingU = null;
                         book.Clear();
                         foreach (var b in snap.RootElement.GetProperty("bids").EnumerateArray())
                             book.Set(BookSide.Bid, instrument.ToTicks(Dec(b[0])), Dec(b[1]));
@@ -493,6 +519,7 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
                             }
 
                             ApplyDepth(book, instrument, d);
+                            firstPendingU ??= U;
                             lastU = u;
                         }
 
@@ -500,10 +527,22 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
                         docs.Clear();
                         buffer.Clear();
                         snapshotTask = null;
-                        if (lastU < 0) lastU = lastUpdateId;
                         synced = true;
-                        sink.OnDepth(instrument, book.BuildUpdate(DateTime.UtcNow, 500, fullRefresh: true));
-                        lastPublish = DateTime.UtcNow;
+                        var snapshotAt = DateTime.UtcNow;
+                        sink.OnDepth(instrument, book.BuildUpdate(snapshotAt, 500, fullRefresh: true,
+                            providerId: Id, venue: Id, sequence: lastU,
+                            firstSequence: firstPendingU ?? lastUpdateId, previousSequence: lastPublishedU,
+                            additionalCoverage: DepthCoverage.PartialBook | (sequenceGapPending ? DepthCoverage.SequenceGap : DepthCoverage.None),
+                            gapBefore: sequenceGapPending ? DepthGapReason.Sequence : DepthGapReason.None,
+                            message: sequenceGapPending
+                                ? "Binance depth restored from a fresh snapshot after a sequence gap; snapshot time is local publication time."
+                                : "Binance depth snapshot time is local publication time.",
+                            receivedAt: snapshotAt));
+                        lastPublish = snapshotAt;
+                        lastBookAt = snapshotAt;
+                        lastPublishedU = lastU;
+                        firstPendingU = null;
+                        sequenceGapPending = false;
                         continue;
                     }
 
@@ -511,9 +550,20 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
                     bool inOrder = _futures
                         ? data.TryGetProperty("pu", out var pu) && pu.GetInt64() == lastU
                         : U2 == lastU + 1;
+                    var now = DateTime.UtcNow;
                     if (!inOrder && u2 > lastU)
                     {
                         // se perdió un evento: resincroniza
+                        sequenceGapPending = true;
+                        sink.OnDepth(instrument, book.BuildUpdate(lastBookAt, 500, fullRefresh: false,
+                            providerId: Id, venue: Id, sequence: lastU,
+                            firstSequence: firstPendingU, previousSequence: lastPublishedU,
+                            additionalCoverage: DepthCoverage.PartialBook | DepthCoverage.SequenceGap | DepthCoverage.Missing,
+                            gapBefore: DepthGapReason.Sequence,
+                            message: "Binance depth sequence gap; the retained book is stale until a fresh snapshot arrives.",
+                            receivedAt: now));
+                        lastPublishedU = lastU;
+                        firstPendingU = null;
                         synced = false;
                         snapshotTask = null;
                         buffer.Clear();
@@ -525,15 +575,21 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
                     if (u2 > lastU)
                     {
                         ApplyDepth(book, instrument, data);
+                        firstPendingU ??= U2;
                         lastU = u2;
+                        lastBookAt = now;
                     }
 
                     doc.Dispose();
-                    var now = DateTime.UtcNow;
                     if ((now - lastPublish).TotalMilliseconds >= 90)
                     {
-                        sink.OnDepth(instrument, book.BuildUpdate(now, 500));
+                        sink.OnDepth(instrument, book.BuildUpdate(now, 500,
+                            providerId: Id, venue: Id, sequence: lastU,
+                            firstSequence: firstPendingU, previousSequence: lastPublishedU,
+                            additionalCoverage: DepthCoverage.PartialBook, receivedAt: now));
                         lastPublish = now;
+                        lastPublishedU = lastU;
+                        firstPendingU = null;
                     }
                 }
             }
@@ -560,6 +616,20 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
             }
 
             if (ct.IsCancellationRequested) break;
+            if (channel is "order book" or "data")
+            {
+                sink.OnDepth(instrument, new DepthUpdate
+                {
+                    Snapshot = DepthSnapshot.Empty,
+                    ProviderId = Id,
+                    Venue = Id,
+                    ReceivedAt = DateTime.UtcNow,
+                    IsFullRefresh = false,
+                    Coverage = DepthCoverage.PartialBook | DepthCoverage.Disconnected | DepthCoverage.Missing | DepthCoverage.SequenceGap,
+                    GapBefore = DepthGapReason.Disconnected,
+                    Message = $"Binance {channel} disconnected ({reason}); waiting for a fresh venue snapshot.",
+                });
+            }
             var wait = LiveSubscription.Backoff(failures);
             sub.SetChannel(channel, FeedStatus.Reconnecting, failures == 0
                 ? $"Reconnecting ({reason})…"
@@ -598,9 +668,29 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
         return last;
     }
 
+    private async Task<WebSocket> ConnectSocketAsync(Uri endpoint, CancellationToken ct)
+    {
+        if (_connectWebSocket != null)
+            return await _connectWebSocket(endpoint, ct).ConfigureAwait(false);
+        var socket = new ClientWebSocket();
+        try
+        {
+            socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(10);
+            _configureSocket?.Invoke(socket.Options);
+            await socket.ConnectAsync(endpoint, ct).ConfigureAwait(false);
+            return socket;
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
     public void Dispose()
     {
         _lifetime.Cancel();
-        _http.Dispose();
+        if (_ownsHttpClient) _http.Dispose();
     }
 }

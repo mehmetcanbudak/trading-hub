@@ -12,6 +12,8 @@ Created by [@ralphtradesz](https://x.com/ralphtradesz). English work in this for
 
 **Upstream updates:** [Daily monitoring and the reviewed English sync process](docs/en/upstream-sync.md) track new original-repository commits without automatic merges or deployment.
 
+**Selected KVP capabilities:** the reviewed C# source implements the complete approved history/study/chart/depth/authoring/practice/alert/provider/storage/proxy scope, with correctness redesigns rather than a parallel trading engine. Source/local/fake acceptance is complete; [canonical promotion and personal Mac installation](docs/en/TRANSLATION_STATUS.md#canonical-kvp-promotion--2026-11-05) are tracked separately from the [historical candidate evidence](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04). See the [feature guides](docs/en/README.md) and [pinned attribution/full license](THIRD_PARTY_NOTICES.md#kvp-capability-reference). Branding/directory migration, KVP Windows distribution/updater and external Windows-only VPFM are excluded. The bounded CPU/cache path has measured end-to-end evidence; no Apple GPU acceleration is claimed.
+
 **Using Windows?** See [Windows installation and platform integration](docs/en/portar-a-windows.md).
 
 **Using a Mac (M1 or newer)?** To install **this fork**, use the [manual build instructions](#option-2-install-manually) or the [installation guide](docs/en/instalacion.md). This fork currently publishes no prebuilt downloads. The [original upstream Mac app](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Mac.zip) is available, but does not include this fork's additional fixes. For that archive, unzip it and drag the app to Applications; after verifying its source and signature, macOS may require System Settings → Privacy & Security → **Open Anyway** on the first launch. Do not disable system security checks or replace this fork's installation unintentionally.
@@ -28,6 +30,7 @@ Supported market connections include:
 - **Cryptocurrency:** Binance and Bybit, including free public market data.
 - **Forex and CFDs:** OANDA, cTrader, and CSV imports.
 - **US stocks:** Alpaca.
+- **Candidate data-only sources:** Longbridge with explicit OAuth/metadata and aggregate Binance/Bybit data with partial-constituent coverage/first-venue book; composite prices have no order route.
 
 Claude Code integration uses your own Claude subscription and local CLI, rather than separate API credentials. It can help write, compile, test, and report on C# trading strategies. An additional AI agent assists with live strategy risk allocation.
 
@@ -180,9 +183,9 @@ See [LICENSE](LICENSE) for the authoritative terms.
 
 Selected community adaptations from PANASV and jjuangutierrez and the five restored library families retain their own attribution and terms in [Third-party notices](THIRD_PARTY_NOTICES.md). Apache/MIT libraries are not relicensed under the application's Commons Clause.
 
-### Unmerged selected capabilities
+### Selected additional capabilities
 
-The external `feat/non-kvp-adoption` worktree adds enabled-profile instrument-search fallback, deep zoom, optional QuanTAlib/flow/OI studies, data-only IB history/import, optional Codex strategy chat and explicitly approved TradingView research. It is **uncommitted, unmerged and not installed**; the [validation dashboard](docs/en/TRANSLATION_STATUS.md#unmerged-non-kvp-adoption--2026-11-04) preserves failed and pending gates. No IB orders, KVP, Intel import, real-provider/OAuth certification or arbitrary-code sandbox guarantee is implied. See the [English guides](docs/en/README.md) for fidelity, cost, privacy and safety limits.
+The canonical C# reference includes enabled-profile instrument-search fallback, deep zoom, optional QuanTAlib/flow/OI studies, data-only IB history/import, optional Codex strategy chat and explicitly approved TradingView research. The [accepted non-KVP integration](docs/en/TRANSLATION_STATUS.md#canonical-non-kvp-integration--2026-11-04) supersedes the historical external-worktree checkpoint without erasing its failed receipts. No IB orders, Intel import, real-provider/OAuth certification or arbitrary-code sandbox guarantee is implied. See the [English guides](docs/en/README.md) for fidelity, cost, privacy and safety limits.
 
 ---
 

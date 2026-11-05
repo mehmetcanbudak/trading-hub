@@ -16,7 +16,12 @@ namespace TradingHub.Strategies;
 /// se ejecutó (por ejemplo MNQ aunque la estrategia mire el NQ); los llenados viejos no los tienen y usan los del
 /// instrumento de la estrategia.
 /// </summary>
-public sealed record LiveFill(DateTime Time, bool Buy, decimal Quantity, decimal Price, string? Symbol = null, decimal PointValue = 0);
+public sealed record LiveFill(DateTime Time, bool Buy, decimal Quantity, decimal Price, string? Symbol = null, decimal PointValue = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExecutionId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? Fee = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FeeCurrency = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? AccountFee = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExecutionSequence = null);
 
 /// <summary>
 /// Contabilidad propia de una estrategia en vivo: sus llenados, su posición (aunque otras estrategias
@@ -26,6 +31,10 @@ public sealed class LiveLedger
 {
     private DateTime _openTime;
     private int _number;
+    private decimal _openFees, _peakRealized;
+    private bool _hasConfirmedCosts, _curveInitialized;
+    private readonly Dictionary<string, int> _executionIndices = new(StringComparer.Ordinal);
+    private List<EquityPoint>? _realizedCurve;
 
     public LiveLedger(string key, decimal pointValue)
     {
@@ -43,6 +52,11 @@ public sealed class LiveLedger
     public decimal Position { get; private set; }
     public decimal AveragePrice { get; private set; }
     public decimal Realized { get; private set; }
+    public decimal Fees { get; private set; }
+    public bool CostsComplete { get; private set; } = true;
+    public LiveFill? Execution(string id) => _executionIndices.TryGetValue(id, out int index) ? Fills[index] : null;
+    public long Revision { get; private set; }
+    internal decimal PeakRealized => _peakRealized;
     public List<ClosedTrade> Trades { get; } = new();
 
     /// <summary>Contrato de la posición abierta (null = el de la estrategia, o plana).</summary>
@@ -57,11 +71,75 @@ public sealed class LiveLedger
     /// </summary>
     public int SkippedLines { get; internal set; }
 
-    public decimal OpenPnL(decimal last) => Position == 0 || last <= 0 ? 0 : (last - AveragePrice) * Position * (OpenPointValue > 0 ? OpenPointValue : PointValue);
+    public decimal OpenPnL(decimal last, bool priceKnown = false) => Position == 0 || (!priceKnown && last <= 0) ? 0 : (last - AveragePrice) * Position * (OpenPointValue > 0 ? OpenPointValue : PointValue);
 
     public void Apply(LiveFill f)
     {
+        if (f.ExecutionId is { Length: > 0 } id)
+        {
+            if (_executionIndices.TryGetValue(id, out int index))
+            {
+                if (Fills[index] == f) return;
+                var previous = Fills[index];
+                Fills[index] = f;
+                // A confirmed correction is appended as another optional-ID row, never a rewrite of durable history.
+                if (previous.Time != f.Time || previous.ExecutionSequence != f.ExecutionSequence) RebuildChronological();
+                else RebuildFinancialState();
+                Revision++;
+                return;
+            }
+            _executionIndices.Add(id, Fills.Count);
+        }
         Fills.Add(f);
+        if (f.ExecutionId != null && Fills.Count > 1 &&
+            (f.Time < Fills[^2].Time || (f.Time == Fills[^2].Time && f.ExecutionSequence is { } sequence &&
+                Fills[^2].ExecutionSequence is { } previousSequence && sequence < previousSequence)))
+            RebuildChronological();
+        else ApplyCore(f);
+        Revision++;
+    }
+    private void RebuildChronological()
+    {
+        // Stable UTC order; only a complete authoritative sequence orders equal-time facts.
+        // Missing sequences retain observation order instead of inventing causality from IDs.
+        var ordered = Chronological(Fills).ToArray();
+        Fills.Clear();
+        Fills.AddRange(ordered);
+        _executionIndices.Clear();
+        for (int i = 0; i < Fills.Count; i++)
+            if (Fills[i].ExecutionId is { Length: > 0 } id) _executionIndices.Add(id, i);
+        RebuildFinancialState();
+    }
+    private void RebuildFinancialState()
+    {
+        Position = AveragePrice = Realized = Fees = _openFees = _peakRealized = 0;
+        _openTime = default;
+        _number = 0;
+        OpenSymbol = null;
+        OpenPointValue = 0;
+        CostsComplete = true;
+        _hasConfirmedCosts = _curveInitialized = false;
+        Trades.Clear();
+        _realizedCurve?.Clear();
+        foreach (var fill in Fills) ApplyCore(fill);
+    }
+    private static IEnumerable<LiveFill> Chronological(IEnumerable<LiveFill> fills)
+    {
+        foreach (var group in fills.OrderBy(f => f.Time).GroupBy(f => f.Time))
+        {
+            IEnumerable<LiveFill> ordered = group;
+            if (group.All(f => f.ExecutionSequence.HasValue)) ordered = group.OrderBy(f => f.ExecutionSequence!.Value);
+            foreach (var fill in ordered) yield return fill;
+        }
+    }
+
+    private void ApplyCore(LiveFill f)
+    {
+        decimal fee = f.AccountFee ?? 0;
+        Fees += fee;
+        CostsComplete &= f.AccountFee.HasValue;
+        _hasConfirmedCosts |= f.AccountFee.HasValue;
+        Realized -= fee;
         decimal pv = f.PointValue > 0 ? f.PointValue : PointValue;
         decimal signed = f.Buy ? f.Quantity : -f.Quantity;
         decimal before = Position;
@@ -77,19 +155,25 @@ public sealed class LiveLedger
             decimal total = Math.Abs(before) + f.Quantity;
             AveragePrice = total > 0 ? (AveragePrice * Math.Abs(before) + f.Price * f.Quantity) / total : f.Price;
             Position = before + signed;
+            _openFees += fee;
+            AddCurvePoint(f.Time);
             return;
         }
 
         decimal closing = Math.Min(Math.Abs(before), f.Quantity);
         decimal pnl = (f.Price - AveragePrice) * closing * Math.Sign(before) * (OpenPointValue > 0 ? OpenPointValue : pv);
         Realized += pnl;
-        Trades.Add(new ClosedTrade(++_number, before > 0, _openTime, AveragePrice, f.Time, f.Price, closing, pnl, 0, 0, 0, "", "", 0));
+        decimal entryFee = _openFees * closing / Math.Abs(before);
+        decimal exitFee = fee * closing / f.Quantity;
+        _openFees -= entryFee;
+        Trades.Add(new ClosedTrade(++_number, before > 0, _openTime, AveragePrice, f.Time, f.Price, closing, pnl, entryFee + exitFee, 0, 0, "", "", 0));
         Position = before + signed;
         if (Position == 0)
         {
             AveragePrice = 0;
             OpenSymbol = null;
             OpenPointValue = 0;
+            _openFees = 0;
         }
         else if (Math.Sign(Position) != Math.Sign(before))
         {
@@ -98,7 +182,28 @@ public sealed class LiveLedger
             _openTime = f.Time;
             OpenSymbol = f.Symbol;
             OpenPointValue = pv;
+            _openFees = fee - exitFee;
         }
+        AddCurvePoint(f.Time, closedCurrent: true);
+    }
+    private void AddCurvePoint(DateTime time, bool closedCurrent = false)
+    {
+        _peakRealized = Math.Max(_peakRealized, Realized);
+        if (!_hasConfirmedCosts) return; // Preserve the legacy close-only curve without allocating per-fill history.
+        _realizedCurve ??= new();
+        if (!_curveInitialized)
+        {
+            decimal equity = 0, peak = 0;
+            for (int i = 0; i < Trades.Count - (closedCurrent ? 1 : 0); i++)
+            {
+                var trade = Trades[i];
+                equity += trade.NetPnl;
+                peak = Math.Max(peak, equity);
+                _realizedCurve.Add(new EquityPoint(trade.ExitTime, equity, peak - equity));
+            }
+            _curveInitialized = true;
+        }
+        _realizedCurve.Add(new EquityPoint(time, Realized, _peakRealized - Realized));
     }
 
     /// <summary>Curva de capital al cierre de cada operación (empieza en 0).</summary>
@@ -107,6 +212,11 @@ public sealed class LiveLedger
         var res = new List<EquityPoint>();
         decimal eq = capital, peak = capital;
         if (Fills.Count > 0) res.Add(new EquityPoint(Fills[0].Time, capital, 0));
+        if (_hasConfirmedCosts)
+        {
+            foreach (var point in _realizedCurve!) res.Add(point with { Equity = capital + point.Equity });
+            return res;
+        }
         foreach (var t in Trades)
         {
             eq += t.NetPnl;

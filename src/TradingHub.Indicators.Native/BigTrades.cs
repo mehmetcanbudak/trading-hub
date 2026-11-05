@@ -39,12 +39,16 @@ public class BigTrades : Indicator
     }
 
     private readonly List<Bubble> _bubbles = new();
-    private readonly Queue<decimal> _recent = new();
+    // Completed eligible groups stay immutable; the mutable open group is never committed provisionally.
+    private readonly Queue<(decimal Volume, long Order)> _recent = new();
+    private readonly SortedSet<(decimal Volume, long Order)> _lowerSamples = new(), _upperSamples = new();
+    private (decimal Volume, long Order)? _excludedOldest;
+    private long _sampleOrder;
     private decimal _adaptiveThreshold;
-    private int _sinceRecalc;
     private bool _requested;
     private CumulativeTrade _liveTrade;
     private Bubble _liveBubble;
+    private readonly RenderPen _borderPen = new(Color.SteelBlue);
 
     private ThresholdMode _mode = ThresholdMode.Adaptive;
     private decimal _minVolume = 5;
@@ -126,17 +130,22 @@ public class BigTrades : Indicator
     /// <summary>Umbral actual (para mostrar en la UI).</summary>
     [Browsable(false)]
     public decimal CurrentThreshold => _mode == ThresholdMode.Fixed ? _minVolume : _adaptiveThreshold;
+    [Browsable(false)] public int BubbleCount => _bubbles.Count;
+    [Browsable(false)] public string Status => "Observed raw-print grouping only; compact packets, inferred/unknown sides and synthetic candles excluded. Grouping is not exchange-order completeness.";
 
     // ------------------------------------------------------------------ cálculo
 
     protected override void OnRecalculate()
     {
-        _bubbles.Clear();
-        _recent.Clear();
-        _adaptiveThreshold = 0;
         _requested = false;
-        _liveTrade = null;
-        _liveBubble = null;
+        ResetCumulativeState();
+    }
+
+    private void ResetCumulativeState()
+    {
+        _bubbles.Clear(); _recent.Clear(); _lowerSamples.Clear(); _upperSamples.Clear();
+        _excludedOldest = null; _sampleOrder = 0; _adaptiveThreshold = 0;
+        _liveTrade = null; _liveBubble = null;
     }
 
     protected override void OnCalculate(int bar, decimal value)
@@ -150,79 +159,71 @@ public class BigTrades : Indicator
 
     protected override void OnCumulativeTradesResponse(CumulativeTradesRequest request, IEnumerable<CumulativeTrade> cumulativeTrades)
     {
-        var list = cumulativeTrades as IList<CumulativeTrade> ?? cumulativeTrades.ToList();
-        _bubbles.Clear();
-        _recent.Clear();
-
-        // umbral adaptativo inicial: percentil de toda la historia cargada
-        if (_mode == ThresholdMode.Adaptive && list.Count > 0)
-        {
-            var vols = list.Select(t => t.Volume).ToArray();
-            Array.Sort(vols);
-            _adaptiveThreshold = PercentileOf(vols, _percentile);
-            foreach (var v in list.Skip(Math.Max(0, list.Count - _sample))) _recent.Enqueue(v.Volume);
-        }
-
+        // Replay the same causal rolling rule as live updates, retaining the exact final open-group identity.
+        ResetCumulativeState();
         int bar = 0;
-        foreach (var t in list)
+        foreach (var trade in cumulativeTrades)
         {
-            bar = FindBar(t.Time, bar);
-            if (t.Volume >= CurrentThreshold && t.Volume > 0) _bubbles.Add(MakeBubble(t, bar));
+            SelectOpenTrade(trade);
+            bar = FindBar(trade.Time, bar);
+            UpdateOpenTrade(trade, bar);
         }
-
         RedrawChart();
     }
 
     protected override void OnCumulativeTrade(CumulativeTrade trade)
     {
-        TrackAdaptive(trade.Volume);
-        _liveTrade = trade;
-        _liveBubble = null;
-        Consider(trade);
+        SelectOpenTrade(trade);
+        UpdateOpenTrade(trade, FindBar(trade.Time, Math.Max(0, CurrentBar - 5)));
+        RedrawChart();
     }
 
     protected override void OnUpdateCumulativeTrade(CumulativeTrade trade)
     {
-        if (!ReferenceEquals(trade, _liveTrade))
-        {
-            _liveTrade = trade;
-            _liveBubble = null;
-        }
-
-        Consider(trade);
-    }
-
-    private void Consider(CumulativeTrade trade)
-    {
-        if (trade.Volume < CurrentThreshold || trade.Volume <= 0) return;
-        int bar = FindBar(trade.Time, Math.Max(0, CurrentBar - 5));
-        if (_liveBubble == null)
-        {
-            _liveBubble = MakeBubble(trade, bar);
-            _bubbles.Add(_liveBubble);
-        }
-        else
-        {
-            var b = MakeBubble(trade, bar);
-            _liveBubble.Price = b.Price;
-            _liveBubble.Volume = b.Volume;
-            _liveBubble.Bar = b.Bar;
-        }
-
+        SelectOpenTrade(trade);
+        UpdateOpenTrade(trade, FindBar(trade.Time, Math.Max(0, CurrentBar - 5)));
         RedrawChart();
     }
 
-    private Bubble MakeBubble(CumulativeTrade t, int bar)
+    private void SelectOpenTrade(CumulativeTrade trade)
+    {
+        if (ReferenceEquals(trade, _liveTrade)) return;
+        if (_liveTrade != null && IsEligible(_liveTrade)) CommitAdaptive(_liveTrade.Volume);
+        _liveTrade = trade; _liveBubble = null;
+    }
+
+    private void UpdateOpenTrade(CumulativeTrade trade, int bar)
+    {
+        bool eligible = IsEligible(trade);
+        RefreshAdaptive(eligible);
+        if (!eligible || trade.Volume < CurrentThreshold || trade.Volume <= 0)
+        {
+            if (_liveBubble != null) _bubbles.Remove(_liveBubble);
+            _liveBubble = null; return;
+        }
+        if (_liveBubble == null) { _liveBubble = MakeBubble(trade, bar); _bubbles.Add(_liveBubble); }
+        else { _liveBubble.Price = BubblePrice(trade); _liveBubble.Volume = trade.Volume; _liveBubble.Bar = bar; }
+    }
+    private static bool IsEligible(CumulativeTrade trade)
+    {
+        if (trade.Ticks.Count == 0 || trade.Direction is not (TradeDirection.Buy or TradeDirection.Sell)) return false;
+        foreach (var tick in trade.Ticks)
+            if (!tick.IsObservedTrade || (tick.Quality & TradingHub.Market.DataQuality.InferredSide) != 0) return false;
+        return true;
+    }
+
+    private Bubble MakeBubble(CumulativeTrade trade, int bar) => new()
+    { Bar = bar, Price = BubblePrice(trade), Volume = trade.Volume, Buy = trade.Direction == TradeDirection.Buy, Time = trade.Time };
+
+    private decimal BubblePrice(CumulativeTrade trade)
     {
         decimal price = _anchor switch
         {
-            PriceAnchor.Last => t.Lastprice,
-            PriceAnchor.First => t.FirstPrice,
-            _ => AveragePrice(t),
+            PriceAnchor.Last => trade.Lastprice,
+            PriceAnchor.First => trade.FirstPrice,
+            _ => AveragePrice(trade),
         };
-        if (InstrumentInfo != null && InstrumentInfo.TickSize > 0)
-            price = Math.Round(price / InstrumentInfo.TickSize) * InstrumentInfo.TickSize;
-        return new Bubble { Bar = bar, Price = price, Volume = t.Volume, Buy = t.Direction == TradeDirection.Buy, Time = t.Time };
+        return InstrumentInfo != null && InstrumentInfo.TickSize > 0 ? Math.Round(price / InstrumentInfo.TickSize) * InstrumentInfo.TickSize : price;
     }
 
     private static decimal AveragePrice(CumulativeTrade t)
@@ -238,26 +239,51 @@ public class BigTrades : Indicator
         return v > 0 ? pv / v : t.Lastprice;
     }
 
-    private void TrackAdaptive(decimal volume)
+    private void CommitAdaptive(decimal volume)
     {
         if (_mode != ThresholdMode.Adaptive) return;
-        _recent.Enqueue(volume);
-        while (_recent.Count > _sample) _recent.Dequeue();
-        if (++_sinceRecalc >= 250 || _adaptiveThreshold == 0)
+        if (_recent.Count == _sample)
         {
-            _sinceRecalc = 0;
-            var arr = _recent.ToArray();
-            Array.Sort(arr);
-            _adaptiveThreshold = PercentileOf(arr, _percentile);
+            var oldest = _recent.Dequeue();
+            if (_excludedOldest == oldest) _excludedOldest = null; else RemoveSample(oldest);
         }
+        var sample = (Volume: volume, Order: ++_sampleOrder);
+        _recent.Enqueue(sample); InsertSample(sample);
     }
 
-    private static decimal PercentileOf(decimal[] sorted, decimal pct)
+    private void InsertSample((decimal Volume, long Order) sample)
     {
-        if (sorted.Length == 0) return 0;
-        double pos = (double)pct / 100.0 * (sorted.Length - 1);
-        int idx = Math.Clamp((int)Math.Round(pos), 0, sorted.Length - 1);
-        return sorted[idx];
+        if (_lowerSamples.Count > 0 && sample.CompareTo(_lowerSamples.Max) <= 0) _lowerSamples.Add(sample);
+        else _upperSamples.Add(sample);
+    }
+
+    private void RemoveSample((decimal Volume, long Order) sample)
+    { if (!_lowerSamples.Remove(sample)) _upperSamples.Remove(sample); }
+
+    private int PercentileRank(int count) => count == 0 ? 0 : Math.Clamp((int)Math.Round((double)_percentile / 100 * (count - 1)), 0, count - 1);
+
+    private void RefreshAdaptive(bool eligibleOpen)
+    {
+        if (_mode != ThresholdMode.Adaptive) return;
+        // Keep one extra completed sample in the queue, so rejecting the open group restores the full window.
+        if (eligibleOpen && _recent.Count == _sample && _excludedOldest == null)
+        {
+            _excludedOldest = _recent.Peek(); RemoveSample(_excludedOldest.Value);
+        }
+        else if (!eligibleOpen && _excludedOldest is { } excluded)
+        {
+            InsertSample(excluded); _excludedOldest = null;
+        }
+        int count = _lowerSamples.Count + _upperSamples.Count;
+        // For an open group, partition exactly the first rank closed values; its insertion is a clamp.
+        int lowerCount = eligibleOpen ? PercentileRank(count + 1) : count == 0 ? 0 : PercentileRank(count) + 1;
+        while (_lowerSamples.Count > lowerCount)
+        { var sample = _lowerSamples.Max; _lowerSamples.Remove(sample); _upperSamples.Add(sample); }
+        while (_lowerSamples.Count < lowerCount)
+        { var sample = _upperSamples.Min; _upperSamples.Remove(sample); _lowerSamples.Add(sample); }
+        _adaptiveThreshold = eligibleOpen
+            ? Math.Clamp(_liveTrade.Volume, _lowerSamples.Count == 0 ? decimal.MinValue : _lowerSamples.Max.Volume, _upperSamples.Count == 0 ? decimal.MaxValue : _upperSamples.Min.Volume)
+            : count == 0 ? 0 : _lowerSamples.Max.Volume;
     }
 
     /// <summary>Barra que contiene un instante (búsqueda desde una pista).</summary>
@@ -286,10 +312,12 @@ public class BigTrades : Indicator
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
-        if (ChartInfo == null || _bubbles.Count == 0) return;
+        if (ChartInfo == null) return;
+        FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, Status, Color.LightSkyBlue);
+        if (_bubbles.Count == 0) return;
         int first = FirstVisibleBarNumber, last = LastVisibleBarNumber;
         decimal thr = Math.Max(CurrentThreshold, 0.0000001m);
-        var font = new RenderFont("Arial", 8, FontStyle.Bold);
+        var font = FootprintStudyData.BoldFont;
 
         // las chicas primero para que las grandes queden arriba
         foreach (var b in _bubbles.Where(b => b.Bar >= first && b.Bar <= last).OrderBy(b => b.Volume))
@@ -301,7 +329,7 @@ public class BigTrades : Indicator
             var rect = new Rectangle(x - size / 2, y - size / 2, size, size);
             var col = b.Buy ? BuyColor : SellColor;
             context.FillEllipse(col, rect);
-            if (ShowBorder) context.DrawEllipse(new RenderPen(Color.FromArgb(220, col.R, col.G, col.B)), rect);
+            if (ShowBorder) { _borderPen.Color = Color.FromArgb(220, col.R, col.G, col.B); context.DrawEllipse(_borderPen, rect); }
             if (ShowVolume && size >= 22)
             {
                 string txt = VolumeFormat.Compact(b.Volume, ChartInfo.VolumeDecimals > 0 && b.Volume < 100 ? 1 : 0);

@@ -30,6 +30,10 @@ When a nonempty query has no matches in the current non-favorites profile, the s
 
 History ranges run from 30 minutes to five years, plus **All history** and **From a date**. Recent history uses individual trades and supports footprint. Older provider history uses one-minute bars, or five-/15-minute bars for ranges over 400 days; synthetic trades derived from these bars do **not** provide true footprint information. Tick history downloaded through [Data](datos.md) remains tick-level. The status bar indicates where footprint-capable history begins.
 
+When the chart itself has focus, committed text opens **Chart symbol / period**. A bare number can be either an exact numeric symbol or a minute period; both are separate visible choices. Choose the data connection explicitly, use arrows to select a visible result and Enter to apply it. A prefix without a selected row is not an implicit order or instrument selection. Escape cancels; `?` opens shortcut help. IME preedit is not committed chart text. Old asynchronous results are discarded after query, tab, focus, model, connection or window changes.
+
+Quick-entry data navigation retains the selected account identity. If the account is incompatible with the new source, it is visibly **unavailable**, with no fallback order route, until a compatible account is explicitly selected. A composite crypto source has no executable account, including the shared simulator. Practice keeps its run-owned instrument/account; open a separate normal chart to choose another symbol. Existing order hotkeys and their confirmations are not changed by chart entry.
+
 ## Periods
 
 The defaults are 1m, 5m, 15m, 1h, 4h and D. The selector includes:
@@ -89,6 +93,8 @@ See [First steps](primeros-pasos.md#keyboard-shortcuts) for keys. **Chart → Au
 
 The selected deep-zoom path permits a minimum width of 0.1 pixel per candle. Dense rendering reduces visible candles into per-pixel OHLC/close-extrema geometry; the final visible candle supplies the deliberate color policy, not the aggregate bucket's net direction. This is rendering only: analytic bars, strategy inputs and stored history are not downsampled. Normal pointer-focal zoom, live-edge behavior and time panning remain in effect. The actual 50,000-candle scene passed in the unmerged fixture worktree; it does not certify every GPU/native host (see [dashboard](TRANSLATION_STATUS.md#unmerged-non-kvp-adoption--2026-11-04)).
 
+The **View** control also exposes rectangle zoom, reset view, automatic scale, session boundaries, chart clock/time zone and chart shortcuts. Rectangle selection clips to the main price pane and changes the selected time/price bounds; reset returns to automatic price scale and the live edge. Existing order, drawing-handle and indicator gestures take precedence. Per-chart time zones survive symbol/period changes rather than being silently replaced by the global preference.
+
 ## Multiple charts
 
 - Layouts include one chart; two columns or rows; three columns; one large chart with two to the right or below; four (2 × 2); and six (3 × 2). New slots copy the active chart with other periods. Choosing a smaller layout keeps unused charts saved in the tab.
@@ -115,7 +121,13 @@ Tools include cursor (Esc), horizontal line/ray, vertical line, trend line, ray,
 - Double-click to edit color, width/style, fill, text, extensions, Fibonacci levels, exact prices, visibility, period restriction and locking. Save the style as the default, duplicate or delete the drawing.
 - Long/short position tools start with a 1:2 risk/reward stop and target. Entering quantity adds monetary estimates and marks target/stop touches. If both are touched in a bar, the conservative stop outcome is used.
 
+The extended position drawing can size from account risk using instrument point value, allowed quantity step, account/risk denomination and explicit estimated fees. Zero stop distance, insufficient risk or incompatible/unknown currency conversion produces no false tradable quantity. Monetary calculations support zero/negative prices where meaningful; percentage-of-entry labels are omitted when the entry is nonpositive. This is a sizing estimate, not an order, an FX service or a guarantee of executable liquidity.
+
+**Anchored VWAP** and **Fixed-range volume / delta profile** use available trade/provenance inputs. Range endpoints are inclusive UTC instants; the profile uses bounded sparse decimal rows rather than an array spanning every possible price tick. POC/value-area and raw volume totals are separate from display scaling. Corrections, source/provider, period, row size and resolution invalidate results. Shared drawing parameters do not share mutable calculator/geometry state between charts; clones calculate independently. Volume-bar split fractions are consumed once, including repeated forming-bar updates. CPU calculation is retained; no GPU prerequisite or unmeasured Metal claim applies.
+
 **Price alerts:** right-click a price to create a dotted horizontal alert. Horizontal lines/rays can also enable **Alert when price touches**. Crossing triggers the optional alert sound and a status message, then disables the alert.
+
+The title-bar bell or **Go → Alerts / delivery status** opens unified local price, indicator, strategy, risk and execution notifications. External webhook/Telegram destinations require explicit consent and secret-store configuration; local notification delivery does not depend on external success. Practice notifications do not egress. See [Alert delivery](ajustes.md#local-and-external-alerts) for pending/retry/revoke semantics.
 
 ## Indicators
 
@@ -146,6 +158,8 @@ DOM follows the active chart in the right panel. Default columns show buy orders
 
 The **trade tape** combines fills from one aggressive order with the same millisecond and side. Wheel scrolling pauses following; click the header to return to the latest trades. See [DOM trading](operar.md#trade-with-dom).
 
+**Recorded liquidity heatmap** is a separate resting-book overlay. Displaying it does not enable depth recording. Source/venue, gaps, stale/partial books and I/O errors remain visible; the aggregate crypto DOM/heatmap is explicitly first-venue, not consolidated. See [Recorded depth and heatmap fidelity](datos.md#recorded-depth-and-heatmap-fidelity).
+
 ## Volume profile
 
 - **Session volume profile** supports session, weekly or visible-history profiles, volume/delta/bid-ask modes, POC, a default 70% value area and VAH/VAL lines.
@@ -153,7 +167,7 @@ The **trade tape** combines fills from one aggressive order with the same millis
 
 ## Replay
 
-[Data → Replay](datos.md#replay) opens stored days in a new tab with speed, pause and seek controls. Trade it with the simulated account.
+[Data → Replay](datos.md#replay) opens selected local history in an isolated practice run. **Go → Random / blind practice** offers reproducible seeded local selection and optional instrument/date concealment, Reveal and a run-owned result/journal. Each run has its own account, fills, fees, portfolio and clock; it cannot route real orders or contaminate ordinary simulation.
 
 ## Strategies on charts
 

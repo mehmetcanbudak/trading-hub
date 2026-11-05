@@ -102,7 +102,8 @@ internal sealed partial class StrategiesView
             try { await TradingViewResearchService.Default.ConfigureAsync(owner); }
             catch (Exception ex) { AddNote(MaterialIconKind.AlertCircleOutline, "Could not open research access: " + ex.Message, Ui.Down); }
         });
-        var title = Ui.V(3, Ui.H(8, _chatTitle, _chatEngine), _claudeStatus, Ui.H(4, _chatModel, _chatEffort, research));
+        var pine = Ui.Button("Import Pine", MaterialIconKind.Import, () => _ = ImportPineAsync());
+        var title = Ui.V(3, Ui.H(8, _chatTitle, _chatEngine), _claudeStatus, Ui.H(4, _chatModel, _chatEffort), Ui.H(4, research, pine));
         // laboratorio: Claude corre backtests, optimizaciones y walk-forward por su cuenta
         _labToggle.Content = Ui.H(6, Ui.Icon(MaterialIconKind.FlaskOutline, 15), new TextBlock { Text = "Laboratory", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
         _labToggle.Padding = new Thickness(8, 4);
@@ -240,6 +241,37 @@ internal sealed partial class StrategiesView
         UpdateClaudeHint();
         ShowSuggestions();
         _ = DetectClaudeAsync();
+    }
+
+    private async Task ImportPineAsync()
+    {
+        if (_chatBusy || TopLevel.GetTopLevel(this) is not Window owner) return;
+        try
+        {
+            if (await PineImports.PickAsync(owner, AppPaths.UserIndicators) is { } source) await ReviewPineAsync(source);
+        }
+        catch (Exception ex) { AddNote(MaterialIconKind.AlertCircleOutline, "Could not import Pine source: " + ex.Message, Ui.Down); }
+    }
+
+    /// <summary>Navigation opens a local preview only; the dialog owns the later explicit draft-only Send action.</summary>
+    internal async Task ReviewPineAsync(PineImportSource source)
+    {
+        if (_chatTornDown || TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (_chatBusy)
+        {
+            AddNote(MaterialIconKind.InformationOutline, $"Pine source is preserved locally at {source.Path}. Finish the active assistant response, then import the saved Pine file to review a handoff. No Pine source was sent.", Ui.Warn);
+            return;
+        }
+        _tabs.Select("code");
+        ShowTab("code");
+        var preview = PineImports.Preview(source, _claude.Engine, _chatModel.Text, _chatEffort.Text);
+        try { await Windows.PineReviewWindow.ShowOwnedAsync(_svc, owner, preview); }
+        catch (OperationCanceledException) when (_svc.PineHandoffs.IsStopping) { /* App-owned shutdown canceled the pending review before egress. */ }
+        catch (ObjectDisposedException) when (_svc.PineHandoffs.IsStopping) { /* True shutdown has already rejected new handoffs. */ }
+        catch (Exception error)
+        {
+            if (!_chatTornDown) AddNote(MaterialIconKind.AlertCircleOutline, "Pine review did not complete cleanly: " + error.Message, Ui.Down);
+        }
     }
 
 

@@ -74,6 +74,8 @@ public sealed class StrategyOrder
     /// <summary>En vivo: cantidad real enviada a la cuenta (con el tamaño de la cartera) y cuánto ya se contabilizó.</summary>
     internal decimal LiveQuantity { get; set; }
     internal decimal Booked { get; set; }
+    internal bool ConfirmedCoverage { get; set; }
+    internal decimal ExecutionBaseline { get; set; }
 
     public bool IsActive => State == StrategyOrderState.Active;
 
@@ -97,11 +99,15 @@ internal interface IStrategyHost
     decimal RealizedPnL { get; }
     IReadOnlyList<StrategyOrder> ActiveOrders { get; }
     bool IsBacktest { get; }
+    bool AlertsEnabled => false;
     StrategyOrder Submit(OrderSide side, StrategyOrderType type, decimal quantity, decimal price, string name);
     void Cancel(StrategyOrder order);
     void Modify(StrategyOrder order, decimal price);
     void Log(string message);
 }
+
+/// <summary>A causal strategy notification. Its stable ID permits bounded downstream deduplication, not exactly-once delivery.</summary>
+public sealed record StrategyAlert(string Id, DateTime TimeUtc, string Instrument, string Source, string Message);
 
 /// <summary>
 /// Base de las estrategias. Sobrescribí <see cref="OnInit"/> para crear indicadores y
@@ -111,6 +117,7 @@ public abstract class Strategy
 {
     private readonly List<Series> _indicators = new();
     internal IStrategyHost Host = null!;
+    public event Action<StrategyAlert>? AlertRaised;
 
     // ----------------------------------------------------------------- parámetros comunes
 
@@ -337,6 +344,21 @@ public abstract class Strategy
     }
 
     protected void Log(string message) => Host.Log(message);
+
+    /// <summary>Publishes only during active live/practice processing, never historical recalculation or warm-up.
+    /// Notifications are observational; failed listeners cannot block orders or protection.</summary>
+    protected void Alert(string message, string? id = null)
+    {
+        if (Host == null || !Host.AlertsEnabled || string.IsNullOrWhiteSpace(message)) return;
+        var alert = new StrategyAlert(id ?? Guid.NewGuid().ToString("N"), Host.Time, Host.Instrument.Symbol,
+            DisplayName(GetType()), message);
+        if (AlertRaised == null) return;
+        foreach (Action<StrategyAlert> handler in AlertRaised.GetInvocationList())
+        {
+            try { handler(alert); }
+            catch { /* Notification failures never alter strategy execution. */ }
+        }
+    }
 
     // ----------------------------------------------------------------- dibujos en el gráfico
 

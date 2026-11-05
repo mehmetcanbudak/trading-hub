@@ -113,4 +113,96 @@ public class SecretStoreTests
             Directory.Delete(root, true);
         }
     }
+
+    [Fact]
+    public async Task FileSecretStore_AsyncWritesAreSerializedWithoutLosingOtherAccounts()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tradinghub-secrets-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "secrets.json");
+        try
+        {
+            await using var store = new FileSecretStore(path);
+            await Task.WhenAll(Enumerable.Range(0, 32).Select(index => store.SetAsync("account:" + index, "value:" + index)));
+            await using var reopened = new FileSecretStore(path);
+            for (int index = 0; index < 32; index++)
+                Assert.Equal("value:" + index, await reopened.GetAsync("account:" + index));
+            await Task.WhenAll(Enumerable.Range(0, 16).Select(index => store.SetAsync("account:" + index, null)));
+            for (int index = 0; index < 32; index++)
+                Assert.Equal(index < 16 ? "" : "value:" + index, await reopened.GetAsync("account:" + index));
+            Assert.Single(Directory.GetFiles(root));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData("not-json fake-private-value")]
+    [InlineData("null")]
+    [InlineData("{\"account:secret\":null,\"other\":\"fake-private-value\"}")]
+    [InlineData("{\"account:secret\":[\"fake-private-value\"]}")]
+    public async Task FileSecretStore_MalformedStateIsNotAbsenceAndCannotBeOverwritten(string contents)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "tradinghub-secrets-" + Guid.NewGuid().ToString("N") + ".json");
+        await File.WriteAllTextAsync(path, contents);
+        try
+        {
+            await using var store = new FileSecretStore(path);
+            var read = await Assert.ThrowsAsync<IOException>(() => store.GetAsync("account:secret"));
+            var save = await Assert.ThrowsAsync<IOException>(() => store.SetAsync("account:secret", "replacement"));
+            var delete = await Assert.ThrowsAsync<IOException>(() => store.SetAsync("account:secret", null));
+            foreach (var error in new[] { read, save, delete })
+            {
+                Assert.DoesNotContain("fake-private-value", error.ToString());
+                Assert.DoesNotContain(path, error.ToString());
+                Assert.Null(error.InnerException);
+            }
+            Assert.Equal(contents, await File.ReadAllTextAsync(path));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task FileSecretStore_IoFailuresRemainVisibleWithoutExposingPrivatePathsOrValues()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tradinghub-fake-private-value-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var unreadable = new FileSecretStore(root);
+            var read = await Assert.ThrowsAsync<IOException>(() => unreadable.GetAsync("account:secret"));
+            await using var unwritable = new FileSecretStore(Path.Combine(root, "missing-parent", "secrets.json"));
+            var save = await Assert.ThrowsAsync<IOException>(() => unwritable.SetAsync("account:secret", "fake-private-value"));
+            foreach (var error in new[] { read, save })
+            {
+                Assert.DoesNotContain("fake-private-value", error.ToString());
+                Assert.DoesNotContain(root, error.ToString());
+                Assert.Null(error.InnerException);
+            }
+            Assert.Empty(Directory.GetFileSystemEntries(root));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task FileSecretStore_CanceledAndClosedOperationsCannotChangeSavedCredentials()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "tradinghub-secrets-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var store = new FileSecretStore(path);
+            await store.SetAsync("account:secret", "saved");
+            using var cancel = new CancellationTokenSource();
+            cancel.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.SetAsync("account:secret", "replacement", cancel.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.GetAsync("account:secret", cancel.Token));
+            Assert.Equal("saved", await store.GetAsync("account:secret"));
+            await store.DisposeAsync();
+            await store.DisposeAsync();
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => store.GetAsync("account:secret"));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => store.SetAsync("account:secret", null));
+            await using var reopened = new FileSecretStore(path);
+            Assert.Equal("saved", await reopened.GetAsync("account:secret"));
+        }
+        finally { File.Delete(path); }
+    }
 }

@@ -25,6 +25,12 @@
 
 The backtest's zone/session start determines the daily-loss boundary. Before orders are allowed, the runner warms bars/indicators using loaded instrument history and seeds context from prior-month hourly data. Insufficient loaded bars can delay indicator readiness. The same strategy cannot run twice on the same instrument/account. Futures notices identify actual order quantity and contract.
 
+### Execution facts and saved ownership
+
+Where the account exposes confirmed execution facts, the runner uses the actual execution price, UTC time and available account-currency fees, not the latest market mark or wall clock. Facts from all owned orders are merged chronologically, using a reliable account execution sequence for equal-time ties when supplied. Late/time corrections rebuild the ordered ledger and its trades, curve/peak/drawdown; fee-only corrections recompute financial results without inventing another execution. Missing execution/cost coverage holds new exposure and remains visible.
+
+The ordinary legacy `SimBroker` path remains an **estimated mark/time and unknown-fee fallback**, not a confirmed-execution provider. Practice's deterministic configured fees are simulation facts, not exchange certification. A supported Bybit runner freezes provider/environment/authority/verified-native-UID scope before saved history/protection is read. Same-account credential rotation can preserve ownership; display names, an unverified UID or another account/origin cannot alias the ledger.
+
 ### From a chart
 
 The robot menu lists strategies; Backtesting also offers **Add to active chart**. Initially the strategy is **visual only**: historical signals use a no-cost overlay simulation, and new visual activity uses a separate private `Visual` simulated account, not your account.

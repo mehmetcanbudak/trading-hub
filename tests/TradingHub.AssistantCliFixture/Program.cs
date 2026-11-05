@@ -71,17 +71,35 @@ internal static class Program
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Configured MCP child did not start.");
             var output = process.StandardOutput.ReadToEndAsync();
             var errors = process.StandardError.ReadToEndAsync();
-            await process.StandardInput.WriteLineAsync("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"owned-fixture\",\"version\":\"1\"}}}");
-            process.StandardInput.Close();
-            try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)); }
-            catch
+            var exit = process.WaitForExitAsync();
+            Exception? failure = null;
+            try
             {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync();
-                throw;
+                await process.StandardInput.WriteLineAsync("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"owned-fixture\",\"version\":\"1\"}}}");
+                process.StandardInput.Close();
+                await exit.WaitAsync(TimeSpan.FromSeconds(15));
             }
-            if (process.ExitCode != 0) throw new InvalidOperationException("Configured MCP child rejected its environment: " + await errors);
-            using var response = JsonDocument.Parse(await output);
+            catch (Exception error)
+            {
+                failure = error;
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            finally
+            {
+                await exit;
+                await Task.WhenAll(output, errors);
+            }
+            string stdout = await output, stderr = await errors;
+            string capture = Path.Combine(Path.GetDirectoryName(expectedPath)!, server.Name + ".mcp");
+            await File.WriteAllTextAsync(capture + ".stdout.txt", stdout);
+            await File.WriteAllTextAsync(capture + ".stderr.txt", stderr);
+            if (failure != null)
+                throw new InvalidOperationException("Configured MCP child failed: " + failure.Message
+                    + "\nChild stdout:\n" + stdout + "\nChild stderr:\n" + stderr, failure);
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException("Configured MCP child exited with code " + process.ExitCode
+                    + ".\nChild stdout:\n" + stdout + "\nChild stderr:\n" + stderr);
+            using var response = JsonDocument.Parse(stdout);
             if (response.RootElement.GetProperty("id").GetInt32() != 1 || !response.RootElement.TryGetProperty("result", out _))
                 throw new InvalidOperationException("Configured MCP child did not answer initialization.");
             children++;
@@ -139,8 +157,10 @@ internal static class Program
 
     private static void Equal(string actual, string expected, string name)
     {
-        if (!Path.GetFullPath(actual).Equals(Path.GetFullPath(expected), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
-            throw new InvalidOperationException("The actual " + name + " consumer escaped the isolated store.");
+        string actualPath = Path.GetFullPath(actual), expectedPath = Path.GetFullPath(expected);
+        if (!actualPath.Equals(expectedPath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new InvalidOperationException("The actual " + name + " consumer escaped the isolated store."
+                + "\nExpected: " + expectedPath + "\nActual: " + actualPath);
     }
 
     // Generated adapter values use quoted-key inline TOML with JSON-compatible scalar/array syntax.

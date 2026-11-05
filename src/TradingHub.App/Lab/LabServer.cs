@@ -7,6 +7,7 @@ using TradingHub.App.Services;
 using TradingHub.Data;
 using TradingHub.Market;
 using TradingHub.Strategies;
+using TradingHub.Networking;
 
 namespace TradingHub.App.Lab;
 
@@ -653,7 +654,9 @@ internal static class LabServer
         var from = DateOnly.FromDateTime(Date(a, "from", false));
         var to = DateOnly.FromDateTime(Date(a, "to", false));
         if (to.DayNumber - from.DayNumber > 61) throw new ArgumentException("Maximum 62 days per call.");
-        var inst = await ResolveInstrumentAsync(feed, symbol, preferExchange: true);
+        var network = new AppNetworkProxy(AppSettings.Load(), Keychain.Store).CreateFactory();
+        using var archiveHttp = network.CreateHttpClient(TimeSpan.FromMinutes(10));
+        var inst = await ResolveInstrumentAsync(feed, symbol, preferExchange: true, network: network);
         int ok = 0, skipped = 0, missing = 0;
         long trades = 0;
         for (var d = from; d <= to; d = d.AddDays(1))
@@ -664,7 +667,7 @@ internal static class LabServer
                 continue;
             }
 
-            var list = await PublicArchives.DownloadDayAsync(inst, d, null, CancellationToken.None);
+            var list = await PublicArchives.DownloadDayAsync(inst, d, null, CancellationToken.None, http: archiveHttp);
             if (list == null)
             {
                 missing++;
@@ -681,24 +684,28 @@ internal static class LabServer
     }
 
     /// <summary>Instrumento con su tick y valor del punto (del exchange si se puede; si no, del archivo).</summary>
-    private static async Task<Instrument> ResolveInstrumentAsync(string feed, string symbol, bool preferExchange = false)
+    private static async Task<Instrument> ResolveInstrumentAsync(string feed, string symbol, bool preferExchange = false, ProxyHandlerFactory? network = null)
     {
         if (preferExchange || feed.StartsWith("binance") || feed.StartsWith("bybit"))
         {
             try
             {
+                network ??= new AppNetworkProxy(AppSettings.Load(), Keychain.Store).CreateFactory();
                 TradingHub.Feeds.IMarketDataFeed? f = feed switch
                 {
-                    "binance-futures" => new TradingHub.Feeds.Binance.BinanceFeed(true),
-                    "binance-spot" => new TradingHub.Feeds.Binance.BinanceFeed(false),
-                    "bybit-linear" => new TradingHub.Feeds.Bybit.BybitFeed(),
+                    "binance-futures" => new TradingHub.Feeds.Binance.BinanceFeed(true,
+                        httpClient: network.CreateHttpClient(TimeSpan.FromSeconds(30)), ownsHttpClient: true),
+                    "binance-spot" => new TradingHub.Feeds.Binance.BinanceFeed(false,
+                        httpClient: network.CreateHttpClient(TimeSpan.FromSeconds(30)), ownsHttpClient: true),
+                    "bybit-linear" => new TradingHub.Feeds.Bybit.BybitFeed(
+                        httpClient: network.CreateHttpClient(TimeSpan.FromSeconds(30)), ownsHttpClient: true),
                     _ => null,
                 };
                 if (f != null)
                 {
+                    using var ownedFeed = f;
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                     var list = await f.GetInstrumentsAsync(cts.Token);
-                    f.Dispose();
                     var inst = list.FirstOrDefault(i => i.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
                     if (inst != null) return inst;
                 }

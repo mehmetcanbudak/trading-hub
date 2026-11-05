@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SkiaSharp;
 using TradingHub.Data;
 using TradingHub.Indicators;
@@ -15,6 +16,7 @@ internal sealed class FootprintRenderer
     private readonly SKPaint _fill = new() { IsAntialias = false, Style = SKPaintStyle.Fill };
     private readonly SKPaint _stroke = new() { IsAntialias = false, Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
     private readonly SKPaint _text = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly Ctx _context = new();
 
     private const float ColumnGap = 2;
 
@@ -32,6 +34,27 @@ internal sealed class FootprintRenderer
             if (d.Ask > MaxSide) MaxSide = d.Ask;
             if (d.Trades > MaxTrades) MaxTrades = d.Trades;
         }
+        public void Take(in Stats other)
+        {
+            MaxVol = Math.Max(MaxVol, other.MaxVol);
+            MaxAbsDelta = Math.Max(MaxAbsDelta, other.MaxAbsDelta);
+            MaxSide = Math.Max(MaxSide, other.MaxSide);
+            MaxTrades = Math.Max(MaxTrades, other.MaxTrades);
+        }
+    }
+
+    private struct AggregatedRow(long row, LevelData data)
+    {
+        public long Row = row;
+        public LevelData Data = data;
+    }
+
+    private readonly struct VisibleRow(long row, LevelData data, float y, float height, long pixel)
+    {
+        public readonly long Row = row;
+        public readonly LevelData Data = data;
+        public readonly float Y = y, Height = height;
+        public readonly long Pixel = pixel;
     }
 
     /// <summary>Contexto de dibujo de una vela.</summary>
@@ -47,14 +70,35 @@ internal sealed class FootprintRenderer
         public double RowH;
         public long MinRow, MaxRow;
 
-        // filas agregadas (factor K de filas base por fila visible)
+        // Analytic rows remain at the user's K; only occupied rows consume storage.
         public int K = 1;
-        public LevelData[] Agg = new LevelData[64];
+        public readonly List<AggregatedRow> Agg = new();
+        public readonly List<VisibleRow> Visible = new();
+        public (float Left, float Right)[] ColumnRects = Array.Empty<(float, float)>();
         public long AggMin, AggMax;
         public long PocRow;
-        public decimal PocVolume;
+        public int PocIndex;
+        public decimal PocVolume, TotalVolume;
+        public Stats AllStats;
+        public double PixelHeight = 1;
 
-        public LevelData Get(long r) => r < AggMin || r > AggMax ? default : Agg[r - AggMin];
+        public int LowerBound(long row)
+        {
+            int low = 0, high = Agg.Count;
+            while (low < high)
+            {
+                int middle = low + ((high - low) >> 1);
+                if (Agg[middle].Row < row) low = middle + 1;
+                else high = middle;
+            }
+            return low;
+        }
+
+        public LevelData Get(long row)
+        {
+            int index = LowerBound(row);
+            return index < Agg.Count && Agg[index].Row == row ? Agg[index].Data : default;
+        }
 
         /// <summary>Fila agregada de un precio en ticks.</summary>
         public long RowOfTicks(long ticks) => CandleSeries.FloorDiv(ticks, (long)Series.PriceStep * K);
@@ -63,46 +107,82 @@ internal sealed class FootprintRenderer
         public decimal Center(long r)
         {
             long step = (long)Series.PriceStep * K;
-            return (r * step + (step - 1) / 2m) * Series.Instrument.TickSize;
+            return (r * (decimal)step + (step - 1) / 2m) * Series.Instrument.TickSize;
         }
 
-        /// <summary>Agrupa los niveles de la vela en filas de K filas base.</summary>
-        public void Aggregate(TradingHub.Data.Candle c)
+        /// <summary>Aggregate occupied source levels without allocating or walking their price span.</summary>
+        public void Aggregate(TradingHub.Data.Candle candle)
         {
-            var lv = c.Levels;
+            Agg.Clear();
+            Visible.Clear();
             PocRow = 0;
-            PocVolume = 0;
-            if (lv.IsEmpty)
+            PocIndex = 0;
+            PocVolume = TotalVolume = 0;
+            AllStats = default;
+            foreach (var (row, data) in candle.Levels.Enumerate())
             {
-                AggMin = 0;
-                AggMax = -1;
-                return;
-            }
-
-            AggMin = CandleSeries.FloorDiv(lv.MinRow, K);
-            AggMax = CandleSeries.FloorDiv(lv.MaxRow, K);
-            int n = (int)(AggMax - AggMin + 1);
-            if (Agg.Length < n) Agg = new LevelData[Math.Max(n, Agg.Length * 2)];
-            Array.Clear(Agg, 0, n);
-            foreach (var (row, d) in lv.Enumerate())
-            {
-                ref var a = ref Agg[CandleSeries.FloorDiv(row, K) - AggMin];
-                a.Bid += d.Bid;
-                a.Ask += d.Ask;
-                a.Between += d.Between;
-                a.Trades += d.Trades;
-                if (d.LastTimeTicks > a.LastTimeTicks) a.LastTimeTicks = d.LastTimeTicks;
-            }
-
-            for (int i = 0; i < n; i++)
-            {
-                var v = Agg[i].Volume;
-                if (v > PocVolume)
+                long grouped = CandleSeries.FloorDiv(row, K);
+                if (Agg.Count == 0 || Agg[^1].Row != grouped)
                 {
-                    PocVolume = v;
-                    PocRow = AggMin + i;
+                    Agg.Add(new AggregatedRow(grouped, data));
+                    continue;
+                }
+                ref var sum = ref CollectionsMarshal.AsSpan(Agg)[^1].Data;
+                sum.Bid += data.Bid;
+                sum.Ask += data.Ask;
+                sum.Between += data.Between;
+                sum.Trades = checked(sum.Trades + data.Trades);
+                sum.LastTimeTicks = Math.Max(sum.LastTimeTicks, data.LastTimeTicks);
+            }
+            AggMin = Agg.Count > 0 ? Agg[0].Row : 0;
+            AggMax = Agg.Count > 0 ? Agg[^1].Row : -1;
+            for (int index = 0; index < Agg.Count; index++)
+            {
+                ref readonly var row = ref CollectionsMarshal.AsSpan(Agg)[index];
+                AllStats.Take(row.Data);
+                TotalVolume += row.Data.Volume;
+                if (index == 0 || row.Data.Volume > PocVolume)
+                {
+                    PocVolume = row.Data.Volume;
+                    PocRow = row.Row;
+                    PocIndex = index;
                 }
             }
+        }
+
+        /// <summary>
+        /// Pixel decimation selects the highest-volume actual row, never sums unrelated prices or
+        /// changes analytic K, full-source normalization or POC. Text is already disabled below pixel size.
+        /// </summary>
+        public void BuildVisible()
+        {
+            Visible.Clear();
+            bool compressed = RowH < PixelHeight;
+            for (int index = LowerBound(MinRow); index < Agg.Count && Agg[index].Row <= MaxRow; index++)
+            {
+                ref readonly var row = ref CollectionsMarshal.AsSpan(Agg)[index];
+                float y = Main.Y(Center(row.Row));
+                if (y + RowH / 2 < Main.Rect.Top || y - RowH / 2 > Main.Rect.Bottom) continue;
+                long pixel = compressed ? (long)Math.Floor((y - Main.Rect.Top) / PixelHeight) : 0;
+                float height = (float)Math.Max(RowH, PixelHeight);
+                if (compressed) y = (float)(Main.Rect.Top + (pixel + 0.5) * PixelHeight);
+                var item = new VisibleRow(row.Row, row.Data, y, height, pixel);
+                if (compressed && Visible.Count > 0 && Visible[^1].Pixel == pixel)
+                {
+                    if (item.Data.Volume > Visible[^1].Data.Volume) Visible[^1] = item;
+                }
+                else Visible.Add(item);
+            }
+        }
+
+        public void ClearSources()
+        {
+            Model = null!;
+            Main = null!;
+            Series = null!;
+            L = null!;
+            T = null!;
+            C = null!;
         }
         public int Decimals;
         public SKFont Font = null!, Bold = null!, Small = null!;
@@ -138,21 +218,35 @@ internal sealed class FootprintRenderer
         double rowH = baseRowH * k;
 
         float fontPx = (float)Math.Clamp(rowH * 0.70, 7, 13);
-        var ctx = new Ctx
-        {
-            Model = model,
-            Main = main,
-            Series = series,
-            L = L,
-            T = t,
-            RowH = rowH,
-            Font = RenderContext.GetFont(t.FontFamily, fontPx, false, false),
-            Bold = RenderContext.GetFont(t.FontFamily, fontPx, true, false),
-            Small = RenderContext.GetFont(t.FontFamily, Math.Max(7, fontPx - 1.5f), false, false),
-            GapY = rowH > 7 ? 1 : 0,
-            VolumeStep = model.Instrument.VolumeStep,
-            K = k,
-        };
+        var ctx = _context;
+        ctx.Model = model;
+        ctx.Main = main;
+        ctx.Series = series;
+        ctx.L = L;
+        ctx.T = t;
+        ctx.RowH = rowH;
+        ctx.Font = RenderContext.GetFont(t.FontFamily, fontPx, false, false);
+        ctx.Bold = RenderContext.GetFont(t.FontFamily, fontPx, true, false);
+        ctx.Small = RenderContext.GetFont(t.FontFamily, Math.Max(7, fontPx - 1.5f), false, false);
+        ctx.GapY = rowH > 7 ? 1 : 0;
+        ctx.VolumeStep = model.Instrument.VolumeStep;
+        ctx.K = k;
+        var matrix = canvas.TotalMatrix;
+        double scale = Math.Sqrt((double)matrix.ScaleY * matrix.ScaleY + (double)matrix.SkewX * matrix.SkewX);
+        ctx.PixelHeight = scale > 0 && double.IsFinite(scale) ? 1 / scale : 1;
+        try { RenderCore(canvas, ctx, layout, slotW, hiddenBars); }
+        finally { ctx.ClearSources(); }
+    }
+
+    private void RenderCore(SKCanvas canvas, Ctx ctx, ChartLayout layout, float slotW, HashSet<int>? hiddenBars)
+    {
+        var model = ctx.Model;
+        var main = ctx.Main;
+        var series = ctx.Series;
+        var L = ctx.L;
+        var t = ctx.T;
+        double rowH = ctx.RowH;
+        float fontPx = ctx.Font.Size;
 
         // máximos sobre lo visible (si los colores no son por vela) — sobre las filas agregadas
         var visible = new Stats();
@@ -160,7 +254,7 @@ internal sealed class FootprintRenderer
         for (int i = Math.Max(0, layout.FirstVisible); i <= Math.Min(layout.LastVisible, series.Count - 1); i++)
         {
             ctx.Aggregate(series[i]);
-            for (long r = ctx.AggMin; r <= ctx.AggMax; r++) visible.Take(ctx.Agg[r - ctx.AggMin]);
+            visible.Take(ctx.AllStats);
             visMaxVol = Math.Max(visMaxVol, ctx.PocVolume);
         }
 
@@ -169,9 +263,12 @@ internal sealed class FootprintRenderer
         int totDecimals = ChooseDecimals(visMaxVol * 20, model.Instrument.VolumeDecimals);
         var totalsFont = RenderContext.GetFont(t.FontFamily, Math.Clamp(fontPx + 1.5f, 9, 13), true, false);
 
-        long topRow = ctx.RowOfTicks(model.Instrument.ToTicks((decimal)main.Top)) + 1;
-        long botRow = ctx.RowOfTicks(model.Instrument.ToTicks((decimal)main.Bottom)) - 1;
-        var rects = new (float Left, float Right)[L.Columns.Count];
+        long topRow = ctx.RowOfTicks(model.Instrument.ToTicks((decimal)main.Top));
+        long botRow = ctx.RowOfTicks(model.Instrument.ToTicks((decimal)main.Bottom));
+        if (topRow < long.MaxValue) topRow++;
+        if (botRow > long.MinValue) botRow--;
+        if (ctx.ColumnRects.Length < L.Columns.Count) Array.Resize(ref ctx.ColumnRects, L.Columns.Count);
+        var rects = ctx.ColumnRects;
 
         for (int i = Math.Max(0, layout.FirstVisible); i <= Math.Min(layout.LastVisible, series.Count - 1); i++)
         {
@@ -205,13 +302,8 @@ internal sealed class FootprintRenderer
             ctx.Aggregate(c);
             ctx.MinRow = Math.Max(ctx.AggMin, botRow);
             ctx.MaxRow = Math.Min(ctx.AggMax, topRow);
-            if (L.ProportionPerCandle)
-            {
-                var st = new Stats();
-                for (long r = ctx.AggMin; r <= ctx.AggMax; r++) st.Take(ctx.Agg[r - ctx.AggMin]);
-                ctx.S = st;
-            }
-            else ctx.S = visible;
+            ctx.BuildVisible();
+            ctx.S = L.ProportionPerCandle ? ctx.AllStats : visible;
 
             for (int ci = 0; ci < L.Columns.Count; ci++)
             {
@@ -309,12 +401,12 @@ internal sealed class FootprintRenderer
         var t = x.T;
                 float w = right - left, mid = left + w / 2;
         bool showText = x.RowH >= 9.5 && w >= MinTextWidth(col.Value) * 0.75f;
-        for (long r = x.MinRow; r <= x.MaxRow; r++)
+        foreach (ref readonly var row in CollectionsMarshal.AsSpan(x.Visible))
         {
-            var d = x.Get(r);
-            if (d.IsEmpty) continue;
-            float yc = x.Main.Y(x.Center(r));
-            var cell = new SKRect(left, (float)(yc - x.RowH / 2) + x.GapY / 2, right, (float)(yc + x.RowH / 2) - x.GapY / 2);
+            long r = row.Row;
+            ref readonly var d = ref row.Data;
+            float yc = row.Y;
+            var cell = new SKRect(left, yc - row.Height / 2 + x.GapY / 2, right, yc + row.Height / 2 - x.GapY / 2);
             CellBackground(canvas, x, col, cell, d);
             if (!showText) continue;
             var (askImb, bidImb) = Imbalance(x, r, d);
@@ -337,7 +429,8 @@ internal sealed class FootprintRenderer
             float yc = x.Main.Y(x.Center(x.PocRow));
             _stroke.Color = t.Poc;
             _stroke.StrokeWidth = x.RowH >= 8 ? 1.5f : 1f;
-            canvas.DrawRect(new SKRect(left + 0.75f, (float)(yc - x.RowH / 2) + 0.75f, right - 0.75f, (float)(yc + x.RowH / 2) - 0.75f), _stroke);
+            float height = (float)Math.Max(x.RowH, x.PixelHeight), inset = Math.Min(0.75f, height / 4);
+            canvas.DrawRect(new SKRect(left + 0.75f, yc - height / 2 + inset, right - 0.75f, yc + height / 2 - inset), _stroke);
         }
     }
 
@@ -349,21 +442,21 @@ internal sealed class FootprintRenderer
         var pos = ColorOr(col.PositiveColor, t.LadderPositive);
         var neg = ColorOr(col.NegativeColor, t.LadderNegative);
         var neu = ColorOr(col.NeutralColor, t.ClusterBase);
-        for (long r = x.MinRow; r <= x.MaxRow; r++)
+        foreach (ref readonly var row in CollectionsMarshal.AsSpan(x.Visible))
         {
-            var d = x.Get(r);
-            if (d.IsEmpty) continue;
-            float yc = x.Main.Y(x.Center(r));
+            long r = row.Row;
+            ref readonly var d = ref row.Data;
+            float yc = row.Y;
             int hl = Highlight(x, col.Highlight, r, d, col.Value);
             if (hl != 0)
             {
                 _fill.Color = hl == 1 ? pos : hl == -1 ? neg : neu;
-                canvas.DrawRect(new SKRect(left, (float)(yc - x.RowH / 2) + x.GapY / 2, right, (float)(yc + x.RowH / 2) - x.GapY / 2), _fill);
+                canvas.DrawRect(new SKRect(left, yc - row.Height / 2 + x.GapY / 2, right, yc + row.Height / 2 - x.GapY / 2), _fill);
             }
 
             if (!showText) continue;
             var (askImb, bidImb) = col.Value == FootprintValue.BidAsk ? Imbalance(x, r, d) : (false, false);
-            var cell = new SKRect(left, (float)(yc - x.RowH / 2), right, (float)(yc + x.RowH / 2));
+            var cell = new SKRect(left, yc - row.Height / 2, right, yc + row.Height / 2);
             DrawValueText(canvas, x, col, d, cell, yc + x.BaseOff, askImb && x.L.ShowImbalances, bidImb && x.L.ShowImbalances, r == x.PocRow, col.Align, hl != 0);
         }
     }
@@ -380,12 +473,12 @@ internal sealed class FootprintRenderer
         var neg = ColorOr(col.NegativeColor, t.LadderNegative);
         bool numbers = col.ShowNumbers && x.RowH >= 7.5 && w >= 26;
 
-        for (long r = x.MinRow; r <= x.MaxRow; r++)
+        foreach (ref readonly var row in CollectionsMarshal.AsSpan(x.Visible))
         {
-            var d = x.Get(r);
-            if (d.IsEmpty) continue;
-            float yc = x.Main.Y(x.Center(r));
-            float top = (float)(yc - x.RowH / 2) + x.GapY / 2, bottom = (float)(yc + x.RowH / 2) - x.GapY / 2;
+            long r = row.Row;
+            ref readonly var d = ref row.Data;
+            float yc = row.Y;
+            float top = yc - row.Height / 2 + x.GapY / 2, bottom = yc + row.Height / 2 - x.GapY / 2;
             int hl = Highlight(x, col.Highlight, r, d, col.Value);
 
             void Bar(float frac, SKColor color, bool fromRight)
@@ -486,12 +579,12 @@ internal sealed class FootprintRenderer
     private void DrawValueArea(SKCanvas canvas, Ctx x, float left, float right)
     {
         var (hi, lo) = ValueAreaRows(x);
+        long first = Math.Max(lo, x.MinRow), last = Math.Min(hi, x.MaxRow);
+        if (first > last) return;
         _fill.Color = x.T.ValueArea.WithAlpha(120);
-        for (long r = Math.Max(lo, x.MinRow); r <= Math.Min(hi, x.MaxRow); r++)
-        {
-            float yc = x.Main.Y(x.Center(r));
-            canvas.DrawRect(new SKRect(left, (float)(yc - x.RowH / 2), right, (float)(yc + x.RowH / 2)), _fill);
-        }
+        float top = Math.Max(x.Main.Rect.Top, (float)(x.Main.Y(x.Center(last)) - x.RowH / 2));
+        float bottom = Math.Min(x.Main.Rect.Bottom, (float)(x.Main.Y(x.Center(first)) + x.RowH / 2));
+        canvas.DrawRect(new SKRect(left, top, right, bottom), _fill);
     }
 
     // ===================================================================== texto y colores
@@ -661,17 +754,27 @@ internal sealed class FootprintRenderer
 
     private static (long High, long Low) ValueAreaRows(Ctx x)
     {
-        decimal total = 0;
-        for (long r = x.AggMin; r <= x.AggMax; r++) total += x.Get(r).Volume;
-        decimal target = total * 0.7m;
+        if (x.Agg.Count == 0 || x.TotalVolume <= 0) return (0, 1);
+        decimal target = x.TotalVolume * 0.7m;
         long up = x.PocRow, dn = x.PocRow;
-        decimal acc = x.Get(x.PocRow).Volume;
+        int upper = x.PocIndex + 1, lower = x.PocIndex - 1;
+        decimal acc = x.PocVolume;
         while (acc < target && (up < x.AggMax || dn > x.AggMin))
         {
-            decimal vu = up < x.AggMax ? x.Get(up + 1).Volume : -1;
-            decimal vd = dn > x.AggMin ? x.Get(dn - 1).Volume : -1;
-            if (vu >= vd) { up++; acc += Math.Max(0, vu); }
-            else { dn--; acc += Math.Max(0, vd); }
+            bool hasUpper = upper < x.Agg.Count && x.Agg[upper].Row == up + 1;
+            bool hasLower = lower >= 0 && x.Agg[lower].Row == dn - 1;
+            decimal vu = up < x.AggMax ? hasUpper ? x.Agg[upper].Data.Volume : 0 : -1;
+            decimal vd = dn > x.AggMin ? hasLower ? x.Agg[lower].Data.Volume : 0 : -1;
+            if (vu >= vd)
+            {
+                if (hasUpper) { up = x.Agg[upper++].Row; acc += Math.Max(0, vu); }
+                else up = x.Agg[upper].Row - 1;
+            }
+            else
+            {
+                if (hasLower) { dn = x.Agg[lower--].Row; acc += Math.Max(0, vd); }
+                else dn = x.Agg[lower].Row + 1;
+            }
         }
 
         return (up, dn);

@@ -418,10 +418,16 @@ public sealed class ClaudeCodeBridge : StrategyChatProcess
         var psi = Prepare(cli, request.WorkDirectory);
         psi.StandardInputEncoding = new UTF8Encoding(false);
         Add(psi, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-            "--tools", "Read,Write,Edit,MultiEdit,Glob,Grep", "--permission-mode", "acceptEdits", "--strict-mcp-config");
+            "--tools", request.TextOnly ? "" : "Read,Write,Edit,MultiEdit,Glob,Grep", "--permission-mode", request.TextOnly ? "plan" : "acceptEdits", "--strict-mcp-config");
         Add(psi, "--append-system-prompt", request.SystemPrompt + Localization.Lang.ForClaude);
         var supports = await SupportsAsync(cli, token);
         token.ThrowIfCancellationRequested();
+        if (request.TextOnly)
+        {
+            foreach (string flag in new[] { "--restricted", "--safe-mode", "--tools", "--no-session-persistence" })
+                if (!supports(flag)) throw new InvalidOperationException($"Draft-only Pine handoff requires {flag}. Update Claude Code before sending source.");
+            Add(psi, "--restricted", "--safe-mode", "--no-session-persistence");
+        }
         if (!string.IsNullOrWhiteSpace(request.Model)) Add(psi, "--model", request.Model);
         if (!string.IsNullOrWhiteSpace(request.Effort) && supports("--effort")) Add(psi, "--effort", request.Effort);
         foreach (var dir in request.ExtraDirectories)
@@ -443,7 +449,7 @@ public sealed class ClaudeCodeBridge : StrategyChatProcess
         if (request.Laboratory) allowed.AddRange(LabTools.Select(t => "mcp__tradinghub__" + t));
         if (request.TradingView != null) allowed.AddRange(request.TradingView.ApprovedToolNames.Select(t => "mcp__tradingview_research__" + t));
         if (allowed.Count != 0) Add(psi, "--allowedTools", string.Join(",", allowed));
-        if (SessionId != null) Add(psi, "--resume", SessionId);
+        if (SessionId != null && !request.TextOnly) Add(psi, "--resume", SessionId);
         return psi;
     }
 

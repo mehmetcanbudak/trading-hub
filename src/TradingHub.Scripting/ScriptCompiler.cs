@@ -100,13 +100,44 @@ public sealed class ScriptCompiler
         return refs;
     }
 
-    /// <summary>Compila archivos .cs en un ensamblado cargado en memoria (descargable).</summary>
+    /// <summary>The editor and source-copy preflight share the exact runtime compilation pipeline.</summary>
+    public static CSharpCompilation CreateCompilation(IReadOnlyDictionary<string, string> sources, string assemblyName, bool adaptCompatibleNamespaces = true) =>
+        CreateCompilationCore(sources.Select(source => new ScriptSource(source.Key, source.Value)), assemblyName, adaptCompatibleNamespaces);
+
+    private static CSharpCompilation CreateCompilationCore(IEnumerable<ScriptSource> sources, string assemblyName,
+        bool adaptCompatibleNamespaces = true, CancellationToken cancellationToken = default)
+    {
+        var parse = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: new[] { "CROSS_PLATFORM", "TRADINGHUB" });
+        var trees = new List<SyntaxTree> { CSharpSyntaxTree.ParseText(GlobalUsings, parse, path: "GlobalUsings.g.cs", encoding: System.Text.Encoding.UTF8) };
+        foreach (var source in sources)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            trees.Add(CSharpSyntaxTree.ParseText(adaptCompatibleNamespaces ? Preprocess(source.Text) : source.Text,
+                parse, path: source.Path, encoding: System.Text.Encoding.UTF8));
+        }
+        var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+            optimizationLevel: OptimizationLevel.Release,
+            nullableContextOptions: NullableContextOptions.Annotations,
+            allowUnsafe: true);
+        return CSharpCompilation.Create(assemblyName + "_" + Guid.NewGuid().ToString("N")[..8], trees, BuildReferences(), options);
+    }
+
+    /// <summary>Emits without loading or running user code. A failed preflight never publishes a partial source copy.</summary>
+    public static ScriptCompileResult ValidateSources(IReadOnlyDictionary<string, string> sources)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using var pe = new MemoryStream();
+        var emit = CreateCompilation(sources, "TradingHubSourcePreflight").Emit(pe);
+        return new ScriptCompileResult { Success = emit.Success, Diagnostics = Describe(emit.Diagnostics), Elapsed = sw.Elapsed };
+    }
+
+    /// <summary>Compiles .cs files into a collectible in-memory assembly.</summary>
     public ScriptCompileResult Compile(IReadOnlyList<string> files, string assemblyName) =>
         CompileCore(ReadSources(files), assemblyName);
 
     /// <summary>Compiles captured text without reopening its diagnostic paths.</summary>
-    public ScriptCompileResult CompileSources(IReadOnlyList<ScriptSource> sources, string assemblyName) =>
-        CompileCore(sources, assemblyName);
+    public ScriptCompileResult CompileSources(IReadOnlyList<ScriptSource> sources, string assemblyName, CancellationToken cancellationToken = default) =>
+        CompileCore(sources, assemblyName, cancellationToken);
 
     private static IEnumerable<ScriptSource> ReadSources(IReadOnlyList<string> files)
     {
@@ -122,35 +153,15 @@ public sealed class ScriptCompiler
         }
     }
 
-    private static ScriptCompileResult CompileCore(IEnumerable<ScriptSource> sources, string assemblyName)
+    private static ScriptCompileResult CompileCore(IEnumerable<ScriptSource> sources, string assemblyName, CancellationToken cancellationToken = default)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var parse = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: new[] { "CROSS_PLATFORM", "TRADINGHUB" });
-        var trees = new List<SyntaxTree> { CSharpSyntaxTree.ParseText(GlobalUsings, parse, path: "GlobalUsings.g.cs", encoding: System.Text.Encoding.UTF8) };
-        foreach (var source in sources)
-        {
-            var text = Preprocess(source.Text);
-            trees.Add(CSharpSyntaxTree.ParseText(text, parse, path: source.Path, encoding: System.Text.Encoding.UTF8));
-        }
-
-        var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
-            optimizationLevel: OptimizationLevel.Release,
-            nullableContextOptions: NullableContextOptions.Annotations,
-            allowUnsafe: true);
-        var compilation = CSharpCompilation.Create(assemblyName + "_" + Guid.NewGuid().ToString("N")[..8], trees, BuildReferences(), options);
-
+        cancellationToken.ThrowIfCancellationRequested();
+        var compilation = CreateCompilationCore(sources, assemblyName, cancellationToken: cancellationToken);
         using var pe = new MemoryStream();
         using var pdb = new MemoryStream();
-        var emit = compilation.Emit(pe, pdb);
-        var diags = emit.Diagnostics
-            .Where(d => d.Severity == DiagnosticSeverity.Error || (d.Severity == DiagnosticSeverity.Warning && !IgnoredWarnings.Contains(d.Id)))
-            .Select(d =>
-            {
-                var span = d.Location.GetLineSpan();
-                return new ScriptDiagnostic(span.Path ?? "", span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1,
-                    d.Severity == DiagnosticSeverity.Error ? "error" : "warning", d.Id, d.GetMessage(TradingHub.Common.UiCulture.Current));
-            })
-            .ToList();
+        var emit = compilation.Emit(pe, pdb, cancellationToken: cancellationToken);
+        var diags = Describe(emit.Diagnostics);
 
         if (!emit.Success)
             return new ScriptCompileResult { Success = false, Diagnostics = diags, Elapsed = sw.Elapsed };
@@ -161,6 +172,15 @@ public sealed class ScriptCompiler
         var asm = alc.LoadFromStream(pe, pdb);
         return new ScriptCompileResult { Success = true, Assembly = asm, Diagnostics = diags, Elapsed = sw.Elapsed };
     }
+
+    private static IReadOnlyList<ScriptDiagnostic> Describe(IEnumerable<Diagnostic> diagnostics) => diagnostics
+        .Where(d => d.Severity == DiagnosticSeverity.Error || (d.Severity == DiagnosticSeverity.Warning && !IgnoredWarnings.Contains(d.Id)))
+        .Select(d =>
+        {
+            var span = d.Location.GetLineSpan();
+            return new ScriptDiagnostic(span.Path ?? "", span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1,
+                d.Severity == DiagnosticSeverity.Error ? "error" : "warning", d.Id, d.GetMessage(TradingHub.Common.UiCulture.Current));
+        }).ToList();
 
     private static readonly HashSet<string> IgnoredWarnings = new()
     {

@@ -37,6 +37,7 @@ public sealed class InstrumentPicker : Button
     private readonly Flyout _flyout;
 
     private static readonly Dictionary<string, IReadOnlyList<Instrument>> InstrumentCache = new();
+    private static readonly Dictionary<string, (DateTime At, InstrumentCatalogSnapshot Snapshot)> CatalogStatus = new();
     private static readonly Dictionary<string, (DateTime At, IReadOnlyDictionary<string, TickerStats> Stats)> StatsCache = new();
     private static readonly object CacheLock = new();
     private static readonly Dictionary<string, long> CacheVersions = new();
@@ -268,8 +269,12 @@ public sealed class InstrumentPicker : Button
             {
                 var instruments = await CachedInstrumentsAsync(_svc, p.Id, token, TimeSpan.FromSeconds(10));
                 if (token.IsCancellationRequested || version != _loadVersion || !_open) return;
+                InstrumentCatalogSnapshot? catalog;
+                lock (CacheLock) catalog = CatalogStatus.GetValueOrDefault(p.Id).Snapshot;
+                if (catalog is { IsOffline: true }) errors.Add(catalog.StatusText);
+                else if (catalog?.Warning is { Length: > 0 } warning) errors.Add(warning);
                 IReadOnlyDictionary<string, TickerStats>? stats = null;
-                if (_svc.Connections.GetFeed(p.Id) is ITickerStatsProvider sp)
+                if (catalog is not { IsOffline: true } && _svc.Connections.GetFeed(p.Id) is ITickerStatsProvider sp)
                 {
                     try { stats = await CachedStatsAsync(p.Id, sp, token); }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
@@ -322,7 +327,7 @@ public sealed class InstrumentPicker : Button
         string q = (_search.Text ?? "").Trim();
         var filtered = _rows.Where(r =>
             (_filterQuote == "" || r.Instrument.QuoteAsset == _filterQuote) &&
-            (q.Length == 0 || r.Instrument.Symbol.Contains(q, StringComparison.OrdinalIgnoreCase) || r.Instrument.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
+            (q.Length == 0 || Matches(r.Instrument, q)))
             .ToList();
         // coincidencias que empiezan con lo buscado, primero
         if (q.Length > 0)
@@ -339,7 +344,7 @@ public sealed class InstrumentPicker : Button
         }
     }
 
-    private static bool Matches(Instrument instrument, string query) =>
+    public static bool Matches(Instrument instrument, string query) =>
         instrument.Symbol.Contains(query, StringComparison.OrdinalIgnoreCase) ||
         instrument.Description.Contains(query, StringComparison.OrdinalIgnoreCase);
 
@@ -468,6 +473,7 @@ public sealed class InstrumentPicker : Button
             {
                 _cacheEpoch++;
                 InstrumentCache.Clear();
+                CatalogStatus.Clear();
                 StatsCache.Clear();
                 CacheVersions.Clear();
             }
@@ -475,6 +481,7 @@ public sealed class InstrumentPicker : Button
             {
                 CacheVersions[profileId] = CacheVersions.GetValueOrDefault(profileId) + 1;
                 InstrumentCache.Remove(profileId);
+                CatalogStatus.Remove(profileId);
                 StatsCache.Remove(profileId);
             }
         }
@@ -484,38 +491,37 @@ public sealed class InstrumentPicker : Button
     public static Task<IReadOnlyList<Instrument>> InstrumentsAsync(AppServices svc, string profileId) =>
         CachedInstrumentsAsync(svc, profileId, CancellationToken.None, TimeSpan.FromSeconds(10));
 
+    /// <summary>Cancellation follows quick-entry text, tab and window ownership into discovery.</summary>
+    public static Task<IReadOnlyList<Instrument>> InstrumentsAsync(AppServices svc, string profileId, CancellationToken token) =>
+        CachedInstrumentsAsync(svc, profileId, token, TimeSpan.FromSeconds(10));
+
+    /// <summary>The same provider-labelled discovery status for quick entry and the full picker.</summary>
+    public static InstrumentCatalogSnapshot? CatalogSnapshot(string profileId)
+    {
+        lock (CacheLock) return CatalogStatus.GetValueOrDefault(profileId).Snapshot;
+    }
+
     private static async Task<IReadOnlyList<Instrument>> CachedInstrumentsAsync(AppServices svc, string profileId, CancellationToken token, TimeSpan timeout)
     {
         long epoch, version;
         lock (CacheLock)
         {
-            if (InstrumentCache.TryGetValue(profileId, out var cached)) return cached;
+            if (InstrumentCache.TryGetValue(profileId, out var cached) && CatalogStatus.TryGetValue(profileId, out var status) &&
+                DateTime.UtcNow - status.At < (status.Snapshot.IsOffline ? TimeSpan.FromSeconds(30) : TimeSpan.FromMinutes(15))) return cached;
             epoch = _cacheEpoch;
             version = CacheVersions.GetValueOrDefault(profileId);
         }
-        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token);
-        bounded.CancelAfter(timeout);
-        IReadOnlyList<Instrument> list;
-        try { list = await svc.Connections.GetFeed(profileId).GetInstrumentsAsync(bounded.Token).WaitAsync(timeout, token); }
-        catch (OperationCanceledException)
-        {
-            // WaitAsync can resume before the caller token reaches this linked source.
-            // Cancel the transport before disposing its link or publishing cancellation.
-            bounded.Cancel();
-            if (!token.IsCancellationRequested) throw new TimeoutException("Instrument source timed out.");
-            throw;
-        }
-        catch (TimeoutException)
-        {
-            bounded.Cancel();
-            throw;
-        }
+        var profile = svc.Connections.Find(profileId) ?? throw new KeyNotFoundException("The selected connection no longer exists.");
+        var snapshot = await svc.InstrumentCatalog.LoadAsync(profileId, InstrumentCatalog.IdentityFor(profile),
+            svc.Connections.GetFeed(profileId), token, allowNetwork: !svc.Settings.OfflineCatalogOnly, requestTimeout: timeout);
+        var list = snapshot.Instruments;
         token.ThrowIfCancellationRequested();
         lock (CacheLock)
         {
             if (epoch != _cacheEpoch || version != CacheVersions.GetValueOrDefault(profileId))
                 throw new InvalidOperationException("Connection changed during instrument loading; reopen the picker to refresh.");
             InstrumentCache[profileId] = list;
+            CatalogStatus[profileId] = (DateTime.UtcNow, snapshot);
         }
         return list;
     }
