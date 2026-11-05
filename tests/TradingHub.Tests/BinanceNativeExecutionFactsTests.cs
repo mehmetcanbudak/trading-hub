@@ -1628,6 +1628,224 @@ public sealed class BinanceNativeExecutionFactsTests
         });
     }
 
+    [Fact]
+    public async Task Adopting_the_actual_working_child_revokes_its_historical_manual_stop_and_recovers_only_post_adoption_fills()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            var context = RecoveryContext(root, fake);
+            const string key = "binance-adopted-working-market-child-offline";
+            var owner = context.LedgerOwner(key, LiveStore.CaptureLedgerGeneration(root, key));
+            OwnedOrderIntent original, adopted;
+            ExecutionReport baseline;
+            NativeOrderIdentity parentNative, childNative;
+            long parentId, childId;
+            using (var first = orders.Binance(data, fake.Settings, "Actual working child adopted before offline fill", context))
+            {
+                var firstProjector = AccountExecutionProjector.For(first.Executions, context);
+                firstProjector.Synchronize();
+                await ConditionalState(() => first.OrdersReady && first.PositionReady &&
+                    first.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, first, fake);
+                Assert.Equal(0m, first.Position.Volume);
+                var manual = OrderActions.Manual(first, OrderTypes.Stop, OrderDirections.Buy, 3m, 61000m,
+                    "Manual stop whose actual working child is subsequently adopted");
+                await ConditionalState(() => manual.ExchangeOrderId.StartsWith("algo:", StringComparison.Ordinal) &&
+                    manual.NativeIdentity != null &&
+                    new OrderContext(context.Descriptor, root).Find(manual.IntentId)?.NativeOrders?.Contains(manual.NativeIdentity) == true,
+                    first, fake);
+                var parent = Assert.Single(fake.PlacedAlgo);
+                parentId = parent.AlgoId;
+                parentNative = Assert.IsType<NativeOrderIdentity>(manual.NativeIdentity);
+                var accepted = Assert.IsType<OwnedOrderIntent>(new OrderContext(context.Descriptor, root).Find(manual.IntentId));
+                Assert.Equal((context.ManualOwner, false, true, OrderTypes.Stop, OrderDirections.Buy, 3m, 61000m),
+                    (accepted.Owner, accepted.Adopted, accepted.DispatchUncertain, accepted.Request.Type,
+                        accepted.Request.Direction, accepted.Request.Quantity, accepted.Request.Price));
+                Assert.Equal(("STOP_MARKET", "BUY", 3m, 61000m, false, accepted.ClientOrderId),
+                    (parent.Type, parent.Side, parent.Qty, parent.TriggerPrice, parent.ReduceOnly, parent.ClientId));
+                Assert.Equal(new[] { parentNative }, accepted.NativeOrders!);
+                Assert.Equal(accepted.Id, Assert.Single(new OrderContext(context.Descriptor, root)
+                    .RecoverableNativeSubmissions(data.Instrument.Key, OrderTypes.Stop)).Id);
+
+                childId = fake.Trigger(parentId, fill: 1m);
+                await ConditionalState(() => manual.ExchangeOrderId == childId.ToString(CultureInfo.InvariantCulture) &&
+                    manual.Filled == 1m && manual.Unfilled == 2m && first.Position.Volume == 1m &&
+                    new OrderContext(context.Descriptor, root).Find(accepted.Id)?.WorkingOrder != null &&
+                    first.Executions.Capture(ExecutionCursor.Start).Changes.Any(report => report.Quantity == 1m) &&
+                    first.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, first, fake);
+                await ConditionalPolls(fake, first);
+                childNative = Assert.IsType<NativeOrderIdentity>(manual.NativeIdentity);
+                Assert.NotEqual(parentNative, childNative);
+                Assert.Equal(("MARKET", "PARTIALLY_FILLED", 3m, 1m, parentId, ""),
+                    (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Qty,
+                        fake.Order(childId).Executed, fake.Order(childId).PlacedBy, fake.Order(childId).ClientId));
+                Assert.Equal(childId, fake.AlgoOrder(parentId).ActualOrderId);
+                Assert.Same(manual, Assert.Single(first.ActiveOrders));
+                baseline = Assert.Single(first.Executions.Capture(ExecutionCursor.Start).Changes);
+                Assert.Equal((childNative, accepted.Id, accepted.ClientOrderId, true, 1m, 60000m, "USDT", true),
+                    (baseline.NativeOrder, baseline.IntentId, baseline.ClientOrderId, baseline.Buy,
+                        baseline.Quantity, baseline.Price, baseline.AccountingCurrency, baseline.FeesComplete));
+                Assert.Equal((0m, "USDT"), (Assert.Single(baseline.Fees).Amount, Assert.Single(baseline.Fees).Currency));
+                Assert.Equal(accepted.Id, Assert.IsType<OwnedOrderIntent>(context.Resolve(baseline)).Id);
+                Assert.Equal(ExecutionAvailability.Ready, firstProjector.Availability);
+
+                // Snapshot A only after its actual signed first fill and broker-evidenced working transition.
+                original = Assert.IsType<OwnedOrderIntent>(new OrderContext(context.Descriptor, root).Find(accepted.Id));
+                Assert.Equal(accepted.Request, original.Request);
+                Assert.Equal(new NativeWorkingOrder(parentNative, childNative, OrderTypes.Market, "BTCUSDT", ""), original.WorkingOrder);
+                Assert.Equal(Assert.IsType<NativeWorkingOrder>(original.WorkingOrder).Type, manual.Type);
+                Assert.Contains(parentNative, original.NativeOrders!);
+                Assert.Contains(childNative, original.NativeOrders!);
+                Assert.Null(original.TerminalOrder);
+                adopted = context.Adopt(manual, owner, 1m, new[] { baseline.Identity }, baselineKnown: true);
+                Assert.NotEqual(original.Id, adopted.Id);
+                Assert.NotEqual(original.LogicalOrderId, adopted.LogicalOrderId);
+                Assert.Equal((owner, true, false, true, 1m, manual.Type, 2m, original.ClientOrderId),
+                    (adopted.Owner, adopted.Adopted, adopted.DispatchUncertain, adopted.BaselineKnown,
+                        adopted.QuantityBaseline, adopted.Request.Type, adopted.Request.Quantity, adopted.ClientOrderId));
+                Assert.Equal(new[] { baseline.Identity }, adopted.PriorExecutions!);
+                Assert.Equal(new[] { childNative }, adopted.NativeOrders!);
+                Assert.Equal((adopted.Id, adopted.LogicalOrderId, owner.Id, childNative),
+                    (manual.IntentId, manual.LogicalOrderId, manual.OwnerId, manual.NativeIdentity));
+                Assert.Null(context.Resolve(baseline));
+                Assert.True(context.IsAdoptedExecutionPrefix(baseline));
+                AssertOriginalUnchanged(new OrderContext(context.Descriptor, root));
+                Assert.Empty(LiveStore.LoadLedger(root, key, 1m).Fills);
+                Assert.Single(fake.PlacedAlgo);
+                Assert.Empty(fake.Placed);
+            }
+
+            // Only the real venue matching engine exists during the remaining two-unit fill.
+            fake.Fill(childId, 2m);
+            Assert.Equal(("FINISHED", childId), (fake.AlgoOrder(parentId).Status, fake.AlgoOrder(parentId).ActualOrderId));
+            Assert.Equal(("MARKET", "FILLED", 3m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Empty(fake.Open);
+            var loaded = new OrderContext(context.Descriptor, root);
+            AssertOriginalUnchanged(loaded);
+            Assert.Empty(LiveStore.LoadLedger(root, key, 1m).Fills);
+            // Deterministic public RED boundary: A's historical parent index cannot defeat B's current X claim.
+            // No sorting, queue manipulation or file-enumeration assumption contributes to this assertion.
+            Assert.Empty(loaded.RecoverableNativeSubmissions(data.Instrument.Key, OrderTypes.Stop));
+            Assert.Null(loaded.Resolve(baseline));
+            Assert.True(loaded.IsAdoptedExecutionPrefix(baseline));
+
+            int restartCallStart = fake.Calls.Count;
+            using var broker = orders.Binance(data, fake.Settings, "Actual working child adopted before offline fill", loaded);
+            var projector = AccountExecutionProjector.For(broker.Executions, loaded);
+            projector.Synchronize();
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady && broker.Position.Volume == 3m &&
+                LiveStore.LoadLedger(root, key, 1m).Position == 2m &&
+                LiveStore.LoadLedger(root, key, 1m).AuthoritativeNet == 0m &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(ExecutionAvailability.Ready, projector.Availability);
+            Assert.Empty(broker.ActiveOrders);
+            var facts = broker.Executions.Capture(ExecutionCursor.Start);
+            var remaining = Assert.Single(facts.Changes);
+            Assert.Equal((adopted.Id, adopted.ClientOrderId, childNative, true, 2m, 60000m, "USDT", true),
+                (remaining.IntentId, remaining.ClientOrderId, remaining.NativeOrder, remaining.Buy,
+                    remaining.Quantity, remaining.Price, remaining.AccountingCurrency, remaining.FeesComplete));
+            Assert.NotEqual(baseline.Identity, remaining.Identity);
+            Assert.DoesNotContain(facts.Changes, report => report.IntentId == original.Id || report.Identity == baseline.Identity);
+            AssertAdoptedBook();
+            var disk = new OrderContext(context.Descriptor, root);
+            Assert.Equal(adopted.Id, Assert.IsType<OwnedOrderIntent>(disk.Resolve(remaining)).Id);
+            var checkpoint = Assert.IsType<ExecutionProjectionCheckpoint>(disk.Projected(remaining.Identity));
+            Assert.Equal((owner, adopted.LogicalOrderId, remaining.Identity),
+                (checkpoint.Owner, checkpoint.LogicalOrderId, checkpoint.Report.Identity));
+            Assert.Empty(disk.PendingReceipts());
+            AssertOriginalUnchanged(disk);
+            var current = Assert.IsType<OwnedOrderIntent>(disk.Find(adopted.Id));
+            Assert.Equal((adopted.Owner, adopted.Request, adopted.QuantityBaseline, adopted.BaselineKnown, adopted.ClientOrderId),
+                (current.Owner, current.Request, current.QuantityBaseline, current.BaselineKnown, current.ClientOrderId));
+            Assert.Equal(adopted.PriorExecutions, current.PriorExecutions);
+            Assert.Equal(new[] { childNative }, current.NativeOrders!);
+            Assert.Single(fake.Calls, call => call.StartsWith("POST ", StringComparison.Ordinal));
+            Assert.DoesNotContain(fake.Calls.Skip(restartCallStart), call => call == "GET /fapi/v1/algoOrder");
+
+            int replies = fake.FuturesTradeReplies;
+            await ConditionalState(() => fake.FuturesTradeReplies >= replies + 2, broker, fake);
+            await ConditionalPolls(fake, broker);
+            AssertAdoptedBook();
+            AssertOriginalUnchanged(new OrderContext(context.Descriptor, root));
+
+            // Real non-protective admission, signed POST acceptance, matching-engine fill and ledger projection.
+            var next = OrderActions.Place(broker, owner, OrderTypes.Limit, OrderDirections.Buy, 1m, 61200m);
+            await ConditionalState(() => next.ExchangeOrderId.Length > 0 && fake.Placed.Count == 1, broker, fake);
+            var sent = Assert.Single(fake.Placed);
+            Assert.Equal(("BUY", "LIMIT", 1m, 61200m, false, next.ClientOrderId),
+                (sent.Side, sent.Type, sent.Qty, sent.Price, sent.ReduceOnly, sent.ClientId));
+            Assert.Equal((owner.Id, sent.Id.ToString(CultureInfo.InvariantCulture)), (next.OwnerId, next.ExchangeOrderId));
+            Assert.Equal(OrderStates.Active, next.State);
+            Assert.NotEqual(adopted.LogicalOrderId, next.LogicalOrderId);
+            fake.Fill(sent.Id, 1m);
+            await ConditionalState(() => broker.Position.Volume == 4m && next.Status == OrderStatus.Filled &&
+                LiveStore.LoadLedger(root, key, 1m).Position == 3m && LiveStore.LoadLedger(root, key, 1m).Fills.Count == 2 &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            await ConditionalPolls(fake, broker);
+            var admitted = LiveStore.LoadLedger(root, key, 1m);
+            Assert.Equal((3m, 60400m, 0m, 0m),
+                (admitted.Position, admitted.AveragePrice, admitted.AuthoritativeGross, admitted.AuthoritativeNet));
+            Assert.Equal(LiveFinancialQuality.Authoritative, admitted.FinancialQuality);
+            Assert.False(admitted.HasPendingFinancials);
+            Assert.Empty(admitted.Trades);
+            Assert.Equal(2, admitted.Fills.Select(fill => fill.ExecutionId).Distinct().Count());
+            Assert.DoesNotContain(admitted.Fills, fill => fill.ExecutionId == baseline.Identity || fill.OrderId == original.LogicalOrderId);
+            Assert.Contains(admitted.Fills, fill => fill.ExecutionId == remaining.Identity && fill.Quantity == 2m && fill.Price == 60000m);
+            var nextFill = Assert.Single(admitted.Fills, fill => fill.OrderId == next.LogicalOrderId);
+            Assert.Equal((LiveFillKind.Execution, true, 1m, 61200m, owner.Id, owner.LedgerGeneration, true),
+                (nextFill.Kind, nextFill.Buy, nextFill.Quantity, nextFill.Price, nextFill.OwnerId, nextFill.OwnerGeneration, nextFill.FeesComplete));
+            var nextReport = Assert.Single(broker.Executions.Capture(ExecutionCursor.Start).Changes,
+                report => report.Identity == nextFill.ExecutionId);
+            Assert.Equal((next.IntentId, next.NativeIdentity, next.ClientOrderId),
+                (nextReport.IntentId, nextReport.NativeOrder, nextReport.ClientOrderId));
+            var final = new OrderContext(context.Descriptor, root);
+            Assert.Equal(next.IntentId, Assert.IsType<OwnedOrderIntent>(final.Resolve(nextReport)).Id);
+            Assert.Equal((owner, next.LogicalOrderId),
+                (Assert.IsType<ExecutionProjectionCheckpoint>(final.Projected(nextReport.Identity)).Owner,
+                    Assert.IsType<ExecutionProjectionCheckpoint>(final.Projected(nextReport.Identity)).LogicalOrderId));
+            Assert.Empty(final.PendingReceipts());
+            Assert.Empty(final.RecoverableNativeSubmissions(data.Instrument.Key, OrderTypes.Stop));
+            AssertOriginalUnchanged(final);
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Equal(2, fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal)));
+            Assert.DoesNotContain(fake.Calls.Skip(restartCallStart), call => call == "GET /fapi/v1/algoOrder");
+            Assert.Equal(ExecutionAvailability.Ready, projector.Availability);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+
+            void AssertOriginalUnchanged(OrderContext currentContext)
+            {
+                var historical = Assert.IsType<OwnedOrderIntent>(currentContext.Find(original.Id));
+                Assert.Equal(original with { NativeOrders = null, PriorExecutions = null },
+                    historical with { NativeOrders = null, PriorExecutions = null });
+                Assert.Equal(original.NativeOrders, historical.NativeOrders);
+                Assert.Equal(original.PriorExecutions, historical.PriorExecutions);
+            }
+
+            void AssertAdoptedBook()
+            {
+                var ledger = LiveStore.LoadLedger(root, key, 1m);
+                Assert.Equal((2m, 60000m, 0m, 0m),
+                    (ledger.Position, ledger.AveragePrice, ledger.AuthoritativeGross, ledger.AuthoritativeNet));
+                Assert.Equal(LiveFinancialQuality.Authoritative, ledger.FinancialQuality);
+                Assert.False(ledger.HasPendingFinancials);
+                Assert.Empty(ledger.Trades);
+                var fill = Assert.Single(ledger.Fills);
+                Assert.Equal((LiveFillKind.Execution, remaining.Identity, true, 2m, 60000m, owner.Id, owner.LedgerGeneration,
+                        adopted.LogicalOrderId, true),
+                    (fill.Kind, fill.ExecutionId, fill.Buy, fill.Quantity, fill.Price, fill.OwnerId, fill.OwnerGeneration,
+                        fill.OrderId, fill.FeesComplete));
+                Assert.Equal((0m, "USDT"), (Assert.Single(fill.Fees!).Amount, Assert.Single(fill.Fees!).Currency));
+                Assert.DoesNotContain(ledger.Fills, row => row.ExecutionId == baseline.Identity || row.OrderId == original.LogicalOrderId);
+            }
+        });
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -2636,6 +2854,230 @@ public sealed class BinanceNativeExecutionFactsTests
                 });
                 Assert.Equal(0.3m, ledger.Fills.Sum(fill => Assert.Single(fill.Fees!).Amount));
                 Assert.Empty(ledger.Trades);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task First_conditional_native_index_write_failure_preserves_exact_intent_and_recovers_offline_fills()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            var context = RecoveryContext(root, fake);
+            const string key = "binance-first-conditional-native-index-gap";
+            var owner = context.LedgerOwner(key, LiveStore.CaptureLedgerGeneration(root, key));
+            string journalRoot = Assert.Single(Directory.GetDirectories(Path.Combine(root, "execution-state")));
+            string nativeDirectory = Path.Combine(journalRoot, "native");
+            const string obstruction = "Owned fixture obstruction of the first native-index directory only.";
+            OwnedOrderIntent accepted;
+            NativeOrderIdentity parentNative;
+            long parentId;
+            try
+            {
+                using var first = orders.Binance(data, fake.Settings, "First native index write interrupted", context);
+                await ConditionalState(() => first.OrdersReady && first.PositionReady &&
+                    first.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, first, fake);
+                Assert.Equal(0m, first.Position.Volume);
+                Assert.Empty(first.ActiveOrders);
+                Assert.Empty(fake.Sent);
+                Assert.Empty(LiveStore.LoadLedger(root, key, 1m).Fills);
+                Assert.False(context.HasStorageFault);
+                Assert.False(Directory.Exists(nativeDirectory));
+                Assert.False(File.Exists(nativeDirectory));
+
+                // SaveIntent writes intent/client records before Bind creates the first native index directory.
+                // A regular file at that absent directory blocks only that index, without altering any record.
+                File.WriteAllText(nativeDirectory, obstruction);
+                var stop = OrderActions.Place(first, owner, OrderTypes.Stop, OrderDirections.Buy, 3m, 61000m,
+                    "First accepted conditional with native index unavailable");
+                await ConditionalState(() => stop.NativeIdentity != null &&
+                    new OrderContext(context.Descriptor, root).Find(stop.IntentId)?.NativeOrders?.Contains(stop.NativeIdentity) == true &&
+                    context.HasStorageFault &&
+                    first.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Unavailable, first, fake);
+                var parent = Assert.Single(fake.PlacedAlgo);
+                parentId = parent.AlgoId;
+                parentNative = Assert.IsType<NativeOrderIdentity>(stop.NativeIdentity);
+                accepted = Assert.IsType<OwnedOrderIntent>(new OrderContext(context.Descriptor, root).Find(stop.IntentId));
+                Assert.Equal(new NativeOrderIdentity("binance:algo", parentId.ToString(CultureInfo.InvariantCulture)), parentNative);
+                Assert.Equal((owner, false, true, OrderTypes.Stop, OrderDirections.Buy, 3m, 61000m, false),
+                    (accepted.Owner, accepted.Adopted, accepted.DispatchUncertain, accepted.Request.Type,
+                        accepted.Request.Direction, accepted.Request.Quantity, accepted.Request.Price, accepted.Request.ReduceOnly));
+                Assert.Equal(("BTCUSDT", "", 3m, 61000m, 0m),
+                    (accepted.NativeInstrument, accepted.NativeExchange, accepted.DispatchQuantity, accepted.DispatchPrice, accepted.QuantityProjected));
+                Assert.Equal(new[] { parentNative }, accepted.NativeOrders!);
+                Assert.Null(accepted.Rejection);
+                Assert.Null(accepted.WorkingOrder);
+                Assert.Null(accepted.TerminalOrder);
+                Assert.False(string.IsNullOrEmpty(accepted.ClientOrderId));
+                Assert.Equal(("STOP_MARKET", "NEW", 0L, accepted.ClientOrderId),
+                    (parent.Type, parent.Status, parent.ActualOrderId, parent.ClientId));
+                Assert.Equal(("algo:" + parentId.ToString(CultureInfo.InvariantCulture), owner.Id, accepted.Id, accepted.LogicalOrderId),
+                    (stop.ExchangeOrderId, stop.OwnerId, stop.IntentId, stop.LogicalOrderId));
+                Assert.Equal(obstruction, File.ReadAllText(nativeDirectory));
+                Assert.False(Directory.Exists(nativeDirectory));
+                Assert.True(Directory.Exists(Path.Combine(journalRoot, "intent")));
+                Assert.True(Directory.Exists(Path.Combine(journalRoot, "client")));
+                Assert.Empty(fake.Placed);
+                Assert.Single(fake.Calls, call => call == "POST /fapi/v1/algoOrder");
+                Assert.Empty(fake.Refused);
+                // Dispose the original broker while the same obstruction still prevents every index retry.
+            }
+            finally
+            {
+                // Only the file created above is removed, after the broker's disposal fence has closed.
+                if (File.Exists(nativeDirectory)) File.Delete(nativeDirectory);
+            }
+            Assert.False(File.Exists(nativeDirectory));
+            Assert.False(Directory.Exists(nativeDirectory));
+
+            // Both actual child executions occur with the original broker disposed and the filesystem restored.
+            long childId = fake.Trigger(parentId, fill: 1m);
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m, ""),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed, fake.Order(childId).ClientId));
+            fake.Fill(childId, 2m);
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+            Assert.Equal(("FINISHED", childId), (fake.AlgoOrder(parentId).Status, fake.AlgoOrder(parentId).ActualOrderId));
+            Assert.Equal(("MARKET", "FILLED", 3m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Empty(fake.Open);
+            Assert.Empty(LiveStore.LoadLedger(root, key, 1m).Fills);
+            var loaded = new OrderContext(context.Descriptor, root);
+            Assert.NotSame(context, loaded);
+            Assert.False(loaded.HasStorageFault);
+            var before = Assert.IsType<OwnedOrderIntent>(loaded.Find(accepted.Id));
+            Assert.Equal(accepted with { NativeOrders = null, PriorExecutions = null },
+                before with { NativeOrders = null, PriorExecutions = null });
+            Assert.Equal(accepted.NativeOrders, before.NativeOrders);
+            Assert.Equal(accepted.PriorExecutions, before.PriorExecutions);
+            // Missing lookup data is not a positive superseding ownership claim. This assertion is independent
+            // of file order, provider polling, and the later exact-native recovery guard.
+            Assert.Equal(accepted.Id, Assert.Single(loaded.RecoverableNativeSubmissions(data.Instrument.Key, OrderTypes.Stop)).Id);
+            Assert.False(Directory.Exists(nativeDirectory));
+
+            int originalClientLookups = 0;
+            var releaseStartup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fake.BeforeGetReply = (request, ct) =>
+            {
+                if (request.Route == "/fapi/v1/algoOrder" && request.Query("clientAlgoId") == accepted.ClientOrderId)
+                    Interlocked.Increment(ref originalClientLookups);
+                return request.Route == "/fapi/v1/openOrders" ? releaseStartup.Task.WaitAsync(ct) : Task.CompletedTask;
+            };
+            try
+            {
+                using var broker = orders.Binance(data, fake.Settings, "First native index write interrupted", loaded);
+                var projector = AccountExecutionProjector.For(broker.Executions, loaded);
+                projector.Synchronize();
+                releaseStartup.TrySetResult();
+                await ConditionalState(() => broker.OrdersReady && broker.PositionReady && broker.Position.Volume == 3m &&
+                    LiveStore.LoadLedger(root, key, 1m).Position == 3m &&
+                    LiveStore.LoadLedger(root, key, 1m).Fills.Count == 2 &&
+                    broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+                await ConditionalPolls(fake, broker);
+                Assert.Equal(1, Volatile.Read(ref originalClientLookups));
+                Assert.Equal(ExecutionAvailability.Ready, projector.Availability);
+                Assert.False(loaded.HasStorageFault);
+                Assert.Empty(broker.ActiveOrders);
+                Assert.Single(fake.PlacedAlgo);
+                Assert.Empty(fake.Placed);
+                Assert.Single(fake.Calls, call => call.StartsWith("POST ", StringComparison.Ordinal));
+
+                // 1 @ 60000 + 2 @ 60000 = 3 @ 60000; both real history rows carry zero USDT fees.
+                var ledger = LiveStore.LoadLedger(root, key, 1m);
+                Assert.Equal((3m, 60000m, 0m, 0m),
+                    (ledger.Position, ledger.AveragePrice, ledger.AuthoritativeGross, ledger.AuthoritativeNet));
+                Assert.Equal(LiveFinancialQuality.Authoritative, ledger.FinancialQuality);
+                Assert.False(ledger.HasPendingFinancials);
+                Assert.Empty(ledger.Trades);
+                Assert.Equal(new[] { "91001", "91002" }, ledger.Fills.Select(fill => fill.ExecutionId!.Id).OrderBy(id => id));
+                Assert.Equal(new[] { 1m, 2m }, ledger.Fills.OrderBy(fill => fill.ExecutionId!.Id).Select(fill => fill.Quantity));
+                Assert.All(ledger.Fills, fill => Assert.Equal(
+                    (LiveFillKind.Execution, true, 60000m, owner.Id, owner.LedgerGeneration, accepted.LogicalOrderId, true),
+                    (fill.Kind, fill.Buy, fill.Price, fill.OwnerId, fill.OwnerGeneration, fill.OrderId, fill.FeesComplete)));
+                var disk = new OrderContext(context.Descriptor, root);
+                var recovered = Assert.IsType<OwnedOrderIntent>(disk.Find(accepted.Id));
+                Assert.Equal((accepted.Owner, accepted.Request, accepted.ClientOrderId, 3m),
+                    (recovered.Owner, recovered.Request, recovered.ClientOrderId, recovered.QuantityProjected));
+                Assert.Contains(parentNative, recovered.NativeOrders!);
+                Assert.Contains(childNative, recovered.NativeOrders!);
+                Assert.Equal(new NativeWorkingOrder(parentNative, childNative, OrderTypes.Market, "BTCUSDT", ""), recovered.WorkingOrder);
+                Assert.Equal(new NativeOrderTerminal(childNative, 3m), recovered.TerminalOrder);
+                Assert.Empty(disk.RecoverableNativeSubmissions(data.Instrument.Key, OrderTypes.Stop));
+
+                // Observe the repaired records without calculating hashes or writing an index ourselves.
+                var indexed = new HashSet<NativeOrderIdentity>();
+                foreach (string path in Directory.GetFiles(nativeDirectory, "*.json"))
+                {
+                    using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+                    var value = document.RootElement.GetProperty("Value");
+                    var native = value.GetProperty("Native");
+                    Assert.Equal(accepted.Id, Assert.Single(value.GetProperty("Intents").EnumerateArray()).GetString());
+                    Assert.True(indexed.Add(new NativeOrderIdentity(native.GetProperty("Kind").GetString()!, native.GetProperty("Id").GetString()!)));
+                }
+                Assert.Equal(2, indexed.Count);
+                Assert.Contains(parentNative, indexed);
+                Assert.Contains(childNative, indexed);
+
+                var facts = broker.Executions.Capture(ExecutionCursor.Start);
+                Assert.Equal(2, facts.Changes.Count);
+                foreach (var fill in ledger.Fills)
+                {
+                    var report = Assert.Single(facts.Changes, report => report.Identity == fill.ExecutionId);
+                    Assert.Equal((accepted.Id, accepted.ClientOrderId, childNative, fill.Quantity, 60000m),
+                        (report.IntentId, report.ClientOrderId, report.NativeOrder, report.Quantity, report.Price));
+                    Assert.True(report.FeesComplete);
+                    Assert.Equal(new ExecutionFee(0m, "USDT"), Assert.Single(report.Fees));
+                    Assert.Equal(accepted.Id, Assert.IsType<OwnedOrderIntent>(disk.Resolve(report)).Id);
+                    var projected = Assert.IsType<ExecutionProjectionCheckpoint>(disk.Projected(fill.ExecutionId!));
+                    Assert.Equal((owner, accepted.LogicalOrderId, report.Identity),
+                        (projected.Owner, projected.LogicalOrderId, projected.Report.Identity));
+                }
+                Assert.Empty(disk.PendingReceipts());
+                projector.Synchronize();
+                await ConditionalPolls(fake, broker);
+                Assert.Equal(2, LiveStore.LoadLedger(root, key, 1m).Fills.Count);
+                Assert.Equal(1, Volatile.Read(ref originalClientLookups));
+
+                var next = OrderActions.Place(broker, owner, OrderTypes.Limit, OrderDirections.Buy, 1m, 61200m);
+                await ConditionalState(() => next.ExchangeOrderId.Length > 0 && next.NativeIdentity != null && fake.Placed.Count == 1, broker, fake);
+                Assert.Equal((owner.Id, next.ExchangeOrderId),
+                    (next.OwnerId, Assert.Single(fake.Placed).Id.ToString(CultureInfo.InvariantCulture)));
+                Assert.NotEqual(accepted.LogicalOrderId, next.LogicalOrderId);
+                fake.Fill(long.Parse(next.ExchangeOrderId, CultureInfo.InvariantCulture), 1m);
+                await ConditionalState(() => next.Status == OrderStatus.Filled && broker.Position.Volume == 4m &&
+                    LiveStore.LoadLedger(root, key, 1m).Position == 4m && LiveStore.LoadLedger(root, key, 1m).Fills.Count == 3 &&
+                    broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+                await ConditionalPolls(fake, broker);
+                projector.Synchronize();
+                var admitted = LiveStore.LoadLedger(root, key, 1m);
+                // (180000 + 61200) / 4 = 60300; opening additions realize no P&L and have explicit zero fees.
+                Assert.Equal((4m, 60300m, 0m, 0m),
+                    (admitted.Position, admitted.AveragePrice, admitted.AuthoritativeGross, admitted.AuthoritativeNet));
+                Assert.Equal(LiveFinancialQuality.Authoritative, admitted.FinancialQuality);
+                Assert.False(admitted.HasPendingFinancials);
+                Assert.Equal(3, admitted.Fills.Count);
+                Assert.Equal(3, admitted.Fills.Select(fill => fill.ExecutionId).Distinct().Count());
+                var admittedFill = Assert.Single(admitted.Fills, fill => fill.ExecutionId!.Id == "91003");
+                Assert.Equal((true, 1m, 61200m, owner.Id, next.LogicalOrderId, true),
+                    (admittedFill.Buy, admittedFill.Quantity, admittedFill.Price, admittedFill.OwnerId, admittedFill.OrderId, admittedFill.FeesComplete));
+                var final = new OrderContext(context.Descriptor, root);
+                Assert.Equal(admittedFill.ExecutionId, Assert.IsType<ExecutionProjectionCheckpoint>(final.Projected(admittedFill.ExecutionId!)).Report.Identity);
+                Assert.Contains(next.NativeIdentity!, Assert.IsType<OwnedOrderIntent>(final.Find(next.IntentId)).NativeOrders!);
+                Assert.Empty(final.PendingReceipts());
+                Assert.Empty(broker.ActiveOrders);
+                Assert.Equal(2, fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal)));
+                Assert.Equal(1, Volatile.Read(ref originalClientLookups));
+                Assert.Equal(ExecutionAvailability.Ready, projector.Availability);
+                Assert.Null(broker.LastError);
+                Assert.Empty(fake.Refused);
+            }
+            finally
+            {
+                releaseStartup.TrySetResult();
+                fake.BeforeGetReply = null;
             }
         });
     }

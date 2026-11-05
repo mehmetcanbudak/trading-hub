@@ -770,7 +770,8 @@ public sealed class OrderContext
                     Protective: protective || order.ReduceOnly),
                 Descriptor.Id, Descriptor.Generation, QuantityBaseline: baseline, PriorExecutions: prior,
                 BaselineKnown: baselineKnown, Adopted: true, EphemeralPreparation: _journal == null,
-                NativeOrders: order.NativeIdentity == null ? null : new[] { order.NativeIdentity });
+                NativeOrders: order.NativeIdentity == null ? null : new[] { order.NativeIdentity },
+                WorkingOrder: previous?.WorkingOrder is { } working && working.Child == order.NativeIdentity ? working : null);
             Save(data);
             if (order.NativeIdentity != null)
             {
