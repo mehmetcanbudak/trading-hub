@@ -145,7 +145,7 @@ internal sealed class ChartTraderPanel : UserControl
             partials.Children.Add(b);
             col += 2;
         }
-        var flat = Trade("Close position", null, "primary", "Closes position at market and cancels orders", () => _ = _host.AccountActionAsync(_chart, a => a.Flatten(), "Position closed"));
+        var flat = Trade("Close position", null, "primary", "Closes position at market and cancels orders", () => _ = _host.AccountActionAsync(_chart, a => OrderActions.Flatten(a), "Position closed"));
 
         // stop y objetivo automáticos (plantilla del instrumento donde se ejecuta)
         _brackets.IsCheckedChanged += (_, _) => EditTemplate(t => t.Enabled = _brackets.IsChecked == true);

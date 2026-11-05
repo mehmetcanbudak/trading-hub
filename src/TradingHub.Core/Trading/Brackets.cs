@@ -374,7 +374,7 @@ public sealed class BracketManager : IDisposable
             return $"Order move requested to {Inst.FormatPrice(price)} (stop and targets follow)";
         }
 
-        Account.Modify(order, price);
+        OrderActions.Reprice(Account, order, price);
         return $"Order moved to {Inst.FormatPrice(price)}";
     });
 
@@ -437,7 +437,7 @@ public sealed class BracketManager : IDisposable
         if (abs == 0) return "No open position.";
         decimal qty = fraction >= 1 ? abs : RoundQty(abs * fraction);
         if (qty <= 0) qty = Math.Min(abs, Inst.VolumeStep > 0 ? Inst.VolumeStep : 1);
-        Account.Market(ExitDirection, qty, "Partial");
+        OrderActions.Manual(Account, OrderTypes.Market, ExitDirection, qty, comment: "Partial");
         return $"Closed {Fmt(qty)} of {Fmt(abs)} at market";
     });
 
@@ -848,8 +848,8 @@ public sealed class BracketManager : IDisposable
             if (Account is ITrackedOrderReplacement tracked && tracked.IsReplacementPending(order)) continue;
             _entryMoves.Remove(pb);
             if (Terminal(order)) continue;
-            if (Account is ITrackedOrderReplacement) Account.Replace(order, price, order.Unfilled);
-            else Account.Modify(order, price);
+            if (Account is ITrackedOrderReplacement) OrderActions.Replace(Account, order, price, order.Unfilled);
+            else OrderActions.Reprice(Account, order, price);
             _syncAgain = true;
         }
     }
@@ -887,7 +887,7 @@ public sealed class BracketManager : IDisposable
                     intent.RequestedTotal = total;
                     intent.RequestedPrice = intent.Price;
                     intent.Phase = ExitPhase.Replacing;
-                    Account.Replace(order, intent.Price, intent.Quantity);
+                    OrderActions.Replace(Account, order, intent.Price, intent.Quantity);
                     _syncAgain = true;
                     continue;
                 }
@@ -919,9 +919,7 @@ public sealed class BracketManager : IDisposable
                 quantity = Math.Min(quantity, Math.Max(0, ExitQuantity - working));
             }
             if (quantity <= 0) continue;
-            var order = Account.Exit(intent.Role == BracketRole.StopLoss ? OrderTypes.Stop : OrderTypes.Limit,
-                intent.Side > 0 ? OrderDirections.Sell : OrderDirections.Buy, quantity, intent.Price,
-                intent.Role == BracketRole.StopLoss ? "SL" : "TP");
+            var order = OrderActions.Manual(Account, intent.Role == BracketRole.StopLoss ? OrderTypes.Stop : OrderTypes.Limit, intent.Side > 0 ? OrderDirections.Sell : OrderDirections.Buy, quantity, intent.Price, intent.Role == BracketRole.StopLoss ? "SL" : "TP", reduceOnly: true);
             var owned = new OwnedExit { Handle = order, Latest = order, Intent = intent };
             _owned.Add(owned);
             intent.Current = owned;

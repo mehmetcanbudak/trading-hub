@@ -106,6 +106,8 @@ internal sealed partial class LiveCenter
         if (p.Members.Count == 0) return new PortfolioResult();
         if (p.Members.FirstOrDefault(m => m.Ledger == null) is { } unavailable)
             throw new IOException(unavailable.LedgerError ?? "History unavailable");
+        if (p.Members.Any(m => m.Ledger!.HasPendingFinancials))
+            throw new IOException("Execution prices or fees are pending; portfolio metrics are unavailable.");
         var now = DateTime.UtcNow;
         var from = p.Members.Select(m => m.Ledger!.Fills is { Count: > 0 } fills ? fills[0].Time : now).Min();
         if (from >= now) from = now.AddDays(-1);
@@ -120,6 +122,8 @@ internal sealed partial class LiveCenter
         }).ToList();
         decimal capital = p.Def.Capital > 0 ? p.Def.Capital : 25_000m;
         var res = PortfolioAnalyzer.Analyze(comps, capital);
+        res.FinancialQuality = p.Members.Any(m => m.Ledger!.FinancialQuality == LiveFinancialQuality.Estimated)
+            ? LiveFinancialQuality.Estimated : LiveFinancialQuality.Authoritative;
 
         // curva operación por operación: el drawdown dentro de un día con muchas operaciones también cuenta (la diaria lo esconde)
         bool crypto = comps.All(c => c.Settings.FeedId.StartsWith("binance", StringComparison.Ordinal) || c.Settings.FeedId.StartsWith("bybit", StringComparison.Ordinal) || c.Settings.FeedId == "sim");

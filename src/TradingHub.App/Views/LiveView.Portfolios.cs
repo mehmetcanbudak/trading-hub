@@ -83,7 +83,7 @@ internal sealed partial class LiveView
         if (_portfolioId == null || portfolios.All(p => p.Def.Id != _portfolioId)) _portfolioId = portfolios.FirstOrDefault()?.Def.Id;
         var current = portfolios.FirstOrDefault(p => p.Def.Id == _portfolioId);
 
-        string key = string.Join("|", portfolios.Select(p => $"{p.Def.Id}:{p.Def.Name}:{p.Def.Capital}:{string.Join(",", p.Members.Select(m => $"{m.Key}{m.StateLabel}{m.LedgerError}{m.Ledger?.Fills.Count}{m.Runner?.SizeMultiplier ?? m.Info.Size}{m.OpenPnL:0}"))}")) +
+        string key = string.Join("|", portfolios.Select(p => $"{p.Def.Id}:{p.Def.Name}:{p.Def.Capital}:{string.Join(",", p.Members.Select(m => $"{m.Key}{m.StateLabel}{m.LedgerError}{m.Ledger?.Revision}{m.Runner?.SizeMultiplier ?? m.Info.Size}{m.OpenPnL:0}"))}")) +
                      $"|{_portfolioId}|{LiveStore.ProposalsStamp.Ticks}";
         bool agentChanged = _svc.Live.RiskAgent.Version != _agentVersion;
         if (!force && key == _portfolioKey && !agentChanged) return;
@@ -149,14 +149,23 @@ internal sealed partial class LiveView
             _portfolioDetail.Children.Add(Ui.Card(MembersTable(p, null), 10));
             return;
         }
+        if (p.Members.Any(e => e.Ledger!.HasPendingFinancials || e.OpenPnL == null))
+        {
+            _portfolioDetail.Children.Add(Ui.Card(Ui.Faint("Accounting pending: execution prices, fees or current marks are incomplete; portfolio metrics are unavailable."), 12));
+            _portfolioDetail.Children.Add(Ui.Card(MembersTable(p, null), 10));
+            return;
+        }
+        if (p.Members.Any(e => e.Ledger!.FinancialQuality == LiveFinancialQuality.Estimated))
+            _portfolioDetail.Children.Add(Ui.Faint("Portfolio accounting includes legacy estimates."));
 
         var analysis = LiveCenter.Analyze(p);
         var m = analysis.Metrics;
         decimal open = p.Members.Sum(x => x.OpenPnL!.Value);
+        decimal realized = p.Members.Sum(x => x.Ledger!.NetRealized!.Value);
 
         // números del portafolio
         var kpis = new WrapPanel { ItemSpacing = 10, LineSpacing = 10 };
-        kpis.Children.Add(Kpi("PnL", Money(m.NetProfit + open), $"closed {Money(m.NetProfit)} · open {Money(open)}", m.NetProfit + open >= 0 ? Ui.Up : Ui.Down));
+        kpis.Children.Add(Kpi("PnL", Money(realized + open), $"realized {Money(realized)} · open {Money(open)}", realized + open >= 0 ? Ui.Up : Ui.Down));
         kpis.Children.Add(Kpi("Trades", m.TotalTrades.ToString(Inv), m.TotalTrades > 0 ? $"{m.WinRate:0} % winners" : "none yet", null,
             m.TotalTrades > 0 ? () => OpenTradesOf(p) : null));
         kpis.Children.Add(Kpi("Profit factor", m.TotalTrades > 0 ? (m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es)) : "—", m.TotalTrades > 0 ? $"average {Money(m.AverageTrade)} per trade" : ""));
@@ -214,7 +223,7 @@ internal sealed partial class LiveView
             return table;
         }
 
-        decimal? total = p.Members.All(x => x.Ledger != null) ? p.Members.Sum(x => x.Ledger!.Realized) : null;
+        decimal? total = p.Members.All(x => x.Ledger is { HasPendingFinancials: false }) ? p.Members.Sum(x => x.Ledger!.Realized) : null;
         int n = p.Members.Count;
         for (int i = 0; i < n; i++)
         {

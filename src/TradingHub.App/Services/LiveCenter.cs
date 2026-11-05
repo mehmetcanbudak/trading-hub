@@ -40,7 +40,14 @@ internal sealed class LiveEntry
 
     public string SourceLabel => Source == "chart" ? "Chart" : "Live";
 
-    public string StateLabel =>
+    public string StateLabel => OperationalState + (Ledger?.FinancialQuality switch
+    {
+        LiveFinancialQuality.Estimated => " · estimated accounting",
+        LiveFinancialQuality.Pending => " · accounting pending",
+        _ => "",
+    });
+
+    private string OperationalState =>
         Ledger == null ? "History unavailable"
         : Running ? Runner!.DailyLimitActive ? "Stopped for today" : Paused ? "Paused" : "Running"
         : WaitingResume ? "Awaiting manual resume"
@@ -48,8 +55,14 @@ internal sealed class LiveEntry
         : Runner?.HasWorkingOrders == true ? "Awaiting order confirmation"
         : "Stopped";
 
-    public decimal? OpenPnL => Ledger is { } ledger ? Running ? ledger.OpenPnL(Runner!.Data.LastPrice) : 0 : null;
-    public decimal? Net => Ledger?.Realized + OpenPnL;
+    public decimal? OpenPnL => Ledger switch
+    {
+        null => null,
+        { Position: 0, OpenContextConflict: false } => 0,
+        { } ledger when Running => ledger.KnownOpenPnL(Runner!.Data.LastPrice),
+        _ => null,
+    };
+    public decimal? Net => Ledger?.NetRealized + OpenPnL;
 }
 
 /// <summary>La próxima orden de una estrategia: cuántos contratos, de cuál y si es el micro (con su equivalente en el mini).</summary>
@@ -188,7 +201,7 @@ internal sealed partial class LiveCenter
     {
         try
         {
-            int pending = LiveStore.PendingFills(key);
+            int pending = LiveStore.PendingLedgerEvents(key);
             var file = new FileInfo(LiveStore.LedgerFile(key));
             long length = file.Exists ? file.Length : 0;
             DateTime writeTime = file.Exists ? file.LastWriteTimeUtc : DateTime.MinValue;

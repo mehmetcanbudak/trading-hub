@@ -68,6 +68,7 @@ public sealed record StrategyWarmup(int Bars, IReadOnlyList<string> Indicators, 
         public decimal AveragePrice => 0;
         public decimal OpenPnL => 0;
         public decimal RealizedPnL => 0;
+        public LiveFinancialQuality FinancialQuality => LiveFinancialQuality.Estimated;
         public IReadOnlyList<StrategyOrder> ActiveOrders => Array.Empty<StrategyOrder>();
         public bool IsBacktest => true;
 

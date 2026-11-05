@@ -290,6 +290,8 @@ internal sealed class FakeTradovate : IDisposable
     public Task PublishOrder(JsonObject order) => Push("order", "Updated", order.ToJsonString());
     public Task PublishVersion(JsonObject version) => Push("orderVersion", "Created", version.ToJsonString());
     public Task PublishFill(JsonObject fill) => Push("fill", "Created", fill.ToJsonString());
+    public Task DeleteFill(JsonObject fill) => Push("fill", "Deleted", fill.ToJsonString());
+    public Task PublishPosition(JsonObject position) => Push("position", "Updated", position.ToJsonString());
 
     public async Task ReconnectUser()
     {

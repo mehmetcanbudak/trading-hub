@@ -42,10 +42,40 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private readonly TimeZoneInfo _tz;
     private readonly BarSeries _bars = new();
     private readonly List<StrategyOrder> _orders = new();
+    // Only active/unresolved handles stay here. Durable lineage owns terminal execution corrections.
+    private readonly Dictionary<long, OwnedExecutionOrder> _executionOrders = new();
+    private readonly Dictionary<ExecutionIdentity, ExecutionReport> _executionReports = new();
+    private AccountExecutionProjector? _projector;
+    private AccountExecutionProjector.ProjectionSubscription? _projectionSubscription;
+    private OrderOwner _owner = null!;
+    private sealed class OwnedExecutionOrder(StrategyOrder order, string ledgerId, decimal quantityBaseline = 0)
+    {
+        public StrategyOrder Order { get; } = order;
+        public string LedgerId { get; } = ledgerId;
+        // Immutable for this handle, including native amendments/replacements retaining cumulative Filled.
+        public decimal QuantityBaseline { get; } = quantityBaseline;
+        public Dictionary<ExecutionIdentity, decimal>? PriorExecutions;
+        public bool ExecutionBaselineKnown = quantityBaseline == 0;
+        public decimal Quantity, Value;
+        public List<ExecutionIdentity>? Reports;
+    }
+    private bool OwnershipRiskBlocked => _ownershipMismatch || _historyRetired || _projectionSubscription?.Retired == true
+        || _account.OrderContext.HasStorageFault || (Ledger != null && ForeignOpenContext);
+    private bool ConfiguredValuationBlocked => (MaxDailyLoss > 0 && AvailableTodayPnL == null)
+        || (MaxDrawdown > 0 && AvailableCurrentDrawdown == null);
+    private bool FinancialRiskBlocked => OwnershipRiskBlocked
+        || (Ledger != null && Ledger.HasPendingPrices) || ConfiguredValuationBlocked
+        || _projectionSubscription?.HasPendingUpdates == true
+        || (_owner != null && _account.OrderContext.HasUnprojectedQuantity(_owner));
+    // Ready may precede this runner consuming already-published execution facts. Pending prices hold
+    // admitted orders; source failure, ownership faults and configured risk still require a pause.
+    private bool FinancialPauseRequired => FinancialRiskBlocked &&
+        (OwnershipRiskBlocked || ConfiguredValuationBlocked || _projector?.Availability == ExecutionAvailability.Unavailable);
     private readonly List<string> _log = new();
     private readonly SynchronizationContext? _sync;
     private BarBuilder _builder = null!;
     private bool _warmup;
+    private bool _bootstrapping;
     private long _nextId = 1, _lastId = long.MinValue;
     private int _lastSyntheticIndex = -1;
     private long _timeTicks, _priceTicks;
@@ -69,12 +99,14 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     // detenida con «cerrar posición»: sigue escuchando la cuenta hasta que se ejecute el cierre
     private bool _closing;
     private bool _accountHooked;
-    private bool _syncing, _syncAgain;
+    private int _syncing, _syncAgain;
     private readonly HashSet<Order> _cancelPending = new();
     private readonly List<string> _cancelIds = new();
     private string? _closeReason;
     private bool _closeSubmitted;
     private bool _protectionRefresh, _refreshTarget;
+    private (int Side, decimal Price)? _refreshStopBound;
+    private (int Side, decimal Stop, decimal Target)? _localProtectionPrices;
 
     // Observed user exits are not adopted or booked as strategy orders. Once an actual reduction happens,
     // cap their remaining size to the account's remaining exposure and reconcile our own protection.
@@ -82,16 +114,22 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private readonly Dictionary<Order, decimal> _observedLimits = new();
     private decimal _exitCapacity, _lastExitCapacity;
     private int _exitSign;
-    private int _placing;
+    private int _placing, _strategyCallbacks;
 
     // arrancó con una posición en su contabilidad y espera que la cuenta la confirme
     private bool _awaitingAccount;
     private bool _awaitLogged;
+    private bool _ownershipMismatch;
+    private bool _historyRetired;
+    private bool ForeignOpenContext => Ledger.OpenContextConflict || (Ledger.Position != 0 &&
+        Ledger.OpenContextId != null && Ledger.OpenContextId != _account.OrderContext.Descriptor.Id);
+    private decimal LocalPosition => Ledger?.PositionInContext(_account.OrderContext.Descriptor.Id) ?? 0;
 
     // límites de riesgo
-    private int _tradesSeen = -1;
+    private long _tradesSeen = -1;
     private DateOnly _totalsDay;
     private decimal _dayPnl, _peakClosed;
+    private bool _dayFinancialsPending;
     private DateOnly _limitDay;
 
     public LiveStrategyRunner(Strategy strategy, InstrumentData data, ITradingAccount account, ChartPeriod period, string? timeZoneId = null, TimeSpan sessionStart = default)
@@ -194,8 +232,8 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     /// <summary>Contabilidad propia de esta estrategia (llenados, posición, resultado y operaciones).</summary>
     public LiveLedger Ledger { get; private set; } = null!;
 
-    /// <summary>Posición real de la estrategia (en la cuenta, con el tamaño aplicado).</summary>
-    public decimal OwnPosition => Ledger?.Position ?? 0;
+    /// <summary>Owned quantity in this bound account context, expressed in account units.</summary>
+    public decimal OwnPosition => LocalPosition;
 
     /// <summary>Posición en las unidades de la estrategia (sin el tamaño).</summary>
     public decimal VirtualPosition => _virtual;
@@ -233,9 +271,12 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         Size = SizeMultiplier,
         PointValue = _data.Instrument.PointValue,
         ExecSymbol = CrossExecution ? ExecInstrument.Symbol : null,
-        Position = Ledger?.Position ?? 0,
+        Position = OwnPosition,
         OpenPnL = Ledger?.OpenPnL(_data.LastPrice) ?? 0,
         Realized = Ledger?.Realized ?? 0,
+        CompleteNet = Ledger?.NetRealized,
+        AvailableOpenPnL = Ledger?.KnownOpenPnL(_data.LastPrice),
+        FinancialQuality = Ledger?.FinancialQuality ?? LiveFinancialQuality.Pending,
         Trades = Ledger?.Trades.Count ?? 0,
         Source = Source,
         AccountId = AccountId,
@@ -326,11 +367,36 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     {
         if (IsRunning) return;
         if (_closing || HasWorkingOrders) throw new InvalidOperationException("The previous close or order cancellation is still unresolved.");
-        Ledger ??= Persist ? LiveStore.LoadLedger(Key, _data.Instrument.PointValue) : new LiveLedger(Key, _data.Instrument.PointValue);
-        if (Persist && LiveStore.PendingFills(Key) > 0)
+        _bootstrapping = true;
+        try { StartCore(); }
+        finally
+        {
+            _bootstrapping = false;
+            if (!IsRunning) HookAccount(false);
+        }
+    }
+
+    private void StartCore()
+    {
+        if (Persist) _account.OrderContext.AttachStorage(LiveStore.Root);
+        _owner = Persist
+            ? _account.OrderContext.LedgerOwner(Key, LiveStore.CaptureLedgerGeneration(_account.OrderContext.StorageRoot!, Key))
+            : new OrderOwner(Guid.NewGuid().ToString("N"), Kind: OrderOwnerKind.Strategy);
+        _projector = AccountExecutionProjector.For(_account.Executions, _account.OrderContext);
+        _projector.Synchronize();
+        // Subscribe before loading the durable snapshot. Facts committed during load or warmup stay
+        // queued; applying an overlap is idempotent, whereas subscribing after warmup loses that interval.
+        HookAccount(true);
+        Ledger = Persist ? LiveStore.LoadLedger(_account.OrderContext.StorageRoot!, Key, _data.Instrument.PointValue)
+            : Ledger ?? new LiveLedger(Key, _data.Instrument.PointValue);
+        _historyRetired = false;
+        _executionOrders.Clear();
+        _executionReports.Clear();
+        _localProtectionPrices = null;
+        if (Persist && LiveStore.PendingLedgerEvents(Key) > 0)
         {
             SetPaused(true);
-            Log("Recovered pending ledger fills: new entries remain paused until the fills are saved; existing exposure remains managed.");
+            Log("Recovered pending ledger events: new entries remain paused until the events are saved; existing exposure remains managed.");
         }
         StopReason = null;
         _strategy.InternalInit(this);
@@ -346,8 +412,11 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         _strategy.Canvas.Clear();
         LiveFrom = _data.Trades.Count > 0 ? _data.Trades.LastTime : DateTime.UtcNow;
 
-        _virtual = ToVirtual(Ledger.Position);
-        _lastPos = Ledger.Position;
+        SyncQuantities();
+        SyncExecutions();
+        _ownershipMismatch = ForeignOpenContext;
+        _virtual = ToVirtual(LocalPosition);
+        _lastPos = LocalPosition;
         _closing = false;
         _closeReason = null;
         _closeSubmitted = false;
@@ -355,16 +424,18 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         _observedResize.Clear();
         _keptProtection.Clear(); // running again: its protection is what it tracks from now on
         _adoptIds = AdoptProtectionIds.Where(id => !string.IsNullOrEmpty(id)).Distinct(StringComparer.Ordinal).ToList();
-        _adoptionPending = _adoptIds.Count > 0 && Ledger.Position != 0;
+        _adoptionPending = _adoptIds.Count > 0 && LocalPosition != 0;
         _data.TradesAppended += OnAppended;
         HookAccount(true);
         IsRunning = true;
         StartedUtc = DateTime.UtcNow;
+        _bootstrapping = false;
         Log($"Started on {TradingHub.Common.EnglishText.Of(_account.Name)} with {WarmupBars} warmup bars{(SizeMultiplier != 1 ? $" · size ×{Qty(SizeMultiplier)}" : "")}" +
             (CrossExecution ? $" · executes on {ExecInstrument.Symbol} (1 {_data.Instrument.Symbol} = {Qty(ExecRatio)} {ExecInstrument.Symbol})" : ""));
         if (Ledger.SkippedLines > 0)
             Log($"Its ledger has {Ledger.SkippedLines} unreadable line{(Ledger.SkippedLines == 1 ? "" : "s")}: skipped, and the fills after them were read (the file was not changed)");
-        if (Ledger.Position != 0) CheckInheritedPosition(initial: true);
+        SyncOrders();
+        if (LocalPosition != 0 || ForeignOpenContext) CheckInheritedPosition(initial: true);
         else ReportOrphanedProtection();
         SyncOrders();
         Changed?.Invoke();
@@ -407,8 +478,10 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             _orders.RemoveAll(kept.Contains);
             _sl = _tp = null;
             _protectionRefresh = false;
+            _refreshStopBound = null;
         }
         finally { _placing--; }
+        _strategyCallbacks++;
         try
         {
             _strategy.InternalStop();
@@ -417,9 +490,13 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         {
             Log("Error in OnStop: " + ex.Message);
         }
+        finally { _strategyCallbacks--; }
 
         IsRunning = false;
-        if (flatten && Ledger.Position != 0)
+        // A successor may run this ledger while this stopped runner still watches a cancel-pending handle.
+        // Keep those observations, but never transfer unresolved close management to another active runner.
+        if (!flatten && !_closing && HasWorkingOrders) _projectionSubscription?.RetainPendingOrders();
+        if (flatten && LocalPosition != 0)
         {
             _closing = true;
             _closeSubmitted = false;
@@ -429,7 +506,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         if (!_closing && !HasWorkingOrders) HookAccount(false);
         if (kept.Count > 0)
             Log($"Stopped: {(kept.Count > 1 ? "its stop loss and take profit stay" : $"its {kept[0].Name.ToLowerInvariant()} stays")} working at the broker ({string.Join(", ", kept.Select(so => DescribeLive((Order)so.Live!)))})");
-        else Log(_closing ? "Stopped: position close is unresolved; waiting for the account and order confirmations" : flatten && Ledger.Position == 0 ? "Stopped and position closed" : "Stopped");
+        else Log(_closing ? "Stopped: position close is unresolved; waiting for the account and order confirmations" : flatten && LocalPosition == 0 ? "Stopped and position closed" : "Stopped");
         if (_keptProtection.Count > kept.Count)
             Log("It stopped before adopting the orders its previous run kept at the broker: they stay working (review them in Chart Trader)");
         if (_cancelIds.Count > 0 || _cancelPending.Any(o => o.State == OrderStates.Active))
@@ -451,18 +528,36 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     public void SetPaused(bool paused)
     {
         if (Paused == paused) return;
+        if (!paused) _projector?.Synchronize();
+        if (!paused && _ownershipMismatch && Persist)
+        {
+            Ledger = LiveStore.LoadLedger(_account.OrderContext.StorageRoot!, Key, _data.Instrument.PointValue);
+            _ownershipMismatch = ForeignOpenContext;
+            if (!_ownershipMismatch)
+            {
+                _virtual = ToVirtual(LocalPosition);
+                _lastPos = LocalPosition;
+                _awaitingAccount = LocalPosition != 0;
+                StopReason = null;
+            }
+        }
+        if (!paused && FinancialRiskBlocked)
+        {
+            Log("Cannot resume: execution prices or the financial facts required by configured risk limits are pending.");
+            return;
+        }
         if (!paused && Persist)
         {
             try
             {
-                if (LiveStore.SavePendingFills(Key) is { } error)
+                if (LiveStore.SavePendingLedgerEvents(Key) is { } error)
                 {
-                    Log($"Cannot resume: pending ledger fills could not be saved ({error}). New entries remain paused.");
+                    Log($"Cannot resume: pending ledger events could not be saved ({error}). New entries remain paused.");
                     return;
                 }
-                if (LiveStore.PendingFills(Key) > 0)
+                if (LiveStore.PendingLedgerEvents(Key) > 0)
                 {
-                    Log("Cannot resume: ledger fills are still pending. Restore ledger storage and save the pending fills before opening new exposure.");
+                    Log("Cannot resume: ledger events are still pending. Restore ledger storage and save the pending events before opening new exposure.");
                     return;
                 }
             }
@@ -479,7 +574,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             {
                 if (order.Live is Order live && live.State != OrderStates.Active) continue;
                 decimal remaining = order.Live is Order active ? active.Unfilled : Math.Max(0, order.LiveQuantity - order.Booked);
-                decimal position = Ledger?.Position ?? 0;
+                decimal position = LocalPosition;
                 bool opens = position == 0 || Math.Sign(position) == (order.Side == OrderSide.Buy ? 1 : -1) || remaining > Math.Abs(position);
                 if (opens) Cancel(order);
             }
@@ -504,20 +599,70 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     }
 
     /// <summary>
-    /// Empieza su contabilidad de cero (borra sus operaciones guardadas). Solo sin posición abierta. Devuelve false si
-    /// tiene posición.
+    /// Deletes flat, settled history and starts a fresh owner generation. Open exposure and unresolved orders
+    /// must settle first so an old order cannot book quantity under the new history owner.
     /// </summary>
     public bool ResetLedger()
     {
-        if (Ledger is { Position: not 0 }) return false;
-        if (Persist) LiveStore.DeleteFills(Key);
-        Ledger = new LiveLedger(Key, _data.Instrument.PointValue);
-        _virtual = 0;
-        _lastPos = 0;
-        _tradesSeen = -1;
+        _projector?.Synchronize();
+        if (Ledger is { Position: not 0 } or { OpenContextConflict: true } || HasWorkingOrders || HasRecoveredWorkingOrders() || _closing) return false;
+        if (_projector != null && _owner != null)
+        {
+            if (!_projector.TryResetOwner(_owner, _projectionSubscription, ResetLedgerCore)) return false;
+        }
+        else ResetLedgerCore();
         Log("History deleted: starting fresh");
         Changed?.Invoke();
         return true;
+    }
+
+    private bool HasRecoveredWorkingOrders()
+    {
+        if (_owner == null) return false;
+        // The recovered broker handle need not have a local StrategyOrder. Require its exact durable
+        // context/owner/generation and logical lineage; comments and process-local IDs are not authority.
+        if (!_account.OrdersReady) return true;
+        var context = _account.OrderContext;
+        foreach (var order in _account.ActiveOrders)
+        {
+            if (order.State != OrderStates.Active || order.ContextId != context.Descriptor.Id || order.OwnerId != _owner.Id) continue;
+            var intent = context.Find(order.IntentId);
+            if (intent != null && intent.Owner == _owner && intent.ContextId == context.Descriptor.Id &&
+                intent.Generation == context.Descriptor.Generation && intent.LogicalOrderId == order.LogicalOrderId)
+                return true;
+        }
+        return false;
+    }
+
+    private void ResetLedgerCore()
+    {
+        if (Persist)
+        {
+            // If deletion or generation creation fails, the old owner must not open new exposure.
+            _historyRetired = true;
+            LiveStore.DeleteFills(Key);
+            if (_owner != null)
+                _owner = _account.OrderContext.LedgerOwner(Key,
+                    LiveStore.CaptureLedgerGeneration(_account.OrderContext.StorageRoot!, Key));
+        }
+        else if (_owner != null)
+            _owner = new OrderOwner(Guid.NewGuid().ToString("N"), Kind: OrderOwnerKind.Strategy);
+        _projectionSubscription?.Dispose();
+        _projectionSubscription = null;
+        Ledger = new LiveLedger(Key, _data.Instrument.PointValue);
+        _executionOrders.Clear();
+        _executionReports.Clear();
+        _ownershipMismatch = _historyRetired = false;
+        _virtual = 0;
+        _lastPos = 0;
+        _tradesSeen = -1;
+        if (_accountHooked)
+        {
+            var owner = _owner ?? throw new InvalidOperationException("An active account subscription requires a strategy owner.");
+            var projector = _projector ?? throw new InvalidOperationException("An active account subscription requires an execution projector.");
+            _projectionSubscription = projector.Subscribe(owner, OnAccountChanged);
+            projector.Synchronize();
+        }
     }
 
     /// <summary>Cierra la posición de la estrategia a mercado y cancela sus órdenes (sigue corriendo).</summary>
@@ -532,9 +677,10 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             foreach (var o in _orders.ToList()) Cancel(o);
             _sl = _tp = null;
             _protectionRefresh = false;
+            _refreshStopBound = null;
         }
         finally { _placing--; }
-        if (Ledger == null || Ledger.Position == 0) return;
+        if (Ledger == null || LocalPosition == 0) return;
         _closing = true;
         _closeSubmitted = false;
         _closeReason = why;
@@ -566,13 +712,40 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         }
     }
 
+    /// <summary>Current configured session's available net, including known open valuation; prior closed fee
+    /// uncertainty does not masquerade as current-session uncertainty. Global quality remains unchanged.</summary>
+    public decimal? AvailableTodayPnL
+    {
+        get
+        {
+            if (Ledger == null) return null;
+            RefreshTotals();
+            return !_dayFinancialsPending && Ledger.KnownOpenPnL(_data.LastPrice) is { } open ? _dayPnl + open : null;
+        }
+    }
+
+    public decimal? AvailableCurrentDrawdown
+    {
+        get
+        {
+            if (Ledger == null || Ledger.HasPendingFinancials) return null;
+            RefreshTotals();
+            return Ledger.KnownOpenPnL(_data.LastPrice) is { } open ? Math.Max(0, _peakClosed - (Ledger.Realized + open)) : null;
+        }
+    }
+
     // ----------------------------------------------------------------- datos
 
     private void OnAppended(int start, int count)
     {
         try
         {
-            for (int i = start; i < start + count && IsRunning; i++) Process(i);
+            _strategyCallbacks++;
+            try
+            {
+                for (int i = start; i < start + count && IsRunning; i++) Process(i);
+            }
+            finally { _strategyCallbacks--; }
             if (!IsRunning) return;
             SyncOrders();
             CheckLimits();
@@ -634,8 +807,18 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     {
         if (on == _accountHooked) return;
         _accountHooked = on;
-        if (on) _account.Changed += OnAccountChanged;
-        else _account.Changed -= OnAccountChanged;
+        if (on)
+        {
+            _account.Changed += OnAccountChanged;
+            _projectionSubscription = _projector!.Subscribe(_owner, OnAccountChanged);
+            _projector.Synchronize();
+        }
+        else
+        {
+            _account.Changed -= OnAccountChanged;
+            _projectionSubscription?.Dispose();
+            _projectionSubscription = null;
+        }
     }
 
     private void OnAccountChanged()
@@ -654,7 +837,15 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     /// </summary>
     private void CheckInheritedPosition(bool initial)
     {
-        decimal own = Ledger.Position;
+        if (_ownershipMismatch)
+        {
+            _awaitingAccount = true;
+            StopReason = "The open ledger position belongs to another or conflicting account context; reconcile its original account before resuming.";
+            SetPaused(true);
+            if (initial) Log(StopReason);
+            return;
+        }
+        decimal own = LocalPosition;
         if (own == 0)
         {
             _awaitingAccount = false;
@@ -681,11 +872,11 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         {
             decimal excess = Math.Abs(own) - covered;
             BookSynthetic(own > 0 ? -excess : excess, $"The account does not have {(covered > 0 ? "all of " : "")}the strategy's previous position ({(own > 0 ? "long" : "short")} {Qty(Math.Abs(own))}): closed {Qty(excess)} in its ledger at the latest price");
-            _lastPos = Ledger.Position;
+            _lastPos = LocalPosition;
         }
         else
             Log($"Continuing with its open position: {(own > 0 ? "long" : "short")} {Qty(Math.Abs(own))} @ {_data.Instrument.FormatPrice(Ledger.AveragePrice)}");
-        if (Ledger.Position == 0) ReportOrphanedProtection();
+        if (LocalPosition == 0) ReportOrphanedProtection();
         else if (ProtectOnStart && IsRunning && !_closing) ProtectInherited();
     }
 
@@ -701,7 +892,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     {
         bool resize = AdoptKeptProtection();
         string prefix = StrategyName + ": ";
-        var exit = Ledger.Position > 0 ? OrderDirections.Sell : OrderDirections.Buy;
+        var exit = LocalPosition > 0 ? OrderDirections.Sell : OrderDirections.Buy;
         var existing = _account.ActiveOrders.Where(o => o.State == OrderStates.Active && (o.Type is OrderTypes.Stop or OrderTypes.StopLimit or OrderTypes.Limit)
             && (o.Direction == exit || o.Comment.StartsWith(prefix, StringComparison.Ordinal))
             && !ReferenceEquals(o, _sl?.Live) && !ReferenceEquals(o, _tp?.Live)).ToList();
@@ -712,7 +903,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             else
                 Log($"{existing.Count} orders that could be its stop or target are already working in the account ({string.Join(", ", existing.Select(DescribeLive))}): no additional stop or target will be placed (review them in Chart Trader)");
             if (resize)
-                Log($"The adopted order size does not match the position ({Qty(Math.Abs(Ledger.Position))} {ExecInstrument.Symbol}): it is not replaced while another stop is working (review it in Chart Trader)");
+                Log($"The adopted order size does not match the position ({Qty(Math.Abs(LocalPosition))} {ExecInstrument.Symbol}): it is not replaced while another stop is working (review it in Chart Trader)");
             return;
         }
 
@@ -721,14 +912,14 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             Log($"A closing limit order is already working in the account ({DescribeLive(existing[0])}): no additional take profit will be placed (review it in Chart Trader)");
         else if (existing.Count > 1)
             Log($"{existing.Count} closing limit orders are already working in the account ({string.Join(", ", existing.Select(DescribeLive))}): no additional take profit will be placed (review them in Chart Trader)");
-        _exitSign = Math.Sign(Ledger.Position);
+        _exitSign = Math.Sign(LocalPosition);
         _exitCapacity = _lastExitCapacity = Math.Abs(_account.Position.Volume);
         foreach (var order in existing.Where(o => o.Type == OrderTypes.Limit && o.Direction == exit))
             _observedLimits.TryAdd(order, order.Filled);
         bool target = existing.Count == 0;
         if (resize)
         {
-            Log($"The adopted order size does not match the position ({Qty(Math.Abs(Ledger.Position))} {ExecInstrument.Symbol}): replaced");
+            Log($"The adopted order size does not match the position ({Qty(Math.Abs(LocalPosition))} {ExecInstrument.Symbol}): replaced");
             UpdateProtection(target);
         }
         else PlaceProtection(stop: _sl == null, target: target && _tp == null);
@@ -740,7 +931,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     /// </summary>
     private bool AdoptKeptProtection()
     {
-        var exit = Ledger.Position > 0 ? OrderDirections.Sell : OrderDirections.Buy;
+        var exit = LocalPosition > 0 ? OrderDirections.Sell : OrderDirections.Buy;
         var kept = KeptOrders().Where(o => o.Direction == exit).ToList();
         var stop = kept.FirstOrDefault(o => o.Type is OrderTypes.Stop or OrderTypes.StopLimit);
         var target = kept.FirstOrDefault(o => o.Type == OrderTypes.Limit);
@@ -755,7 +946,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         if (target != null) _tp = Adopt(target, StrategyOrderType.Limit, "Take profit");
         Log($"Adopted {(stop != null && target != null ? "the stop loss and take profit" : stop != null ? "the stop loss" : "the take profit")} kept at the broker: " +
             string.Join(", ", new[] { stop, target }.OfType<Order>().Select(DescribeLive)));
-        decimal size = Math.Abs(Ledger.Position);
+        decimal size = Math.Abs(LocalPosition);
         return (stop != null && stop.Unfilled != size) || (target != null && target.Unfilled != size);
     }
 
@@ -776,6 +967,39 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             LiveQuantity = live.QuantityToFill,
             Booked = live.Filled,
         };
+        SyncExecutions(); // Historical unowned reports are not new fills of this adopted exit.
+        var prior = new Dictionary<ExecutionIdentity, decimal>();
+        bool baselineKnown = so.Booked == 0;
+        if (so.Booked > 0)
+        {
+            // Adoption is a reconciliation path, not an ordinary append. Capture the prior identities once so
+            // a later price/fee correction of one cannot become a new execution of the inherited position.
+            var replay = _account.Executions.Capture(ExecutionCursor.Start);
+            foreach (var report in replay.Changes)
+                if (_account.OrderContext.MatchesExecution(live, report)) prior[report.Identity] = report.Quantity;
+            decimal priorQuantity = 0;
+            foreach (decimal quantity in prior.Values) priorQuantity += quantity;
+            baselineKnown = replay.Availability == ExecutionAvailability.Ready && priorQuantity == so.Booked;
+            if (!baselineKnown)
+                Log("The adopted order's prior execution baseline is unconfirmed: quantity protection continues, but financial attribution remains pending.");
+        }
+        var claim = _account.OrderContext.Adopt(live, _owner, so.Booked, prior.Keys.ToArray(), baselineKnown, protective: true);
+        var owned = new OwnedExecutionOrder(so, claim.LogicalOrderId, claim.QuantityBaseline)
+        {
+            ExecutionBaselineKnown = claim.BaselineKnown,
+            PriorExecutions = claim.PriorExecutions?.ToDictionary(id => id, _ => 0m),
+        };
+        foreach (var fill in Ledger.Fills)
+        {
+            if (fill.Kind != LiveFillKind.Execution || fill.OrderId != claim.LogicalOrderId || fill.ExecutionId == null) continue;
+            var report = new ExecutionReport(fill.ExecutionId, live.Id, fill.Symbol ?? ExecInstrument.Symbol, fill.Time,
+                fill.Buy, fill.Quantity, fill.Price, fill.PointValue, fill.Currency, fill.Fees ?? Array.Empty<ExecutionFee>(), fill.FeesComplete);
+            _executionReports[report.Identity] = report;
+            (owned.Reports ??= new()).Add(report.Identity);
+            owned.Quantity += report.Quantity;
+            owned.Value += report.Quantity * report.Price;
+        }
+        _executionOrders.TryAdd(live.Id, owned);
         _orders.Add(so);
         return so;
     }
@@ -824,30 +1048,59 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
 
     private void SyncOrders()
     {
-        if (_placing > 0) return;
-        if (_syncing)
-        {
-            _syncAgain = true;
-            return;
-        }
-        _syncing = true;
+        Interlocked.Exchange(ref _syncAgain, 1);
+        if (_bootstrapping || _placing > 0 || _strategyCallbacks > 0) return;
+        if (Interlocked.CompareExchange(ref _syncing, 1, 0) != 0) return;
         try
         {
             do
             {
-                _syncAgain = false;
+                Interlocked.Exchange(ref _syncAgain, 0);
                 SyncOrdersCore();
             }
-            while (_syncAgain);
+            while (Volatile.Read(ref _syncAgain) != 0);
         }
-        finally { _syncing = false; }
+        finally
+        {
+            Volatile.Write(ref _syncing, 0);
+            if (Volatile.Read(ref _syncAgain) != 0) SyncOrders();
+        }
     }
 
     private void SyncOrdersCore()
     {
-        if (!IsRunning && !_closing && !HasWorkingOrders) return;
+        if (!IsRunning && !_closing && !HasWorkingOrders)
+        {
+            // A saved-ID cancellation can settle without a tracked StrategyOrder to enter the loop below.
+            // Drain its final facts, then release the stopped observer rather than retaining this runner.
+            if (_projectionSubscription?.Active == false)
+            {
+                SyncQuantities();
+                SyncExecutions();
+                SyncCommittedLedger();
+                HookAccount(false);
+            }
+            return;
+        }
+        decimal previousAverage = Ledger.AveragePrice;
+        bool previousPricesPending = Ledger.HasPendingPrices;
+        if (_projectionSubscription?.Retired == true)
+        {
+            _historyRetired = true;
+            StopReason = "This ledger generation was explicitly retired; original exposure remains managed without recreating its history.";
+            SetPaused(true);
+        }
         CancelSavedProtection();
-        bool changed = false;
+        bool changed = SyncCommittedLedger();
+        if (changed)
+        {
+            // A different context's correction changes the shared ledger, not this account's native
+            // exposure. Establish its new baseline before processing this context's own transitions.
+            _lastPos = LocalPosition;
+            previousAverage = Ledger.AveragePrice;
+            previousPricesPending = Ledger.HasPendingPrices;
+        }
+        changed |= SyncQuantities();
         foreach (var so in _orders.ToList())
         {
             if (so.Live is not Order o) continue;
@@ -860,22 +1113,21 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
                 decimal newlyFilled = filled - so.Booked;
                 Book(so, newlyFilled);
                 so.Booked = filled;
-                if (_observedLimits.Count > 0)
-                    _exitCapacity = Math.Max(0, _exitCapacity + _exitSign * (so.Side == OrderSide.Buy ? newlyFilled : -newlyFilled));
                 changed = true;
             }
 
+            changed |= SyncExecutions();
             if (done)
             {
                 so.State = StrategyOrderState.Filled;
-                so.FillPrice = LastPrice;
-                so.FillTime = Time;
+                // Execution reports, not the last market print, set FillPrice/FillTime.
                 _orders.Remove(so);
                 Fills++;
                 changed = true;
                 Log($"Filled: {Describe(so)}");
                 Executed?.Invoke(this, ExecutedText(so, filled));
                 if (!so.IsProtective && IsRunning) _strategy.InternalFilled(so);
+                ForgetTerminalExecutionOrder(o.Id);
             }
             else if (o.Canceled || o.State == OrderStates.Failed)
             {
@@ -883,17 +1135,27 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
                 so.State = StrategyOrderState.Canceled;
                 _orders.Remove(so);
                 changed = true;
+                ForgetTerminalExecutionOrder(o.Id);
             }
+        }
+        changed |= SyncExecutions();
+        if (FinancialPauseRequired && IsRunning && !Paused)
+        {
+            Log("Execution facts needed for position pricing or configured risk limits are pending: new exposure is paused; reductions and protection remain managed.");
+            SetPaused(true);
         }
 
         _cancelPending.RemoveWhere(o => o.State != OrderStates.Active);
         if (_observedLimits.Count > 0) changed |= CoordinateObservedExits();
 
-        decimal pos = Ledger.Position;
-        if (pos != _lastPos)
+        decimal pos = LocalPosition;
+        bool quantityChanged = pos != _lastPos;
+        bool basisChanged = pos != 0 && (Ledger.AveragePrice != previousAverage || Ledger.HasPendingPrices != previousPricesPending);
+        if (quantityChanged || basisChanged)
         {
             _lastPos = pos;
-            if (IsRunning && !_closing) UpdateProtection(target: _observedLimits.Count == 0);
+            if (IsRunning && !_closing)
+                UpdateProtection(target: _observedLimits.Count == 0);
             changed = true;
         }
 
@@ -901,17 +1163,18 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         if (_protectionRefresh && !_closing && !_cancelPending.Any(o => o.State == OrderStates.Active))
         {
             _protectionRefresh = false;
-            PlaceProtection(stop: true, target: _refreshTarget && _observedLimits.Count == 0);
+            PlaceProtection(stop: _sl is not { IsActive: true },
+                target: _refreshTarget && _tp is not { IsActive: true } && _observedLimits.Count == 0);
         }
         if (_closeReason != null && _account.PositionReady && _account.OrdersReady &&
             _cancelIds.Count == 0 && !_cancelPending.Any(o => o.State == OrderStates.Active) &&
             !_orders.Any(o => o.IsActive && o.Type == StrategyOrderType.Market))
         {
-            if (Ledger.Position != 0 && !_closeSubmitted)
+            if (LocalPosition != 0 && !_closeSubmitted)
             {
                 _closeSubmitted = SendClose(_closeReason);
             }
-            if (Ledger.Position == 0)
+            if (LocalPosition == 0)
             {
                 _closeReason = null;
                 _closing = false;
@@ -941,6 +1204,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
 
     private bool CoordinateObservedExits()
     {
+        if (ForeignOpenContext) return false;
         bool reduced = false;
         foreach (var (order, booked) in _observedLimits.ToList())
         {
@@ -954,9 +1218,9 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         }
         // Order fills and PnL updates can arrive on independent broker read loops. Reconcile ownership from
         // the observed execution, not from a possibly earlier/later position message (and never book it twice).
-        if (reduced && Math.Sign(Ledger.Position) == _exitSign && Math.Abs(Ledger.Position) > _exitCapacity)
+        if (reduced && Math.Sign(LocalPosition) == _exitSign && Math.Abs(LocalPosition) > _exitCapacity)
         {
-            decimal reduction = Math.Abs(Ledger.Position) - _exitCapacity;
+            decimal reduction = Math.Abs(LocalPosition) - _exitCapacity;
             BookSynthetic(-_exitSign * reduction, $"The account's observed closing orders reduced its position by {Qty(reduction)}: reconciled its ledger and protection");
             reduced = true;
         }
@@ -985,7 +1249,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             else if (order.Unfilled > capacity && !_observedResize.ContainsKey(order))
             {
                 _observedResize[order] = capacity;
-                var replacement = _account.Replace(order, order.Price, capacity);
+                var replacement = OrderActions.Replace(_account, order, order.Price, capacity);
                 if (!ReferenceEquals(replacement, order))
                 {
                     _observedLimits.Remove(order);
@@ -999,33 +1263,166 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     }
 
     /// <summary>Contabiliza lo ejecutado de una orden y actualiza la posición en unidades de la estrategia.</summary>
-    private void Book(StrategyOrder so, decimal quantity)
+    private void Book(StrategyOrder so, decimal quantity, bool persist = true)
     {
-        decimal before = Ledger.Position;
-        var fill = new LiveFill(DateTime.UtcNow, so.Side == OrderSide.Buy, quantity, LastPrice > 0 ? LastPrice : _data.LastPrice, ExecInstrument.Symbol, ExecInstrument.PointValue);
+        decimal before = LocalPosition;
+        var owned = _executionOrders[((Order)so.Live!).Id];
+        var fill = new LiveFill(DateTime.UtcNow, so.Side == OrderSide.Buy, quantity, 0,
+            ExecInstrument.Symbol, ExecInstrument.PointValue)
+        {
+            Kind = LiveFillKind.QuantityObservation, OrderId = owned.LedgerId,
+            CumulativeQuantity = so.Booked + quantity - owned.QuantityBaseline,
+            ContextId = _account.OrderContext.Descriptor.Id,
+            OwnerId = _owner.Id, OwnerGeneration = _owner.LedgerGeneration,
+        };
         Ledger.Apply(fill);
-        SaveFill(fill);
-        decimal after = Ledger.Position;
+        AdjustObservedExitCapacity(before);
+        if (persist) SaveFill(fill);
+        decimal after = LocalPosition;
         if (after == 0) _virtual = 0;
         else if (so.IsProtective) _virtual = before != 0 && Math.Sign(before) == Math.Sign(after) ? _virtual * after / before : ToVirtual(after);
         else
         {
-            decimal sign = so.Side == OrderSide.Buy ? 1 : -1;
-            if (so.LiveQuantity > 0) _virtual += sign * so.Quantity * quantity / so.LiveQuantity;
+            if (so.LiveQuantity > 0) _virtual += (after - before) * so.Quantity / so.LiveQuantity;
             if (Math.Sign(_virtual) != Math.Sign(after)) _virtual = ToVirtual(after); // se desincronizó: se rehace
         }
+    }
+
+    private void AdjustObservedExitCapacity(decimal previousPosition)
+    {
+        if (_observedLimits.Count > 0 && LocalPosition != previousPosition)
+            _exitCapacity = Math.Max(0, _exitCapacity + _exitSign * (LocalPosition - previousPosition));
+    }
+
+    private bool SyncQuantities()
+    {
+        bool changed = false;
+        foreach (var update in _projectionSubscription?.DrainQuantities() ?? Array.Empty<OwnedQuantityUpdate>())
+        {
+            var observation = update.Observation;
+            var owned = _executionOrders.Values.FirstOrDefault(order => order.LedgerId == observation.Intent.LogicalOrderId);
+            if (owned != null)
+            {
+                decimal nativeQuantity = owned.QuantityBaseline + observation.CumulativeQuantity;
+                if (nativeQuantity > owned.Order.Booked)
+                {
+                    Book(owned.Order, nativeQuantity - owned.Order.Booked, persist: false);
+                    owned.Order.Booked = nativeQuantity;
+                    changed = true;
+                }
+            }
+            else
+            {
+                decimal before = LocalPosition;
+                long revision = Ledger.Revision;
+                Ledger.Apply(update.Fill);
+                AdjustObservedExitCapacity(before);
+                if (LocalPosition != before)
+                {
+                    decimal after = LocalPosition;
+                    if (after == 0) _virtual = 0;
+                    else if (observation.Intent.Request.Protective)
+                        _virtual = before != 0 && Math.Sign(before) == Math.Sign(after) ? _virtual * after / before : ToVirtual(after);
+                    else
+                    {
+                        _virtual += (after - before) * observation.Intent.VirtualPerUnit;
+                        if (_virtual == 0 || Math.Sign(_virtual) != Math.Sign(after)) _virtual = ToVirtual(after);
+                    }
+                }
+                changed |= Ledger.Revision != revision;
+            }
+        }
+        return changed;
+    }
+
+    private bool SyncCommittedLedger()
+    {
+        bool changed = false;
+        var subscription = _projectionSubscription;
+        var updates = subscription?.DrainCommitted() ?? Array.Empty<LiveFill>();
+        foreach (var fill in updates)
+        {
+            long revision = Ledger.Revision;
+            // This is already durable under this exact root/key/generation. It is a ledger fact,
+            // never a native claim, virtual fill, exit-capacity change or another journal append.
+            Ledger.Apply(fill);
+            if (Ledger.Revision == revision) continue;
+            _ownershipMismatch = ForeignOpenContext;
+            changed = true;
+        }
+        subscription?.AcknowledgeCommitted(updates.Count);
+        return changed;
+    }
+
+    private bool SyncExecutions()
+    {
+        bool changed = false;
+        foreach (var update in _projectionSubscription?.Drain() ?? Array.Empty<OwnedExecutionUpdate>())
+        {
+            var report = update.Report;
+            _executionOrders.TryGetValue(report.LocalOrderId, out var owned);
+            if (owned?.LedgerId != update.Intent.LogicalOrderId)
+                owned = _executionOrders.Values.FirstOrDefault(order => order.LedgerId == update.Intent.LogicalOrderId);
+            if (owned != null)
+            {
+                if (!owned.ExecutionBaselineKnown || owned.PriorExecutions?.ContainsKey(report.Identity) == true) continue;
+                _executionReports.TryGetValue(report.Identity, out var previous);
+                decimal reported = owned.QuantityBaseline + owned.Quantity + report.Quantity - (previous?.Quantity ?? 0);
+                if (reported > owned.Order.Booked)
+                {
+                    Book(owned.Order, reported - owned.Order.Booked);
+                    owned.Order.Booked = reported;
+                }
+                if (previous != null) { owned.Quantity -= previous.Quantity; owned.Value -= previous.Quantity * previous.Price; }
+                else (owned.Reports ??= new()).Add(report.Identity);
+                _executionReports[report.Identity] = report;
+                owned.Quantity += report.Quantity;
+                owned.Value += report.Quantity * report.Price;
+                owned.Order.FillPrice = owned.Quantity > 0 ? owned.Value / owned.Quantity : 0;
+                owned.Order.FillTime = report.Time;
+            }
+            decimal before = LocalPosition;
+            long revision = Ledger.Revision;
+            Ledger.Apply(update.Fill);
+            if (Ledger.Revision == revision) continue;
+            AdjustObservedExitCapacity(before);
+            if (LocalPosition != before)
+            {
+                decimal after = LocalPosition;
+                if (after == 0) _virtual = 0;
+                else if (update.Intent.Request.Protective)
+                    _virtual = before != 0 && Math.Sign(before) == Math.Sign(after) ? _virtual * after / before : ToVirtual(after);
+                else
+                {
+                    decimal ratio = update.Intent.VirtualPerUnit;
+                    _virtual += (after - before) * ratio;
+                    if (_virtual == 0 || Math.Sign(_virtual) != Math.Sign(after)) _virtual = ToVirtual(after);
+                }
+            }
+            changed = true;
+        }
+        return changed;
+    }
+
+    private void ForgetTerminalExecutionOrder(long localId)
+    {
+        if (!_executionOrders.Remove(localId, out var owned)) return;
+        if (owned.Reports != null)
+            foreach (var identity in owned.Reports) _executionReports.Remove(identity);
     }
 
     /// <summary>Asiento sin orden (lo que la cuenta no tiene): se cierra al último precio.</summary>
     private void BookSynthetic(decimal signedQuantity, string why)
     {
-        if (signedQuantity == 0) return;
-        decimal before = Ledger.Position;
+        if (signedQuantity == 0 || ForeignOpenContext) return;
+        decimal before = LocalPosition;
         decimal price = _data.LastPrice > 0 ? _data.LastPrice : Ledger.AveragePrice;
-        var fill = new LiveFill(DateTime.UtcNow, signedQuantity > 0, Math.Abs(signedQuantity), price, Ledger.OpenSymbol ?? ExecInstrument.Symbol, Ledger.OpenPointValue > 0 ? Ledger.OpenPointValue : ExecInstrument.PointValue);
+        var fill = new LiveFill(DateTime.UtcNow, signedQuantity > 0, Math.Abs(signedQuantity), price,
+            Ledger.OpenSymbol ?? ExecInstrument.Symbol, Ledger.OpenPointValue > 0 ? Ledger.OpenPointValue : ExecInstrument.PointValue)
+        { ContextId = _account.OrderContext.Descriptor.Id };
         Ledger.Apply(fill);
         SaveFill(fill);
-        decimal after = Ledger.Position;
+        decimal after = LocalPosition;
         _virtual = after == 0 ? 0 : before != 0 && Math.Sign(before) == Math.Sign(after) ? _virtual * after / before : ToVirtual(after);
         Log(why);
     }
@@ -1037,86 +1434,205 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private void SaveFill(LiveFill fill)
     {
         if (!Persist) return;
+        string root = _account.OrderContext.StorageRoot ?? LiveStore.Root;
+        if (_owner != null && fill.OwnerId == null)
+            fill = fill with { ContextId = fill.ContextId ?? _account.OrderContext.Descriptor.Id,
+                OwnerId = _owner.Id, OwnerGeneration = _owner.LedgerGeneration };
         int waiting = 0;
-        try { waiting = LiveStore.PendingFills(Key); }
+        try { waiting = LiveStore.PendingLedgerEvents(root, Key); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // AppendFill must still receive this observed fill; it retains it and reports the actual storage error.
+            // AppendFill must still receive this observed event; it retains it and reports the actual storage error.
         }
-        if (LiveStore.AppendFill(Key, fill) is { } error)
+        string? error;
+        if (_owner != null)
         {
-            Log($"Could not save a fill to its ledger ({error.TrimEnd('.')}): it stays pending and is saved before the next fill; new entries are paused");
+            var result = _projector != null
+                ? _projector.CommitOwnedEvent(_owner, fill)
+                : LiveStore.AppendOwnedEvent(root, Key, _owner.LedgerGeneration, fill);
+            if (result.Status == LiveStore.ExecutionProjectionStatus.Retired)
+            {
+                _historyRetired = true;
+                StopReason = "This ledger generation was explicitly retired; old observations cannot recreate its history.";
+                SetPaused(true);
+                Log(StopReason);
+                return;
+            }
+            error = result.Error;
+        }
+        else error = LiveStore.AppendFill(Key, fill);
+        if (error != null)
+        {
+            Log($"Could not save a ledger event ({error.TrimEnd('.')}): it stays pending and is saved before the next event; new entries are paused");
             try { SetPaused(true); }
             catch (Exception ex)
             {
-                // Paused is already set before cancellation. Do not lose this fill's booking if a broker cancel fails.
+                // Paused is already set before cancellation. Do not lose this event if a broker cancel fails.
                 Log($"New entries remain paused; entry cancellation or its notification failed ({ex.Message}). Reconcile the working orders.");
             }
         }
         else if (waiting > 0)
-            Log($"Saved {waiting} pending fill{(waiting == 1 ? "" : "s")} to its ledger; resume manually when ready");
+            Log($"Saved {waiting} pending ledger event{(waiting == 1 ? "" : "s")} to its ledger; resume manually when ready");
+        _projector?.NotifyCommittedFacts();
     }
 
     /// <summary>Manda el cierre de la posición propia (nunca más de lo que la cuenta tiene en ese sentido).</summary>
     private bool SendClose(string why)
     {
-        decimal own = Ledger.Position;
+        decimal own = LocalPosition;
         if (own == 0) return true;
         if (!_account.PositionReady || !_account.OrdersReady) return false;
         decimal acc = _account.Position?.Volume ?? 0;
         decimal closable = Math.Sign(acc) == Math.Sign(own) ? Math.Min(Math.Abs(acc), Math.Abs(own)) : 0;
         decimal excess = Math.Abs(own) - closable;
+        if (excess > 0 && ForeignOpenContext) return false;
         if (excess > 0)
             BookSynthetic(own > 0 ? -excess : excess, $"The account did not have {Qty(excess)} of the strategy's position: it was closed in its ledger at the latest price");
         if (closable <= 0) return true;
         var so = new StrategyOrder { Id = _nextId++, Side = own > 0 ? OrderSide.Sell : OrderSide.Buy, Type = StrategyOrderType.Market, Quantity = closable, Name = why, Time = Time, IsProtective = true };
         Place(so, closable);
-        _syncAgain = true; // a synchronous account may already have filled it while Place suppressed its event
+        Interlocked.Exchange(ref _syncAgain, 1); // synchronous fills can arrive while Place suppresses callbacks
         return true;
     }
 
-    /// <summary>Replaces its stop loss and take profit with ones for the current position (without <paramref name="target"/>, only the stop loss).</summary>
+    /// <summary>Refreshes only changed owned protection legs through cancellation acknowledgment.
+    /// Matching native remaining quantities and prices survive partial fills and price finalization.</summary>
     private void UpdateProtection(bool target = true)
     {
+        decimal pos = LocalPosition;
+        int side = Math.Sign(pos);
+        if (_refreshStopBound is { } pendingBound && pendingBound.Side != side) _refreshStopBound = null;
+        if (side != 0 && _sl is { IsActive: true } previousStop &&
+            previousStop.Side == (side > 0 ? OrderSide.Sell : OrderSide.Buy))
+        {
+            decimal bound = previousStop.Price;
+            if (previousStop.Live is Order live && live.TriggerPrice > 0)
+                bound = bound > 0 ? (side > 0 ? Math.Max(bound, live.TriggerPrice) : Math.Min(bound, live.TriggerPrice)) : live.TriggerPrice;
+            if (bound > 0)
+            {
+                if (_refreshStopBound is { } retained)
+                    bound = side > 0 ? Math.Max(bound, retained.Price) : Math.Min(bound, retained.Price);
+                _refreshStopBound = (side, bound);
+            }
+        }
+        var prices = ProtectionPrices(pos);
+        bool keepStop = pos != 0 && prices.Stop > 0 && MatchesProtection(_sl, pos, prices.Stop, stop: true);
+        bool keepTarget = pos != 0 && target && prices.Target > 0 && MatchesProtection(_tp, pos, prices.Target, stop: false);
         _protectionRefresh = true;
         _refreshTarget = target;
         _placing++;
         try
         {
-            if (_sl is { IsActive: true }) Cancel(_sl);
-            if (_tp is { IsActive: true }) Cancel(_tp);
-            _sl = _tp = null;
+            if (!keepStop)
+            {
+                if (_sl is { IsActive: true }) Cancel(_sl);
+                _sl = null;
+            }
+            if (!keepTarget)
+            {
+                if (_tp is { IsActive: true }) Cancel(_tp);
+                _tp = null;
+            }
         }
         finally { _placing--; }
         if (!_cancelPending.Any(o => o.State == OrderStates.Active))
         {
             _protectionRefresh = false;
-            PlaceProtection(stop: true, target: target && _observedLimits.Count == 0);
+            PlaceProtection(stop: !keepStop, target: target && !keepTarget && _observedLimits.Count == 0);
         }
     }
 
-    /// <summary>Places the stop loss and/or the take profit the strategy uses for the current position (nothing while flat).</summary>
-    private void PlaceProtection(bool stop, bool target)
+    private bool MatchesProtection(StrategyOrder? strategyOrder, decimal position, decimal price, bool stop)
     {
-        decimal pos = Ledger.Position;
-        if (pos == 0) return;
+        if (strategyOrder is not { IsActive: true, Live: Order live } ||
+            live.State != OrderStates.Active || live.Canceled || _cancelPending.Contains(live)) return false;
+        if (live.Direction != (position > 0 ? OrderDirections.Sell : OrderDirections.Buy) ||
+            live.Unfilled != Math.Abs(position)) return false;
+        if (stop ? live.Type is not (OrderTypes.Stop or OrderTypes.StopLimit) : live.Type != OrderTypes.Limit) return false;
+        decimal nativePrice = stop && live.TriggerPrice > 0 ? live.TriggerPrice : live.Price;
+        return nativePrice == ExecInstrument.RoundPrice(price);
+    }
+
+    private (decimal Stop, decimal Target) ProtectionPrices(decimal pos)
+    {
+        if (pos == 0) { _localProtectionPrices = null; return default; }
+        int side = Math.Sign(pos);
+        if (ForeignOpenContext)
+        {
+            // Shared financial history and a mixed account average cannot price this owned lot.
+            // Prefer its acknowledged native legs, then the prices established before the conflict.
+            var retained = _localProtectionPrices is { } local && local.Side == side ? local : default;
+            decimal retainedStop = AcknowledgedProtectionPrice(_sl, pos, stop: true);
+            decimal retainedTarget = AcknowledgedProtectionPrice(_tp, pos, stop: false);
+            if (retainedStop <= 0) retainedStop = retained.Stop;
+            if (retainedTarget <= 0) retainedTarget = retained.Target;
+            _localProtectionPrices = (side, retainedStop, retainedTarget);
+            return (retainedStop, retainedTarget);
+        }
+        var accountPosition = _account.Position;
         decimal avg = Ledger.AveragePrice;
-        decimal qty = Math.Abs(pos);
-        var exit = pos > 0 ? OrderSide.Sell : OrderSide.Buy;
+        if (avg <= 0)
+            avg = accountPosition is { AveragePrice: > 0 } ? accountPosition.AveragePrice
+                : _account.LastPrice > 0 ? _account.LastPrice : _data.LastPrice;
+        if (avg <= 0) return default;
         var inst = _data.Instrument;
         int stopTicks = _strategy.StopLossTicks > 0 ? _strategy.StopLossTicks : _strategy.TrailingStopTicks;
-        if (stop && stopTicks > 0)
-        {
-            _highWater = _lowWater = LastPrice; // trailing starts where its stop is placed
-            decimal d = stopTicks * inst.TickSize;
-            _sl = Protective(exit, StrategyOrderType.Stop, qty, inst.RoundPrice(pos > 0 ? avg - d : avg + d), "Stop loss");
-        }
+        decimal stop = stopTicks > 0 ? inst.RoundPrice(pos > 0 ? avg - stopTicks * inst.TickSize : avg + stopTicks * inst.TickSize) : 0;
+        if (stop > 0 && _refreshStopBound is { } bound && bound.Side == Math.Sign(pos))
+            stop = pos > 0 ? Math.Max(stop, bound.Price) : Math.Min(stop, bound.Price);
+        decimal target = _strategy.TakeProfitTicks > 0
+            ? inst.RoundPrice(pos > 0 ? avg + _strategy.TakeProfitTicks * inst.TickSize : avg - _strategy.TakeProfitTicks * inst.TickSize) : 0;
+        _localProtectionPrices = (side, stop, target);
+        return (stop, target);
+    }
 
-        if (target && _strategy.TakeProfitTicks > 0)
+    private static decimal AcknowledgedProtectionPrice(StrategyOrder? strategyOrder, decimal position, bool stop)
+    {
+        if (strategyOrder?.Live is not Order live || live.State != OrderStates.Active || live.Canceled ||
+            live.Direction != (position > 0 ? OrderDirections.Sell : OrderDirections.Buy)) return 0;
+        if (stop ? live.Type is not (OrderTypes.Stop or OrderTypes.StopLimit) : live.Type != OrderTypes.Limit) return 0;
+        return stop && live.TriggerPrice > 0 ? live.TriggerPrice : live.Price;
+    }
+
+    /// <summary>Places required protection only when the account can admit its full reduce-only quantity.
+    /// A fill may precede the native position snapshot; keep the existing refresh pending until it reconciles.</summary>
+    private void PlaceProtection(bool stop, bool target)
+    {
+        decimal pos = LocalPosition;
+        if (pos == 0) { _refreshStopBound = null; return; }
+        decimal qty = Math.Abs(pos);
+        int stopTicks = _strategy.StopLossTicks > 0 ? _strategy.StopLossTicks : _strategy.TrailingStopTicks;
+        if ((!stop || stopTicks <= 0) && (!target || _strategy.TakeProfitTicks <= 0)) return;
+        var position = _account.Position;
+        decimal accountPosition = position?.Volume ?? 0;
+        if (position == null || !_account.PositionReady || !_account.OrdersReady || Math.Sign(accountPosition) != Math.Sign(pos) ||
+            Math.Abs(accountPosition) < qty)
         {
-            decimal d = _strategy.TakeProfitTicks * inst.TickSize;
-            _tp = Protective(exit, StrategyOrderType.Limit, qty, inst.RoundPrice(pos > 0 ? avg + d : avg - d), "Take profit");
+            _protectionRefresh = true;
+            _refreshTarget = target;
+            return;
         }
+        var prices = ProtectionPrices(pos);
+        _placing++;
+        try
+        {
+            var exit = pos > 0 ? OrderSide.Sell : OrderSide.Buy;
+            if (stop && prices.Stop > 0)
+            {
+                if (_refreshStopBound is { } bound && bound.Side == Math.Sign(pos))
+                {
+                    _highWater = Math.Max(_highWater, LastPrice);
+                    _lowWater = Math.Min(_lowWater, LastPrice);
+                }
+                else _highWater = _lowWater = LastPrice;
+                _sl = Protective(exit, StrategyOrderType.Stop, qty, prices.Stop, "Stop loss");
+            }
+
+            if (target && prices.Target > 0)
+                _tp = Protective(exit, StrategyOrderType.Limit, qty, prices.Target, "Take profit");
+            _refreshStopBound = null;
+        }
+        finally { _placing--; }
     }
 
     private StrategyOrder Protective(OrderSide side, StrategyOrderType type, decimal qty, decimal price, string name)
@@ -1127,8 +1643,9 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
 
     private void Trail(decimal price)
     {
+        if (ForeignOpenContext) return; // Do not re-anchor local trailing protection from conflicted financial prices.
         if (_strategy.TrailingStopTicks <= 0 || _sl is not { IsActive: true } || _sl.Live is not Order o) return;
-        decimal pos = Ledger.Position;
+        decimal pos = LocalPosition;
         decimal dist = _strategy.TrailingStopTicks * _data.Instrument.TickSize;
         decimal? target = null;
         if (pos > 0 && price > _highWater)
@@ -1149,7 +1666,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         {
             _lastTrailUpdate = DateTime.UtcNow;
             _sl.Price = t;
-            _account.Modify(o, t);
+            OrderActions.Reprice(_account, o, t);
         }
     }
 
@@ -1163,32 +1680,34 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         _placing++; // una simulada llena (y avisa) antes de devolver la orden: se contabiliza después
         try
         {
-            live = so.IsProtective
-                ? _account.Exit(so.Type == StrategyOrderType.Market ? OrderTypes.Market : so.Type == StrategyOrderType.Stop ? OrderTypes.Stop : OrderTypes.Limit, dir, liveQuantity, ExecInstrument.RoundPrice(so.Price), comment)
-                : so.Type switch
+            var type = so.Type == StrategyOrderType.Market ? OrderTypes.Market
+                : so.Type == StrategyOrderType.Stop ? OrderTypes.Stop : OrderTypes.Limit;
+            bool reducing = so.IsProtective || !RealOrderPermission.IncreasesExposure(LocalPosition,
+                dir == OrderDirections.Buy ? liveQuantity : -liveQuantity);
+            live = OrderActions.Place(_account, _owner, type, dir, liveQuantity, ExecInstrument.RoundPrice(so.Price),
+                comment, reducing, so.Quantity, so.IsProtective,
+                Math.Max(Math.Abs(LocalPosition), Math.Abs(LocalPosition + (dir == OrderDirections.Buy ? liveQuantity : -liveQuantity))));
+
+            so.Live = live;
+            if (live.LogicalOrderId != null)
+                _executionOrders.TryAdd(live.Id, new OwnedExecutionOrder(so, live.LogicalOrderId));
+            if (live.State == OrderStates.Failed)
             {
-                StrategyOrderType.Market => _account.Market(dir, liveQuantity, comment),
-                StrategyOrderType.Limit => _account.Limit(dir, liveQuantity, ExecInstrument.RoundPrice(so.Price), comment),
-                _ => _account.Stop(dir, liveQuantity, ExecInstrument.RoundPrice(so.Price), comment),
-            };
+                so.State = StrategyOrderState.Canceled;
+                Log($"Rejected: {Describe(so)} ({_account.LastError})");
+                return so;
+            }
+            Interlocked.Exchange(ref _syncAgain, 1);
+
+            _orders.Add(so);
+            Log($"Submitted: {Describe(so)}");
+            Changed?.Invoke();
+            return so;
         }
         finally
         {
             _placing--;
         }
-
-        so.Live = live;
-        if (live.State == OrderStates.Failed)
-        {
-            so.State = StrategyOrderState.Canceled;
-            Log($"Rejected: {Describe(so)} ({_account.LastError})");
-            return so;
-        }
-
-        _orders.Add(so);
-        Log($"Submitted: {Describe(so)}");
-        Changed?.Invoke();
-        return so;
     }
 
     /// <summary>
@@ -1232,8 +1751,8 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         decimal qty = filled > 0 ? filled : so.LiveQuantity;
         string what = so.IsProtective ? $" ({so.Name.ToLowerInvariant()})" : "";
         string micro = CrossExecution && ExecRatio > 0 ? $" · micro: equivalent to {Qty(qty / ExecRatio)} {_data.Instrument.Symbol}" : "";
-        decimal price = _account.LastPrice > 0 ? _account.LastPrice : LastPrice > 0 ? LastPrice : _data.LastPrice;
-        return $"«{StrategyName}» {(so.Side == OrderSide.Buy ? "bought" : "sold")} {Qty(qty)} {ExecInstrument.Symbol} at {ExecInstrument.FormatPrice(price)}{what} on {TradingHub.Common.EnglishText.Of(_account.Name)}{micro}";
+        string price = so.FillPrice > 0 ? $"at {ExecInstrument.FormatPrice(so.FillPrice)}" : "at an execution price still pending";
+        return $"«{StrategyName}» {(so.Side == OrderSide.Buy ? "bought" : "sold")} {Qty(qty)} {ExecInstrument.Symbol} {price}{what} on {TradingHub.Common.EnglishText.Of(_account.Name)}{micro}";
     }
 
     private static string Qty(decimal q) => q.ToString("0.########", Inv);
@@ -1244,28 +1763,28 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
 
     private void RefreshTotals()
     {
-        var trades = Ledger.Trades;
-        if (trades.Count == _tradesSeen && _totalsDay == _sessionDay) return;
-        _tradesSeen = trades.Count;
+        var changes = Ledger.RealizedChanges;
+        if (Ledger.Revision == _tradesSeen && _totalsDay == _sessionDay) return;
+        _tradesSeen = Ledger.Revision;
         _totalsDay = _sessionDay;
         decimal eq = 0, peak = 0, day = 0;
-        foreach (var t in trades)
+        foreach (var change in changes)
         {
-            eq += t.NetPnl;
+            eq += change.Net;
             peak = Math.Max(peak, eq);
-            if (_sessionDay != default && _session.SessionDate(DateTime.SpecifyKind(t.ExitTime, DateTimeKind.Utc)) == _sessionDay) day += t.NetPnl;
+            if (_sessionDay != default && _session.SessionDate(DateTime.SpecifyKind(change.Time, DateTimeKind.Utc)) == _sessionDay) day += change.Net;
         }
 
         _peakClosed = peak;
         _dayPnl = day;
+        _dayFinancialsPending = Ledger.HasPendingFinancialsForSession(_session, _sessionDay);
     }
 
     private void CheckLimits()
     {
         if (!IsRunning || _warmup || (MaxDailyLoss <= 0 && MaxDrawdown <= 0)) return;
-        if (MaxDrawdown > 0 && CurrentDrawdown >= MaxDrawdown)
+        if (MaxDrawdown > 0 && AvailableCurrentDrawdown is { } dd && dd >= MaxDrawdown)
         {
-            decimal dd = CurrentDrawdown;
             StopReason = $"Maximum drawdown reached ({Money(-dd)}; limit {Money(-MaxDrawdown)})";
             string msg = $"{StrategyName}: {StopReason}. Stopped{(CloseOnLimit ? " and closes its position" : "")}.";
             Log(StopReason + (CloseOnLimit ? ": stops and closes the position" : ": stops (position remains open)"));
@@ -1274,9 +1793,8 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             return;
         }
 
-        if (MaxDailyLoss > 0 && !DailyLimitActive)
+        if (MaxDailyLoss > 0 && !DailyLimitActive && AvailableTodayPnL is { } today)
         {
-            decimal today = TodayPnL;
             if (today > -MaxDailyLoss) return;
             _limitDay = _sessionDay;
             StopReason = $"Maximum daily loss reached ({Money(today)}; limit {Money(-MaxDailyLoss)})";
@@ -1313,7 +1831,10 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     /// <summary>Resultado abierto en las unidades de la estrategia.</summary>
     public decimal OpenPnL => _warmup || Ledger == null || Ledger.Position == 0 ? 0 : Ledger.OpenPnL(LastPrice) * _virtual / Ledger.Position;
 
+    /// <summary>Best-available numeric result for existing strategy code; inspect FinancialQuality before using it
+    /// as confirmed economics. Missing execution facts never become fabricated market-price fills.</summary>
     public decimal RealizedPnL => _warmup || Ledger == null ? 0 : Ledger.Realized;
+    public LiveFinancialQuality FinancialQuality => Ledger?.FinancialQuality ?? LiveFinancialQuality.Pending;
     public IReadOnlyList<StrategyOrder> ActiveOrders => _orders.ToList();
     public bool IsBacktest => false;
 
@@ -1354,7 +1875,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             q = Math.Min(q, Math.Abs(_virtual));
         }
 
-        decimal own = Ledger.Position;
+        decimal own = LocalPosition;
         decimal delta = Target(_virtual + sign * q) - own;
         if (delta == 0 || Math.Sign(delta) != Math.Sign(sign))
         {
@@ -1365,6 +1886,12 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
 
         decimal after = own + delta;
         bool reduces = Math.Abs(after) < Math.Abs(own) && (after == 0 || Math.Sign(after) == Math.Sign(own));
+        if (!reduces && FinancialRiskBlocked)
+        {
+            Log($"Execution facts required for configured risk are pending. Did not submit {name}; reductions and cancels remain allowed.");
+            so.State = StrategyOrderState.Canceled;
+            return so;
+        }
         if (!reduces && Guard?.Check(this, side, Math.Abs(delta), after) is { } why)
         {
             Log($"Risk guard: {why}. Did not submit {name}");
@@ -1374,7 +1901,11 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         }
 
         so.Quantity = q;
-        return Place(so, Math.Abs(delta));
+        Place(so, Math.Abs(delta));
+        // Public callers have no following market-data boundary. Reconcile only after registration;
+        // strategy callbacks defer to their existing outer boundary, and SyncOrders remains single-flight.
+        SyncOrders();
+        return so;
     }
 
     public void Cancel(StrategyOrder order)
@@ -1398,7 +1929,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     {
         if (!order.IsActive || order.Live is not Order o || price <= 0) return;
         order.Price = price;
-        _account.Modify(o, price);
+        OrderActions.Reprice(_account, o, price);
     }
 
     public void Log(string message)

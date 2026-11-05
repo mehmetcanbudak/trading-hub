@@ -762,9 +762,9 @@ internal static partial class SafetyScene
             string accountId = AppServices.TradovateAccountId(profile, 101);
             var broker = services.AccountFor(data, accountId);
             check(WaitFor(() => broker.PositionReady && broker.OrdersReady), "Tradovate fixture confirms its initial native snapshots");
-            var entry = broker.Market(OrderDirections.Buy, 2, "Fixture entry");
+            var entry = TradingHub.Trading.OrderActions.Manual(broker, TradingHub.Trading.OrderTypes.Market, OrderDirections.Buy, 2, comment: "Fixture entry");
             check(WaitFor(() => entry.Status == OrderStatus.Filled && broker.Position.Volume == 2), "Tradovate fixture holds two confirmed contracts");
-            var limit = broker.Limit(OrderDirections.Buy, 1, 4990, "Fixture working limit");
+            var limit = TradingHub.Trading.OrderActions.Manual(broker, TradingHub.Trading.OrderTypes.Limit, OrderDirections.Buy, 1, 4990, "Fixture working limit");
             check(WaitFor(() => limit.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(limit)), "Tradovate fixture has a confirmed working order before reconfiguration");
 
             profile.TradovateUser = "changed-fixture-login";
@@ -775,7 +775,7 @@ internal static partial class SafetyScene
             broker.Cancel(limit);
             check(WaitFor(() => limit.Canceled && !broker.ActiveOrders.Contains(limit)) && limit.Filled == 0,
                 "The original Tradovate context still receives the working order's cancellation acknowledgment");
-            var close = broker.Exit(OrderTypes.Market, OrderDirections.Sell, 2, 0, "Fixture close");
+            var close = TradingHub.Trading.OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 2, 0, "Fixture close", reduceOnly: true);
             check(WaitFor(() => close.Status == OrderStatus.Filled && broker.Position.Volume == 0),
                 $"The original Tradovate context confirms its reduction after reconfiguration ({broker.LastError})");
             check(!ReferenceEquals(broker, services.AccountFor(data, accountId)),
@@ -813,17 +813,13 @@ internal sealed class FixtureRealAccount(SimBroker inner) : ITradingAccount
         remove => inner.Changed -= value;
     }
 
-    public Order Market(OrderDirections dir, decimal qty, string comment = "") => inner.Market(dir, qty, comment);
-    public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Limit(dir, qty, price, comment);
-    public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => inner.Stop(dir, qty, trigger, comment);
-    public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Exit(type, dir, qty, price, comment);
-    public Order Replace(Order order, decimal newPrice, decimal newQuantity) => inner.Replace(order, newPrice, newQuantity);
+    public OrderContext OrderContext => inner.OrderContext;
+    public IExecutionSource Executions => inner.Executions;
+    public Order Submit(PreparedOrderIntent intent) => inner.Submit(intent);
+    public Order Replace(Order order, PreparedOrderIntent intent) => inner.Replace(order, intent);
     public void Cancel(Order order) => inner.Cancel(order);
     public void CancelAt(decimal price) => inner.CancelAt(price);
     public void CancelAll() => inner.CancelAll();
-    public void Modify(Order order, decimal newPrice) => inner.Modify(order, newPrice);
-    public void Flatten() => inner.Flatten();
-    public void Reverse() => inner.Reverse();
 }
 
 // ======================================================================== S1: one Quit path
@@ -949,7 +945,7 @@ internal static partial class SafetyScene
             // a long position on the account and in the strategy's ledger: the strategy inherits it and protects it at start
             void Hold(SimBroker account, string ledgerKey)
             {
-                account.Market(OrderDirections.Buy, 1, "safety-quit: fixture position");
+                TradingHub.Trading.OrderActions.Manual(account, TradingHub.Trading.OrderTypes.Market, OrderDirections.Buy, 1, comment: "safety-quit: fixture position");
                 LiveStore.AppendFill(ledgerKey, new LiveFill(DateTime.UtcNow, true, 1, data.LastPrice, inst.Symbol, inst.PointValue));
             }
 
@@ -1467,6 +1463,12 @@ public class FixtureDesktopLifetime : DispatchProxy
 internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
 {
     private readonly List<Order> _held = new();
+    private readonly Dictionary<long, long> _executionAliases = new();
+    private readonly Dictionary<Order, PreparedOrderIntent> _intents = new();
+    public OrderContext OrderContext => inner.OrderContext;
+    private IExecutionSource? _executions;
+    public IExecutionSource Executions => _executions ??= new DelegateExecutionSource(CaptureExecutions, h => Changed += h, h => Changed -= h);
+    private bool _confirming;
     private event Action? ConfirmationChanged;
 
     public string Name => "Fixture slow close";
@@ -1476,6 +1478,20 @@ internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
     public IEnumerable<Order> ActiveOrders => inner.ActiveOrders.Concat(_held.Where(o => o.State == OrderStates.Active));
     public string? LastError => inner.LastError;
     public decimal LastPrice => inner.LastPrice;
+    public ExecutionSnapshot CaptureExecutions(long afterRevision)
+    {
+        if (_confirming) return new ExecutionSnapshot(afterRevision, Array.Empty<ExecutionReport>(), ExecutionAvailability.Synchronizing);
+        var snapshot = inner.Executions.Capture(new(inner.Executions.Epoch, afterRevision));
+        if (_executionAliases.Count == 0 || snapshot.Changes.Count == 0) return snapshot;
+        var changes = new ExecutionReport[snapshot.Changes.Count];
+        for (int i = 0; i < changes.Length; i++)
+        {
+            var report = snapshot.Changes[i];
+            changes[i] = _executionAliases.TryGetValue(report.LocalOrderId, out long heldId)
+                ? report with { LocalOrderId = heldId } : report;
+        }
+        return snapshot with { Changes = changes };
+    }
 
     public event Action? Changed
     {
@@ -1483,9 +1499,13 @@ internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
         remove { inner.Changed -= value; ConfirmationChanged -= value; }
     }
 
-    public Order Market(OrderDirections dir, decimal qty, string comment = "")
+    public Order Submit(PreparedOrderIntent intent)
     {
-        var order = new Order { Direction = dir, Type = OrderTypes.Market, QuantityToFill = qty, Unfilled = qty, Comment = comment, State = OrderStates.Active, Status = OrderStatus.Placed };
+        var request = intent.Request;
+        if (request.Type != OrderTypes.Market) return inner.Submit(intent);
+        var order = new Order { Direction = request.Direction, Type = request.Type, QuantityToFill = request.Quantity, Unfilled = request.Quantity, Comment = request.Comment, ReduceOnly = request.ReduceOnly, State = OrderStates.Active, Status = OrderStatus.Placed };
+        OrderContext.BindOrder(order, intent);
+        _intents.Add(order, intent);
         _held.Add(order);
         return order;
     }
@@ -1501,7 +1521,14 @@ internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
         foreach (var order in _held)
         {
             if (order.State != OrderStates.Active) continue;
-            var filled = inner.Exit(OrderTypes.Market, order.Direction, order.QuantityToFill, 0, order.Comment);
+            Order filled;
+            _confirming = true;
+            try
+            {
+                filled = inner.Submit(_intents[order]);
+                _executionAliases[filled.Id] = order.Id;
+            }
+            finally { _confirming = false; }
             order.QuantityToFill = filled.QuantityToFill;
             order.Unfilled = filled.Unfilled;
             order.Price = filled.Price;
@@ -1511,16 +1538,7 @@ internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
         }
     }
 
-    public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => inner.Limit(dir, qty, price, comment);
-    public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => inner.Stop(dir, qty, trigger, comment);
-    public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "")
-    {
-        if (type != OrderTypes.Market) return inner.Exit(type, dir, qty, price, comment);
-        var order = Market(dir, qty, comment);
-        order.ReduceOnly = true;
-        return order;
-    }
-    public Order Replace(Order order, decimal newPrice, decimal newQuantity) => inner.Replace(order, newPrice, newQuantity);
+    public Order Replace(Order order, PreparedOrderIntent intent) => inner.Replace(order, intent);
 
     public void Cancel(Order order)
     {
@@ -1542,7 +1560,4 @@ internal sealed class FixtureSlowCloseAccount(SimBroker inner) : ITradingAccount
         inner.CancelAll();
     }
 
-    public void Modify(Order order, decimal newPrice) => inner.Modify(order, newPrice);
-    public void Flatten() => inner.Flatten();
-    public void Reverse() => inner.Reverse();
 }

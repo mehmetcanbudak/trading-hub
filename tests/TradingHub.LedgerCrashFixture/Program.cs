@@ -28,6 +28,7 @@ internal static class Program
         try
         {
             Progress("operation " + args[1]);
+            if (args[1].StartsWith("execution-", StringComparison.Ordinal)) return ExecutionRestart(args[1]);
             if (args[1] is "write" or "flat-write")
             {
                 string checkpoint = args.Length > 2 ? args[2] : "Acknowledged";
@@ -70,7 +71,7 @@ internal static class Program
                 else if (args[1] == "save-pending")
                 {
                     Progress("save pending begin");
-                    if (LiveStore.SavePendingFills(Key) is { } error) throw new IOException(error);
+                    if (LiveStore.SavePendingLedgerEvents(Key) is { } error) throw new IOException(error);
                     Progress("save pending complete");
                 }
                 else if (args[1] == "resume-flat")
@@ -96,7 +97,7 @@ internal static class Program
                 var ledger = LiveStore.LoadLedger(Key, 1);
                 Progress("load ledger complete");
                 Progress("pending fills begin");
-                int pending = LiveStore.PendingFills(Key);
+                int pending = LiveStore.PendingLedgerEvents(Key);
                 Progress("pending fills complete");
                 Progress("snapshot serialization begin");
                 string snapshot = JsonSerializer.Serialize(new
@@ -130,6 +131,87 @@ internal static class Program
         Console.Out.Flush();
         if (Console.ReadLine() != "continue") throw new IOException("The fixture checkpoint was not released.");
         Progress("checkpoint released");
+    }
+
+    private static int ExecutionRestart(string operation)
+    {
+        const string instrument = "test:TEST";
+        const decimal pointValue = 10m;
+        var source = new ExecutionLog();
+        var context = new OrderContext(new AccountContextDescriptor("owned-execution-crash-context", "fixture-native",
+            "owned-futures", "loopback-fixture", "local:owned-execution-crash", "fixture-generation", "fixture-account"),
+            LiveStore.Root, source);
+        bool writer = operation is "execution-receipt-crash" or "execution-ledger-crash";
+        if (writer)
+        {
+            Guid generation = LiveStore.CaptureLedgerGeneration(LiveStore.Root, Key);
+            var owner = context.LedgerOwner(Key, generation);
+            var entry = Prepare(owner, buy: true);
+            var report = Report(buy: true, price: 100m, fee: 3m);
+            source.Publish(report);
+            context.SaveReceipt(new(source.Epoch, 1), report);
+            if (operation == "execution-ledger-crash")
+            {
+                var fill = new LiveFill(report.Time, true, 2m, 100m, "TEST", pointValue)
+                {
+                    Kind = LiveFillKind.Execution, OrderId = entry.LogicalOrderId, ExecutionId = report.Identity,
+                    Fees = report.Fees, FeesComplete = true, Currency = "USD", ContextId = context.Descriptor.Id,
+                    OwnerId = owner.Id, OwnerGeneration = generation,
+                };
+                var projected = LiveStore.ProjectExecution(LiveStore.Root, Key, generation, fill);
+                if (projected.Status != LiveStore.ExecutionProjectionStatus.Applied) throw new IOException(projected.Error ?? "Owned execution did not commit before its acknowledgement boundary.");
+            }
+            // Parent kills this exact owned child after the public durable receive/commit boundary.
+            Pause();
+            return 0;
+        }
+        if (operation is not ("execution-recover" or "execution-correct" or "execution-retired")) return 64;
+        Console.WriteLine("started");
+        Console.Out.Flush();
+        var entryReport = Report(buy: true, price: operation == "execution-correct" ? 102m : 100m,
+            fee: operation == "execution-correct" ? 4m : 3m);
+        var recoveredEntry = context.Resolve(entryReport) ?? throw new IOException("Fresh process did not recover the exact native order owner.");
+        var projector = AccountExecutionProjector.For(source, context);
+        projector.Synchronize();
+        source.Publish(entryReport);
+        var exitReport = Report(buy: false, price: 105m, fee: 3m);
+        if (context.Resolve(exitReport) == null)
+        {
+            if (operation == "execution-retired") throw new IOException("Retired fixture has no existing exit lineage.");
+            Prepare(recoveredEntry.Owner, buy: false);
+        }
+        source.Publish(exitReport);
+        projector.Synchronize();
+        if (context.PendingReceipts().Count != 0 || context.HasStorageFault) throw new IOException(context.LastError ?? "Execution recovery left an unacknowledged durable receipt.");
+        var ledger = LiveStore.LoadLedger(LiveStore.Root, Key, pointValue);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            ledger.Fills, ledger.Position, ledger.AveragePrice, ledger.Realized, OpenPnL = ledger.OpenPnL(110m),
+            ledger.SkippedLines, Pending = LiveStore.PendingLedgerEvents(Key),
+            DispatchUncertain = recoveredEntry.DispatchUncertain, ClosedTrades = ledger.Trades.Count,
+            Quality = ledger.FinancialQuality, ledger.AuthoritativeNet, LedgerExists = File.Exists(LiveStore.LedgerFile(Key)),
+        }));
+        Console.Out.Flush();
+        return 0;
+
+        PreparedOrderIntent Prepare(OrderOwner owner, bool buy)
+        {
+            var ticket = context.Prepare(owner, new OrderRequest(instrument, buy ? OrderDirections.Buy : OrderDirections.Sell,
+                OrderTypes.Limit, 2m, buy ? 103m : 104m, ReduceOnly: !buy, StrategyQuantity: 2m, MaximumOwnedQuantity: 2m));
+            if (ticket.Error != null) throw new IOException(ticket.Error);
+            if (context.StartDispatch(ticket, "TEST", "FAKE") is { } dispatchError) throw new IOException(dispatchError);
+            if (context.BindNative(ticket, new NativeOrderIdentity("fixture:order", buy ? "entry" : "exit")) is { } bindingError) throw new IOException(bindingError);
+            return ticket;
+        }
+
+        ExecutionReport Report(bool buy, decimal price, decimal fee) => new(
+            new ExecutionIdentity(new ExecutionScope(context.Descriptor.Provider, "fixture-account", "loopback-fixture", instrument)
+                { ContextId = context.Descriptor.Id }, buy ? "native-entry-execution" : "native-exit-execution"),
+            buy ? 1 : 2, "TEST", buy ? Time : Time.AddMinutes(1), buy, 2m, price, pointValue,
+            "USD", new[] { new ExecutionFee(fee, "USD") }, true)
+        {
+            ContextId = context.Descriptor.Id, NativeOrder = new NativeOrderIdentity("fixture:order", buy ? "entry" : "exit"),
+        };
     }
 
     private sealed class WriteBudget(int remaining)

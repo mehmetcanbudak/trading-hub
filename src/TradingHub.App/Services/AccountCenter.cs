@@ -48,7 +48,7 @@ public sealed class AccountSnapshot
 public sealed class AccountCenter
 {
     private readonly AppServices _svc;
-    private readonly Dictionary<string, (int Count, RoundTripResult Result)> _cache = new();
+    private readonly Dictionary<string, (long Revision, RoundTripResult Result)> _cache = new();
 
     public AccountCenter(AppServices svc)
     {
@@ -105,23 +105,32 @@ public sealed class AccountCenter
         return list;
     }
 
-    /// <summary>Operaciones y resultados de la cuenta (se recalcula solo cuando hay ejecuciones nuevas).</summary>
-    public RoundTripResult Analysis(string accountId, IReadOnlyList<AccountFill> fills)
+    /// <summary>Reuses analysis only for the matching effective-execution revision.</summary>
+    private RoundTripResult Analysis(string accountId, (long Revision, IReadOnlyList<AccountFill> Fills) snapshot)
     {
         lock (_cache)
         {
-            if (_cache.TryGetValue(accountId, out var c) && c.Count == fills.Count) return c.Result;
-            var r = RoundTrips.Analyze(fills);
-            _cache[accountId] = (fills.Count, r);
+            if (_cache.TryGetValue(accountId, out var c) && c.Revision == snapshot.Revision) return c.Result;
+            var r = RoundTrips.Analyze(snapshot.Fills);
+            _cache[accountId] = (snapshot.Revision, r);
             return r;
         }
+    }
+
+    private RoundTripResult Analysis(string accountId)
+    {
+        long revision = _svc.Journal.RevisionOf(accountId);
+        lock (_cache)
+        {
+            if (_cache.TryGetValue(accountId, out var c) && c.Revision == revision) return c.Result;
+        }
+        return Analysis(accountId, _svc.Journal.SnapshotOf(accountId));
     }
 
     /// <summary>Resultado del día y saldo de la cuenta simulada (para la barra de arriba).</summary>
     public (decimal DayPnl, decimal Balance) SimSummary()
     {
-        var fills = _svc.Journal.FillsOf(SimId);
-        var r = Analysis(SimId, fills);
+        var r = Analysis(SimId);
         decimal open = _svc.SimBrokers.Sum(b => b.Position?.UnrealizedPnL ?? 0);
         decimal today = r.Realized.Where(x => IsToday(x.Time)).Sum(x => x.Net);
         return (today + open, _svc.Settings.SimStartBalance + r.RealizedNet + open);
@@ -129,9 +138,8 @@ public sealed class AccountCenter
 
     public AccountSnapshot Snapshot(AccountEntry a)
     {
-        var s = new AccountSnapshot { Account = a };
-        s.Fills = _svc.Journal.FillsOf(a.Id);
-        s.Analysis = Analysis(a.Id, s.Fills);
+        var journal = _svc.Journal.SnapshotOf(a.Id);
+        var s = new AccountSnapshot { Account = a, Fills = journal.Fills, Analysis = Analysis(a.Id, journal) };
         s.TradesToday = s.Analysis.Trades.Count(t => IsToday(t.CloseTime));
         decimal realizedToday = s.Analysis.Realized.Where(x => IsToday(x.Time)).Sum(x => x.Net);
         if (a.Kind == AccountKind.Sim) FillSim(s, realizedToday);
@@ -283,7 +291,7 @@ public sealed class AccountCenter
         if (p.Net == 0) return NothingToClose(p.Symbol, 0);
         if (p.Ref is SimBroker b)
         {
-            b.Flatten();
+            OrderActions.Flatten(b);
             return null;
         }
 

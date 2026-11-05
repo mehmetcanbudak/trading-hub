@@ -43,7 +43,7 @@ public class BracketTests
     public void Stop_y_objetivo_desde_la_posicion_y_oco_al_llenarse_el_objetivo()
     {
         var r = new Rig();
-        r.Broker.Market(OrderDirections.Buy, 2);
+        OrderActions.Manual(r.Broker, OrderTypes.Market, OrderDirections.Buy, 2);
         Assert.Equal(2m, r.Position);
 
         // hacia la pérdida = stop, hacia la ganancia = objetivo
@@ -65,7 +65,7 @@ public class BracketTests
     public void Lados_equivocados_se_rechazan()
     {
         var r = new Rig();
-        r.Broker.Market(OrderDirections.Sell, 1);
+        OrderActions.Manual(r.Broker, OrderTypes.Market, OrderDirections.Sell, 1);
         r.Brackets.SetStopLoss(95);
         r.Brackets.AddTarget(105);
         Assert.Empty(r.Broker.ActiveOrders);
@@ -87,7 +87,7 @@ public class BracketTests
         r.Brackets.Template.Targets.Add(new BracketTarget { Ticks = 5, Percent = 50 });
         r.Brackets.Template.Targets.Add(new BracketTarget { Ticks = 15, Percent = 50 });
 
-        r.Broker.Market(OrderDirections.Buy, 4); // entra a 101 (último + 1 tick, sin libro)
+        OrderActions.Manual(r.Broker, OrderTypes.Market, OrderDirections.Buy, 4); // entra a 101 (último + 1 tick, sin libro)
         decimal entry = r.Broker.Position!.AveragePrice;
         Assert.Equal(4m, r.Position);
         Assert.Equal(4m, r.Brackets.StopLoss!.Unfilled);
@@ -112,7 +112,7 @@ public class BracketTests
     public void Cerrar_una_parte_a_mano_ajusta_stop_y_objetivos()
     {
         var r = new Rig();
-        r.Broker.Market(OrderDirections.Buy, 4);
+        OrderActions.Manual(r.Broker, OrderTypes.Market, OrderDirections.Buy, 4);
         r.Brackets.SetStopLoss(90);
         r.Brackets.AddTarget(120);
         r.Brackets.ClosePartial(0.5m);
@@ -125,7 +125,7 @@ public class BracketTests
     public void Segundo_objetivo_divide_al_primero_en_parciales()
     {
         var r = new Rig();
-        r.Broker.Market(OrderDirections.Buy, 4);
+        OrderActions.Manual(r.Broker, OrderTypes.Market, OrderDirections.Buy, 4);
         r.Brackets.AddTarget(110);
         r.Brackets.AddTarget(120);
         var targets = r.Brackets.Targets.OrderBy(t => t.Price).ToList();
@@ -145,7 +145,7 @@ public class BracketTests
     public void Orden_pendiente_con_stop_y_objetivo_adjuntos_se_activa_al_llenarse()
     {
         var r = new Rig();
-        var entry = r.Broker.Limit(OrderDirections.Buy, 2, 95);
+        var entry = OrderActions.Manual(r.Broker, OrderTypes.Limit, OrderDirections.Buy, 2, 95);
         r.Brackets.AttachToEntry(entry, 90);
         r.Brackets.AttachToEntry(entry, 105);
         var pb = r.Brackets.PendingFor(entry)!;
@@ -167,8 +167,8 @@ public class BracketTests
     public void Los_stops_nunca_dan_vuelta_la_posicion()
     {
         var r = new Rig();
-        r.Broker.Market(OrderDirections.Buy, 1);
-        var exit = ((ITradingAccount)r.Broker).Exit(OrderTypes.Stop, OrderDirections.Sell, 5, 95);
+        OrderActions.Manual(r.Broker, OrderTypes.Market, OrderDirections.Buy, 1);
+        var exit = OrderActions.Manual(((ITradingAccount)r.Broker), OrderTypes.Stop, OrderDirections.Sell, 5, 95, reduceOnly: true);
         r.Trade(94);
         Assert.Equal(0m, r.Position); // vende solo lo que había, no queda corto
         Assert.NotEqual(OrderStates.Active, exit.State);

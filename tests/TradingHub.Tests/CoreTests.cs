@@ -81,7 +81,7 @@ public class CoreTests
         var data = new InstrumentData(Btc, new SimulatedFeed());
         data.Trades.Add(new Trade(1, T0, 100m, 1, TradeSide.Buy));
         var broker = new SimBroker(data, new Portfolio(), new TradingStatistics());
-        var order = broker.Limit(OrderDirections.Buy, 2, 99.5m);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 2, 99.5m);
         Assert.Equal(OrderStates.Active, order.State);
 
         // operación a 99.4 (atraviesa el límite)
@@ -92,7 +92,7 @@ public class CoreTests
         Assert.Equal(2m, broker.Position!.Volume);
         Assert.Equal(99.5m, broker.Position.AveragePrice);
 
-        broker.Market(OrderDirections.Sell, 2); // sin libro: al último precio menos un tick
+        OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 2); // sin libro: al último precio menos un tick
         Assert.Equal(0m, broker.Position.Volume);
         Assert.Equal((99.3m - 99.5m) * 2, broker.Position.RealizedPnL);
     }

@@ -9,6 +9,7 @@ using TradingHub.Indicators;
 using TradingHub.Market;
 using TradingHub.Trading;
 using TradingHub.Trading.Statistics;
+using TradingHub.Strategies;
 
 namespace TradingHub.App.Services;
 
@@ -288,6 +289,10 @@ public sealed class AppServices
 {
     private readonly Dictionary<string, SimBroker> _simBrokers = new();
     private readonly Dictionary<string, ITradingAccount> _realBrokers = new();
+    private readonly Dictionary<string, OrderContext> _orderContexts = new(StringComparer.Ordinal);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Context, string Instrument), WeakReference<ITradingAccount>> _wireAccounts = new();
+    private OrderContext? _simOrderContext;
+    private readonly string _executionRoot;
 
     // how each real broker AccountFor built was made, for as long as anything holds the broker (see BrokerOrigin)
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ITradingAccount, BrokerOrigin> _brokerOrigins = new();
@@ -298,11 +303,15 @@ public sealed class AppServices
     private readonly Dictionary<string, TradingHub.Feeds.Rithmic.RithmicTradingSession> _rithmicSessions = new();
     private readonly Dictionary<string, TradingHub.Feeds.Tradovate.TradovateTradingSession> _tradovateSessions = new();
     private readonly List<TradingHub.Feeds.Tradovate.TradovateTradingSession> _retiredTradovateSessions = new();
+    private sealed record RithmicContextOrigin(string Profile, string LocalNamespace, string Generation, string Environment);
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<TradingHub.Feeds.Rithmic.RithmicTradingSession, RithmicContextOrigin> _rithmicOrigins = new();
+    private readonly List<TradingHub.Feeds.Rithmic.RithmicTradingSession> _retiredRithmicSessions = new();
 
     /// <summary>Cuentas de Tradovate de una conexión (sincroniza órdenes, posiciones y saldos en segundo plano).</summary>
     public TradingHub.Feeds.Tradovate.TradovateTradingSession TradovateSessionFor(ConnectionProfile p)
     {
         if (_tradovateSessions.TryGetValue(p.Id, out var s)) return s;
+        Connections.EnsureTradingIdentity(p);
         var feed = (TradingHub.Feeds.Tradovate.TradovateFeed)Connections.GetFeed(p.Id);
         s = new TradingHub.Feeds.Tradovate.TradovateTradingSession(feed.Connection);
         _tradovateSessions[p.Id] = s;
@@ -325,8 +334,14 @@ public sealed class AppServices
     public TradingHub.Feeds.Rithmic.RithmicTradingSession RithmicSessionFor(ConnectionProfile p)
     {
         if (_rithmicSessions.TryGetValue(p.Id, out var s)) return s;
+        // Do not replace an unresolved account's transport in place. A changed connection remains reduction/cancel-only
+        // through its original session until it is confirmed idle; this also avoids competing Rithmic order logins.
+        foreach (var retired in _retiredRithmicSessions)
+            if (_rithmicOrigins.TryGetValue(retired, out var old) && old.Profile == p.Id && RithmicInUse(retired)) return retired;
+        Connections.EnsureTradingIdentity(p);
         s = new TradingHub.Feeds.Rithmic.RithmicTradingSession(Connections.RithmicSettingsOf(p));
         _rithmicSessions[p.Id] = s;
+        _rithmicOrigins.Add(s, new(p.Id, p.TradingNamespace, p.TradingGeneration, PublicEndpoint(p.RithmicUri) + "|" + p.RithmicSystem));
         // cada ejecución queda en el historial de la cuenta (saldo, operaciones y estadísticas)
         s.FillReceived += f => Journal.Add(RithmicAccountId(p, f.Account),
             new AccountFill(f.Id, f.Time, f.Symbol, f.IsBuy, f.Quantity, f.Price, AccountCenter.PointValueOf(f.Symbol), 0, f.BasketId));
@@ -353,10 +368,14 @@ public sealed class AppServices
         // cada estrategia que arranca en vivo arma su contexto de mercado con el último mes (no solo con el calentamiento)
         TradingHub.Strategies.LiveStrategyRunner.Started += OnRunnerStarted;
         Connections.FeedInUse = RetainTradovateFeed;
-        // la sesión de órdenes de Rithmic sigue la configuración nueva sin abrir otra (una segunda cortaría la primera)
+        // Trading contexts are immutable. Retire old sessions without moving outstanding requests to new credentials.
         Connections.Reconfigured += p =>
         {
-            if (p.IsRithmic && _rithmicSessions.TryGetValue(p.Id, out var session)) session.Reconfigure(Connections.RithmicSettingsOf(p));
+            if (_rithmicSessions.Remove(p.Id, out var session))
+            {
+                if (RithmicInUse(session)) _retiredRithmicSessions.Add(session);
+                else session.Dispose();
+            }
             // A changed profile gets a new Tradovate context. Existing activity keeps its original transport.
             if (_tradovateSessions.Remove(p.Id, out var tv))
             {
@@ -373,6 +392,7 @@ public sealed class AppServices
         KlineHistory.CacheRoot = Path.Combine(AppPaths.Root, "Klines");
         // TRADINGHUB_LIVE_DIR: cartera alternativa (pruebas)
         TradingHub.Strategies.LiveStore.Root = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR") is { Length: > 0 } live ? live : Path.Combine(AppPaths.Root, "Live");
+        _executionRoot = TradingHub.Strategies.LiveStore.Root;
         // las que corrían al cerrar Trading Hub (enseguida el guardado periódico las marca detenidas): para reanudarlas al abrir
         RunningAtLastClose = TradingHub.Strategies.LiveStore.LoadRunners().Where(i => i.Running && !LiveEntry.IsManaged(i.Source)).ToList();
         Hub.RecordLive = Settings.RecordLiveData;
@@ -477,7 +497,9 @@ public sealed class AppServices
     {
         if (!_simBrokers.TryGetValue(data.Instrument.Key, out var b))
         {
-            b = new SimBroker(data, Portfolio, Statistics);
+            _simOrderContext ??= new OrderContext(OrderContext.EphemeralSimulation(Portfolio.AccountID).Descriptor, _executionRoot);
+            b = new SimBroker(data, Portfolio, Statistics, _simOrderContext);
+            AccountExecutionProjector.For(b.Executions, b.OrderContext).Synchronize();
             _simBrokers[data.Instrument.Key] = b;
             var inst = data.Instrument;
             b.NewMyTrade += t => Journal.Add(AccountCenter.SimId, new AccountFill(Guid.NewGuid().ToString("N"), t.Time, inst.Symbol,
@@ -547,42 +569,66 @@ public sealed class AppServices
         if (accountId == "sim") return SimBrokerFor(data);
         DisposeIdleReplacedBrokers();
         string key = accountId + "|" + data.Instrument.Key;
-        if (_realBrokers.TryGetValue(key, out var b)) return b;
+        if (_realBrokers.TryGetValue(key, out var b))
+        {
+            if (!_brokerOrigins.TryGetValue(b, out _)) return b;
+            var current = Connections.FindForAccount(accountId);
+            if (current == null || Connections.IsTradingGenerationCurrent(current, b.OrderContext.Descriptor.Generation)) return b;
+            ReplaceStaleBrokers(current);
+        }
         if (accountId.StartsWith("tradovate|", StringComparison.Ordinal))
         {
             var parts = accountId.Split('|');
             var tp = Connections.Find(parts[1]) ?? throw new KeyNotFoundException(accountId);
+            if (tp.Kind != ConnectionKind.Tradovate) throw new InvalidOperationException("This saved account no longer belongs to a Tradovate connection.");
             var session = TradovateSessionFor(tp);
             long id = long.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
             var acc = session.Accounts.FirstOrDefault(a => a.Id == id) ?? new TradingHub.Feeds.Tradovate.TradovateAccount(id, parts[2], true);
-            return Cache(key, tp, new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc, $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}"), session.Connection);
+            var context = TradingContext(tp, accountId, "Tradovate", "futures",
+                (session.IsDemo ? "demo|" : "live|") + PublicEndpoint(session.Connection.RestBase),
+                session.Accounts.Any(a => a.Id == id) ? id.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
+            return Cache(key, tp, new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc,
+                $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}", context), session.Connection);
         }
 
         if (accountId.StartsWith("rithmic|", StringComparison.Ordinal))
         {
             var parts = accountId.Split('|');
             var rp = Connections.Find(parts[1]) ?? throw new KeyNotFoundException(accountId);
+            if (!rp.IsRithmic) throw new InvalidOperationException("This saved account no longer belongs to a Rithmic connection.");
             var session = RithmicSessionFor(rp);
             var feed = (TradingHub.Feeds.Rithmic.RithmicFeed)Connections.GetFeed(rp.Id);
-            return Cache(key, rp, new TradingHub.Feeds.Rithmic.RithmicBroker(data, session, parts[2], $"{parts[2]} · Rithmic{(session.IsPractice ? " (practice)" : " — REAL")}",
-                ct => feed.ContractAsync(data.Instrument, ct)));
+            var origin = _rithmicOrigins.GetValue(session, _ => new(rp.Id, rp.TradingNamespace, rp.TradingGeneration,
+                PublicEndpoint(rp.RithmicUri) + "|" + rp.RithmicSystem));
+            var context = TradingContext(rp, accountId, "Rithmic", "futures", origin.Environment, null, origin);
+            return Cache(key, rp, new TradingHub.Feeds.Rithmic.RithmicBroker(data, session, parts[2],
+                $"{parts[2]} · Rithmic{(session.IsPractice ? " (practice)" : " — REAL")}",
+                ct => feed.ContractAsync(data.Instrument, ct), context), rithmicSession: session);
         }
 
         var p = Connections.Find(accountId) ?? throw new KeyNotFoundException(accountId);
-        return Cache(key, p, new BinanceBroker(data, Connections.BinanceSettingsOf(p), p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL"));
+        if (p.Kind is not (ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot))
+            throw new InvalidOperationException("This connection does not supply a supported trading account.");
+        var settings = Connections.BinanceSettingsOf(p);
+        var binanceContext = TradingContext(p, accountId, "Binance", settings.Futures ? "usd-m-futures" : "spot",
+            (settings.Testnet ? "testnet|" : "live|") + PublicEndpoint(settings.RestBase), null);
+        return Cache(key, p, new BinanceBroker(data, settings, p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL", binanceContext));
     }
 
     /// <summary>
     /// How a real broker was built: from which connection, whether it traded real money then, and the connection settings
     /// that decide where its orders go (Binance: market, testnet or REAL, and API key, which also decide its REST server;
-    /// Rithmic: system and user, as its shared session follows a new server by itself).
+    /// Rithmic: system and user; active retired sessions retain their original routing and account context).
     /// </summary>
-    private sealed class BrokerOrigin(string profileId, bool real, object? settings, TradingHub.Feeds.Tradovate.TradovateConnection? transport)
+    private sealed class BrokerOrigin(string profileId, bool real, object? settings, TradingHub.Feeds.Tradovate.TradovateConnection? transport,
+        string generation, TradingHub.Feeds.Rithmic.RithmicTradingSession? rithmicSession)
     {
         public string ProfileId { get; } = profileId;
         public bool Real { get; } = real;
         public object? Settings { get; } = settings;
         public TradingHub.Feeds.Tradovate.TradovateConnection? Transport { get; } = transport;
+        public string Generation { get; } = generation;
+        public TradingHub.Feeds.Rithmic.RithmicTradingSession? RithmicSession { get; } = rithmicSession;
 
         private volatile bool _replaced;
 
@@ -598,11 +644,61 @@ public sealed class AppServices
         _ => (p.Kind, p.Testnet, p.ApiKey),
     };
 
-    private ITradingAccount Cache(string key, ConnectionProfile p, ITradingAccount broker, TradingHub.Feeds.Tradovate.TradovateConnection? transport = null)
+    private ITradingAccount Cache(string key, ConnectionProfile p, ITradingAccount broker,
+        TradingHub.Feeds.Tradovate.TradovateConnection? transport = null,
+        TradingHub.Feeds.Rithmic.RithmicTradingSession? rithmicSession = null)
     {
         _realBrokers[key] = broker;
-        _brokerOrigins.AddOrUpdate(broker, new BrokerOrigin(p.Id, broker.IsReal, BrokerSettingsOf(p), transport));
+        _brokerOrigins.AddOrUpdate(broker, new BrokerOrigin(p.Id, broker.IsReal, BrokerSettingsOf(p), transport,
+            broker.OrderContext.Descriptor.Generation, rithmicSession));
+        _wireAccounts[(broker.OrderContext.Descriptor.Id, broker.Instrument.Key)] = new(broker);
+        AccountExecutionProjector.For(broker.Executions, broker.OrderContext).Synchronize();
         return broker;
+    }
+
+    private static string PublicEndpoint(string endpoint)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) return "unresolved endpoint";
+        var clean = new UriBuilder(uri) { UserName = "", Password = "", Query = "", Fragment = "" };
+        return clean.Uri.GetLeftPart(UriPartial.Path);
+    }
+
+    private OrderContext TradingContext(ConnectionProfile profile, string accountId, string provider, string product,
+        string environment, string? nativeAccount, RithmicContextOrigin? retired = null)
+    {
+        Connections.EnsureTradingIdentity(profile);
+        string local = retired?.LocalNamespace ?? profile.TradingNamespace;
+        string generation = retired?.Generation ?? profile.TradingGeneration;
+        string id = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(string.Join("\\n", local, generation, provider, product, environment, accountId))));
+        if (_orderContexts.TryGetValue(id, out var existing)) return existing;
+        var descriptor = new AccountContextDescriptor(id, provider, product, environment, local, generation, nativeAccount);
+        var context = new OrderContext(descriptor);
+        context.Configure(descriptor, _executionRoot, request =>
+        {
+            if (!_wireAccounts.TryGetValue((id, request.Instrument), out var weak) || !weak.TryGetTarget(out var broker))
+                return "The prepared account route is no longer available.";
+            decimal signed = request.Direction == OrderDirections.Buy ? request.Quantity : -request.Quantity;
+            decimal position = broker.Position.Volume;
+            bool increases = RealOrderPermission.IncreasesExposure(position, signed);
+            if (request.ReduceOnly && increases)
+                return "The requested reduction exceeds the currently reconciled account position.";
+            if (increases && !Connections.IsTradingGenerationCurrent(profile, generation))
+                return "The connection's trading namespace changed: new exposure is disabled; original-context reductions/cancels remain allowed.";
+            return CheckRealOrderForProfile(Connections.Profiles.Contains(profile) ? profile : null, broker, position, signed);
+        });
+        _orderContexts.Add(id, context);
+        return context;
+    }
+
+    private bool RithmicInUse(TradingHub.Feeds.Rithmic.RithmicTradingSession session)
+    {
+        foreach (var broker in _realBrokers.Values.Concat(_replacedBrokers))
+            if (_brokerOrigins.TryGetValue(broker, out var origin) && ReferenceEquals(origin.RithmicSession, session) && BrokerInUse(broker)) return true;
+        return !session.IsConnected || session.Accounts.Any(account =>
+            !session.OrdersReadyFor(account.AccountId) ||
+            session.OrdersOf(account.AccountId).Any(order => !order.Done && order.Unfilled > 0) ||
+            session.PositionsOf(account.AccountId).Any(position => position.Position.Net != 0));
     }
 
     /// <summary>Cached real brokers were replaced after their connection changed: what shows them switches to <see cref="AccountFor"/>.</summary>
@@ -621,7 +717,8 @@ public sealed class AppServices
         foreach (var (key, broker) in _realBrokers.ToList())
         {
             if (!_brokerOrigins.TryGetValue(broker, out var origin) || origin.ProfileId != p.Id
-                || (origin.Transport == null && Equals(origin.Settings, now))) continue;
+                || (origin.Transport == null && origin.Generation == p.TradingGeneration &&
+                    Connections.IsTradingGenerationCurrent(p, origin.Generation) && Equals(origin.Settings, now))) continue;
             origin.Replaced = true;
             _realBrokers.Remove(key);
             _replacedBrokers.Add(broker);
@@ -687,6 +784,13 @@ public sealed class AppServices
             _retiredTradovateSessions.RemoveAt(i);
             DisposeTradovate(session);
         }
+        for (int i = _retiredRithmicSessions.Count - 1; i >= 0; i--)
+        {
+            var session = _retiredRithmicSessions[i];
+            if (RithmicInUse(session)) continue;
+            _retiredRithmicSessions.RemoveAt(i);
+            session.Dispose();
+        }
         Connections.ReleaseRetiredFeeds();
     }
 
@@ -697,9 +801,11 @@ public sealed class AppServices
     /// enabled with real orders allowed, and on a broker <see cref="AccountFor"/> built, a connection that still has the
     /// mode (REAL or not), credentials and server it was built with. Reductions and cancels never need it.
     /// </summary>
-    public string? CheckRealOrder(string accountId, ITradingAccount account, decimal position, decimal signedQuantity)
+    public string? CheckRealOrder(string accountId, ITradingAccount account, decimal position, decimal signedQuantity) =>
+        CheckRealOrderForProfile(Connections.FindForAccount(accountId), account, position, signedQuantity);
+
+    private string? CheckRealOrderForProfile(ConnectionProfile? p, ITradingAccount account, decimal position, decimal signedQuantity)
     {
-        var p = Connections.FindForAccount(accountId);
         if (p != null && _brokerOrigins.TryGetValue(account, out var origin) && RealOrderPermission.IncreasesExposure(position, signedQuantity))
         {
             // Rithmic brokers follow their session's mode; the others keep the one they were built with
@@ -767,6 +873,8 @@ public sealed class AppServices
             foreach (var rs in _rithmicSessions.Values) rs.Dispose();
             foreach (var ts in _tradovateSessions.Values) DisposeTradovate(ts);
             foreach (var ts in _retiredTradovateSessions) DisposeTradovate(ts);
+            foreach (var rs in _retiredRithmicSessions) rs.Dispose();
+            foreach (var b in _simBrokers.Values) b.Dispose();
             Hub.Dispose();
             Connections.DisposeAll();
         }

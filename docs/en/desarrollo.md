@@ -83,6 +83,7 @@ The number is initial loading seconds. With no scenes, Trading is captured. Asse
 | trading, accounts, strategies, live, data, connections, settings | Navigate and capture the section. |
 | english | English windows/dialogs, safety copy and related localization assertions using isolated fixtures. |
 | safety | Financial-safety and protection-aware quit scenarios, including pending close/cancel acknowledgment and changed Tradovate contexts; fake providers only. |
+| live-financial | Actual simulator execution charges in the live portfolio KPI; saves the rendered surface and independent accounting receipt. Requires an explicit isolated live-store override. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
 | panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
 | footprint | Footprint text colors and editor. |

@@ -522,13 +522,13 @@ public sealed class DomRenderer
         {
             case DomColumn.Bid:
             case DomColumn.BuyOrders:
-                if (price < bestAsk) broker.Limit(OrderDirections.Buy, qty, price);
-                else broker.Stop(OrderDirections.Buy, qty, price);
+                if (price < bestAsk) OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, qty, price);
+                else OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Buy, qty, price);
                 return $"Buy {(price < bestAsk ? "limit" : "stop")} {qty} @ {dom.Instrument.FormatPrice(price)}";
             case DomColumn.Ask:
             case DomColumn.SellOrders:
-                if (price > bestBid) broker.Limit(OrderDirections.Sell, qty, price);
-                else broker.Stop(OrderDirections.Sell, qty, price);
+                if (price > bestBid) OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Sell, qty, price);
+                else OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, qty, price);
                 return $"Sell {(price > bestBid ? "limit" : "stop")} {qty} @ {dom.Instrument.FormatPrice(price)}";
         }
 

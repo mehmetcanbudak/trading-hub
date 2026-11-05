@@ -231,7 +231,7 @@ public sealed partial class TradingView
                 B("S. Ask", "sell-soft", "Limit sell at ask (joins ask queue)", () => AtBook(OrderDirections.Sell, ask: true))),
             Row(B("Cancel", "", "Cancel all orders", () => _ = AccountActionAsync(_active, a => a.CancelAll(), "Orders canceled")),
                 B("Reverse", "", "Reverse position", () => _ = ReverseAsync(_active)),
-                B("Close position", "primary", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, a => a.Flatten(), "Position closed"))));
+                B("Close position", "primary", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, a => OrderActions.Flatten(a), "Position closed"))));
         panel.Margin = new Thickness(10, 8, 10, 10);
         return new Border { Child = panel, BorderBrush = Ui.Line, BorderThickness = new Thickness(0, 1, 0, 0), Background = Ui.Bg1 };
     }
@@ -435,7 +435,7 @@ public sealed partial class TradingView
         }
 
         var actions = Ui.Row(8,
-            Small("Close position", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, acc => acc.Flatten(), "Position closed")),
+            Small("Close position", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, acc => OrderActions.Flatten(acc), "Position closed")),
             Small("Reverse", "Reverse position", () => _ = ReverseAsync(_active)),
             Small("Cancel", "Cancel all orders", () => _ = AccountActionAsync(_active, acc => acc.CancelAll(), "Orders canceled")));
 
@@ -795,9 +795,9 @@ public sealed partial class TradingView
         bool entry = IsEntry(acc, dir);
         var order = type switch
         {
-            OrderTypes.Market => acc.Market(dir, qty),
-            OrderTypes.Limit => acc.Limit(dir, qty, price),
-            _ => acc.Stop(dir, qty, price),
+            OrderTypes.Market => OrderActions.Manual(acc, OrderTypes.Market, dir, qty),
+            OrderTypes.Limit => OrderActions.Manual(acc, OrderTypes.Limit, dir, qty, price),
+            _ => OrderActions.Manual(acc, OrderTypes.Stop, dir, qty, price),
         };
 
         // orden de entrada con la plantilla activa: lleva el stop y los objetivos adjuntos
@@ -855,7 +855,7 @@ public sealed partial class TradingView
     }
 
     /// <summary>Reverses the position: it opens the other side, so it needs real-order permission like an entry.</summary>
-    internal Task ReverseAsync(ChartTab? chart) => AccountActionAsync(chart, a => a.Reverse(), "Position reversed", a => -2 * a.Position.Volume);
+    internal Task ReverseAsync(ChartTab? chart) => AccountActionAsync(chart, a => OrderActions.Reverse(a), "Position reversed", a => -2 * a.Position.Volume);
 
     internal async Task BracketActionAsync(ChartTab? chart, Func<BracketManager, string> action, string description)
     {
@@ -919,7 +919,7 @@ public sealed partial class TradingView
             case "sell-market": _ = TradeAsync(chart, OrderTypes.Market, OrderDirections.Sell, 0); break;
             case "buy-bid": _ = TradeAsync(chart, OrderTypes.Limit, OrderDirections.Buy, Best(true)); break;
             case "sell-ask": _ = TradeAsync(chart, OrderTypes.Limit, OrderDirections.Sell, Best(false)); break;
-            case "flatten": _ = AccountActionAsync(chart, a => a.Flatten(), "Position closed"); break;
+            case "flatten": _ = AccountActionAsync(chart, a => OrderActions.Flatten(a), "Position closed"); break;
             case "reverse": _ = ReverseAsync(chart); break;
             case "cancel-all": _ = AccountActionAsync(chart, a => a.CancelAll(), "Orders canceled"); break;
             case "close-25": _ = BracketActionAsync(chart, b => b.ClosePartial(0.25m), "Close 25% of position"); break;
@@ -1037,7 +1037,7 @@ public sealed partial class TradingView
         if (br != null && acc!.Position.Volume != 0)
         {
             items.Add(Item("Close half at market", MaterialIconKind.ContentCut, () => _ = BracketActionAsync(tab, b => b.ClosePartial(0.5m), "Close half of position")));
-            items.Add(Item("Close all at market", MaterialIconKind.CloseBoxOutline, () => _ = AccountActionAsync(tab, a => a.Flatten(), "Position closed")));
+            items.Add(Item("Close all at market", MaterialIconKind.CloseBoxOutline, () => _ = AccountActionAsync(tab, a => OrderActions.Flatten(a), "Position closed")));
             items.Add(Item("Stop to breakeven", MaterialIconKind.ShieldOutline, () => _ = BracketActionAsync(tab, b => b.MoveStopToBreakeven(), "Move stop to breakeven")));
             items.Add(Item("Place stop and targets from template", MaterialIconKind.TargetVariant, () => _ = BracketActionAsync(tab, b => b.ApplyTemplate(), "Place stop and targets")));
             items.Add(new Separator());

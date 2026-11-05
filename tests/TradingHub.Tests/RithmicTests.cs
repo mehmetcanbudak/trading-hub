@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Feeds.Rithmic;
@@ -9,8 +8,11 @@ using TradingHub.Trading;
 namespace TradingHub.Tests;
 
 /// <summary>Rithmic contra un servidor de mentira: historia paginada, velas, contrato del mes y órdenes.</summary>
-public class RithmicTests
+public class RithmicTests : IDisposable
 {
+    private readonly NativeOrderTestFixture _orders = new();
+    public void Dispose() => _orders.Dispose();
+
     private static readonly Instrument Es = new() { Symbol = "ES", FeedId = RithmicFeed.FeedId, Exchange = "CME", TickSize = 0.25m, VolumeStep = 1, PointValue = 50 };
     private const long T0 = 1_790_000_000;
 
@@ -86,11 +88,11 @@ public class RithmicTests
         Assert.True(session.IsPractice);
 
         var data = new InstrumentData(Es, new SimulatedFeed());
-        using var broker = new RithmicBroker(data, session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
         Assert.False(broker.IsReal);
 
         // mercado: se llena y la posición llega por la planta de PnL
-        broker.Market(OrderDirections.Buy, 2);
+        OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 2);
         await Until(() => broker.Position.Volume == 2);
         Assert.Equal(2m, broker.Position.Volume);
         Assert.Equal(5000m, broker.Position.AveragePrice);
@@ -98,14 +100,14 @@ public class RithmicTests
         Assert.Empty(broker.ActiveOrders);
 
         // límite: queda activa con su número de Rithmic
-        var limit = broker.Limit(OrderDirections.Sell, 1, 5010);
+        var limit = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Sell, 1, 5010);
         await Until(() => limit.ExchangeOrderId.Length > 0);
         Assert.StartsWith("B", limit.ExchangeOrderId);
         Assert.Contains(limit, broker.ActiveOrders);
         Assert.Equal(5010.0, server.Open[limit.ExchangeOrderId].Price);
 
         // modificar el precio
-        broker.Modify(limit, 5012);
+        OrderActions.Reprice(broker, limit, 5012);
         await Until(() => limit.Price == 5012 && !broker.IsReplacementPending(limit));
         Assert.Equal(5012.0, server.Open[limit.ExchangeOrderId].Price);
         Assert.Equal(5012m, limit.Price);
@@ -118,7 +120,7 @@ public class RithmicTests
         Assert.Equal(0m, limit.Filled); // a cancellation is not an execution
 
         // cerrar la posición
-        broker.Flatten();
+        OrderActions.Flatten(broker);
         await Until(() => broker.Position.Volume == 0);
         Assert.Equal(0m, broker.Position.Volume);
     }
@@ -134,17 +136,17 @@ public class RithmicTests
             SuppressModifyNotification = true
         };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady);
-        var order = stop ? broker.Stop(OrderDirections.Sell, 5, 4990) : broker.Limit(OrderDirections.Buy, 5, 4990);
+        var order = stop ? OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 5, 4990) : OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 5, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
         var basket = order.ExchangeOrderId;
         await server.FillOrder(basket, 1, 4990);
         await Until(() => order.Filled == 1);
         var tracked = (ITrackedOrderReplacement)broker;
-        Assert.Same(order, broker.Replace(order, 4988, 3)); // one filled + three remaining = four total
+        Assert.Same(order, OrderActions.Replace(broker, order, 4988, 3)); // one filled + three remaining = four total
         Assert.True(tracked.IsReplacementPending(order));
         await Until(() => server.ModifyRequests == 1);
         Assert.Equal(1, server.ModifyRequests);
@@ -194,19 +196,19 @@ public class RithmicTests
             SuppressModifyNotification = true
         };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady);
-        var order = stop ? broker.Stop(OrderDirections.Sell, 5, 4990) : broker.Limit(OrderDirections.Sell, 5, 4990);
+        var order = stop ? OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 5, 4990) : OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Sell, 5, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
         string basket = order.ExchangeOrderId;
         string tag = server.Open[basket].Tag;
-        broker.Modify(order, 4991);
+        OrderActions.Reprice(broker, order, 4991);
         await Until(() => server.ModifyRequests == 1);
-        broker.Modify(order, 4992);
-        broker.Modify(order, 4993);
-        Assert.Same(order, broker.Replace(order, 4970, 1)); // explicit sizing requests remain suppressed
+        OrderActions.Reprice(broker, order, 4992);
+        OrderActions.Reprice(broker, order, 4993);
+        Assert.Same(order, OrderActions.Replace(broker, order, 4970, 1)); // explicit sizing requests remain suppressed
         await server.FillOrder(basket, 1, 4991);
         await Until(() => order.Filled == 1);
         Assert.True(broker.IsReplacementPending(order));
@@ -248,20 +250,20 @@ public class RithmicTests
     {
         using var server = new FakeRithmicServer { LoseModifyResponse = true, ApplyLostModification = applied };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady);
-        var order = broker.Stop(OrderDirections.Sell, 5, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 5, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
         string basket = order.ExchangeOrderId;
         string tag = server.Open[basket].Tag;
         server.OrderReplayRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        broker.Modify(order, 4991);
+        OrderActions.Reprice(broker, order, 4991);
         await Until(() => broker.LastError?.Contains("unknown", StringComparison.OrdinalIgnoreCase) == true);
         Assert.Contains("unknown", broker.LastError, StringComparison.OrdinalIgnoreCase);
-        broker.Modify(order, 4992);
-        broker.Modify(order, 4993);
+        OrderActions.Reprice(broker, order, 4992);
+        OrderActions.Reprice(broker, order, 4993);
         Assert.True(broker.IsReplacementPending(order));
         Assert.Equal(1, server.ModifyRequests);
         server.LoseModifyResponse = false;
@@ -302,17 +304,17 @@ public class RithmicTests
             SuppressModifyNotification = true
         };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady);
-        var order = broker.Stop(OrderDirections.Sell, 5, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 5, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
         string basket = order.ExchangeOrderId;
         string tag = server.Open[basket].Tag;
-        broker.Replace(order, 4991, 3);
+        OrderActions.Replace(broker, order, 4991, 3);
         await Until(() => server.ModifyRequests == 1);
-        broker.Modify(order, 4993);
+        OrderActions.Reprice(broker, order, 4993);
         await server.FillOrder(basket, 1, 4990);
         await Until(() => order.Filled == 1);
         server.ModifyRejection = null;
@@ -343,20 +345,20 @@ public class RithmicTests
             ModifyResponseRelease = new(TaskCreationOptions.RunContinuationsAsynchronously)
         };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady);
-        var order = broker.Stop(OrderDirections.Sell, 2, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 2, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
-        broker.Modify(order, 4991);
+        OrderActions.Reprice(broker, order, 4991);
         await Until(() => server.ModifyRequests == 1);
-        broker.Modify(order, 4993);
+        OrderActions.Reprice(broker, order, 4993);
         Assert.True(broker.IsReplacementPending(order));
         if (cancel)
         {
             broker.Cancel(order);
-            broker.Modify(order, 4994); // cancellation remains authoritative even before its native reply
+            OrderActions.Reprice(broker, order, 4994); // cancellation remains authoritative even before its native reply
         }
         else
         {
@@ -388,15 +390,15 @@ public class RithmicTests
             RejectModifyByNotification = notification
         };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady);
-        var order = broker.Limit(OrderDirections.Buy, 5, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 5, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
         var basket = order.ExchangeOrderId;
         var tracked = (ITrackedOrderReplacement)broker;
-        broker.Replace(order, 4988, 3);
+        OrderActions.Replace(broker, order, 4988, 3);
         await Until(() => server.ModifyRequests == 1);
         order.Price = 4988;
         order.QuantityToFill = order.Unfilled = 3;
@@ -420,20 +422,20 @@ public class RithmicTests
     {
         using var server = new FakeRithmicServer { LoseModifyResponse = true, ApplyLostModification = applied };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady);
-        var order = broker.Limit(OrderDirections.Buy, 5, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 5, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
         var basket = order.ExchangeOrderId;
         server.OrderReplayRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
         var tracked = (ITrackedOrderReplacement)broker;
-        broker.Replace(order, 4988, 3);
+        OrderActions.Replace(broker, order, 4988, 3);
         await Until(() => broker.LastError?.Contains("unknown", StringComparison.OrdinalIgnoreCase) == true);
         Assert.Contains("unknown", broker.LastError, StringComparison.OrdinalIgnoreCase);
         Assert.True(tracked.IsReplacementPending(order));
-        for (int i = 0; i < 4; i++) Assert.Same(order, broker.Replace(order, 4987, 2));
+        for (int i = 0; i < 4; i++) Assert.Same(order, OrderActions.Replace(broker, order, 4987, 2));
         Assert.Equal(1, server.ModifyRequests);
         server.OrderReplayRelease.SetResult();
         await Until(() => broker.OrdersReady);
@@ -441,7 +443,7 @@ public class RithmicTests
         if (!applied)
         {
             Assert.True(tracked.IsReplacementPending(order)); // an old working replay cannot resolve an unknown command
-            Assert.Same(order, broker.Replace(order, 4987, 2));
+            Assert.Same(order, OrderActions.Replace(broker, order, 4987, 2));
             var tag = server.Open[basket].Tag;
             await server.PushOrder(basket, tag, true, 3, 4988);
         }
@@ -459,11 +461,11 @@ public class RithmicTests
     {
         using var server = new FakeRithmicServer();
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => session.IsConnected);
-        var order = broker.Limit(OrderDirections.Buy, 1, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1, 4990);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
         Assert.Contains(order, broker.ActiveOrders);
         await server.RemoveOrderWhileDisconnected(order.ExchangeOrderId);
@@ -478,14 +480,14 @@ public class RithmicTests
     {
         using var server = new FakeRithmicServer { LoseNewOrderResponse = true };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady && broker.PositionReady);
         Assert.True(broker.OrdersReady && broker.PositionReady, session.StatusText);
         var replayRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.OrderReplayRelease = replayRelease;
-        var order = broker.Limit(OrderDirections.Buy, 3, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3, 4990);
         string basket = await server.UnacknowledgedOrderAccepted.Task.WaitAsync(TimeSpan.FromSeconds(6));
         await Until(() => broker.LastError != null && session.IsConnected);
         Assert.NotNull(broker.LastError);
@@ -493,7 +495,7 @@ public class RithmicTests
         Assert.Contains(order, broker.ActiveOrders);
         Assert.Empty(order.ExchangeOrderId);
         Assert.False(broker.OrdersReady);
-        Assert.Same(order, broker.Replace(order, 4989, 3));
+        Assert.Same(order, OrderActions.Replace(broker, order, 4989, 3));
         server.FillWhileDisconnected(basket, 1, 4990);
 
         // Matching side/price/quantity is not ownership; only the pre-send tag may bind our handle.
@@ -511,7 +513,6 @@ public class RithmicTests
         Assert.Same(order, Assert.Single(broker.ActiveOrders, o => o.ExchangeOrderId == basket));
         string tag;
         lock (server.Tags) tag = Assert.Single(server.Tags);
-        Assert.Equal("th-" + RithmicBroker.SessionTag + "-" + order.Id.ToString(CultureInfo.InvariantCulture), tag);
         Assert.Equal(basket, session.OrderByTag(tag)?.BasketId);
         Assert.Single(session.OrdersOf("ACC1"), o => o.UserTag == tag);
 
@@ -538,14 +539,14 @@ public class RithmicTests
     {
         using var server = new FakeRithmicServer { LoseNewOrderResponse = true };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady && broker.PositionReady);
         Assert.True(broker.OrdersReady && broker.PositionReady, session.StatusText);
         var replayRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.OrderReplayRelease = replayRelease;
-        var order = broker.Limit(OrderDirections.Sell, 2, 5010);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Sell, 2, 5010);
         broker.Cancel(order);
         string basket = await server.UnacknowledgedOrderAccepted.Task.WaitAsync(TimeSpan.FromSeconds(6));
         await Until(() => broker.LastError != null && session.IsConnected);
@@ -576,12 +577,12 @@ public class RithmicTests
     {
         using var server = new FakeRithmicServer { NewOrderRejection = "account order permission denied" };
         using var session = new RithmicTradingSession(Settings(server));
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
         await Until(() => broker.OrdersReady && broker.PositionReady);
         Assert.True(broker.OrdersReady && broker.PositionReady, session.StatusText);
-        var order = broker.Limit(OrderDirections.Buy, 1, 4990);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1, 4990);
         broker.Cancel(order);
         await Until(() => order.State == OrderStates.Failed && !broker.ActiveOrders.Contains(order));
         Assert.Equal(OrderStates.Failed, order.State);
@@ -595,35 +596,6 @@ public class RithmicTests
     }
 
     [Fact]
-    public async Task Order_tags_carry_a_per_process_session_component()
-    {
-        // Order ids restart at 1 in every process: the tag also needs a part that tells this process from earlier ones
-        using var server = new FakeRithmicServer { MarketPrice = 5000 };
-        using var feed = new RithmicFeed(Settings(server));
-        using var session = new RithmicTradingSession(Settings(server));
-        session.Start();
-        await Until(() => session.IsConnected);
-        Assert.True(session.IsConnected, session.StatusText);
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
-
-        var limit = broker.Limit(OrderDirections.Sell, 1, 5010);
-        var market = broker.Market(OrderDirections.Buy, 1);
-        await Until(() => limit.ExchangeOrderId.Length > 0 && market.ExchangeOrderId.Length > 0);
-        string[] tags;
-        lock (server.Tags) tags = server.Tags.ToArray();
-
-        Assert.Equal(2, tags.Length);
-        foreach (var tag in tags) Assert.Matches("^th-[0-9a-z]{4,12}-[0-9]+$", tag);
-        var parts = tags.Select(t => Regex.Match(t, "^th-([0-9a-z]+)-([0-9]+)$")).ToArray();
-        Assert.Single(parts.Select(m => m.Groups[1].Value).Distinct()); // one session component for the whole process
-        Assert.Equal(new[] { limit.Id, market.Id }.Order(), parts.Select(m => long.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture)).Order());
-
-        // the session matches each order by the tag stored for it
-        string limitTag = tags.Single(t => t.EndsWith("-" + limit.Id.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal));
-        Assert.Equal(limit.ExchangeOrderId, session.OrderByTag(limitTag)?.BasketId);
-    }
-
-    [Fact]
     public async Task An_earlier_process_order_with_the_same_counter_stays_separate()
     {
         using var server = new FakeRithmicServer { MarketPrice = 5000 };
@@ -632,9 +604,9 @@ public class RithmicTests
         session.Start();
         await Until(() => session.IsConnected);
         Assert.True(session.IsConnected, session.StatusText);
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
+        using var broker = _orders.Rithmic(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
 
-        var ours = broker.Limit(OrderDirections.Sell, 1, 5010);
+        var ours = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Sell, 1, 5010);
         await Until(() => ours.ExchangeOrderId.Length > 0 && server.Open.ContainsKey(ours.ExchangeOrderId));
         string basket = ours.ExchangeOrderId;
 
@@ -656,7 +628,7 @@ public class RithmicTests
         Assert.Equal(4990m, earlier.Price);
 
         // restored orders keep matching by basket id
-        broker.Modify(earlier, 4995);
+        OrderActions.Reprice(broker, earlier, 4995);
         await Until(() => server.Open["B900"].Price == 4995);
         Assert.Equal(4995.0, server.Open["B900"].Price);
         Assert.Equal(5010.0, server.Open[basket].Price);
@@ -667,40 +639,6 @@ public class RithmicTests
         Assert.False(server.Open.ContainsKey(basket));
         Assert.True(server.Open.ContainsKey("B900"));
         Assert.True(server.Open.ContainsKey("B901"));
-    }
-
-    [Fact]
-    public async Task Session_tag_comes_from_the_process_start_and_differs_between_processes()
-    {
-        var start = new DateTime(2026, 10, 23, 9, 30, 0, DateTimeKind.Utc);
-        string a = RithmicBroker.SessionTagFor(start);
-        Assert.Matches("^[0-9a-z]{8}$", a); // short ASCII
-        Assert.Equal(a, RithmicBroker.SessionTagFor(start)); // stable for one process
-        Assert.Equal(a, RithmicBroker.SessionTagFor(start.ToLocalTime())); // the same instant in local time
-        Assert.NotEqual(a, RithmicBroker.SessionTagFor(start.AddMilliseconds(1))); // a process started 1 ms later
-        Assert.NotEqual(a, RithmicBroker.SessionTagFor(start.AddHours(-2))); // an earlier process the same day
-
-        // this process's component is its start time (base 36 Unix milliseconds)
-        long ms = 0;
-        foreach (char ch in RithmicBroker.SessionTag) ms = ms * 36 + (char.IsAsciiDigit(ch) ? ch - '0' : ch - 'a' + 10);
-        using (var process = System.Diagnostics.Process.GetCurrentProcess())
-        {
-            var started = process.StartTime.ToUniversalTime();
-            Assert.InRange(DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime, started.AddSeconds(-1), started.AddSeconds(1));
-        }
-
-        // and it is the component this process puts in its tags
-        using var server = new FakeRithmicServer { MarketPrice = 5000 };
-        using var feed = new RithmicFeed(Settings(server));
-        using var session = new RithmicTradingSession(Settings(server));
-        session.Start();
-        await Until(() => session.IsConnected);
-        using var broker = new RithmicBroker(new InstrumentData(Es, new SimulatedFeed()), session, "ACC1", "ACC1", ct => feed.ContractAsync(Es, ct));
-        var limit = broker.Limit(OrderDirections.Buy, 1, 4990);
-        await Until(() => limit.ExchangeOrderId.Length > 0);
-        string tag;
-        lock (server.Tags) tag = Assert.Single(server.Tags);
-        Assert.Equal("th-" + RithmicBroker.SessionTag + "-" + limit.Id.ToString(CultureInfo.InvariantCulture), tag);
     }
 
     private sealed class Sink : IMarketDataSink

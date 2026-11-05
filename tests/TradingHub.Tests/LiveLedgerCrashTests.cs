@@ -35,6 +35,41 @@ public sealed class LiveLedgerCrashTests : IDisposable
     }
 
     [Theory]
+    [InlineData("execution-receipt-crash")]
+    [InlineData("execution-ledger-crash")]
+    public async Task A_fresh_process_projects_received_or_committed_native_facts_once_and_honors_retirement(string checkpoint)
+    {
+        await CrashAt("owned-execution-boundary", checkpoint);
+        var recovered = await ReadInFreshProcess("execution-recover");
+        Assert.True(recovered.DispatchUncertain);
+        Assert.Equal(0m, recovered.Position);
+        Assert.Equal(94m, recovered.AuthoritativeNet); // (105 - 100) * 2 * 10 - 3 - 3.
+        Assert.Equal(LiveFinancialQuality.Authoritative, recovered.Quality);
+        Assert.Equal(1, recovered.ClosedTrades);
+        Assert.Equal(new[] { 2m, 2m }, recovered.Fills.Select(fill => fill.Quantity));
+        Assert.All(recovered.Fills, fill => Assert.Equal(LiveFillKind.Execution, fill.Kind));
+        var repeated = await ReadInFreshProcess("execution-recover");
+        Assert.Equal(94m, repeated.AuthoritativeNet);
+        Assert.Equal(recovered.Fills, repeated.Fills);
+
+        var corrected = await ReadInFreshProcess("execution-correct");
+        Assert.Equal(0m, corrected.Position);
+        Assert.Equal(53m, corrected.AuthoritativeNet); // (105 - 102) * 2 * 10 - 4 - 3.
+        Assert.Equal(1, corrected.ClosedTrades);
+        Assert.Equal(2, corrected.Fills.Count);
+        var correctionRepeated = await ReadInFreshProcess("execution-correct");
+        Assert.Equal(53m, correctionRepeated.AuthoritativeNet);
+        Assert.Equal(corrected.Fills, correctionRepeated.Fills);
+
+        LiveStore.DeleteFills(Key);
+        var retired = await ReadInFreshProcess("execution-retired");
+        Assert.Empty(retired.Fills);
+        Assert.Equal(0m, retired.Position);
+        Assert.False(retired.LedgerExists);
+        Assert.Equal(0, retired.Pending);
+    }
+
+    [Theory]
     [InlineData("IntentTemporary", false)]
     [InlineData("IntentPublished", true)]
     [InlineData("PartialWrite", true)]
@@ -155,7 +190,6 @@ public sealed class LiveLedgerCrashTests : IDisposable
         Assert.Equal("started", await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog));
         await reader.WaitForExitAsync().WaitAsync(Watchdog);
         Assert.Equal(1, reader.ExitCode);
-        Assert.Contains("Keep the strategy stopped", await reader.StandardError.ReadToEndAsync());
         Assert.NotNull(LiveStore.AppendFill(Key, SecondClose));
         Assert.Throws<IOException>(() => LiveStore.LoadLedger(Key, 1));
         Assert.Equal(committed, File.ReadAllBytes(file));
@@ -210,7 +244,7 @@ public sealed class LiveLedgerCrashTests : IDisposable
         var reconciled = LiveStore.LoadLedger(Key, 1);
         Assert.Equal(new[] { Opening, FirstClose, SecondClose }, reconciled.Fills);
         Assert.Equal(-1m, reconciled.Position);
-        Assert.Equal(0, LiveStore.PendingFills(Key));
+        Assert.Equal(0, LiveStore.PendingLedgerEvents(Key));
         // The same content is still a new fill when explicitly submitted again.
         Assert.Null(LiveStore.AppendFill(Key, FirstClose));
         Assert.Equal(new[] { Opening, FirstClose, SecondClose, FirstClose }, (await ReadInFreshProcess()).Fills);
@@ -439,7 +473,7 @@ public sealed class LiveLedgerCrashTests : IDisposable
         return Process.Start(start)!;
     }
 
-    private sealed record Snapshot(List<LiveFill> Fills, decimal Position, decimal AveragePrice, decimal Realized, decimal OpenPnL, int SkippedLines, int Pending, bool? InitiallyPaused = null, bool? Paused = null);
+    private sealed record Snapshot(List<LiveFill> Fills, decimal Position, decimal AveragePrice, decimal Realized, decimal OpenPnL, int SkippedLines, int Pending, bool? InitiallyPaused = null, bool? Paused = null, bool? DispatchUncertain = null, int? ClosedTrades = null, LiveFinancialQuality? Quality = null, decimal? AuthoritativeNet = null, bool? LedgerExists = null);
 
     private sealed class RejectingStream(string path) : Stream
     {

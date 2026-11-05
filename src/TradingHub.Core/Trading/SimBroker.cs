@@ -19,6 +19,7 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
     private readonly List<MyTrade> _myTrades = new();
     private readonly Dictionary<long, decimal> _queueAhead = new();
     private readonly TradingStatistics _stats;
+    private readonly ExecutionScope _executionScope;
 
     // operación abierta para las estadísticas (entrada → salida)
     private DateTime _openTime;
@@ -26,11 +27,16 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
     private decimal _openVolume;
     private decimal _runUp, _drawDown;
 
-    public SimBroker(InstrumentData data, Portfolio portfolio, TradingStatistics stats)
+    public SimBroker(InstrumentData data, Portfolio portfolio, TradingStatistics stats, OrderContext? orderContext = null)
     {
         _data = data;
         _stats = stats;
         Portfolio = portfolio;
+        OrderContext = orderContext ?? OrderContext.EphemeralSimulation(portfolio.AccountID);
+        if (OrderContext.Descriptor.Provider != "simulator" || OrderContext.Executions is not ExecutionLog)
+            throw new ArgumentException("The simulator needs a simulator context with an actual execution log.", nameof(orderContext));
+        _executionScope = new ExecutionScope("simulator", portfolio.AccountID, "paper", data.Instrument.Key, Guid.NewGuid().ToString("N"))
+            { ContextId = OrderContext.Descriptor.Id };
         Security = new Security
         {
             Code = data.Instrument.Symbol,
@@ -45,6 +51,8 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
     }
 
     public Instrument Instrument => _data.Instrument;
+    public OrderContext OrderContext { get; }
+    public IExecutionSource Executions => OrderContext.Executions;
 
     /// <summary>Nombre de la cuenta (cada estrategia puede usar una propia).</summary>
     // Persisted live-ledger keys include this legacy name; localize it only for display.
@@ -66,47 +74,53 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
 
     public event Action? Changed;
 
+
     // ===================================================================== API de órdenes
 
-    public Order Market(OrderDirections dir, decimal qty, string comment = "") =>
-        Submit(new Order { Direction = dir, Type = OrderTypes.Market, QuantityToFill = qty, Comment = comment });
-
-    public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") =>
-        Submit(new Order { Direction = dir, Type = OrderTypes.Limit, QuantityToFill = qty, Price = Instrument.RoundPrice(price), Comment = comment });
-
-    public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") =>
-        Submit(new Order { Direction = dir, Type = OrderTypes.Stop, QuantityToFill = qty, TriggerPrice = Instrument.RoundPrice(trigger), Comment = comment });
-
-    public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
-        Submit(new Order
-        {
-            Direction = dir, Type = type is OrderTypes.Market or OrderTypes.Stop ? type : OrderTypes.Limit, QuantityToFill = qty,
-            TriggerPrice = type == OrderTypes.Stop ? Instrument.RoundPrice(price) : 0,
-            Price = type is not (OrderTypes.Market or OrderTypes.Stop) ? Instrument.RoundPrice(price) : 0,
-            Comment = comment, ReduceOnly = true,
-        });
+    public Order Submit(PreparedOrderIntent intent)
+    {
+        var request = intent.Request;
+        var order = new Order { Direction = request.Direction, Type = request.Type, QuantityToFill = request.Quantity,
+            Price = request.Type == OrderTypes.Stop ? 0 : Instrument.RoundPrice(request.Price),
+            TriggerPrice = request.Type == OrderTypes.Stop ? Instrument.RoundPrice(request.Price) : 0,
+            ReduceOnly = request.ReduceOnly, Comment = request.Comment };
+        string? error = OrderContext.Validate(intent);
+        if (request.Instrument != Instrument.Key) error = "The prepared order routes to another instrument.";
+        error ??= OrderContext.BindOrder(order, intent);
+        if (error != null) return Reject(order, error);
+        return SubmitPrepared(order, intent);
+    }
 
     public bool IsReplacementPending(Order order) => false;
 
     /// <summary>Cambia precio y cantidad en el lugar (la orden conserva su identidad).</summary>
-    public Order Replace(Order o, decimal newPrice, decimal newQuantity)
+    public Order Replace(Order o, PreparedOrderIntent intent)
     {
-        if (o.State != OrderStates.Active) return o;
-        if (newQuantity <= 0)
+        string? error = OrderContext.Validate(intent, o);
+        if (error != null) { LastError = error; return o; }
+        if (o.State != OrderStates.Active)
         {
-            Cancel(o);
+            OrderContext.RecordRejected(intent, "The predecessor is no longer working.");
             return o;
         }
-
-        o.QuantityToFill = o.Filled + newQuantity;
-        o.Unfilled = newQuantity;
-        Modify(o, newPrice);
+        decimal quantity = intent.IsPriceOnlyReplacement ? o.Unfilled : intent.Request.Quantity;
+        if (quantity <= 0) { Cancel(o); return o; }
+        error = OrderContext.BindOrder(o, intent) ?? OrderContext.StartDispatch(intent, Instrument.Symbol, Instrument.Exchange);
+        if (error != null) { LastError = error; return o; }
+        o.QuantityToFill = o.Filled + quantity;
+        o.Unfilled = quantity;
+        LastError = o.NativeIdentity == null ? null : OrderContext.BindNative(intent, o.NativeIdentity);
+        ApplyPrice(o, intent.Request.Price);
         return o;
     }
 
     public override Task OpenOrderAsync(Order order)
     {
-        Submit(order);
+        var ticket = OrderContext.Prepare(OrderContext.ManualOwner, new(Instrument.Key, order.Direction, order.Type,
+            order.QuantityToFill, order.Type == OrderTypes.Stop ? order.TriggerPrice : order.Price, order.ReduceOnly, order.Comment));
+        string? error = OrderContext.BindOrder(order, ticket);
+        if (error != null) Reject(order, error);
+        else SubmitPrepared(order, ticket);
         return Task.CompletedTask;
     }
 
@@ -118,11 +132,11 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
 
     public override Task ModifyOrderAsync(Order order, decimal newPrice)
     {
-        Modify(order, newPrice);
+        OrderActions.Reprice(this, order, newPrice);
         return Task.CompletedTask;
     }
 
-    public Order Submit(Order o)
+    private Order SubmitPrepared(Order o, PreparedOrderIntent intent)
     {
         o.Security = Security!;
         o.Portfolio = Portfolio!;
@@ -134,6 +148,11 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
             o.Status = OrderStatus.Rejected;
             return o;
         }
+        string? error = OrderContext.StartDispatch(intent, Instrument.Symbol, Instrument.Exchange);
+        if (error != null) return Reject(o, error);
+        o.NativeIdentity = new("simulator:order", intent.ClientOrderId);
+        o.ExchangeOrderId = o.NativeIdentity.Id;
+        LastError = OrderContext.BindNative(intent, o.NativeIdentity);
 
         o.State = OrderStates.Active;
         o.Status = OrderStatus.Placed;
@@ -160,6 +179,15 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
         return o;
     }
 
+    private Order Reject(Order order, string error)
+    {
+        order.State = OrderStates.Failed;
+        order.Status = OrderStatus.Rejected;
+        LastError = error;
+        Changed?.Invoke();
+        return order;
+    }
+
     public void Cancel(Order o)
     {
         if (o.State != OrderStates.Active) return;
@@ -180,7 +208,7 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
         foreach (var o in ActiveOrders.Where(o => (o.Type == OrderTypes.Stop ? o.TriggerPrice : o.Price) == price).ToList()) Cancel(o);
     }
 
-    public void Modify(Order o, decimal newPrice)
+    private void ApplyPrice(Order o, decimal newPrice)
     {
         if (o.State != OrderStates.Active) return;
         newPrice = Instrument.RoundPrice(newPrice);
@@ -195,22 +223,6 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
         Changed?.Invoke();
     }
 
-    /// <summary>Cierra la posición a mercado y cancela todas las órdenes.</summary>
-    public void Flatten()
-    {
-        CancelAll();
-        var pos = Position!.Volume;
-        if (pos > 0) Market(OrderDirections.Sell, pos, "Close");
-        else if (pos < 0) Market(OrderDirections.Buy, -pos, "Close");
-    }
-
-    /// <summary>Da vuelta la posición (de largo a corto o viceversa).</summary>
-    public void Reverse()
-    {
-        var pos = Position!.Volume;
-        if (pos > 0) Market(OrderDirections.Sell, pos * 2, "Reverse");
-        else if (pos < 0) Market(OrderDirections.Buy, -pos * 2, "Reverse");
-    }
 
     // ===================================================================== motor de llenado
 
@@ -377,6 +389,19 @@ public sealed class SimBroker : TradingManager, ITradingAccount, ITrackedOrderRe
             RealizedPnL = realized,
         };
         _myTrades.Add(mt);
+        string? currency = Portfolio!.Currency?.ToString();
+        var report = new ExecutionReport(
+            new ExecutionIdentity(_executionScope, mt.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            o.Id, Instrument.Symbol, mt.Time, o.Direction == OrderDirections.Buy, qty, price, Instrument.PointValue,
+            currency,
+            commission == 0 ? Array.Empty<ExecutionFee>() : new[] { new ExecutionFee(commission, currency) },
+            FeesComplete: true)
+        {
+            ContextId = OrderContext.Descriptor.Id, IntentId = o.IntentId, ClientOrderId = o.ClientOrderId,
+            NativeOrder = o.NativeIdentity,
+        };
+        ((ExecutionLog)Executions).Publish(report);
+        OrderContext.ObserveQuantity(o, Instrument.Symbol, Instrument.PointValue);
         RaiseNewMyTrade(mt);
         RaiseOrderChanged(o);
         RaisePositionChanged(pos);

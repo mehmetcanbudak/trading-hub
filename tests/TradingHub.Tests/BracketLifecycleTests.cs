@@ -201,7 +201,7 @@ public class BracketLifecycleTests
         brackets.ApplyTemplate();
         var oldStop = brackets.StopLoss!;
         var oldTarget = brackets.Targets.Single();
-        var manual = account.Limit(OrderDirections.Sell, 1, 160, "manual");
+        var manual = OrderActions.Manual(account, OrderTypes.Limit, OrderDirections.Sell, 1, 160, "manual");
 
         account.Position.Volume = 0;
         account.Publish();
@@ -237,7 +237,7 @@ public class BracketLifecycleTests
         var account = new Account { ImmediateCancellation = true };
         account.Position.Volume = 0;
         using var brackets = new BracketManager(account);
-        var entry = account.Limit(OrderDirections.Buy, 2, 95);
+        var entry = OrderActions.Manual(account, OrderTypes.Limit, OrderDirections.Buy, 2, 95);
         brackets.AttachToEntry(entry, 90);
         brackets.AttachToEntry(entry, 105);
         account.Working.Remove(entry);
@@ -321,7 +321,7 @@ public class BracketLifecycleTests
         using var brackets = new BracketManager(account);
         brackets.Template.StopTicks = 10;
         brackets.Template.Targets.Single().Ticks = 20;
-        var entry = account.Limit(OrderDirections.Buy, 2, 95);
+        var entry = OrderActions.Manual(account, OrderTypes.Limit, OrderDirections.Buy, 2, 95);
         brackets.AttachTemplate(entry);
         brackets.CancelBracket(entry);
         entry.Time = DateTime.UtcNow.AddDays(-1);
@@ -358,7 +358,7 @@ public class BracketLifecycleTests
         var account = new Account { ImmediateCancellation = true };
         account.Position.Volume = 0;
         using var brackets = new BracketManager(account);
-        var entry = account.Limit(OrderDirections.Buy, 2, 95);
+        var entry = OrderActions.Manual(account, OrderTypes.Limit, OrderDirections.Buy, 2, 95);
         brackets.AttachToEntry(entry, 90);
         brackets.AttachToEntry(entry, 105);
         brackets.CancelBracket(entry);
@@ -501,7 +501,7 @@ public class BracketLifecycleTests
         var account = new AmendingAccount { DelayAcceptance = true };
         account.Position.Volume = 0;
         using var brackets = new BracketManager(account);
-        var entry = account.Limit(OrderDirections.Buy, 2, 95);
+        var entry = OrderActions.Manual(account, OrderTypes.Limit, OrderDirections.Buy, 2, 95);
         brackets.AttachToEntry(entry, 90);
         brackets.AttachToEntry(entry, 105);
         brackets.Move(entry, 96);
@@ -635,8 +635,10 @@ public class BracketLifecycleTests
         public decimal BrokerPrice(Order order) => _amendments.TryGetValue(order, out var amendment)
             ? amendment.OldPrice : BracketManager.PriceOf(order);
 
-        public Order Replace(Order order, decimal price, decimal quantity)
+        public override Order Replace(Order order, PreparedOrderIntent intent)
         {
+            decimal price = intent.Request.Price, quantity = intent.Request.Quantity;
+            OrderContext.BindOrder(order, intent);
             _amendments.Add(order, new Amendment(BracketManager.PriceOf(order), order.QuantityToFill, price, order.Filled + quantity));
             if (OptimisticQuantity)
             {
@@ -682,6 +684,8 @@ public class BracketLifecycleTests
         public bool ImmediateCancellation { get; set; }
         public decimal LastPrice { get; set; } = 100m;
         public string? LastError => null;
+        public OrderContext OrderContext { get; } = OrderContext.EphemeralSimulation("Bracket lifecycle fixture");
+        public IExecutionSource Executions { get; } = new UnavailableExecutionSource();
         public event Action? Changed;
 
         public void Publish() => Changed?.Invoke();
@@ -721,28 +725,29 @@ public class BracketLifecycleTests
             Publish();
         }
 
-        private Order Submit(OrderTypes type, OrderDirections direction, decimal quantity, decimal price, string comment, bool reduceOnly)
+        public Order Submit(PreparedOrderIntent intent)
         {
+            var request = intent.Request;
+            var type = request.Type;
+            var direction = request.Direction;
+            var quantity = request.Quantity;
+            var price = request.Price;
+            var comment = request.Comment;
+            var reduceOnly = request.ReduceOnly;
             var order = new Order
             {
                 Type = type, Direction = direction, QuantityToFill = quantity, Unfilled = quantity,
                 Price = type == OrderTypes.Limit ? price : 0, TriggerPrice = type == OrderTypes.Stop ? price : 0,
                 State = OrderStates.Active, Status = OrderStatus.Placed, Comment = comment, ReduceOnly = reduceOnly,
             };
+            OrderContext.BindOrder(order, intent);
             Submitted.Add(order);
             if (!DelayAcceptance) Accept(order);
             else Publish();
             return order;
         }
 
-        public Order Exit(OrderTypes type, OrderDirections direction, decimal quantity, decimal price, string comment = "") =>
-            Submit(type, direction, quantity, price, comment, true);
-        public Order Market(OrderDirections direction, decimal quantity, string comment = "") =>
-            Submit(OrderTypes.Market, direction, quantity, 0, comment, false);
-        public Order Limit(OrderDirections direction, decimal quantity, decimal price, string comment = "") =>
-            Submit(OrderTypes.Limit, direction, quantity, price, comment, false);
-        public Order Stop(OrderDirections direction, decimal quantity, decimal price, string comment = "") =>
-            Submit(OrderTypes.Stop, direction, quantity, price, comment, false);
+        public virtual Order Replace(Order order, PreparedOrderIntent intent) => throw new NotSupportedException();
         public void Cancel(Order order)
         {
             if (order.ExchangeOrderId.Length == 0) return; // No receipt is possible until the placement is accepted.
@@ -750,10 +755,7 @@ public class BracketLifecycleTests
             if (ImmediateCancellation) AcknowledgeCancel(order);
             else Publish(); // A cancel receipt is not a terminal order acknowledgment.
         }
-        public void Modify(Order order, decimal price) => throw new NotSupportedException();
         public void CancelAt(decimal price) => throw new NotSupportedException();
         public void CancelAll() => throw new NotSupportedException();
-        public void Flatten() => throw new NotSupportedException();
-        public void Reverse() => throw new NotSupportedException();
     }
 }

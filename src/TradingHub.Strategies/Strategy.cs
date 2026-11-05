@@ -95,6 +95,7 @@ internal interface IStrategyHost
     decimal AveragePrice { get; }
     decimal OpenPnL { get; }
     decimal RealizedPnL { get; }
+    LiveFinancialQuality FinancialQuality { get; }
     IReadOnlyList<StrategyOrder> ActiveOrders { get; }
     bool IsBacktest { get; }
     StrategyOrder Submit(OrderSide side, StrategyOrderType type, decimal quantity, decimal price, string name);
@@ -210,9 +211,13 @@ public abstract class Strategy
     public bool IsFlat => Host.Position == 0;
     public bool IsLong => Host.Position > 0;
     public bool IsShort => Host.Position < 0;
+    /// <summary>Existing decimal financial getters are best-available/last-known estimates while reports are pending.
+    /// Inspect FinancialQuality, or use AuthoritativeNetProfit when confirmed economics are required.</summary>
     public decimal AveragePrice => Host.AveragePrice;
     public decimal OpenPnL => Host.OpenPnL;
     public decimal NetProfit => Host.RealizedPnL;
+    public LiveFinancialQuality FinancialQuality => Host.FinancialQuality;
+    public decimal? AuthoritativeNetProfit => FinancialQuality == LiveFinancialQuality.Authoritative ? NetProfit : null;
     public IReadOnlyList<StrategyOrder> ActiveOrders => Host.ActiveOrders;
 
     // ----------------------------------------------------------------- órdenes

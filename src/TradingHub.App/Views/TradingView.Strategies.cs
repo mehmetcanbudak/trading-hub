@@ -302,7 +302,7 @@ public sealed partial class TradingView
             {
                 // en visual sigue desde donde quedó la historia: si el backtest terminó con una posición abierta, la
                 // simulada propia la abre y la estrategia la sigue gestionando (la salida se une a esa entrada)
-                shadow.Market(open.IsLong ? OrderDirections.Buy : OrderDirections.Sell, open.Quantity, "Historical position");
+                OrderActions.Manual(shadow, OrderTypes.Market, open.IsLong ? OrderDirections.Buy : OrderDirections.Sell, open.Quantity, comment: "Historical position");
                 if (shadow.Position?.Volume is { } v && v != 0)
                     runner.SeedPosition(new LiveFill(open.EntryTime, open.IsLong, open.Quantity, open.AveragePrice));
             }
@@ -405,7 +405,7 @@ public sealed partial class TradingView
             var ledger = cs.Runner?.Ledger ?? cs.SavedLedger;
             // la visual todavía no tomó la posición de la historia (por ejemplo, sin precio en vivo): se dibuja la de la historia
             var historyOpen = !cs.Live && cs.HistoryOpen != null && (ledger == null || ledger.Fills.Count == 0) ? cs.HistoryOpen : null;
-            string key = $"{cs.History.Count}|{ledger?.Fills.Count ?? 0}|{ledger?.Position ?? 0}|{historyOpen?.EntryTime.Ticks ?? 0}";
+            string key = $"{cs.History.Count}|{ledger?.Revision ?? 0}|{ledger?.Position ?? 0}|{historyOpen?.EntryTime.Ticks ?? 0}";
             if (key == cs.SignalsKey)
             {
                 // con una posición abierta, la línea de la entrada al precio actual se mueve con el mercado
@@ -431,7 +431,7 @@ public sealed partial class TradingView
             {
                 foreach (var t in ledger.Trades.ToList()) AddTrade(t);
                 // posición abierta: la entrada desde la última vez que estuvo plana
-                if (ledger.Position != 0)
+                if (ledger.Position != 0 && !ledger.HasPendingPrices)
                 {
                     decimal pos = 0;
                     DateTime? opened = null;
@@ -512,12 +512,13 @@ public sealed partial class TradingView
     {
         decimal units = runner.UnitsFor(LiveCenter.QuantityOf(runner.StrategyInstance.GetParameters()));
         string each = units > 0 ? $"{units.ToString("0.####", TradingHub.Common.UiCulture.Current)} {runner.ExecInstrument.Symbol} per order" : "size is zero";
-        return $"live · {TradingHub.Common.EnglishText.Of(runner.Account.Name)} · {each}";
+        return $"live · {TradingHub.Common.EnglishText.Of(runner.Account.Name)} · {each} · {runner.FinancialQuality} accounting";
     }
 
     /// <summary>Posición abierta: línea punteada de la entrada al precio actual, del color del resultado abierto.</summary>
     private static void SetOpenLink(ChartModel model, ChartStrategy cs, LiveLedger ledger)
     {
+        if (ledger.HasPendingPrices) return;
         DateTime opened = DateTime.MinValue;
         decimal pos = 0;
         foreach (var f in ledger.Fills.ToList())

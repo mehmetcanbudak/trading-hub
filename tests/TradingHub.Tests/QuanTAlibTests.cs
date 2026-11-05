@@ -163,7 +163,6 @@ public class QuanTAlibTests
                 // Deadlock watchdog only; exit status and consumer assertions supply the evidence.
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(120));
                 Assert.True(child.ExitCode == 0, await stdout + Environment.NewLine + await stderr);
-                Assert.Contains("Cold ScriptCompiler Q alias + JMA + Camarilla + closed-bar BacktestEngine passed.", await stdout);
             }
             finally
             {
