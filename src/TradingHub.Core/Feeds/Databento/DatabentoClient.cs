@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using TradingHub.Market;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.Databento;
 
@@ -14,13 +15,17 @@ namespace TradingHub.Feeds.Databento;
 public sealed class DatabentoClient : IDisposable
 {
     public const string Dataset = "GLBX.MDP3";
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient _http;
     private readonly string _base;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    public DatabentoClient(string apiKey, string? baseUrl = null)
+    public DatabentoClient(string apiKey, string? baseUrl = null, ProxyHandlerFactory? network = null)
     {
         _base = (baseUrl ?? "https://hist.databento.com/v0").TrimEnd('/');
+        network ??= new ProxyHandlerFactory(new NetworkProxyPolicy());
+        var handler = network.CreateHandler();
+        handler.AllowAutoRedirect = false;
+        _http = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(10) };
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes(apiKey.Trim() + ":")));
     }
 

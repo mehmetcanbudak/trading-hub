@@ -11,7 +11,7 @@
 3. **Test connection** saves first, then tests and shows the result above the form.
 4. Use **Save** after subsequent edits.
 
-The form also has a customizable name, type, Enabled switch and Delete action. Disabled profiles do not supply instruments or trading accounts. Deleting removes the profile and its native credential-store secrets, **not recorded history**. The final built-in Simulator, Binance, Bybit or Rithmic profile cannot always be deleted; disable it instead.
+The form also has a customizable name, type, Enabled switch and Delete action. Disabled profiles do not supply new instruments or trading accounts. Deleting never deletes recorded history. Captured Bybit credential contexts needed for unresolved requests, exposure or protection are retained for reconciliation/recovery rather than erased under an owned acknowledgment. The final built-in Simulator, Binance, Bybit or Rithmic profile cannot always be deleted; disable it instead.
 
 Most providers have **History when opening a chart**, from 30 minutes to seven days. Already stored/downloaded data loads locally; missing history comes from the provider.
 
@@ -19,15 +19,17 @@ Most providers have **History when opening a chart**, from 30 minutes to seven d
 
 Passwords, API secrets, tokens and Databento keys use **macOS Keychain** (service `Trading Hub`) or native **Windows Credential Manager** (stable generic targets `Trading Hub/<account>`), rather than ordinary files. Saved secret fields show a masked native-store placeholder. Enter a new value to replace one; leaving the field blank preserves the saved value. Native Windows credential behavior remains a separate validation gate, not proof supplied by shared-runtime tests.
 
-`connections.json` contains nonsecret metadata such as name, username, server, public API identifier (for example Binance API key ID or Alpaca Key ID) and options. Treat even nonsecret account metadata as private when sharing screenshots or diagnostics.
+`connections.json` contains nonsecret metadata such as name, username, server, public API identifier (for example Binance API key ID or Alpaca Key ID) and options. Both Bybit API credentials, Longbridge access/refresh tokens and proxy/notification authorization secrets use the private store. Treat even nonsecret account metadata as private when sharing screenshots or diagnostics.
 
 ## Provider capabilities
+
+For Bybit strategy ownership, a profile/display name is not an account identity. Persistent strategy/journal scope binds the provider, environment, normalized API authority and **freshly verified native UID**. Same-UID credential rotation preserves ownership; a different UID/origin cannot adopt old history/protection. Unknown UID waits visibly without a shared “unknown”/name fallback or silently discarding the saved startup intent.
 
 | Provider | Data | Requirements | Orders |
 |---|---|---|---|
 | Simulator | Offline simulated market. | None. | Simulated account. |
 | Binance Futures / Spot | Public crypto/live history. | None for public data; API key/secret for account trading. | Testnet or real. |
-| Bybit | USDT linear perpetuals. | None for public data. | Not implemented. |
+| Bybit | USDT linear-perpetual data; testnet data has a distinct identity. | None for public data; appropriate UTA API credentials for execution. | One-way UTA Demo, Testnet or Real, with explicit real-order permission. |
 | Rithmic | CME futures, history and orders. | Username, password, system and server. | Practice or real. |
 | AMP Futures | Rithmic integration. | AMP-issued Rithmic credentials. | Practice or real. |
 | Tradovate | CME data and trading accounts. | Username/password plus API CID/secret; relevant entitlements. | Demo or real. |
@@ -36,8 +38,12 @@ Passwords, API secrets, tokens and Databento keys use **macOS Keychain** (servic
 | Alpaca | US stocks and ETFs. | API key ID and secret. | Not implemented. |
 | Databento | Historical CME ticks, including long ranges. | Paid-by-usage API key. | No live data or orders. |
 | Interactive Brokers | Selected index-futures live/tick/bar data and stored/offline history. | API-enabled TWS or IB Gateway, compatible wire version and data entitlements; offline mode needs local data only. | Not implemented. |
+| Longbridge | Configured quotes, recent tape, candles and partial depth. | Client ID, explicit OAuth grant and instrument/session metadata. | Data only; no Longbridge order route. |
+| Aggregate crypto | Composite Binance/Bybit trade/candle data with constituent coverage. | Public constituent data or configured source profiles. | None: the composite price is not an executable venue, including ordinary simulation. |
 
-Any supported market-data source can feed the simulated account. Provider eligibility, subscriptions, API approval, retention, free tiers and prices can change; verify them with the provider rather than assuming the original project's advertised allowances still apply.
+Individual supported market-data sources can feed ordinary simulation; practice uses its isolated run account. The aggregate composite intentionally exposes **no order route**. Provider eligibility, subscriptions, API approval, retention, free tiers and prices can change; verify them with the provider rather than assuming the original project's advertised allowances still apply.
+
+Aggregate numeric trade IDs remain constituent IDs and are not globally unique or monotonic. Canonical identity is source identity plus exact source event ID (`TradeIdentity.From`); uncertain observations stay explicitly partial rather than being deduplicated by equal price/time/size. First-venue book loss emits a missing/gap state independently of healthy tape from the other venue. Only a real usable fresh first-venue snapshot restores the book.
 
 ## Simulator
 
@@ -54,7 +60,27 @@ Public charts, DOM, tape and history need no account. For trading:
 
 ## Bybit
 
-Public USDT linear-perpetual data only. Routing orders to a Bybit account is not implemented.
+Choose **Demo**, **Testnet** or **Real** explicitly. Demo uses Bybit's demo execution environment with public main-market data; Testnet has its own market-data/history identity. API key and secret must belong to the selected environment. Real orders additionally require **Allow REAL orders from Trading Hub**, the existing confirmations and configured quantity limits. Never grant withdrawal permission.
+
+The execution adapter accepts supported **UTA, USDT-settled linear perpetuals in one-way mode**, not hedge-mode, inverse/USDC or an assumed equivalent account. Unsupported metadata, missing positions/orders or unresolved submissions disable new exposure. A timed-out/ambiguous placement is reconciled by its stable client/order identity, not resubmitted as a new create. Cancellation/amendment remains pending until authoritative reports confirm it; partial/late actual executions retain their execution identities and available fee currency.
+
+Native reducing exits use `reduceOnly`; local stop/target sibling handling is **not atomic exchange OCO**. Live runners retain stable client identity across pre-ACK process recovery and adopt only their owned protection. Provider holdings do not automatically become a strategy's owned position. Revoking real-order permission blocks increases/reversals but keeps cancellation and genuine reductions available.
+
+Accounts keeps actual wallet values visible independently of missing execution history. UTA wallet equity is account-wide USD; displayed supported-contract open/closed PnL is provider-reported USDT, not an invented conversion or complete round-trip reconstruction. Missing/unconverted fees, unknown position/order snapshots and incomplete opening cost basis stay unavailable/labelled; bounded fill history is not permission to claim complete account performance.
+
+Editing credentials creates a new immutable context. Previous contexts continue receiving owned acknowledgments/fills and remain durably recoverable until confirmed idle and drained; a failed private-store readback rejects the new context without erasing the old one. True Quit/restart awaits the session's owned HTTP/poll/fill work before releasing shared resources. These source capabilities still require real-provider entitlement/native validation; fake fixtures do not certify production accounts.
+
+## Longbridge
+
+Longbridge is **data only**. Configure client/region and supported instruments with explicit exchange, currency, tick/display grid, quantity and session/time-zone/calendar metadata. Missing metadata is not guessed from a symbol suffix or current price; a display analysis grid is not an exchange order-valid tick schedule.
+
+Connect uses an owned loopback callback, PKCE and bounded matching state; cancellation, wrong/expired state and failed token persistence cannot publish an authorization. Refresh/access tokens remain in the private store. Quotes are quotes, not fabricated executed-volume prints. Recent tape, zero-volume candles and snapshot/partial depth carry their available source resolution/coverage. Reconnect requires a new book baseline; showing quotes alone does not establish continuous depth history or full historical tape.
+
+## Aggregate crypto
+
+The aggregate retains available constituent trade/candle data when another venue fails and exposes provider/time-specific partial coverage. Unknown buy-side volume is not silently treated as observed aggression. Stored/cached results keep source and correction identity.
+
+The DOM/heatmap is explicitly the **designated first venue only**. It is not consolidated and does not fail over to another venue as though the venue were unchanged. Neither the composite instrument nor its first-venue book authorizes Binance, Bybit, Rithmic or Tradovate orders; choose a separate executable individual-source chart and account.
 
 ## Rithmic
 
@@ -68,6 +94,8 @@ Direct official R|Protocol integration; R|Trader Pro is not required. The profil
 - **Advanced:** application name (some systems require provider approval) and instrument-search product roots such as ES, NQ, MES, MNQ and CL. Search resolves each to the active contract, for example ES → ESZ6 in the original examples.
 
 Accounts appear in Rithmic-chart tickets and Accounts once the order session connects. Rithmic generally allows one session per username; another program signing in can disconnect one session. Verify application approval with your provider before relying on it.
+
+The fork retains its existing stronger working-revision/quantity/price acknowledgment protections. Source comparison found that KVP's `KeepPendingPrice` optimistically overrides displayed price until a matching report, termination or five-second timeout, whereas this fork waits for an exact **later WorkingRevision plus quantity and price**, terminal state or definite rejection; unknown outcomes stay pending and native price is not replaced before ACK. The KVP amendment engine was therefore not imported. This is source-review rationale, not a fresh runtime pass. Available Rithmic/AMP depth is one BBO level per side and remains partial; after reconnect fresh **price and size on both sides** are required before a refresh. It is not event-complete L2 or MBO coverage.
 
 ### If Rithmic will not connect or trade
 
@@ -137,6 +165,7 @@ New chart defaults use the 18:00 America/New_York session; saved and custom sess
 | Provider | Test destination | Real destination |
 |---|---|---|
 | Binance | Testnet submits without confirmation. | Requires explicit real-order permission. |
+| Bybit | Demo or Testnet submits to that selected environment. | Real requires explicit permission and reconciled one-way UTA state. |
 | Rithmic / AMP | Rithmic Paper Trading / Rithmic Test submit directly. | Other systems, including prop firms, require explicit permission. |
 | Tradovate | Demo submits directly. | Requires explicit real Tradovate permission. |
 
@@ -145,9 +174,15 @@ Without permission, real destinations are absent from Chart Trader, and an order
 ### Enable real-money trading
 
 1. Validate everything using simulation or the provider's test account first.
-2. Select the correct live environment: Binance Testnet/Real, Tradovate Demo/Real, or a real Rithmic/AMP server/system.
+2. Select the correct live environment: Binance Testnet/Real, Bybit Demo/Testnet/Real, Tradovate Demo/Real, or a real Rithmic/AMP server/system.
 3. Enable that profile's real-order permission.
 4. Set maximum order quantity; larger requests are blocked.
 5. Save and test the connection.
 
 See [Trading safety](operar.md#safety) for confirmations and risk limits. These instructions explain the existing capability; translation validation does not authorize or test real-money orders.
+
+## Explicit network proxy policy
+
+[Settings → Network proxy](ajustes.md#network-proxy) applies captured system/direct/custom policy to app-owned ordinary HTTP and WebSocket transports, including discovery/history/private APIs, OAuth/revocation, public archives and research. Credentials are separate private-store values. New transports capture new policy; active contexts are not globally retargeted or forcibly disconnected during owned acknowledgments. Private HTTP and credential-bearing WebSocket handshakes reject redirects.
+
+Interactive Brokers' native TCP connection and external assistant/browser processes are not app HTTP/WebSocket transports and are not represented as proxy-covered. Use the protection-aware Quit/restart path when a new connection policy must apply; a proxy error is not permission to retry an uncertain order or fall back silently to a direct route.

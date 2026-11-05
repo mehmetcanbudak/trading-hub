@@ -21,9 +21,11 @@ public class AnchoredFlowVwap : Indicator
     private SwingKind _swing = SwingKind.Both;
     private FlowWeight _weight = FlowWeight.AbsoluteDelta;
     private string _manual = "";
+    private static readonly string[] ManualFormats = { "yyyy-MM-dd HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-ddTHH:mm:ss'Z'", "yyyy-MM-ddTHH:mm:ss.FFFFFFF'Z'" };
+    private DateTime _manualTime; private bool _manualParsed;
     private int _radius = 10, _baseline = 50, _bands = 3;
     private decimal _spike = 3, _sigma = 1;
-    private bool _estimate;
+    private bool _estimate, _allowInferred, _retrospective = true;
     private readonly object _sync = new();
     private readonly List<StudyLevel> _levels = new();
     private readonly List<Row> _causal = new(), _painted = new();
@@ -31,34 +33,9 @@ public class AnchoredFlowVwap : Indicator
     private int _undoStart;
     private readonly OptionalValueDataSeries _vwap = new("AnchoredFlowVwap.Value", "Flow VWAP") { Color = Color.Gold, Width = 2, ShowZeroValue = true };
     private readonly OptionalValueDataSeries[] _upper = new OptionalValueDataSeries[3], _lower = new OptionalValueDataSeries[3];
-    private readonly record struct Row(int Anchor, int Confirmed, Moments State, StudyCoverage Coverage, decimal Flow);
-    private struct Moments
-    {
-        public decimal Weight, Mean, M2;
-        public void Add(decimal price, decimal weight)
-        {
-            if (weight < 0) throw new InvalidOperationException("Flow weights must be nonnegative.");
-            if (weight == 0) return;
-            checked
-            {
-                decimal total = Weight + weight, delta = price - Mean;
-                decimal next = Mean + delta * (weight / total);
-                M2 += weight * delta * (price - next);
-                Weight = total; Mean = next;
-            }
-        }
-        public decimal Deviation
-        {
-            get
-            {
-                if (Weight == 0) return 0;
-                decimal variance = M2 / Weight;
-                // Welford moments avoid catastrophic subtractive cancellation. Only decimal rounding dust is clamped.
-                if (variance < -0.000000000000000000000001m) throw new ArithmeticException("Negative weighted variance.");
-                return (decimal)Math.Sqrt((double)Math.Max(0, variance));
-            }
-        }
-    }
+    private readonly RenderPen[] _linePens = new RenderPen[7];
+    private static readonly RenderPen AnchorPen = new(Color.Gold);
+    private readonly record struct Row(int Anchor, int Confirmed, WeightedStudyMoments State, StudyCoverage Coverage, decimal Flow);
 
     public AnchoredFlowVwap() : base(true)
     {
@@ -69,12 +46,14 @@ public class AnchoredFlowVwap : Indicator
             _lower[i] = new($"AnchoredFlowVwap.Lower{i + 1}", $"Lower {i + 1} sigma") { Color = Color.DarkGoldenrod };
             DataSeries.Add(_upper[i]); DataSeries.Add(_lower[i]);
         }
+        for (int i = 0; i < DataSeries.Count; i++) { var series = (ValueDataSeries)DataSeries[i]; _linePens[i] = new(series.Color, series.Width); }
+        UpdateDrawingMode();
         EnableCustomDrawing = true; DrawAbovePrice = true; SubscribeToDrawingEvents(DrawingLayouts.Final);
     }
     [Display(Name = "Anchor mode", GroupName = "Anchor")]
     public AnchorMode Mode { get => _mode; set { _mode = value; RecalculateValues(); } }
     [Display(Name = "Manual UTC (yyyy-MM-dd HH:mm; empty = loaded history start)", GroupName = "Anchor")]
-    public string ManualUtc { get => _manual; set { _manual = value?.Trim() ?? ""; RecalculateValues(); } }
+    public string ManualUtc { get => _manual; set { _manual = value?.Trim() ?? ""; _manualParsed = false; RecalculateValues(); } }
     [Display(Name = "Closed bars on each side", GroupName = "Anchor"), Range(1, 200)]
     public int SwingRadius { get => _radius; set { ArgumentOutOfRangeException.ThrowIfLessThan(value, 1); ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 200); _radius = value; RecalculateValues(); } }
     [Display(Name = "Swing kind", GroupName = "Anchor")]
@@ -87,6 +66,8 @@ public class AnchoredFlowVwap : Indicator
     public FlowWeight Weight { get => _weight; set { _weight = value; RecalculateValues(); } }
     [Display(Name = "Allow estimated OHLC / aggregate fallback", GroupName = "Calculation")]
     public bool AllowEstimated { get => _estimate; set { _estimate = value; RecalculateValues(); } }
+    [Display(Name = "Allow explicitly inferred aggressors", GroupName = "Calculation")]
+    public bool AllowInferredAggressors { get => _allowInferred; set { _allowInferred = value; RecalculateValues(); } }
     [Display(Name = "Sigma bands", GroupName = "Bands"), Range(0, 3)]
     public int Bands { get => _bands; set { ArgumentOutOfRangeException.ThrowIfLessThan(value, 0); ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 3); _bands = value; RecalculateValues(); } }
     [Display(Name = "Sigma multiplier", GroupName = "Bands"), Range(0.01, 20)]
@@ -94,22 +75,33 @@ public class AnchoredFlowVwap : Indicator
     [Display(Name = "Fill opacity", GroupName = "Visualization"), Range(0, 80)] public int FillOpacity { get; set; } = 22;
     [Display(Name = "Flow bubbles", GroupName = "Visualization")] public bool ShowFlowBubbles { get; set; } = true;
     [Display(Name = "Maximum bubble size", GroupName = "Visualization"), Range(4, 60)] public int BubbleSize { get; set; } = 14;
+    [Display(Name = "Retrospective chart lines (numeric series stay causal)", GroupName = "Visualization")]
+    public bool RetrospectiveDrawing { get => _retrospective; set { _retrospective = value; UpdateDrawingMode(); RecalculateValues(); } }
+    /// <summary>Drawing-only value; never a strategy series. Available only after RetrospectiveConfirmationAt closes.</summary>
+    public decimal? RetrospectiveValueAt(int bar) => bar >= 0 && bar < _painted.Count && _painted[bar].State.Weight > 0 ? _painted[bar].State.Mean : null;
+    public int RetrospectiveConfirmationAt(int bar) => bar >= 0 && bar < _painted.Count ? _painted[bar].Confirmed : -1;
+    public int CausalAnchorAt(int bar) => bar >= 0 && bar < _causal.Count ? _causal[bar].Anchor : -1;
+    private void UpdateDrawingMode()
+    {
+        foreach (var data in DataSeries) ((ValueDataSeries)data).VisualType = _retrospective ? VisualMode.OnlyValueOnAxis : VisualMode.Line;
+    }
     [Browsable(false)] public int AnchorBar => _causal.Count == 0 ? -1 : _causal[^1].Anchor;
     [Browsable(false)] public int ConfirmationBar => _causal.Count == 0 ? -1 : _causal[^1].Confirmed;
     [Browsable(false)] public StudyCoverage Coverage => _causal.Count == 0 ? StudyCoverage.Missing : _causal[^1].Coverage;
-    [Browsable(false)] public string Status => $"{FootprintStudyData.Label(Coverage)}; " + (AnchorBar < 0 ? "waiting for anchor" : Mode == AnchorMode.Swing ? $"retrospective pivot {AnchorBar}, confirmed {ConfirmationBar}" : Mode == AnchorMode.Manual && ManualUtc.Length == 0 ? "explicit loaded-history start" : $"anchor {AnchorBar}") + (!IsAvailable ? "; unavailable (zero accumulated weight)" : "");
-    [Browsable(false)] public bool IsAvailable => _causal.Count > 0 && _causal[^1].State.Weight > 0;
+    [Browsable(false)] public string Status => $"{FootprintStudyData.Label(Coverage)}; numeric series causal; " + (AnchorBar < 0 ? "waiting for anchor" : Mode == AnchorMode.Swing ? $"drawing pivot {AnchorBar}, confirmed at close {ConfirmationBar}" : Mode == AnchorMode.Manual && ManualUtc.Length == 0 ? "explicit loaded-history start" : $"anchor {AnchorBar}") + (!IsAvailable ? "; unavailable (zero accumulated weight)" : "");
+    [Browsable(false)] public bool IsAvailable => _causal.Count > 0 && StudyMath.HasValue(_causal[^1].State, _causal[^1].Coverage);
 
     protected override void OnRecalculate() { lock (_sync) { _causal.Clear(); _painted.Clear(); _paintUndo.Clear(); } }
     protected override void OnCalculate(int bar, decimal value)
     {
+        if (bar == 0) UpdateDrawingMode();
         lock (_sync)
         {
             if (bar < _causal.Count - 1) { _causal.Clear(); _painted.Clear(); _paintUndo.Clear(); Clear(); }
             if (_causal.Count == bar + 1)
             {
                 // Undo the retrospective paint made by the old latest-bar confirmation.
-                for (int i = 0; i < _paintUndo.Count; i++) { _painted[_undoStart + i] = _paintUndo[i]; Write(_undoStart + i, _paintUndo[i]); }
+                for (int i = 0; i < _paintUndo.Count; i++) _painted[_undoStart + i] = _paintUndo[i];
                 _causal.RemoveAt(bar); _painted.RemoveAt(bar);
             }
             for (int i = _causal.Count; i <= bar; i++) Step(i);
@@ -120,7 +112,7 @@ public class AnchoredFlowVwap : Indicator
         _paintUndo.Clear();
         Row previous = bar == 0 ? new(-1, -1, default, StudyCoverage.Missing, 0) : _causal[bar - 1];
         int anchor = Detect(bar, previous.Anchor), confirmed = anchor != previous.Anchor ? bar : previous.Confirmed;
-        Moments moments = anchor == previous.Anchor ? previous.State : default;
+        WeightedStudyMoments moments = anchor == previous.Anchor ? previous.State : default;
         StudyCoverage coverage = anchor == previous.Anchor ? previous.Coverage : StudyCoverage.Missing;
         _undoStart = anchor;
         if (anchor >= 0 && anchor != previous.Anchor)
@@ -128,24 +120,26 @@ public class AnchoredFlowVwap : Indicator
             {
                 _paintUndo.Add(_painted[i]);
                 var retro = Accumulate(i, anchor, confirmed, ref moments, ref coverage);
-                _painted[i] = retro; Write(i, retro);
+                _painted[i] = retro;
             }
         Row row = anchor < 0 ? new(-1, -1, default, StudyCoverage.Missing, 0) : Accumulate(bar, anchor, confirmed, ref moments, ref coverage);
         _causal.Add(row); _painted.Add(row); Write(bar, row);
     }
-    private Row Accumulate(int bar, int anchor, int confirmed, ref Moments moments, ref StudyCoverage coverage)
+    private Row Accumulate(int bar, int anchor, int confirmed, ref WeightedStudyMoments moments, ref StudyCoverage coverage)
     {
         var candle = GetCandle(bar);
+        if (!candle.CanCalculateCausally)
+        { coverage |= StudyMath.Coverage(candle) | StudyCoverage.MissingBars; return new(anchor, confirmed, moments, coverage, 0); }
         StudyCoverage current;
         decimal flow = 0;
-        if (candle.HasObservedFootprint)
+        if ((candle.HasObservedFootprint || candle.HasAggregatedFootprint) && (_weight != FlowWeight.AbsoluteDelta || !candle.HasInferredSide || AllowInferredAggressors))
         {
             current = FootprintStudyData.Read(candle, false, 1, false, _levels);
             foreach (var row in _levels) { Add(row.Price, row.Volume, row.Bid, row.Ask, ref moments); flow += Math.Abs(row.Ask - row.Bid); }
         }
-        else if (_estimate && candle.Volume > 0)
+        else if (_estimate && candle.Volume > 0 && (_weight != FlowWeight.AbsoluteDelta || !candle.HasInferredSide || AllowInferredAggressors))
         {
-            current = StudyCoverage.Estimated;
+            current = StudyMath.Coverage(candle) | StudyCoverage.Estimated;
             Add(candle.High / 3 + candle.Low / 3 + candle.Close / 3, candle.Volume, candle.Bid, candle.Ask, ref moments);
             flow = Math.Abs(candle.Delta);
         }
@@ -153,22 +147,32 @@ public class AnchoredFlowVwap : Indicator
         coverage |= current;
         return new(anchor, confirmed, moments, coverage, flow);
     }
-    private void Add(decimal price, decimal volume, decimal bid, decimal ask, ref Moments moments) => moments.Add(price, _weight switch
+    private void Add(decimal price, decimal volume, decimal bid, decimal ask, ref WeightedStudyMoments moments) => moments.Add(price, _weight switch
     { FlowWeight.AbsoluteDelta => Math.Abs(ask - bid), FlowWeight.Volume => volume, _ => checked(Math.Abs(price) * volume) });
     private int Detect(int bar, int previous)
     {
         if (_mode == AnchorMode.Manual)
         {
             if (_manual.Length == 0) return 0;
-            if (!DateTime.TryParseExact(_manual, new[] { "yyyy-MM-dd HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-ddTHH:mm:ss'Z'", "yyyy-MM-ddTHH:mm:ss.FFFFFFF'Z'" }, CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var time))
-                throw new FormatException("Manual anchor must be an explicit UTC date/time (yyyy-MM-dd HH:mm or ISO Z). Empty explicitly means loaded-history start.");
-            return previous >= 0 ? previous : GetCandle(bar).Time >= time ? bar : -1;
+            if (!_manualParsed)
+            {
+                if (!DateTime.TryParseExact(_manual, ManualFormats, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out _manualTime))
+                    throw new FormatException("Manual anchor must be an explicit UTC date/time (yyyy-MM-dd HH:mm or ISO Z). Empty explicitly means loaded-history start.");
+                _manualParsed = true;
+            }
+            return previous >= 0 ? previous : GetCandle(bar).Time >= _manualTime ? bar : -1;
         }
         if (_mode == AnchorMode.VolumeSpike)
         {
-            if (bar < _baseline) return previous;
-            decimal sum = 0; for (int i = bar - _baseline; i < bar; i++) sum += GetCandle(i).Volume;
+            if (bar < _baseline || !GetCandle(bar).CanCalculateCausally || (StudyMath.Coverage(GetCandle(bar)) & StudyCoverage.Incomplete) != 0) return previous;
+            decimal sum = 0;
+            for (int i = bar - _baseline; i < bar; i++)
+            {
+                var source = GetCandle(i);
+                if (!source.CanCalculateCausally || (StudyMath.Coverage(source) & StudyCoverage.Incomplete) != 0) return previous;
+                sum += source.Volume;
+            }
             return sum > 0 && GetCandle(bar).Volume >= sum / _baseline * _spike ? bar : previous;
         }
         int candidate = bar - _radius;
@@ -176,7 +180,8 @@ public class AnchoredFlowVwap : Indicator
         var pivot = GetCandle(candidate); bool low = true, high = true;
         for (int i = candidate - _radius; i <= bar; i++)
         {
-            if (!GetCandle(i).IsCandleFinished) return previous;
+            var source = GetCandle(i);
+            if (!source.IsCandleFinished || !source.CanCalculateCausally || (StudyMath.Coverage(source) & StudyCoverage.Incomplete) != 0) return previous;
             if (i == candidate) continue;
             // Earliest equal-price pivot wins a plateau, independent of replay order.
             var c = GetCandle(i);
@@ -187,7 +192,7 @@ public class AnchoredFlowVwap : Indicator
     }
     private void Write(int bar, Row row)
     {
-        bool available = row.State.Weight > 0;
+        bool available = StudyMath.HasValue(row.State, row.Coverage);
         _vwap.Set(bar, available ? row.State.Mean : 0, available);
         decimal deviation = available ? row.State.Deviation * _sigma : 0;
         for (int i = 0; i < 3; i++)
@@ -201,8 +206,8 @@ public class AnchoredFlowVwap : Indicator
     }
     private void UpdateBreak(int bar)
     {
-        if (bar < 0 || bar >= _painted.Count) return;
-        bool broken = bar + 1 < _painted.Count && _painted[bar].Anchor != _painted[bar + 1].Anchor;
+        if (bar < 0 || bar >= _causal.Count) return;
+        bool broken = bar + 1 < _causal.Count && _causal[bar].Anchor != _causal[bar + 1].Anchor;
         for (int i = 0; i < DataSeries.Count; i++)
         {
             var series = (ValueDataSeries)DataSeries[i];
@@ -215,13 +220,33 @@ public class AnchoredFlowVwap : Indicator
         lock (_sync)
         {
             FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 0, "Flow VWAP: " + Status, Color.Gold);
-            int last = Math.Min(LastVisibleBarNumber, _painted.Count - 1), first = Math.Max(0, FirstVisibleBarNumber);
-            decimal maximum = 0; for (int i = first; i <= last; i++) maximum = Math.Max(maximum, _painted[i].Flow);
+            var rendering = _retrospective ? _painted : _causal;
+            int last = Math.Min(LastVisibleBarNumber, rendering.Count - 1), first = Math.Max(0, FirstVisibleBarNumber);
+            for (int s = 0; s < DataSeries.Count; s++)
+            {
+                var series = (ValueDataSeries)DataSeries[s]; _linePens[s].Color = series.Color; _linePens[s].Width = series.Width;
+                _linePens[s].DashStyle = (System.Drawing.Drawing2D.DashStyle)(int)series.LineDashStyle;
+            }
+            decimal maximum = 0; for (int i = first; i <= last; i++) maximum = Math.Max(maximum, rendering[i].Flow);
             for (int i = first; i <= last; i++)
             {
-                var row = _painted[i]; if (row.State.Weight == 0) continue;
+                var row = rendering[i]; if (row.State.Weight == 0) continue;
                 int x = ChartInfo.GetXByBar(i), width = Math.Max(2, ChartInfo.PriceChartContainer.BarsWidth);
                 decimal deviation = row.State.Deviation * _sigma;
+                if (_retrospective)
+                {
+                    Row previous = i > 0 ? rendering[i - 1] : default;
+                    bool connected = i > 0 && previous.State.Weight > 0 && previous.Anchor == row.Anchor;
+                    int from = connected ? ChartInfo.GetXByBar(i - 1) : x - width / 2;
+                    for (int s = 0; s < DataSeries.Count; s++)
+                    {
+                        var series = (ValueDataSeries)DataSeries[s]; if (!series.Visible || s > 0 && (s + 1) / 2 > _bands) continue;
+                        decimal multiplier = s == 0 ? 0 : (s % 2 == 1 ? 1 : -1) * ((s + 1) / 2);
+                        decimal currentValue = row.State.Mean + deviation * multiplier;
+                        decimal priorValue = connected ? previous.State.Mean + previous.State.Deviation * _sigma * multiplier : currentValue;
+                        context.DrawLine(_linePens[s], from, ChartInfo.GetYByPrice(priorValue), connected ? x : x + width / 2, ChartInfo.GetYByPrice(currentValue));
+                    }
+                }
                 for (int band = _bands; band >= 1; band--)
                 {
                     int top = ChartInfo.GetYByPrice(row.State.Mean + deviation * band), bottom = ChartInfo.GetYByPrice(row.State.Mean - deviation * band);
@@ -241,10 +266,11 @@ public class AnchoredFlowVwap : Indicator
                     }
                 }
             }
-            if (AnchorBar >= first && AnchorBar <= last)
+            int marker = _retrospective ? AnchorBar : ConfirmationBar;
+            if (marker >= first && marker <= last)
             {
-                int x = ChartInfo.GetXByBar(AnchorBar);
-                context.DrawLine(new RenderPen(Color.Gold, 1), x, ChartArea.Top, x, ChartArea.Bottom);
+                int x = ChartInfo.GetXByBar(marker);
+                context.DrawLine(AnchorPen, x, ChartArea.Top, x, ChartArea.Bottom);
             }
         }
     }

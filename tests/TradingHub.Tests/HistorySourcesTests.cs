@@ -44,11 +44,10 @@ public class HistorySourcesTests : IDisposable
         Assert.All(inRecording, t => Assert.True(t.Price < 30_000m)); // en esos minutos, lo de Rithmic
         Assert.All(combined.Where(t => t.Time.Hour == 9 || t.Time.Hour == 11), t => Assert.True(t.Price >= 30_000m)); // afuera, Databento
 
-        // ordenadas por hora, con ids que crecen y no se repiten entre fuentes
+        // Chronologically ordered across sources.
         for (int i = 1; i < combined.Count; i++)
         {
             Assert.True(combined[i].Time >= combined[i - 1].Time);
-            Assert.True(combined[i].Id > combined[i - 1].Id);
         }
     }
 

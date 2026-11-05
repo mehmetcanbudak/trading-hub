@@ -31,21 +31,42 @@
   </ItemGroup>
 
   <Target Name="CopyLedgerCrashFixture" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildProjectDirectory)/../TradingHub.LedgerCrashFixture/TradingHub.LedgerCrashFixture.csproj" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)" RebaseOutputs="true">
+      <Output TaskParameter="TargetOutputs" ItemName="LedgerCrashFixtureTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <_LedgerCrashFixtureDirectory>@(LedgerCrashFixtureTarget->'%(RootDir)%(Directory)')</_LedgerCrashFixtureDirectory>
+    </PropertyGroup>
     <ItemGroup>
-      <LedgerCrashFixtureFiles Include="$(MSBuildProjectDirectory)/../TradingHub.LedgerCrashFixture/bin/$(Configuration)/$(TargetFramework)/**/*" />
+      <LedgerCrashFixtureFiles Include="$(_LedgerCrashFixtureDirectory)**/*" />
     </ItemGroup>
     <Copy SourceFiles="@(LedgerCrashFixtureFiles)" DestinationFiles="@(LedgerCrashFixtureFiles->'$(OutDir)LedgerCrashFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
   <Target Name="CopyQuantColdFixture" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildProjectDirectory)/../TradingHub.QuantColdFixture/TradingHub.QuantColdFixture.csproj" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)" RebaseOutputs="true">
+      <Output TaskParameter="TargetOutputs" ItemName="QuantColdFixtureTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <_QuantColdFixtureDirectory>@(QuantColdFixtureTarget->'%(RootDir)%(Directory)')</_QuantColdFixtureDirectory>
+    </PropertyGroup>
     <ItemGroup>
-      <QuantColdFixtureFiles Include="$(MSBuildProjectDirectory)/../TradingHub.QuantColdFixture/bin/$(Configuration)/$(TargetFramework)/**/*" />
+      <QuantColdFixtureFiles Include="$(_QuantColdFixtureDirectory)**/*" />
     </ItemGroup>
     <Copy SourceFiles="@(QuantColdFixtureFiles)" DestinationFiles="@(QuantColdFixtureFiles->'$(OutDir)QuantColdFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
   <Target Name="CopyAssistantCliFixture" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildProjectDirectory)/../TradingHub.AssistantCliFixture/TradingHub.AssistantCliFixture.csproj" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)" RebaseOutputs="true">
+      <Output TaskParameter="TargetOutputs" ItemName="AssistantCliFixtureTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <_AssistantCliFixtureDirectory>@(AssistantCliFixtureTarget->'%(RootDir)%(Directory)')</_AssistantCliFixtureDirectory>
+    </PropertyGroup>
     <ItemGroup>
-      <AssistantCliFixtureFiles Include="$(MSBuildProjectDirectory)/../TradingHub.AssistantCliFixture/bin/$(Configuration)/$(TargetFramework)/**/*" />
+      <AssistantCliFixtureFiles Include="$(_AssistantCliFixtureDirectory)**/*" />
     </ItemGroup>
     <Copy SourceFiles="@(AssistantCliFixtureFiles)" DestinationFiles="@(AssistantCliFixtureFiles->'$(OutDir)AssistantCliFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>

@@ -62,6 +62,13 @@ public sealed class CodexBridge : StrategyChatProcess
         string help = await HelpAsync(cli, request.WorkDirectory, token, "exec", "--help");
         foreach (string flag in new[] { "--ignore-user-config", "--ignore-rules", "--sandbox", "--json" })
             if (!help.Contains(flag, StringComparison.Ordinal)) throw new InvalidOperationException($"Codex isolation requires {flag}; this CLI does not advertise support. Update Codex before using strategy chat.");
+        if (request.TextOnly)
+        {
+            string features = await HelpAsync(cli, request.WorkDirectory, token, "--ignore-user-config", "--ignore-rules", "features", "list");
+            foreach (string feature in new[] { "shell_tool", "apps" })
+                if (!features.Split('\n').Any(line => line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() == feature))
+                    throw new InvalidOperationException($"Draft-only Pine handoff requires Codex feature control {feature}. Update Codex before sending source.");
+        }
         var psi = ClaudeCodeBridge.Prepare(cli, request.WorkDirectory);
         psi.StandardInputEncoding = new UTF8Encoding(false);
         psi.StandardErrorEncoding = Encoding.UTF8;
@@ -69,7 +76,7 @@ public sealed class CodexBridge : StrategyChatProcess
         foreach (var key in psi.Environment.Keys.ToArray())
             if ((key.StartsWith("CODEX", comparison) && key != "CODEX_HOME") || key.StartsWith("OPENAI", comparison)) psi.Environment.Remove(key);
         psi.Environment["PATH"] = Path.GetDirectoryName(Path.GetFullPath(cli)) + Path.PathSeparator + psi.Environment["PATH"];
-        Add(psi, "exec", "--ignore-user-config", "--ignore-rules", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check");
+        Add(psi, "exec", "--ignore-user-config", "--ignore-rules", "--json", "--sandbox", request.TextOnly ? "read-only" : "workspace-write", "--skip-git-repo-check");
         Config("approval_policy", Quote("never"));
         Config("sandbox_workspace_write.network_access", "false");
         Config("sandbox_workspace_write.exclude_tmpdir_env_var", "true");
@@ -80,6 +87,14 @@ public sealed class CodexBridge : StrategyChatProcess
         Config("web_search", Quote("disabled"));
         Config("skills.include_instructions", "false");
         Config("skills.bundled.enabled", "false");
+        if (request.TextOnly)
+        {
+            Config("features.shell_tool", "false");
+            Config("features.apps", "false");
+            Config("features.view_image", "false");
+            Config("features.multi_agent", "false");
+            Config("features.code_mode.enabled", "false");
+        }
         // Explicit untrusted entries suppress every project-scoped config/hooks/rules layer.
         // User config is ignored, but CLI-owned authentication and exact-session storage remain available.
         for (var dir = new DirectoryInfo(Path.GetFullPath(request.WorkDirectory)); dir != null; dir = dir.Parent)
@@ -100,7 +115,7 @@ public sealed class CodexBridge : StrategyChatProcess
         if (!string.IsNullOrWhiteSpace(request.Model)) Add(psi, "--model", request.Model);
         if (!string.IsNullOrWhiteSpace(request.Effort)) Config("model_reasoning_effort", Quote(request.Effort));
         foreach (var directory in request.ExtraDirectories) if (Directory.Exists(directory)) Add(psi, "--add-dir", directory);
-        if (SessionId != null) Add(psi, "resume", SessionId);
+        if (SessionId != null && !request.TextOnly) Add(psi, "resume", SessionId);
         Add(psi, "-");
         return psi;
         void Config(string key, string value) => Add(psi, "-c", key + "=" + value);

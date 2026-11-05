@@ -21,14 +21,20 @@ public readonly struct Trade
     public readonly decimal Price;
     public readonly decimal Volume;
     public readonly TradeSide Side;
+    public readonly TradeProvenance Provenance;
+    public bool IsObservedTrade => Provenance.IsObservedTrade;
+    public bool HasKnownAvailability => Provenance.HasKnownAvailability;
+    /// <summary>Nominal availability; unknown legacy proxy timing is explicitly marked by HasKnownAvailability.</summary>
+    public DateTime AvailableAt => Provenance.AvailabilityTime(Time);
 
-    public Trade(long id, DateTime time, decimal price, decimal volume, TradeSide side)
+    public Trade(long id, DateTime time, decimal price, decimal volume, TradeSide side, TradeProvenance provenance = default)
     {
         Id = id;
         Time = time;
         Price = price;
         Volume = volume;
         Side = side;
+        Provenance = provenance.Normalize(id);
     }
 
     public override string ToString() => $"{Time:HH:mm:ss.fff} {Side} {Volume} @ {Price} (#{Id})";

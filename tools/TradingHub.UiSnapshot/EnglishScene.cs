@@ -91,7 +91,10 @@ internal static class EnglishScene
             if (dialog.IsVisible) dialog.Close(false);
         }
 
-        Check(!Path.GetFullPath(AppPaths.Root).StartsWith(Path.GetFullPath(TradingHub.Common.Product.AppData), StringComparison.Ordinal), "uses isolated application data");
+        string actualDataRoot = Path.GetFullPath(AppPaths.Root);
+        string productionDataRoot = Path.GetFullPath(TradingHub.Common.Product.DefaultAppData);
+        Check(!actualDataRoot.Equals(productionDataRoot, StringComparison.OrdinalIgnoreCase) &&
+            !actualDataRoot.StartsWith(productionDataRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "uses isolated application data");
         Check(Environment.GetEnvironmentVariable("TRADINGHUB_SLEEP_GUARD") == "off", "power changes are disabled");
         var svc = App.Services;
         Check(svc.Connections.Profiles.All(p => !p.AllowRealOrders), "all fixture profiles keep real orders disabled");

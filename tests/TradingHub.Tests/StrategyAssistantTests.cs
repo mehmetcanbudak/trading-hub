@@ -240,6 +240,100 @@ public sealed class StrategyAssistantTests
         finally { Directory.Delete(root, true); }
     }
 
+    [UnixAssistantFact]
+    public async Task PineHandoffUsesSelectedRealBridgeWithNoExecutionToolsOrAutomaticSourcePublication()
+    {
+        foreach (string engine in new[] { "claude", "codex" })
+        {
+            using var fixture = new CliFixture(engine);
+            fixture.Reply(engine == "claude" ? "{\"type\":\"result\",\"result\":\"Unvalidated C# draft\",\"is_error\":false}\n"
+                : "{\"type\":\"item.completed\",\"item\":{\"id\":\"draft\",\"type\":\"agent_message\",\"text\":\"Unvalidated C# draft\"}}\n{\"type\":\"turn.completed\"}\n");
+            var source = new PineImportSource(Path.Combine(fixture.Root, "kept.pine"), "kept.pine", "plot(close)", "original-byte-hash");
+            File.WriteAllText(source.Path, source.Text);
+            var preview = PineImports.Preview(source, engine, "selected-model", "high");
+            var result = await PineAssistantHandoff.SendAsync(preview, true, fixture.Bridge);
+            Assert.Equal(StrategyChatStatus.Succeeded, result!.Status);
+            Assert.Contains("plot(close)", File.ReadAllText(Path.Combine(fixture.Root, "stdin.txt")));
+            var arguments = File.ReadAllText(Path.Combine(fixture.Root, "args.txt")).Split('\0');
+            Assert.Contains("selected-model", arguments);
+            Assert.DoesNotContain("--add-dir", arguments);
+            Assert.DoesNotContain("--resume", arguments);
+            if (engine == "claude")
+            {
+                Assert.Equal("", arguments[Array.IndexOf(arguments, "--tools") + 1]);
+                Assert.Contains("--restricted", arguments);
+                Assert.Contains("--safe-mode", arguments);
+                Assert.Contains("--no-session-persistence", arguments);
+                using var config = JsonDocument.Parse(arguments[Array.IndexOf(arguments, "--mcp-config") + 1]);
+                Assert.Empty(config.RootElement.GetProperty("mcpServers").EnumerateObject());
+            }
+            else
+            {
+                Assert.Equal("read-only", arguments[Array.IndexOf(arguments, "--sandbox") + 1]);
+                Assert.Contains("features.shell_tool=false", arguments);
+                Assert.Contains("features.apps=false", arguments);
+                Assert.Contains("mcp_servers={}", arguments);
+            }
+            Assert.Equal("plot(close)", File.ReadAllText(source.Path));
+            Assert.Empty(Directory.EnumerateFiles(fixture.Root, "*.cs", SearchOption.AllDirectories));
+        }
+    }
+
+    [UnixAssistantFact]
+    public async Task MissingCodexTextOnlyFeatureControlRejectsBeforeAnySourceEgress()
+    {
+        using var fixture = new CliFixture("codex");
+        File.WriteAllText(Path.Combine(fixture.Root, "features.txt"), "unrelated stable true\n");
+        var result = await fixture.Bridge.SendAsync(new("private source", fixture.Root, "instructions", textOnly: true));
+        Assert.Equal(StrategyChatStatus.Failed, result.Status);
+        Assert.Contains("shell_tool", result.Text);
+        Assert.False(File.Exists(Path.Combine(fixture.Root, "stdin.txt")));
+    }
+
+    [UnixAssistantFact]
+    public async Task AppShutdownAndCanceledPineHandoffRetainOwnershipUntilChildExitAndHeldStderrDrain()
+    {
+        using var fixture = new CliFixture("codex");
+        File.WriteAllText(Path.Combine(fixture.Root, "hold-stderr"), "owned fixture");
+        File.WriteAllText(Path.Combine(fixture.Root, "turn-delay"), "hold active CLI");
+        var owner = new PineHandoffRegistry();
+        var source = new PineImportSource(Path.Combine(fixture.Root, "source.pine"), "source.pine", "plot(close)", "fixture");
+        File.WriteAllText(source.Path, source.Text);
+        Task<StrategyChatResult?> pending = owner.RunAsync(cancellation => PineAssistantHandoff.SendAsync(
+            PineImports.Preview(source, "codex", null, null), true, fixture.Bridge, cancellation));
+        try
+        {
+            await WaitForFile(Path.Combine(fixture.Root, "held-stderr-pid"));
+            await WaitForFile(Path.Combine(fixture.Root, "held-cli-pid"));
+            await WaitForFile(Path.Combine(fixture.Root, "held-workspace"));
+            using var process = System.Diagnostics.Process.GetProcessById(int.Parse(File.ReadAllText(Path.Combine(fixture.Root, "held-cli-pid")), System.Globalization.CultureInfo.InvariantCulture));
+            string workspace = File.ReadAllText(Path.Combine(fixture.Root, "held-workspace")).TrimEnd('\r', '\n');
+            Task shutdown = owner.StopAsync();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Throws<ObjectDisposedException>(() => { _ = owner.RunAsync(_ => Task.CompletedTask); });
+            Assert.False(pending.IsCompleted);
+            Assert.False(shutdown.IsCompleted);
+            Assert.True(fixture.Bridge.IsRunning);
+            Assert.True(Directory.Exists(workspace));
+            File.WriteAllText(Path.Combine(fixture.Root, "release-stderr"), "drain now");
+            var result = await pending.WaitAsync(TimeSpan.FromSeconds(15));
+            await shutdown.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(StrategyChatStatus.Cancelled, result!.Status);
+            Assert.False(fixture.Bridge.IsRunning);
+            Assert.False(Directory.Exists(workspace));
+            Assert.True(File.Exists(Path.Combine(fixture.Root, "held-stderr-done")));
+            Assert.Equal("plot(close)", File.ReadAllText(source.Path));
+        }
+        finally
+        {
+            File.WriteAllText(Path.Combine(fixture.Root, "release-stderr"), "release owned helper");
+            Task shutdown = owner.StopAsync();
+            if (File.Exists(Path.Combine(fixture.Root, "held-stderr-pid"))) await WaitForFile(Path.Combine(fixture.Root, "held-stderr-done"));
+            await shutdown.WaitAsync(TimeSpan.FromSeconds(20));
+            await pending.WaitAsync(TimeSpan.FromSeconds(20));
+        }
+    }
+
 
     private static async Task WaitForFile(string path)
     {
@@ -281,14 +375,16 @@ public sealed class StrategyAssistantTests
         {
             Directory.CreateDirectory(Root);
             string cli = Path.Combine(Root, "fake-" + engine);
-            File.WriteAllText(cli, "#!/bin/sh\nroot=$(dirname \"$0\")\ncase \" $* \" in *' --help '*) if [ -f \"$root/help-delay\" ]; then printf started > \"$root/help-delay-started\"; /bin/sleep 30; fi; /bin/cat \"$root/help.txt\"; exit 0;; esac\nif [ -f \"$root/turn-delay\" ]; then printf started > \"$root/turn-delay-started\"; /bin/sleep 30; fi\nif [ -f \"$root/close-stdin\" ]; then exec 0<&-; exit 9; fi\nprintf '%s\\0' \"$@\" > \"$root/args.txt\"\n/bin/cat > \"$root/stdin.txt\"\nif [ -f \"$root/pressure\" ]; then i=0; while [ $i -lt 6000 ]; do printf 'diagnostic-pressure-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' >&2; i=$((i+1)); done; fi\n/bin/cat \"$root/reply.jsonl\"\nexit $(/bin/cat \"$root/exit.txt\")\n", new UTF8Encoding(false));
+            File.WriteAllText(cli, "#!/bin/sh\nroot=$(dirname \"$0\")\ncase \" $* \" in *' --help '*) if [ -f \"$root/help-delay\" ]; then printf started > \"$root/help-delay-started\"; /bin/sleep 30; fi; /bin/cat \"$root/help.txt\"; exit 0;; *' features list '*) /bin/cat \"$root/features.txt\"; exit 0;; esac\nif [ -f \"$root/hold-stderr\" ]; then printf '%s' \"$$\" > \"$root/held-cli-pid.tmp\"; /bin/mv \"$root/held-cli-pid.tmp\" \"$root/held-cli-pid\"; /bin/pwd > \"$root/held-workspace.tmp\"; /bin/mv \"$root/held-workspace.tmp\" \"$root/held-workspace\"; /bin/sh -c '/bin/sh \"$1/stderr-holder\" \"$1\" \"$$\" >/dev/null &' holder \"$root\"; fi\nif [ -f \"$root/turn-delay\" ]; then printf started > \"$root/turn-delay-started\"; /bin/sleep 30; fi\nif [ -f \"$root/close-stdin\" ]; then exec 0<&-; exit 9; fi\nprintf '%s\\0' \"$@\" > \"$root/args.txt\"\n/bin/cat > \"$root/stdin.txt\"\nif [ -f \"$root/pressure\" ]; then i=0; while [ $i -lt 6000 ]; do printf 'diagnostic-pressure-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' >&2; i=$((i+1)); done; fi\n/bin/cat \"$root/reply.jsonl\"\nexit $(/bin/cat \"$root/exit.txt\")\n", new UTF8Encoding(false));
             File.SetUnixFileMode(cli, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.WriteAllText(Path.Combine(Root, "stderr-holder"), "#!/bin/sh\nroot=$1\nformer=$2\nwhile [ \"$(/bin/ps -o ppid= -p \"$$\" | /usr/bin/tr -d ' ')\" = \"$former\" ]; do /bin/sleep 0.02; done\nprintf '%s' \"$$\" > \"$root/held-stderr-pid.tmp\"\n/bin/mv \"$root/held-stderr-pid.tmp\" \"$root/held-stderr-pid\"\nwhile [ ! -f \"$root/release-stderr\" ]; do /bin/sleep 0.02; done\nprintf 'owned stderr fully drained\\n' >&2\nprintf done > \"$root/held-stderr-done\"\n", new UTF8Encoding(false));
             WriteHelp(); Reply("");
+            File.WriteAllText(Path.Combine(Root, "features.txt"), "shell_tool stable true\napps stable true\n");
             _variable = engine == "codex" ? "TRADINGHUB_CODEX_CLI" : "TRADINGHUB_CLAUDE_CLI";
             _previous = Environment.GetEnvironmentVariable(_variable); Environment.SetEnvironmentVariable(_variable, cli);
             Bridge = engine == "codex" ? new CodexBridge(research) : new ClaudeCodeBridge(research);
         }
-        public void WriteHelp() => File.WriteAllText(Path.Combine(Root, "help.txt"), "--ignore-user-config --ignore-rules --sandbox --json --effort VALUE --add-dir DIR\n");
+        public void WriteHelp() => File.WriteAllText(Path.Combine(Root, "help.txt"), "--ignore-user-config --ignore-rules --sandbox --json --effort VALUE --add-dir DIR --restricted --safe-mode --tools LIST --no-session-persistence\n");
         public void Reply(string json, int exitCode = 0) { File.WriteAllText(Path.Combine(Root, "reply.jsonl"), json); File.WriteAllText(Path.Combine(Root, "exit.txt"), exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
         public Task<StrategyChatResult> Send() => Bridge.SendAsync(new("fixture", Root, "instructions")).WaitAsync(TimeSpan.FromSeconds(15));
         public void Dispose() { Bridge.Cancel(); Environment.SetEnvironmentVariable(_variable, _previous); Directory.Delete(Root, true); }

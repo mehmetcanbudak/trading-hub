@@ -14,7 +14,8 @@ public class NonKvpFlowStudiesTests
     {
         var instrument = new Instrument { Symbol = "FLOW-FIXTURE", FeedId = "sim", TickSize = 1, VolumeStep = 1 };
         var data = new InstrumentData(instrument, new SimulatedFeed());
-        for (int i = 0; i < bars.Length; i++) data.Trades.Add(new Trade(bars[i].Synthetic ? -i - 1 : i + 1, Start.AddMinutes(i), bars[i].Price, bars[i].Volume, bars[i].Side));
+        for (int i = 0; i < bars.Length; i++) data.Trades.Add(new Trade(bars[i].Synthetic ? -i - 1 : i + 1, Start.AddMinutes(i), bars[i].Price, bars[i].Volume, bars[i].Side,
+            bars[i].Synthetic ? new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide, 60, "known M1 OHLC fixture") : default));
         return new ChartModel(data, ChartPeriod.M1, new ChartSettings());
     }
     private static T Add<T>(ChartModel model, T study) where T : Indicator
@@ -120,7 +121,8 @@ public class NonKvpFlowStudiesTests
         var flow = Add(model, new AnchoredFlowVwap { Mode = AnchoredFlowVwap.AnchorMode.Swing, SwingRadius = 1, Swing = kind, Weight = AnchoredFlowVwap.FlowWeight.Volume });
         Assert.Equal(-1, flow.AnchorBar);
         model.Series[2].IsClosed = true; flow.HostCalculate(2);
-        Assert.Equal(1, flow.AnchorBar); Assert.Equal(2, flow.ConfirmationBar); Assert.Equal((decimal)pivot, Value(flow, 1));
+        Assert.Equal(1, flow.AnchorBar); Assert.Equal(2, flow.ConfirmationBar); Assert.Equal((decimal)pivot, flow.RetrospectiveValueAt(1));
+        Assert.Equal(2, flow.RetrospectiveConfirmationAt(1)); Assert.False(((OptionalValueDataSeries)flow.DataSeries[0]).IsAvailable(1));
         model.Series[2].IsClosed = false; flow.HostCalculate(2);
         Assert.Equal(-1, flow.AnchorBar); Assert.Equal(0m, Value(flow, 1));
     }
@@ -183,7 +185,7 @@ public class NonKvpFlowStudiesTests
         model.Series[0].HighTicks = 10000; model.Series[0].CloseTicks = 9999;
         var refill = Add(model, new RefillZones { PriceGrouping = 1, MinimumVolume = 0.001m, AbsorptionOnly = false, AllowEstimated = true });
         Assert.InRange(refill.Zones.Count, 1, 200); Assert.Equal(1000m, refill.Zones.Sum(z => z.Volume));
-        Assert.All(refill.Zones, z => Assert.Equal(StudyCoverage.Estimated, z.Coverage));
+        Assert.All(refill.Zones, z => { Assert.True(z.Coverage.HasFlag(StudyCoverage.Estimated)); Assert.True(z.Coverage.HasFlag(StudyCoverage.InferredSide)); Assert.False(z.Coverage.HasFlag(StudyCoverage.Observed)); });
         using var flat = Model((10, 40, TradeSide.None, true));
         Assert.Single(Add(flat, new RefillZones { PriceGrouping = 1, MinimumVolume = 100, AbsorptionOnly = false, AllowEstimated = true }).Zones);
     }
@@ -242,12 +244,12 @@ public class NonKvpFlowStudiesTests
             (20, 1, TradeSide.Buy, false), (8, 1, TradeSide.Buy, false), (12, 1, TradeSide.Buy, false));
         model.Series[5].IsClosed = true;
         var flow = Add(model, new AnchoredFlowVwap { SwingRadius = 2, Swing = AnchoredFlowVwap.SwingKind.Both, Weight = AnchoredFlowVwap.FlowWeight.Volume });
-        Assert.Equal(3, flow.AnchorBar); Assert.Equal(20m, Value(flow, 3));
+        Assert.Equal(3, flow.AnchorBar); Assert.Equal(20m, flow.RetrospectiveValueAt(3)); Assert.Equal(0m, Value(flow, 3));
         model.Series[5].IsClosed = false; flow.HostCalculate(5);
-        Assert.Equal(2, flow.AnchorBar); Assert.Equal(12.5m, Value(flow, 3));
+        Assert.Equal(2, flow.AnchorBar); Assert.Equal(12.5m, flow.RetrospectiveValueAt(3)); Assert.Equal(0m, Value(flow, 3));
         Assert.False(((ValueDataSeries)flow.DataSeries[0]).IsThisPointOfEndLine(2));
         flow.HostCalculate(5);
-        Assert.Equal(12.5m, Value(flow, 3));
+        Assert.Equal(12.5m, flow.RetrospectiveValueAt(3)); Assert.Equal(0m, Value(flow, 3));
     }
     [Theory]
     [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)]

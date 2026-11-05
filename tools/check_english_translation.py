@@ -7,6 +7,7 @@ Language detection is a regression heuristic, not proof that arbitrary text is E
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import re
 import shutil
@@ -74,10 +75,15 @@ def validate_documentation() -> int:
     return len(errors)
 
 
-def validate_source() -> int:
+def validate_source(assembly: Path | None = None) -> int:
     dotnet = shutil.which("dotnet") or str(Path.home() / ".dotnet/dotnet")
-    result = subprocess.run([dotnet, "run", "--project", str(ROOT / "tools/TradingHub.UiSnapshot"),
-                             "--configuration", "Release", "--", "--check-english", str(ROOT)], cwd=ROOT, check=False)
+    if assembly is None:
+        command = [dotnet, "run", "--project", str(ROOT / "tools/TradingHub.UiSnapshot"),
+                   "--configuration", "Release", "--", "--check-english", str(ROOT)]
+    else:
+        assembly = assembly.resolve(strict=True)
+        command = [dotnet, str(assembly), "--check-english", str(ROOT)]
+    result = subprocess.run(command, cwd=ROOT, check=False)
     return int(result.returncode != 0)
 
 
@@ -90,8 +96,12 @@ def self_check() -> None:
 
 if __name__ == "__main__":
     try:
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--ui-snapshot-assembly", type=Path,
+                            help="Run the unchanged source audit from an already-built UiSnapshot DLL without rebuilding.")
+        args = parser.parse_args()
         self_check()
-        failures = validate_documentation() + validate_source()
+        failures = validate_documentation() + validate_source(args.ui_snapshot_assembly)
         print("English localization checks: " + ("PASS" if not failures else "FAIL"), flush=True)
         sys.exit(1 if failures else 0)
     except (OSError, ValueError, AssertionError) as exc:

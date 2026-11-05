@@ -9,7 +9,7 @@ using TradingHub.App.Windows;
 namespace TradingHub.App.Views;
 
 /// <summary>Ajustes generales de la plataforma.</summary>
-internal sealed class SettingsView : UserControl, IPage
+internal sealed partial class SettingsView : UserControl, IPage
 {
     private readonly AppServices _svc;
     private readonly Action<string> _status;
@@ -32,7 +32,11 @@ internal sealed class SettingsView : UserControl, IPage
 
     public void OnTimer()
     {
-        if (IsVisible && ++_tick % 8 == 0) RefreshSleep(); // ~2 s
+        if (IsVisible && ++_tick % 8 == 0)
+        {
+            RefreshSleep();
+            RefreshCandleMaintenance();
+        }
     }
 
     private Control Build()
@@ -108,7 +112,14 @@ internal sealed class SettingsView : UserControl, IPage
             Setting("Language", "English, Spanish or Simplified Chinese. Claude replies in the selected language; generated code stays English.", Ui.V(6, language, Ui.H(8, languageNote, restart))),
             Setting("Appearance", "Use dark or light appearance throughout the platform. Individual chart colors remain unchanged.", appearance),
             Setting("Chart time zone", "Time on chart axes, tape, and sessions.", tz),
-            Setting("Alert sounds", "Price alerts, large trades, and indicator notices.", sounds)
+            Setting("Alert sounds", "Price alerts, large trades, and indicator notices.", sounds),
+            Setting("Notification destinations", "Unified alert history, delivery status and opt-in external destinations. Secrets stay in private credential storage.",
+                Ui.Button("Alerts", MaterialIconKind.BellOutline, () =>
+                {
+                    var window = new AlertsWindow(_svc);
+                    if (TopLevel.GetTopLevel(this) is Window owner) window.Show(owner);
+                    else window.Show();
+                }))
             );
 
         var trading = Section("Trade", MaterialIconKind.SwapVertical,
@@ -118,6 +129,7 @@ internal sealed class SettingsView : UserControl, IPage
         var data = Section("Data", MaterialIconKind.DatabaseOutline,
             Setting("Record incoming live data", "Save each incoming trade for charts, replay, and backtesting.", record),
             Setting("Data folder", AppPaths.Root, Ui.Button("Open", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Root))),
+            Setting("Market data folder", AppPaths.MarketRoot, Ui.Button("Open", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.MarketRoot))),
             Setting("Custom indicators (C#)", AppPaths.UserIndicators, Ui.Button("Open", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.UserIndicators))),
             Setting("Strategies (C#)", AppPaths.Strategies, Ui.Button("Open", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Strategies))));
 
@@ -137,7 +149,13 @@ internal sealed class SettingsView : UserControl, IPage
             Spacing = 18,
             MaxWidth = 860,
             HorizontalAlignment = HorizontalAlignment.Left,
-            Children = { Ui.V(4, Ui.H1("Settings"), Ui.Muted("General Trading Hub preferences")), general, trading, liveStart, sleep, hotkeys, data, about },
+            Children =
+            {
+                Ui.V(4, Ui.H1("Settings"), Ui.Muted("General Trading Hub preferences")), general, trading, liveStart,
+                sleep, hotkeys, data, BuildHistorySettings(), BuildCandleMaintenance(), BuildProxySettings(),
+                Section("Storage locations", MaterialIconKind.FolderOpenOutline, new Controls.StorageLocationPanel(_svc.StoragePreferences, Localization.Lang.Restart)),
+                about,
+            },
         };
     }
 

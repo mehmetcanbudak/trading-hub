@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using Newtonsoft.Json;
 using TradingHub.Common;
 using TradingHub.Common.Logging;
+using TradingHub.Data;
+using TradingHub.Market;
 using TradingHub.Indicators.Drawing;
 using TradingHub.Rendering;
 using TradingHub.Rendering.Context;
@@ -46,6 +48,10 @@ namespace TradingHub.Indicators
         void RequestFixedProfile(Indicator indicator, FixedProfileRequest request)
         {
         }
+
+        /// <summary>Recorded received depth in this bar's causal time interval, including explicit gaps.</summary>
+        DepthHistoryQuery GetDepthHistory(int bar) => new(DateTime.MinValue, DateTime.MinValue,
+            Array.Empty<DepthSample>(), null, DepthCoverage.Missing, "Recorded depth is unavailable.");
     }
 
     /// <summary>Argumento de RedrawChart.</summary>
@@ -226,6 +232,12 @@ namespace TradingHub.Indicators
         [JsonIgnore]
         public MarketDepthInfo MarketDepthInfo => Host?.MarketDepthInfo ?? MarketDepthInfo.Empty;
 
+        /// <summary>Recorded depth in a bar; missing samples are never filled from the current book.</summary>
+        protected DepthHistoryQuery GetDepthHistory(int bar) => Host?.GetDepthHistory(bar) ??
+            new(DateTime.MinValue, DateTime.MinValue, Array.Empty<DepthSample>(), null, DepthCoverage.Missing, "Recorded depth is unavailable.");
+
+        protected IReadOnlyList<DepthSample> GetDepthSamples(int bar) => GetDepthHistory(bar).Samples;
+
         [Browsable(false)]
         [JsonIgnore]
         public TradingManager TradingManager => Host?.TradingManager;
@@ -338,6 +350,16 @@ namespace TradingHub.Indicators
         protected virtual void MarketDepthsChanged(IEnumerable<MarketDataArg> depths)
         {
             foreach (var d in depths) MarketDepthChanged(d);
+        }
+
+        /// <summary>The current snapshot plus its original received changes and coverage metadata.</summary>
+        protected virtual void OnDepthSnapshot(DepthUpdate update)
+        {
+        }
+
+        /// <summary>Selected recorded history, recording status or staleness changed.</summary>
+        protected virtual void OnDepthHistoryChanged()
+        {
         }
 
         /// <summary>
@@ -723,6 +745,8 @@ namespace TradingHub.Indicators
         internal void HostNewTrades(IEnumerable<MarketDataArg> trades) => OnNewTrades(trades);
         internal void HostBestBidAsk(MarketDataArg arg) => OnBestBidAskChanged(arg);
         internal void HostMarketDepths(IEnumerable<MarketDataArg> depths) => MarketDepthsChanged(depths);
+        internal void HostDepthSnapshot(DepthUpdate update) => OnDepthSnapshot(update);
+        internal void HostDepthHistoryChanged() => OnDepthHistoryChanged();
         internal void HostCumulativeResponse(CumulativeTradesRequest req, IEnumerable<CumulativeTrade> trades) => OnCumulativeTradesResponse(req, trades);
         internal void HostCumulativeTrade(CumulativeTrade t) => OnCumulativeTrade(t);
         internal void HostUpdateCumulativeTrade(CumulativeTrade t) => OnUpdateCumulativeTrade(t);

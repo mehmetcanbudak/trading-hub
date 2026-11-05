@@ -470,6 +470,23 @@ internal sealed class FakeRithmicServer : IDisposable
         }
     }
 
+    /// <summary>Sends only the supplied BBO fields to current subscriptions, including incomplete side reports.</summary>
+    public async Task PushBestBidOffer(string symbol, double? bidPrice = null, int? bidSize = null,
+        double? askPrice = null, int? askSize = null)
+    {
+        WebSocket[] targets;
+        lock (_gate) targets = _marketData.Where(kv => kv.Key.State == WebSocketState.Open && kv.Value.Contains(symbol)).Select(kv => kv.Key).ToArray();
+        foreach (var ws in targets)
+        {
+            var message = new ProtoWriter().Int(154467, 151).String(110100, symbol).String(110101, "CME");
+            if (bidPrice is { } bid) message.Double(100022, bid);
+            if (bidSize is { } bids) message.Int(100030, bids);
+            if (askPrice is { } ask) message.Double(100025, ask);
+            if (askSize is { } asks) message.Int(100031, asks);
+            await Send(ws, message).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>
     /// Reports a working order that this Trading Hub process did not send (another session's, for example) on the order
     /// plant, as Rithmic reports the account's orders. It can then be modified or canceled by basket id.

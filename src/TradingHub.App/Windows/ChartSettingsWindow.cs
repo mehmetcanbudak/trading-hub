@@ -32,7 +32,7 @@ internal sealed class ChartSettingsWindow : Window
         _host = host;
         _chart = chart;
         _model = chart.Model!;
-        Title = $"Chart settings · {chart.Symbol} {_model.Period.DisplayName}";
+        Title = $"Chart settings · {(chart.Model!.Settings.BlindReplay ? "Practice" : chart.Symbol)} {_model.Period.DisplayName}";
         Width = 470;
         Height = 700;
         MinWidth = 420;
@@ -78,6 +78,19 @@ internal sealed class ChartSettingsWindow : Window
             ColorRow("Crosshair label", nameof(ChartTheme.CrosshairLabelBack)),
             ColorRow("Session start", nameof(ChartTheme.NewSession)),
             Toggle("Mark each session start", () => _model.Settings.ShowSessionLines, v => _model.Settings.ShowSessionLines = v));
+        Tab("Time and navigation",
+            TimeZonePicker(),
+            Toggle("Show chart clock", () => _model.Settings.ShowClock, v => _model.Settings.ShowClock = v),
+            Toggle("Show session lines", () => _model.Settings.ShowSessionLines, v => _model.Settings.ShowSessionLines = v),
+            SmallButton("Rectangle zoom (drag on chart)", () => { _chart.View.Controller?.SelectRectangleZoom(); _chart.View.Focus(); }),
+            SmallButton("Reset chart view", () => { _chart.View.Controller?.ResetView(); }),
+            Note("Ctrl/Command + drag zooms a rectangle without moving orders. Wheel zooms time; Shift + wheel pans; Ctrl/Command + wheel zooms price. The clock uses replay time during replay."));
+        Tab("Depth heatmap",
+            Toggle("Show liquidity heatmap", () => _model.Settings.ShowLiquidityHeatmap, v => _model.Settings.ShowLiquidityHeatmap = v),
+            DepthNumber("Heatmap opacity (%)", () => _model.Settings.HeatmapOpacity, v => _model.Settings.HeatmapOpacity = v, 0, 100),
+            DepthNumber("Maximum sample age (seconds)", () => _model.Settings.HeatmapMaxAgeSeconds, v => _model.Settings.HeatmapMaxAgeSeconds = v, 1, 300),
+            DepthNumber("Price grouping (ticks)", () => _model.Settings.HeatmapPriceGrouping, v => _model.Settings.HeatmapPriceGrouping = v, 1, 10000),
+            Note("Display does not enable depth recording. Only received/recorded samples are shown; missing and stale depth are not carried forward. Recording, retention and provider coverage are configured separately."));
         Tab("Footprint",
             ColorRow("Bid (sellers)", nameof(ChartTheme.Bid)),
             ColorRow("Ask (buyers)", nameof(ChartTheme.Ask)),
@@ -146,7 +159,7 @@ internal sealed class ChartSettingsWindow : Window
             ColorRow("Long position / buys", nameof(ChartTheme.PositionLong)),
             ColorRow("Short position / sells", nameof(ChartTheme.PositionShort)));
 
-        var head = Ui.V(4, Ui.H2("Chart settings"), Note($"{chart.Symbol} · {_model.Period.DisplayName}. Changes appear immediately and are saved for this chart."));
+        var head = Ui.V(4, Ui.H2("Chart settings"), Note($"{(_model.Settings.BlindReplay ? "Practice" : chart.Symbol)} · {_model.Period.DisplayName}. Changes appear immediately and are saved for this chart."));
         head.Margin = new Thickness(20, 16, 20, 4);
         var body = new DockPanel();
         DockPanel.SetDock(head, Dock.Top);
@@ -228,6 +241,37 @@ internal sealed class ChartSettingsWindow : Window
         };
         _refreshers.Add(() => cb.IsChecked = get());
         return cb;
+    }
+
+    private Control TimeZonePicker()
+    {
+        var picker = new ComboBox { MinWidth = 270, MaxWidth = 390 };
+        Avalonia.Automation.AutomationProperties.SetName(picker, "Chart timezone");
+        picker.Items.Add(new ComboBoxItem { Content = "System local timezone", Tag = "" });
+        foreach (var zone in TimeZoneInfo.GetSystemTimeZones().OrderBy(z => z.BaseUtcOffset).ThenBy(z => z.Id))
+            picker.Items.Add(new ComboBoxItem { Content = $"{zone.Id} (UTC{zone.BaseUtcOffset.TotalHours:+0.##;-0.##;0})", Tag = zone.Id });
+        picker.SelectedItem = picker.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag! == (_model.Settings.TimeZoneId ?? "")) ?? picker.Items[0];
+        picker.SelectionChanged += (_, _) =>
+        {
+            if (picker.SelectedItem is not ComboBoxItem { Tag: string id }) return;
+            _model.Settings.TimeZoneId = id.Length == 0 ? null : id;
+            _model.Invalidate();
+            Workspace.Save(_host);
+        };
+        return Section("Chart timezone", picker, Note("Axis labels, drawing times and the chart clock use this timezone, including daylight-saving changes. Exchange session boundaries do not change."));
+    }
+
+    private Control DepthNumber(string label, Func<int> get, Action<int> set, int minimum, int maximum)
+    {
+        var number = new NumericUpDown { Minimum = minimum, Maximum = maximum, Value = Math.Clamp(get(), minimum, maximum), Increment = 1, FormatString = "0", MinWidth = 140 };
+        Avalonia.Automation.AutomationProperties.SetName(number, label);
+        number.ValueChanged += (_, _) =>
+        {
+            set(Math.Clamp((int)(number.Value ?? minimum), minimum, maximum));
+            _model.Invalidate();
+            Workspace.Save(_host);
+        };
+        return Section(label, number);
     }
 
     /// <summary>Fila de un color: muestra el actual y al tocarlo abre la paleta, el código y "restablecer".</summary>

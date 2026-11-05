@@ -6,6 +6,7 @@ using System.Text.Json;
 using TradingHub.Data;
 using TradingHub.Market;
 using TradingHub.Trading;
+using TradingHub.Networking;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("TradingHub.Tests")]
 
@@ -80,10 +81,12 @@ public sealed class BinanceAccountClient : IDisposable
     private readonly HttpClient _http;
     private long _timeOffsetMs;
 
-    public BinanceAccountClient(BinanceAccountSettings settings)
+    public BinanceAccountClient(BinanceAccountSettings settings, ProxyHandlerFactory? network = null)
     {
         _s = settings;
-        _http = new HttpClient { Timeout = settings.RequestTimeout };
+        var handler = (network ?? new ProxyHandlerFactory(new NetworkProxyPolicy())).CreateHandler();
+        handler.AllowAutoRedirect = false;
+        _http = new HttpClient(handler, disposeHandler: true) { Timeout = settings.RequestTimeout };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("TradingHub/0.2");
         if (settings.HasKeys) _http.DefaultRequestHeaders.Add("X-MBX-APIKEY", settings.ApiKey);
     }
@@ -522,11 +525,11 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         public Task Last = Task.CompletedTask;
     }
 
-    public BinanceBroker(InstrumentData data, BinanceAccountSettings settings, string name)
+    public BinanceBroker(InstrumentData data, BinanceAccountSettings settings, string name, ProxyHandlerFactory? network = null)
     {
         _data = data;
         _settings = settings;
-        _client = new BinanceAccountClient(settings);
+        _client = new BinanceAccountClient(settings, network);
         _spotBaseAsset = string.IsNullOrWhiteSpace(data.Instrument.BaseAsset) ? null : data.Instrument.BaseAsset;
         Name = name;
         Position = new Position { Security = new Security { Code = data.Instrument.Symbol, SecurityId = data.Instrument.Key } };

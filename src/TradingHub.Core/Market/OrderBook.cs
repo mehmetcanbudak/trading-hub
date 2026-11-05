@@ -6,15 +6,44 @@ public enum BookSide : byte
     Ask = 1,
 }
 
-/// <summary>Un nivel del libro: precio (en ticks) y tamaño.</summary>
+/// <summary>A resting book level: exact price ticks and decimal size.</summary>
 public readonly record struct BookLevel(long PriceTicks, decimal Size);
 
-/// <summary>Cambio de un nivel del libro (tamaño absoluto; 0 = nivel eliminado).</summary>
-public readonly record struct BookChange(BookSide Side, long PriceTicks, decimal Size);
+public enum BookChangeOrigin : byte { Received, DerivedSnapshotDifference, BookRepair }
+
+/// <summary>An absolute-size change; zero removes the level. Origin distinguishes feed input from local repair.</summary>
+public readonly record struct BookChange(BookSide Side, long PriceTicks, decimal Size, BookChangeOrigin Origin = BookChangeOrigin.Received);
+
+[Flags]
+public enum DepthCoverage
+{
+    None = 0,
+    SnapshotOnly = 1,
+    ReceivedChanges = 2,
+    PartialBook = 4,
+    SequenceGap = 8,
+    Disconnected = 16,
+    Truncated = 32,
+    Missing = 64,
+    OutOfOrder = 128,
+    /// <summary>Validated levels on one known side; Missing still marks the unknown opposing side.</summary>
+    KnownSide = 256,
+}
+
+public enum DepthGapReason : byte
+{
+    None,
+    Disconnected,
+    Sequence,
+    FeedChanged,
+    Overflow,
+    StorageFailure,
+    Missing,
+}
 
 /// <summary>
-/// Foto inmutable del libro de órdenes. Los feeds la generan en su hilo y la UI la consume
-/// sin locks. Bids ordenados de mayor a menor precio, asks de menor a mayor.
+/// A feed snapshot. Bids descend and asks ascend. A snapshot describes only the
+/// levels supplied by its provider, never an event-complete or market-by-order book.
 /// </summary>
 public sealed class DepthSnapshot
 {
@@ -69,12 +98,28 @@ public sealed class DepthSnapshot
     }
 }
 
-/// <summary>Una actualización de profundidad: la foto completa más los cambios que la produjeron.</summary>
+/// <summary>A provider update: its resulting snapshot and the received absolute-size changes.</summary>
 public sealed class DepthUpdate
 {
     public required DepthSnapshot Snapshot { get; init; }
     public IReadOnlyList<BookChange> Changes { get; init; } = Array.Empty<BookChange>();
     public bool IsFullRefresh { get; init; }
+    public string? ProviderId { get; init; }
+    public string? Venue { get; init; }
+    /// <summary>UTC arrival/availability time; the receiver supplies it when absent.</summary>
+    public DateTime ReceivedAt { get; init; }
+    public long? Sequence { get; init; }
+    public long? FirstSequence { get; init; }
+    public long? PreviousSequence { get; init; }
+    public DepthCoverage Coverage { get; init; } = DepthCoverage.SnapshotOnly;
+    public DepthGapReason GapBefore { get; init; }
+    public string? Message { get; init; }
+    /// <summary>Known levels may be displayed without treating a missing opposing side as zero.</summary>
+    public bool HasAvailableLevels => (Snapshot.HasBid || Snapshot.HasAsk) &&
+        (Coverage & (DepthCoverage.Disconnected | DepthCoverage.OutOfOrder)) == 0 &&
+        (!Coverage.HasFlag(DepthCoverage.Missing) || Coverage.HasFlag(DepthCoverage.KnownSide) && Snapshot.HasBid != Snapshot.HasAsk) &&
+        (!Coverage.HasFlag(DepthCoverage.SequenceGap) || IsFullRefresh || GapBefore is DepthGapReason.Overflow or DepthGapReason.StorageFailure);
+    public bool IsUsable => Snapshot.HasBid && Snapshot.HasAsk && HasAvailableLevels;
 }
 
 /// <summary>
@@ -85,6 +130,7 @@ public sealed class OrderBookBuilder
     private readonly SortedDictionary<long, decimal> _bids = new(Comparer<long>.Create((a, b) => b.CompareTo(a)));
     private readonly SortedDictionary<long, decimal> _asks = new();
     private readonly List<BookChange> _pending = new();
+    private bool _repaired;
 
     public int BidCount => _bids.Count;
     public int AskCount => _asks.Count;
@@ -94,23 +140,17 @@ public sealed class OrderBookBuilder
         _bids.Clear();
         _asks.Clear();
         _pending.Clear();
+        _repaired = false;
     }
 
-    public void Set(BookSide side, long priceTicks, decimal size)
+    public void Set(BookSide side, long priceTicks, decimal size, BookChangeOrigin origin = BookChangeOrigin.Received)
     {
         var dict = side == BookSide.Bid ? _bids : _asks;
-        if (size <= 0)
-        {
-            if (dict.Remove(priceTicks)) _pending.Add(new BookChange(side, priceTicks, 0));
-        }
-        else
-        {
-            if (!dict.TryGetValue(priceTicks, out var old) || old != size)
-            {
-                dict[priceTicks] = size;
-                _pending.Add(new BookChange(side, priceTicks, size));
-            }
-        }
+        if (size <= 0) dict.Remove(priceTicks);
+        else dict[priceTicks] = size;
+        // Preserve repeated/no-op received absolute updates as well as effective changes.
+        _pending.Add(new BookChange(side, priceTicks, Math.Max(0, size), origin));
+        if (origin == BookChangeOrigin.BookRepair) _repaired = true;
     }
 
     /// <summary>Elimina niveles cruzados (puede pasar con feeds que mandan bid/ask por separado).</summary>
@@ -122,16 +162,21 @@ public sealed class OrderBookBuilder
         if (bestBid < bestAsk) return;
         if (aggressorSideUpdated == BookSide.Bid)
         {
-            foreach (var k in _asks.Keys.TakeWhile(k => k <= bestBid).ToList()) Set(BookSide.Ask, k, 0);
+            foreach (var k in _asks.Keys.TakeWhile(k => k <= bestBid).ToList()) Set(BookSide.Ask, k, 0, BookChangeOrigin.BookRepair);
         }
         else
         {
-            foreach (var k in _bids.Keys.TakeWhile(k => k >= bestAsk).ToList()) Set(BookSide.Bid, k, 0);
+            foreach (var k in _bids.Keys.TakeWhile(k => k >= bestAsk).ToList()) Set(BookSide.Bid, k, 0, BookChangeOrigin.BookRepair);
         }
     }
 
-    public DepthUpdate BuildUpdate(DateTime time, int maxLevelsPerSide = 1000, bool fullRefresh = false)
+    public DepthUpdate BuildUpdate(DateTime time, int maxLevelsPerSide = 1000, bool fullRefresh = false,
+        string? providerId = null, string? venue = null, long? sequence = null,
+        long? firstSequence = null, long? previousSequence = null,
+        DepthCoverage additionalCoverage = DepthCoverage.None, DepthGapReason gapBefore = DepthGapReason.None,
+        string? message = null, DateTime receivedAt = default)
     {
+        if (maxLevelsPerSide < 1) throw new ArgumentOutOfRangeException(nameof(maxLevelsPerSide));
         var bids = new BookLevel[Math.Min(maxLevelsPerSide, _bids.Count)];
         int i = 0;
         foreach (var kv in _bids)
@@ -150,6 +195,23 @@ public sealed class OrderBookBuilder
 
         var changes = _pending.ToArray();
         _pending.Clear();
-        return new DepthUpdate { Snapshot = new DepthSnapshot(bids, asks, time), Changes = changes, IsFullRefresh = fullRefresh };
+        var coverage = DepthCoverage.ReceivedChanges | (additionalCoverage & ~DepthCoverage.KnownSide);
+        bool repaired = _repaired;
+        _repaired = false;
+        if (repaired) coverage |= DepthCoverage.PartialBook;
+        if (_bids.Count > maxLevelsPerSide || _asks.Count > maxLevelsPerSide) coverage |= DepthCoverage.PartialBook | DepthCoverage.Truncated;
+        if (bids.Length == 0 || asks.Length == 0)
+        {
+            if ((bids.Length > 0 || asks.Length > 0) && !coverage.HasFlag(DepthCoverage.Missing))
+                coverage |= DepthCoverage.KnownSide;
+            coverage |= DepthCoverage.PartialBook | DepthCoverage.Missing;
+        }
+        return new DepthUpdate
+        {
+            Snapshot = new DepthSnapshot(bids, asks, time), Changes = changes, IsFullRefresh = fullRefresh,
+            ProviderId = providerId, Venue = venue, Sequence = sequence, FirstSequence = firstSequence,
+            PreviousSequence = previousSequence, Coverage = coverage, GapBefore = gapBefore, ReceivedAt = receivedAt,
+            Message = repaired ? "Crossed levels were removed locally; BookRepair changes are not received exchange events. " + message : message,
+        };
     }
 }

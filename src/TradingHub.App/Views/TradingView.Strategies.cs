@@ -22,6 +22,8 @@ public sealed class ChartStrategy
     public Dictionary<string, object?> Parameters { get; set; } = new();
     public bool Live { get; set; }
     public string AccountId { get; set; } = "sim";
+    public string? PersistentOwnerKey { get; set; }
+    internal bool ExplicitAccountChange;
 
     /// <summary>Estaba ejecutando y se volvió a abrir Trading Hub: espera que la reanudes (no opera sola al abrir).</summary>
     public bool Paused { get; set; }
@@ -48,6 +50,9 @@ public sealed class ChartStrategy
 
     /// <summary>Ejecutaba y espera que la reanudes: su contabilidad guardada (para dibujar la posición abierta igual).</summary>
     internal LiveLedger? SavedLedger;
+    internal LiveRunnerLocalState? PracticeState;
+    internal IReadOnlyList<string> PracticeProtection = Array.Empty<string>();
+    internal string? ProtectionOwnerKey;
 
     /// <summary>Lo que dibujó la estrategia sobre la historia (rangos, niveles, líneas…).</summary>
     internal StrategyCanvas? HistoryCanvas;
@@ -130,6 +135,12 @@ public sealed partial class TradingView
         {
             runner.Stop(flatten: false, keepProtection);
             kept = runner.ProtectionOrderIds.ToList();
+            cs.ProtectionOwnerKey = kept.Count > 0 ? runner.Key : null;
+            if (runner.Account is TradingHub.Replay.ReplayAccount && runner.Ledger != null)
+            {
+                cs.PracticeState = runner.CaptureLocalState();
+                cs.PracticeProtection = kept;
+            }
             // after a normal stop its saved state no longer names orders to adopt (a keep-protection stop records its own)
             if (!keepProtection && runner.Persist) LiveStore.SaveProtectionOrderIds(runner.Info());
             if (!runner.IsClosing && !runner.HasWorkingOrders)
@@ -137,7 +148,7 @@ public sealed partial class TradingView
                 _svc.Runners.Remove(runner);
                 cs.Runner = null;
             }
-            _svc.SaveLiveState();
+            if (runner.Persist) _svc.SaveLiveState();
         }
 
         cs.Shadow?.Dispose();
@@ -153,8 +164,33 @@ public sealed partial class TradingView
     /// </summary>
     internal async Task RunStrategyAsync(ChartTab chart, ChartStrategy cs, bool historyOnly = false, bool keepProtection = false)
     {
-        if (chart.Model is not { } model) return;
+        if (_svc.IsShuttingDown || chart.Model is not { } model) return;
+        using var ownedStart = _svc.Live.BeginStart();
+        if (ownedStart == null) return;
+        var practice = _svc.ReplaySessions.TryGet(model.Data);
+        if (practice == null && cs.Live && chart.AccountSelectionUnavailable)
+        {
+            cs.Overlay.Error = cs.Overlay.Status = "Select an account for the current data source before starting this strategy.";
+            model.Invalidate();
+            return;
+        }
+        if (chart.IsReplay && (practice == null || practice.Ended))
+        {
+            cs.Overlay.Error = "Practice has ended or its run account is unavailable.";
+            return;
+        }
+        if (practice != null)
+        {
+            chart.AccountId = cs.AccountId = practice.AccountId;
+            keepProtection = true;
+        }
+        if (cs.ExplicitAccountChange && practice == null) keepProtection = true;
         IReadOnlyList<string> kept = historyOnly ? Array.Empty<string>() : StopStrategy(cs, keepProtection);
+        if (cs.ExplicitAccountChange && practice == null)
+        {
+            kept = Array.Empty<string>(); // Old-account native protection is never adopted on the explicitly chosen new route.
+            cs.ProtectionOwnerKey = null;
+        }
         if (!historyOnly && cs.Runner is { IsRunning: false } stopping && (stopping.IsClosing || stopping.HasWorkingOrders))
         {
             cs.Overlay.Error = LiveCenter.PendingBrokerMessage;
@@ -164,12 +200,15 @@ public sealed partial class TradingView
             return;
         }
         cs.Cts?.Cancel();
-        var cts = cs.Cts = new CancellationTokenSource();
+        var cts = cs.Cts = CancellationTokenSource.CreateLinkedTokenSource(ownedStart.Token);
+        bool Stopped() => cts.IsCancellationRequested || _svc.IsShuttingDown || practice?.Ended == true;
         cs.Busy = true;
         cs.Overlay.Error = null;
         try
         {
+            if (Stopped()) return;
             var file = await StrategyFileAsync(cs.StrategyId);
+            if (Stopped()) return;
             if (file?.Type == null)
             {
                 cs.Overlay.Error = file == null ? "strategy not found" : "has errors";
@@ -181,8 +220,8 @@ public sealed partial class TradingView
             var data = model.Data;
             cs.Overlay.Status = "waiting for history…";
             model.Invalidate();
-            while (data.IsLoadingHistory && !cts.IsCancellationRequested) await Task.Delay(300);
-            if (cts.IsCancellationRequested) return;
+            while (data.IsLoadingHistory && !Stopped()) await Task.Delay(300, cts.Token);
+            if (Stopped()) return;
 
             // 1) lo histórico: backtest sobre lo que tiene cargado el gráfico
             cs.Overlay.Status = "calculating…";
@@ -197,18 +236,19 @@ public sealed partial class TradingView
                 FromUtc = ticks.FirstTime,
                 ToUtc = ticks.LastTime,
                 Period = model.Period.Code,
-                CommissionPercent = costs.CommissionPercent,
-                CommissionPerUnit = costs.CommissionPerUnit,
-                SlippageTicks = costs.SlippageTicks,
+                CommissionPercent = practice?.Fees.NotionalRate * 100 ?? costs.CommissionPercent,
+                CommissionPerUnit = practice?.Fees.PerUnit ?? costs.CommissionPerUnit,
+                SlippageTicks = practice != null ? 0 : costs.SlippageTicks,
                 TimeZoneId = _svc.Settings.TimeZoneId,
                 CloseAtEnd = false,
             };
+            if (practice != null) settings.InitialCapital = practice.Account.Portfolio!.BeginBalance;
             var historyStrategy = file.Create();
             historyStrategy.SetParameters(cs.Parameters);
             var result = ticks.Count > 0
                 ? await Task.Run(() => new BacktestEngine(historyStrategy, ticks, settings) { ContextHistory = MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc) }.Run(cts.Token), cts.Token)
                 : new BacktestResult();
-            if (cts.IsCancellationRequested) return;
+            if (Stopped()) return;
             if (result.Error != null) cs.Overlay.Error = result.Error;
             cs.History = result.Trades;
             cs.HistoryOpen = result.OpenPosition;
@@ -228,7 +268,7 @@ public sealed partial class TradingView
                 cs.Overlay.Status = "live · paused (open settings to resume)";
                 cs.Overlay.Live = false;
                 // la posición que tiene abierta en la cuenta se dibuja igual mientras espera
-                cs.SavedLedger = _svc.Live.Entries().FirstOrDefault(e => ReferenceEquals(e.ChartStrategy, cs))?.Ledger;
+                cs.SavedLedger = practice == null ? _svc.Live.Entries().FirstOrDefault(e => ReferenceEquals(e.ChartStrategy, cs))?.Ledger : null;
                 cs.SignalsKey = "";
                 return;
             }
@@ -241,15 +281,17 @@ public sealed partial class TradingView
             ITradingAccount account;
             if (cs.Live)
             {
-                account = _svc.AccountFor(data, cs.AccountId);
+                account = practice != null ? _svc.ReplaySessions.Resolve(data, practice.AccountId) : _svc.AccountFor(data, cs.AccountId);
                 if (account.IsReal && TopLevel.GetTopLevel(chart.Window ?? (Control)this) is Window w &&
                     !await ConfirmDialog.ShowAsync(w, "Execute on REAL account",
                         $"«{file.DisplayName}» will trade {data.Instrument.Symbol} on {TradingHub.Common.EnglishText.Of(account.Name)} with real orders and no individual confirmation. Stop it from the chart legend.",
                         "Execute with real money", danger: true))
                 {
+                    if (Stopped()) return;
                     cs.Live = false;
                     account = cs.Shadow = NewShadow(data);
                 }
+                if (Stopped()) return;
             }
             else
             {
@@ -260,25 +302,46 @@ public sealed partial class TradingView
             void Restore(LiveStrategyRunner r)
             {
                 LiveCenter.Restore(r);
-                if (kept.Count > 0) r.AdoptProtectionIds = kept;
+                if (kept.Count > 0)
+                {
+                    if (!string.Equals(cs.ProtectionOwnerKey, r.Key, StringComparison.Ordinal))
+                        throw new InvalidOperationException("Kept protection belongs to another verified account. Restore that account or remove the old strategy before creating a separate run.");
+                    r.AdoptProtectionIds = kept;
+                }
             }
 
             var runner = new LiveStrategyRunner(strategy, data, account, period, _svc.Settings.TimeZoneId)
             {
                 Source = "chart",
-                AccountId = cs.Live ? cs.AccountId : "",
+                AccountId = practice?.AccountId ?? (cs.Live ? cs.AccountId : ""),
                 ProfileId = chart.FeedId,
-                Persist = cs.Live, // las visuales no ensucian la cartera
-                ProtectOnStart = cs.Live,
+                Persist = cs.Live && practice == null,
+                ProtectOnStart = practice != null || cs.Live,
                 // real-order permission at every submit (a visual one trades its own simulated account: never blocked)
                 Guard = _svc.OrderGuard,
             };
-            if (cs.Live) Restore(runner);
-            if (cs.Live && _svc.Settings.SmartContracts)
+            if (!runner.TryPrepareIdentity(out var identityReason))
+            {
+                cs.Overlay.Status = identityReason ?? "Waiting for verified account identity";
+                model.Invalidate();
+            }
+            if (!await _svc.Live.WaitForAccountIdentityAsync(runner, cts.Token) || Stopped()) return;
+            string preparedKey = runner.Key;
+            if (cs.Live && practice == null && cs.PersistentOwnerKey is { } expectedOwner &&
+                !string.Equals(expectedOwner, preparedKey, StringComparison.Ordinal))
+                throw new InvalidOperationException("This saved chart strategy belongs to another verified account. Restore its original account or explicitly choose a different account before creating a separate run.");
+            if (cs.Live && practice == null) Restore(runner);
+            if (practice != null && ReferenceEquals(account, practice.Account) && cs.PracticeState != null)
+            {
+                runner.RestoreLocalState(cs.PracticeState);
+                runner.AdoptProtectionIds = cs.PracticeProtection;
+            }
+            if (cs.Live && practice == null && _svc.Settings.SmartContracts)
             {
                 // contrato inteligente, igual que en el panel: con el tamaño guardado, si el tamaño pide fracciones del mini
                 // ejecuta la misma exposición en el micro (×0,5 de 1 NQ = 5 MNQ); con una posición abierta sigue en su contrato
-                var (execInst, ratio) = await _svc.Live.ExecutionContractForAsync(chart.FeedId, data.Instrument, cs.Parameters, runner.SizeMultiplier, strategy, account.Name);
+                var (execInst, ratio) = await _svc.Live.ExecutionContractForAsync(chart.FeedId, data.Instrument, cs.Parameters, runner.SizeMultiplier, runner.Key);
+                if (Stopped()) return;
                 if (!execInst.Symbol.Equals(data.Instrument.Symbol, StringComparison.OrdinalIgnoreCase))
                 {
                     var execStrategy = file.Create();
@@ -295,6 +358,9 @@ public sealed partial class TradingView
                         ExecRatio = ratio,
                         Guard = _svc.OrderGuard,
                     };
+                    if (!await _svc.Live.WaitForAccountIdentityAsync(runner, cts.Token) || Stopped()) return;
+                    if (!string.Equals(preparedKey, runner.Key, StringComparison.Ordinal))
+                        throw new InvalidOperationException("The execution adapter belongs to a different verified account; this strategy was not started.");
                     Restore(runner);
                 }
             }
@@ -307,7 +373,7 @@ public sealed partial class TradingView
                     runner.SeedPosition(new LiveFill(open.EntryTime, open.IsLong, open.Quantity, open.AveragePrice));
             }
 
-            if (cs.Live && _svc.Live.AwaitingBroker(runner.Key))
+            if (cs.Live && practice == null && _svc.Live.AwaitingBroker(runner.Key))
             {
                 cs.Overlay.Error = LiveCenter.PendingBrokerMessage;
                 cs.Overlay.Status = "Awaiting order confirmation";
@@ -322,19 +388,25 @@ public sealed partial class TradingView
                 return;
             }
 
+            if (Stopped()) return;
             runner.Start();
+            if (cs.Live && practice == null) cs.PersistentOwnerKey = runner.Key;
+            cs.ExplicitAccountChange = false;
             cs.Runner = runner;
             if (cs.Live)
             {
                 _svc.Runners.RemoveAll(r => !r.IsRunning && !r.IsClosing && !r.HasWorkingOrders);
                 _svc.Runners.Add(runner);
-                _svc.Live.Watch(runner);
-                _svc.SaveLiveState();
+                if (practice == null)
+                {
+                    _svc.Live.Watch(runner);
+                    _svc.SaveLiveState();
+                }
             }
 
             cs.Overlay.Live = cs.Live;
-            cs.Overlay.Status = cs.Live ? LiveStatus(cs, runner) : "visual";
-            _status(cs.Live ? $"{file.DisplayName} executing on {TradingHub.Common.EnglishText.Of(account.Name)} over {data.Instrument.Symbol}" : $"{file.DisplayName} on chart (visual only)");
+            cs.Overlay.Status = practice?.IsBlind == true ? "practice · concealed" : cs.Live ? LiveStatus(model, runner) : "visual";
+            _status(cs.Live ? $"{file.DisplayName} executing on {TradingHub.Common.EnglishText.Of(account.Name)} over {chart.DisplaySymbol}" : $"{file.DisplayName} on chart (visual only)");
         }
         catch (OperationCanceledException)
         {
@@ -348,8 +420,11 @@ public sealed partial class TradingView
         finally
         {
             cs.Busy = false;
-            Workspace.Save(this);
-            model.Invalidate();
+            if (!_svc.IsShuttingDown)
+            {
+                Workspace.Save(this);
+                model.Invalidate();
+            }
         }
     }
 
@@ -395,7 +470,7 @@ public sealed partial class TradingView
             // marcas viejas y la operación abierta no aparecía hasta tocar «Aplicar»); las que ejecutan, solo las marcas
             if (!cs.Busy && model.Data.HistoryFrom < cs.HistoryFrom && !model.Data.IsLoadingHistory && !model.Data.IsExtending)
                 _ = RunStrategyAsync(chart, cs, historyOnly: cs.Live);
-            if (cs.Live && cs.Runner is { IsRunning: true } running && LiveStatus(cs, running) is var status && status != cs.Overlay.Status)
+            if (cs.Live && cs.Runner is { IsRunning: true } running && LiveStatus(model, running) is var status && status != cs.Overlay.Status)
             {
                 cs.Overlay.Status = status;
                 model.Invalidate();
@@ -508,8 +583,9 @@ public sealed partial class TradingView
     }
 
     /// <summary>Estado de una que ejecuta, con cuántos contratos y de cuál manda cada orden («en vivo · Cuenta simulada · 1 NQ por orden»).</summary>
-    private string LiveStatus(ChartStrategy cs, LiveStrategyRunner runner)
+    private static string LiveStatus(ChartModel model, LiveStrategyRunner runner)
     {
+        if (model.Settings.BlindReplay) return "practice · concealed";
         decimal units = runner.UnitsFor(LiveCenter.QuantityOf(runner.StrategyInstance.GetParameters()));
         string each = units > 0 ? $"{units.ToString("0.####", TradingHub.Common.UiCulture.Current)} {runner.ExecInstrument.Symbol} per order" : "size is zero";
         return $"live · {TradingHub.Common.EnglishText.Of(runner.Account.Name)} · {each}";
@@ -528,7 +604,8 @@ public sealed partial class TradingView
         }
 
         if (opened == DateTime.MinValue) return;
-        SetOpenLink(model, cs, opened, ledger.AveragePrice, ledger.Position > 0, ledger.OpenPnL);
+        // The link renderer invokes this callback only with a delivered chart price (Trades.Count > 0).
+        SetOpenLink(model, cs, opened, ledger.AveragePrice, ledger.Position > 0, last => ledger.OpenPnL(last, priceKnown: true));
     }
 
     /// <summary>La posición que deja abierta la historia (mientras la simulada de la visual todavía no la tomó).</summary>

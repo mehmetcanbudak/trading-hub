@@ -13,6 +13,7 @@ using TradingHub.Charting.Dom;
 using TradingHub.Charting.Drawings;
 using TradingHub.Charting.Rendering;
 using TradingHub.Data;
+using TradingHub.Feeds;
 using TradingHub.Market;
 using TradingHub.Trading;
 
@@ -229,9 +230,9 @@ public sealed partial class TradingView
                 B("B. Ask", "buy-soft", "Limit buy at ask (subject to liquidity)", () => AtBook(OrderDirections.Buy, ask: true)),
                 B("S. Bid", "sell-soft", "Limit sell at bid (subject to liquidity)", () => AtBook(OrderDirections.Sell, ask: false)),
                 B("S. Ask", "sell-soft", "Limit sell at ask (joins ask queue)", () => AtBook(OrderDirections.Sell, ask: true))),
-            Row(B("Cancel", "", "Cancel all orders", () => _ = AccountActionAsync(_active, a => a.CancelAll(), "Orders canceled")),
+            Row(B("Cancel", "", "Cancel all orders", () => _ = AccountActionAsync(_active, a => a.CancelAll(), "Cancel all orders")),
                 B("Reverse", "", "Reverse position", () => _ = ReverseAsync(_active)),
-                B("Close position", "primary", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, a => a.Flatten(), "Position closed"))));
+                B("Close position", "primary", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, a => a.Flatten(), "Close position"))));
         panel.Margin = new Thickness(10, 8, 10, 10);
         return new Border { Child = panel, BorderBrush = Ui.Line, BorderThickness = new Thickness(0, 1, 0, 0), Background = Ui.Bg1 };
     }
@@ -435,9 +436,9 @@ public sealed partial class TradingView
         }
 
         var actions = Ui.Row(8,
-            Small("Close position", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, acc => acc.Flatten(), "Position closed")),
+            Small("Close position", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, acc => acc.Flatten(), "Close position")),
             Small("Reverse", "Reverse position", () => _ = ReverseAsync(_active)),
-            Small("Cancel", "Cancel all orders", () => _ = AccountActionAsync(_active, acc => acc.CancelAll(), "Orders canceled")));
+            Small("Cancel", "Cancel all orders", () => _ = AccountActionAsync(_active, acc => acc.CancelAll(), "Cancel all orders")));
 
         // parciales: cierran una parte a mercado; stop y objetivos se ajustan solos
         var partials = Ui.Row(6,
@@ -590,14 +591,19 @@ public sealed partial class TradingView
     {
         if (tab.Model == null) return;
         var data = tab.Model.Data;
-        var account = AccountOf(tab)!;
+        var account = AccountOf(tab);
         tab.Model.Account = account;
-        tab.Model.Brackets = _svc.BracketsFor(account);
+        tab.Model.Brackets = account != null ? _svc.BracketsFor(account) : null;
         if (force || _dom.Dom?.Data != data || _dom.Dom?.Broker != account)
         {
             _dom.Dom = new DomModel(data, _svc.Settings.Dom) { Broker = account, Brackets = tab.Model.Brackets, OrderQuantity = QtyOf(tab), Step = 1 };
             _domStep?.Select(1);
-            _tape.Tape = new TapeModel(data) { TimeZone = tab.Model.Settings.TimeZone };
+            _tape.Tape = new TapeModel(data)
+            {
+                TimeZone = tab.Model.Settings.TimeZone,
+                BlindReplay = tab.Model.Settings.BlindReplay,
+                BlindReplayStart = tab.Model.Settings.BlindReplayStart,
+            };
         }
 
         UpdatePanelTitles();
@@ -614,8 +620,12 @@ public sealed partial class TradingView
         _syncing = true;
         Ui.SyncAccounts(_accountBox, AccountOptions(tab, data), tab.AccountId);
         _syncing = false;
-        _accountWarning.IsVisible = account.IsReal;
-        _accountWarning.Text = "REAL ACCOUNT: Orders are sent to market using real money.";
+        _accountWarning.IsVisible = account == null || account.IsReal;
+        _accountWarning.Text = account == null
+            ? tab.AccountSelectionUnavailable
+                ? "Selected account unavailable on this data connection. Choose a compatible account explicitly; no order route is attached."
+                : "DATA ONLY: Composite prices are not executable; no trading account is attached."
+            : "REAL ACCOUNT: Orders are sent to market using real money.";
 
         // cantidades sugeridas según el instrumento
         decimal step = data.Instrument.VolumeStep;
@@ -650,15 +660,26 @@ public sealed partial class TradingView
     internal TradingHub.Data.InstrumentData? TradeData(ChartTab chart) => chart.CrossData ?? chart.Model?.Data;
 
     /// <summary>Cuenta donde operan las órdenes de un gráfico (en el instrumento del cross trading, si hay).</summary>
-    internal ITradingAccount? AccountOf(ChartTab? chart) =>
-        chart?.Model == null ? null : _svc.AccountFor(chart.CrossData ?? chart.Model.Data, chart.AccountId);
+    internal ITradingAccount? AccountOf(ChartTab? chart)
+    {
+        if (chart?.Model == null || chart.AccountSelectionUnavailable || chart.Model.Data.Feed is AggregateFeed) return null;
+        if (chart.IsReplay)
+        {
+            var run = _svc.ReplaySessions.TryGet(chart.Model.Data);
+            if (run == null) return null;
+            chart.AccountId = run.AccountId;
+            return run.Account;
+        }
+        return _svc.AccountFor(chart.CrossData ?? chart.Model.Data, chart.AccountId);
+    }
 
     /// <summary>El gráfico dibuja la posición y las órdenes de la cuenta donde ejecuta.</summary>
     internal void ApplyTradingTarget(ChartTab chart)
     {
-        if (chart.Model == null || AccountOf(chart) is not { } acc) return;
+        if (chart.Model == null) return;
+        var acc = AccountOf(chart);
         chart.Model.Account = acc;
-        chart.Model.Brackets = _svc.BracketsFor(acc);
+        chart.Model.Brackets = acc != null ? _svc.BracketsFor(acc) : null;
         chart.Model.Invalidate();
     }
 
@@ -683,6 +704,11 @@ public sealed partial class TradingView
     internal async Task SetCrossTradingAsync(ChartTab chart, string? symbol, bool save = true)
     {
         if (chart.Model == null) return;
+        if (chart.AccountSelectionUnavailable || chart.IsReplay || chart.Model.Data.Feed is AggregateFeed)
+        {
+            _status("Cross trading is unavailable for practice replay and data-only composite instruments.");
+            return;
+        }
         if (string.IsNullOrWhiteSpace(symbol) || symbol.Equals(chart.Symbol, StringComparison.OrdinalIgnoreCase))
         {
             chart.CrossSymbol = null;
@@ -713,6 +739,17 @@ public sealed partial class TradingView
 
     internal void SetChartAccount(ChartTab chart, string accountId)
     {
+        if (chart.IsReplay || chart.Model?.Data.Feed is AggregateFeed)
+        {
+            _status("This chart cannot select an external trading account.");
+            return;
+        }
+        if (chart.Model == null || !_svc.AccountsFor(chart.Model.Data).Any(option => option.Id == accountId))
+        {
+            _status("Selected account is not available for this chart. No order route was changed.");
+            return;
+        }
+        chart.AccountSelectionUnavailable = false;
         chart.AccountId = accountId;
         ApplyTradingTarget(chart);
         if (ReferenceEquals(chart, _active)) BindSidePanel(chart, force: true);
@@ -787,7 +824,7 @@ public sealed partial class TradingView
             return null;
         }
 
-        string desc = $"{Localization.Lang.T(dir == OrderDirections.Buy ? "BUY" : "SELL")} {Localization.Lang.T(type switch { OrderTypes.Market => "at market", OrderTypes.Limit => "limit", _ => "stop" })} {qty} {acc.Instrument.Symbol}{(price > 0 ? " @ " + acc.Instrument.FormatPrice(price) : "")}";
+        string desc = $"{Localization.Lang.T(dir == OrderDirections.Buy ? "BUY" : "SELL")} {Localization.Lang.T(type switch { OrderTypes.Market => "at market", OrderTypes.Limit => "limit", _ => "stop" })} {qty} {(chart.Model?.Settings.BlindReplay == true ? "Practice" : acc.Instrument.Symbol)}{(price > 0 ? " @ " + acc.Instrument.FormatPrice(price) : "")}";
         decimal signed = dir == OrderDirections.Buy ? qty : -qty;
         if (Blocked(chart, acc, signed)) return null;
         if (!await ConfirmAsync(chart, acc, desc, qty: qty)) return null;
@@ -851,11 +888,11 @@ public sealed partial class TradingView
         if (acc.IsReal && !await ConfirmAsync(chart, acc, message + "?", checkQuantity: false)) return;
         if (adds != null && Blocked(chart, acc, adds(acc))) return;
         action(acc);
-        _status(message);
+        _status(acc.LastError is { Length: > 0 } error ? error : $"{message} requested; check account status for confirmation.");
     }
 
     /// <summary>Reverses the position: it opens the other side, so it needs real-order permission like an entry.</summary>
-    internal Task ReverseAsync(ChartTab? chart) => AccountActionAsync(chart, a => a.Reverse(), "Position reversed", a => -2 * a.Position.Volume);
+    internal Task ReverseAsync(ChartTab? chart) => AccountActionAsync(chart, a => a.Reverse(), "Reverse position", a => -2 * a.Position.Volume);
 
     internal async Task BracketActionAsync(ChartTab? chart, Func<BracketManager, string> action, string description)
     {
@@ -875,7 +912,7 @@ public sealed partial class TradingView
         if (cancel)
         {
             acc.CancelAt(price);
-            _status($"Orders canceled on {acc.Instrument.FormatPrice(price)}");
+            _status(acc.LastError is { Length: > 0 } error ? error : $"Order cancellation requested at {acc.Instrument.FormatPrice(price)}; check account status for confirmation.");
             return;
         }
 
@@ -903,6 +940,7 @@ public sealed partial class TradingView
     {
         chart ??= _active;
         if (chart?.Model == null) return false;
+        if (ExecuteChartNavigationHotkey(id, chart)) return true;
         var model = chart.Model;
         var toolbar = chart.Window?.Toolbar ?? _toolbar;
         decimal Best(bool bid)
@@ -919,9 +957,9 @@ public sealed partial class TradingView
             case "sell-market": _ = TradeAsync(chart, OrderTypes.Market, OrderDirections.Sell, 0); break;
             case "buy-bid": _ = TradeAsync(chart, OrderTypes.Limit, OrderDirections.Buy, Best(true)); break;
             case "sell-ask": _ = TradeAsync(chart, OrderTypes.Limit, OrderDirections.Sell, Best(false)); break;
-            case "flatten": _ = AccountActionAsync(chart, a => a.Flatten(), "Position closed"); break;
+            case "flatten": _ = AccountActionAsync(chart, a => a.Flatten(), "Close position"); break;
             case "reverse": _ = ReverseAsync(chart); break;
-            case "cancel-all": _ = AccountActionAsync(chart, a => a.CancelAll(), "Orders canceled"); break;
+            case "cancel-all": _ = AccountActionAsync(chart, a => a.CancelAll(), "Cancel all orders"); break;
             case "close-25": _ = BracketActionAsync(chart, b => b.ClosePartial(0.25m), "Close 25% of position"); break;
             case "close-50": _ = BracketActionAsync(chart, b => b.ClosePartial(0.5m), "Close half of position"); break;
             case "breakeven": _ = BracketActionAsync(chart, b => b.MoveStopToBreakeven(), "Move stop to breakeven"); break;
@@ -1037,7 +1075,7 @@ public sealed partial class TradingView
         if (br != null && acc!.Position.Volume != 0)
         {
             items.Add(Item("Close half at market", MaterialIconKind.ContentCut, () => _ = BracketActionAsync(tab, b => b.ClosePartial(0.5m), "Close half of position")));
-            items.Add(Item("Close all at market", MaterialIconKind.CloseBoxOutline, () => _ = AccountActionAsync(tab, a => a.Flatten(), "Position closed")));
+            items.Add(Item("Close all at market", MaterialIconKind.CloseBoxOutline, () => _ = AccountActionAsync(tab, a => a.Flatten(), "Close position")));
             items.Add(Item("Stop to breakeven", MaterialIconKind.ShieldOutline, () => _ = BracketActionAsync(tab, b => b.MoveStopToBreakeven(), "Move stop to breakeven")));
             items.Add(Item("Place stop and targets from template", MaterialIconKind.TargetVariant, () => _ = BracketActionAsync(tab, b => b.ApplyTemplate(), "Place stop and targets")));
             items.Add(new Separator());
@@ -1095,7 +1133,7 @@ public sealed partial class TradingView
                 model.Drawings.Add(new ChartDrawing { Kind = DrawingKind.HorizontalLine, Alert = true, ColorArgb = 0xFFF2B53A, LineStyle = LineStyleKind.Dashed, Points = { new ChartPoint(DateTime.UtcNow, (double)price) } });
                 DrawingsTouched(tab);
             }));
-            if (acc?.ActiveOrders.Any() == true) items.Add(Item("Cancel all orders", MaterialIconKind.CloseCircleOutline, () => _ = AccountActionAsync(tab, a => a.CancelAll(), "Orders canceled")));
+            if (acc?.ActiveOrders.Any() == true) items.Add(Item("Cancel all orders", MaterialIconKind.CloseCircleOutline, () => _ = AccountActionAsync(tab, a => a.CancelAll(), "Cancel all orders")));
             items.Add(new Separator());
         }
 
@@ -1174,6 +1212,8 @@ public sealed partial class TradingView
     internal List<AccountOption> AccountOptions(ChartTab tab, InstrumentData data)
     {
         var list = _svc.AccountsFor(data).ToList();
+        if (tab.AccountSelectionUnavailable && list.All(option => option.Id != tab.AccountId))
+            list.Add(new AccountOption(tab.AccountId, $"{tab.AccountId} · selected account unavailable on this data connection", false));
         if (tab.AccountId.StartsWith("rithmic|", StringComparison.Ordinal) && list.All(a => a.Id != tab.AccountId))
             list.Add(new AccountOption(tab.AccountId, $"{tab.AccountId.Split('|')[^1]} · Rithmic (connecting…)", false));
         return list;
@@ -1182,7 +1222,13 @@ public sealed partial class TradingView
     internal void UpdatePosition()
     {
         var acc = Account;
-        if (acc == null || _active?.Model == null) return;
+        if (_active?.Model == null) return;
+        if (acc == null)
+        {
+            _positionText.Text = "Data only · no executable account";
+            _positionText.Foreground = Ui.Text2;
+            return;
+        }
 
         // las cuentas de Rithmic aparecen cuando su sesión termina de conectarse
         bool was = _syncing;
@@ -1203,6 +1249,8 @@ public sealed partial class TradingView
         ToolTip.SetTip(_positionText, null);
         _positionText.Text = acc.LastError != null
             ? "⚠ " + acc.LastError
+            : !acc.PositionReady ? "Position unknown · awaiting account snapshot"
+            : !acc.OrdersReady ? "Order state unknown · awaiting account snapshot"
             : pos.Volume == 0
                 ? $"No position · {orders} active order(s)"
                 : $"{(pos.Volume > 0 ? "LONG" : "SHORT")} {Math.Abs(pos.Volume)} @ {_active.Model.Instrument.FormatPrice(pos.AveragePrice)} · PnL {pos.UnrealizedPnL:+0.00;-0.00}{brackets}";

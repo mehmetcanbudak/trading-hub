@@ -24,7 +24,7 @@ public class LongHistoryTests
         var trades = new List<Trade>();
         KlineHistory.Synthesize(klines, Inst, 1, new[] { (t0, t0.AddMinutes(3)) }, trades);
         Assert.Equal(12, trades.Count);
-        Assert.All(trades, t => Assert.True(KlineHistory.IsSynthetic(t.Id)));
+        Assert.All(trades, trade => { Assert.True(trade.Id < 0); Assert.True(KlineHistory.IsSynthetic(trade)); });
         Assert.True(trades.Zip(trades.Skip(1)).All(p => p.First.Time < p.Second.Time && p.First.Id < p.Second.Id));
 
         var store = new TradeStore(Inst);

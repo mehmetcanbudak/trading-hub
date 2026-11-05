@@ -43,12 +43,20 @@ internal sealed class DataView : UserControl, IPage
     private readonly Button _download;
     private readonly Button _cancel;
     private CancellationTokenSource? _cts;
+    private readonly Uri? _publicArchiveOrigin;
+    private readonly TextBlock _losslessArchiveStatus = new() { Name = "LosslessArchiveStatus", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
+    private readonly ProgressBar _losslessArchiveProgress = new() { Name = "LosslessArchiveProgress", Minimum = 0, Maximum = 1, Height = 6, IsVisible = false };
+    private CancellationTokenSource? _losslessArchiveCancellation;
+    private Control? _savedDayActions;
+    private Button? _losslessArchiveCancel;
+    internal Task LosslessArchiveOperation { get; private set; } = Task.CompletedTask;
 
-    public DataView(AppServices svc, Action<string> status, MainWindow main)
+    public DataView(AppServices svc, Action<string> status, MainWindow main, Uri? publicArchiveOrigin = null)
     {
         _svc = svc;
         _status = status;
         _main = main;
+        _publicArchiveOrigin = publicArchiveOrigin;
         _picker = new InstrumentPicker(svc) { HorizontalAlignment = HorizontalAlignment.Stretch };
         _picker.Picked += (profileId, inst, _) =>
         {
@@ -134,12 +142,22 @@ internal sealed class DataView : UserControl, IPage
         var replay = Ui.Button("Replay", MaterialIconKind.PlayCircleOutline, () => _ = ReplaySelectedAsync());
         ToolTip.SetTip(replay, "Open selected day as replay in Trading (simulated account only)");
         var delete = Ui.Button("Delete", MaterialIconKind.DeleteOutline, () => _ = DeleteSelectedAsync(), "ghost");
-        var actions = Ui.H(8, delete, replay);
+        var archive = Ui.Button("Archive losslessly", MaterialIconKind.ArchiveOutline, () => LosslessArchiveOperation = ArchiveSelectedAsync());
+        archive.Name = "LosslessArchiveSelected";
+        var actions = Ui.H(8, delete, replay, archive);
+        _savedDayActions = actions;
+        var archiveCancel = Ui.Button("Cancel archive", MaterialIconKind.Close, () => _losslessArchiveCancellation?.Cancel());
+        archiveCancel.Name = "LosslessArchiveCancel";
+        archiveCancel.IsVisible = false;
+        _losslessArchiveCancel = archiveCancel;
         actions.HorizontalAlignment = HorizontalAlignment.Right;
         actions.Margin = new Thickness(0, 8, 0, 0);
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
-        DockPanel.SetDock(actions, Dock.Bottom);
-        head.Children.Add(actions);
+        var tools = Ui.V(6, actions,
+            Note(MaterialIconKind.InformationOutline, "Archive 1–31 selected completed raw days as verified lossless copies. Original raw files remain authoritative and are never deleted; keeping both copies increases disk use. IB uses its separate atomic catalog."),
+            _losslessArchiveStatus, _losslessArchiveProgress, archiveCancel);
+        DockPanel.SetDock(tools, Dock.Bottom);
+        head.Children.Add(tools);
         head.Children.Add(Ui.V(3, _daysTitle, _daysInfo));
         var panel = new DockPanel();
         DockPanel.SetDock(head, Dock.Top);
@@ -539,7 +557,8 @@ internal sealed class DataView : UserControl, IPage
                     var r = await Task.Run(() => CsvImport.Import(path, symbol, AppPaths.Ticks, offset, null, progress, CancellationToken.None));
                     lines.Add($"{symbol}: {r.Kind}, {r.Trades:N0} trades in {r.Days} day(s)" +
                               (r.From is { } f && r.To is { } t ? $" ({f:dd/MM/yyyy} → {t:dd/MM/yyyy})" : "") +
-                              (r.BadLines > 0 ? $", {r.BadLines:N0} unreadable rows" : "") + $" · price increment {r.TickSize.ToString("0.########", CultureInfo.InvariantCulture)}");
+                              (r.BadLines > 0 ? $", {r.BadLines:N0} unreadable rows" : "") + $" · price increment {r.TickSize.ToString("0.########", CultureInfo.InvariantCulture)}" +
+                              " · " + r.QualitySummary);
                 }
                 catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
                 {
@@ -722,6 +741,65 @@ internal sealed class DataView : UserControl, IPage
 
     private List<DayData> SelectedDays() => _days.SelectedItems?.OfType<ListBoxItem>().Select(i => (DayData)i.Tag!).ToList() ?? new();
 
+    private async Task ArchiveSelectedAsync()
+    {
+        if (_losslessArchiveCancellation != null) return;
+        var selected = _selected;
+        var days = SelectedDays().Select(day => day.Day).ToArray();
+        if (selected == null || days.Length == 0)
+        {
+            _losslessArchiveStatus.Text = "Choose the recorded instrument and completed raw days to archive.";
+            return;
+        }
+        if (days.Length > 31)
+        {
+            _losslessArchiveStatus.Text = "Select no more than 31 completed raw days per archive operation.";
+            return;
+        }
+        if (HistorySources.StoredTickSize(AppPaths.Ticks, selected.FeedId, selected.Symbol) is not { } tickSize || tickSize <= 0)
+        {
+            _losslessArchiveStatus.Text = "Saved instrument tick metadata is unavailable. No archive was written.";
+            return;
+        }
+        var instrument = new Instrument { FeedId = selected.FeedId, Symbol = selected.Symbol, TickSize = tickSize, Exchange = FeedName(selected.FeedId) };
+        using var cancellation = _losslessArchiveCancellation = new();
+        var ct = cancellation.Token;
+        _symbols.IsEnabled = _days.IsEnabled = false;
+        if (_savedDayActions != null) _savedDayActions.IsEnabled = false;
+        if (_losslessArchiveCancel != null) _losslessArchiveCancel.IsVisible = true;
+        _losslessArchiveProgress.IsVisible = true;
+        _losslessArchiveProgress.Value = 0;
+        using var job = BackgroundWork.Begin($"archiving recorded history for {instrument.Symbol}");
+        try
+        {
+            _losslessArchiveStatus.Text = $"Verifying lossless archives for {instrument.Symbol} · {days.Length} selected day(s)…";
+            var progress = new Progress<double>(value =>
+            {
+                if (_losslessArchiveCancellation == cancellation && !ct.IsCancellationRequested)
+                    _losslessArchiveProgress.Value = value;
+            });
+            int completed = await _svc.ArchiveRecordedDaysAsync(instrument, days, progress, ct);
+            _losslessArchiveStatus.Text = $"Verified {completed} lossless archive day(s). Original raw files were retained unchanged.";
+        }
+        catch (OperationCanceledException)
+        {
+            _losslessArchiveStatus.Text = "Archival cancelled. Completed verified copies remain available; original raw files were retained.";
+        }
+        catch (Exception ex)
+        {
+            _losslessArchiveStatus.Text = "Archival stopped: " + ex.Message + " Completed verified copies may remain; original raw files were not deleted.";
+        }
+        finally
+        {
+            _losslessArchiveCancellation = null;
+            _symbols.IsEnabled = _days.IsEnabled = true;
+            if (_savedDayActions != null) _savedDayActions.IsEnabled = true;
+            if (_losslessArchiveCancel != null) _losslessArchiveCancel.IsVisible = false;
+            _losslessArchiveProgress.IsVisible = false;
+            Refresh();
+        }
+    }
+
     private async Task DeleteSelectedAsync()
     {
         var days = SelectedDays();
@@ -821,6 +899,7 @@ internal sealed class DataView : UserControl, IPage
         using var job = BackgroundWork.Begin($"downloading history for {inst.Symbol}");
         try
         {
+            using var archiveHttp = downloader == null ? _svc.NetworkProxy.CreateFactory().CreateHttpClient(TimeSpan.FromMinutes(10)) : null;
             for (int i = 0; i < days.Count; i++)
             {
                 var day = days[i];
@@ -846,7 +925,7 @@ internal sealed class DataView : UserControl, IPage
                 var progress = new Progress<double>(p => _progress.Value = (index + p) / days.Count);
                 var list = downloader != null
                     ? await downloader.DownloadDayAsync(inst, day, progress, ct)
-                    : await PublicArchives.DownloadDayAsync(inst, day, progress, ct);
+                    : await PublicArchives.DownloadDayAsync(inst, day, progress, ct, http: archiveHttp, baseOrigin: _publicArchiveOrigin);
                 fetched++;
                 if (list == null)
                 {

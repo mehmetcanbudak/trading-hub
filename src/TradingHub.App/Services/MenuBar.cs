@@ -131,22 +131,37 @@ internal sealed class MenuBar
 
         Sep();
         var positions = new List<MenuLine>();
+        int positionCount = 0;
+        bool coverageIncomplete = false;
         foreach (var a in _svc.AccountCenter.Accounts())
         {
             try
             {
-                foreach (var p in _svc.AccountCenter.Snapshot(a).Positions.Where(p => p.Net != 0))
-                    positions.Add(new MenuLine($"p:{a.Id}:{p.Symbol}", $"   {p.Symbol} · {a.Name} · {(p.Net > 0 ? "long" : "short")} {Math.Abs(p.Net).ToString("0.####", Es)} · {Money(p.OpenPnl)}", true, ShowPanel));
+                var snapshot = _svc.AccountCenter.Snapshot(a);
+                if (!snapshot.PositionsKnown || !snapshot.Connected)
+                {
+                    coverageIncomplete = true;
+                    positions.Add(new MenuLine($"p-unavailable:{a.Id}", $"   {a.Name} · account snapshot incomplete", true, ShowPanel));
+                }
+                foreach (var p in snapshot.Positions.Where(p => p.Net != 0))
+                {
+                    positionCount++;
+                    string side = $"{(p.Net > 0 ? "long" : "short")} {Math.Abs(p.Net).ToString("0.####", Es)}";
+                    if (!snapshot.PositionsKnown) side = $"Last known: {side}";
+                    string pnl = snapshot.OpenPnlKnown ? Money(p.OpenPnl) : "—";
+                    positions.Add(new MenuLine($"p:{a.Id}:{p.Symbol}", $"   {p.Symbol} · {a.Name} · {side} · {pnl}", true, ShowPanel));
+                }
             }
             catch
             {
-                // una cuenta que no contesta no frena el menú
+                coverageIncomplete = true;
+                positions.Add(new MenuLine($"p-unavailable:{a.Id}", $"   {a.Name} · account snapshot unavailable", true, ShowPanel));
             }
         }
 
-        lines.Add(new MenuLine("pos", $"Open positions ({positions.Count})"));
+        lines.Add(new MenuLine("pos", coverageIncomplete ? "Open positions (coverage incomplete)" : $"Open positions ({positionCount})"));
         lines.AddRange(positions);
-        if (positions.Count == 0) lines.Add(new MenuLine("pos-none", "   No positions"));
+        if (positionCount == 0 && !coverageIncomplete) lines.Add(new MenuLine("pos-none", "   No positions"));
 
 
         Sep();

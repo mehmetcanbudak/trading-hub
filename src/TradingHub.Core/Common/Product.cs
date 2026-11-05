@@ -8,9 +8,15 @@ public static class Product
     /// <summary>La carpeta de la app dentro de <paramref name="baseDir"/>.</summary>
     public static string Folder(string baseDir) => Path.Combine(baseDir, Name);
 
-    /// <summary>Datos de la app (~/Library/Application Support/Trading Hub).</summary>
-    public static string AppData => Folder(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+    /// <summary>The unchanged Trading Hub application-data location before any explicit opt-in.</summary>
+    public static string DefaultAppData => StorageLocations.DefaultAppRoot;
 
-    /// <summary>Carpeta visible del usuario (~/Documents/Trading Hub): estrategias e indicadores propios.</summary>
-    public static string Documents => Folder(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+    /// <summary>The unchanged Trading Hub scripts location before any explicit opt-in.</summary>
+    public static string DefaultDocuments => StorageLocations.DefaultScriptsRoot;
+
+    /// <summary>The process's effective app location; explicit environment overrides win.</summary>
+    public static string AppData => StorageLocations.Startup.AppRoot;
+
+    /// <summary>The process's effective scripts location. Existing directory names are preserved.</summary>
+    public static string Documents => StorageLocations.Startup.ScriptsRoot;
 }

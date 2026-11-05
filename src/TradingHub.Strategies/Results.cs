@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using TradingHub.Market;
 
 namespace TradingHub.Strategies;
 
@@ -253,6 +254,12 @@ public sealed class BacktestResult
     public int Bars { get; set; }
     public double Seconds { get; set; }
     public string? Error { get; set; }
+    public DataQuality DataQuality { get; set; }
+    public int ResolutionSeconds { get; set; }
+    public string? SourceIdentity { get; set; }
+    public long CorrectionRevision { get; set; }
+    public bool HasKnownAvailability { get; set; }
+    public string? DataWarning { get; set; }
 
     /// <summary>Posición que quedó abierta al final (solo sin «cerrar al final»; la usa el gráfico para seguirla en vivo).</summary>
     [JsonIgnore] public OpenPosition? OpenPosition { get; set; }

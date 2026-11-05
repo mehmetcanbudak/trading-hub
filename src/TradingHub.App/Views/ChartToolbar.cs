@@ -35,6 +35,8 @@ internal sealed class ChartToolbar : UserControl
     private ChartTab? _chart;
     private bool _syncing;
     private readonly LinkButton _link;
+    private readonly TextBlock _clock = new() { FontFamily = Ui.MonoFont, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _practiceLabel = new() { Text = "Practice", FontWeight = Avalonia.Media.FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, IsVisible = false };
 
     /// <summary>Todos los períodos del selector, por grupo.</summary>
     internal static readonly (string Title, string[] Codes)[] PeriodGroups =
@@ -117,7 +119,7 @@ internal sealed class ChartToolbar : UserControl
 
         // se acomoda en dos líneas si la ventana es angosta (nunca corta botones)
         var left = new WrapPanel { ItemSpacing = 8, LineSpacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var c in new Control[] { _link, Picker, _historyBox, Ui.Divider(true), Ui.H(4, _periodsHost, _periodMenu), _layoutBox, _stepBox })
+        foreach (var c in new Control[] { _link, Picker, _practiceLabel, _historyBox, Ui.Divider(true), Ui.H(4, _periodsHost, _periodMenu), _layoutBox, _stepBox })
         {
             c.VerticalAlignment = VerticalAlignment.Center;
             left.Children.Add(c);
@@ -128,6 +130,12 @@ internal sealed class ChartToolbar : UserControl
         right.Children.Add(Ui.Button("Indicators", MaterialIconKind.FunctionVariant, () => _host.OpenIndicators(_chart)));
         right.Children.Add(Ui.IconButton(MaterialIconKind.ViewColumnOutline, "Edit footprint columns", () => _host.OpenFootprintEditor(_chart)));
         right.Children.Add(Ui.IconButton(MaterialIconKind.PaletteOutline, "Chart settings: background, candle and axis colors…", () => _host.OpenChartSettings(_chart)));
+        Button? navigation = null;
+        navigation = Ui.Button("View", MaterialIconKind.Magnify, () => _host.ShowChartNavigation(_chart, navigation!));
+        Avalonia.Automation.AutomationProperties.SetName(navigation, "Chart navigation and clock");
+        right.Children.Add(navigation);
+        right.Children.Add(_clock);
+        right.Children.Add(Ui.Button("Practice replay…", MaterialIconKind.Play, () => _host.OpenPracticeDialog()));
         Button? strategies = null;
         strategies = Ui.IconButton(MaterialIconKind.RobotOutline, "Chart strategies: historical and live entry/exit marks, visual-only or executing on an account", () => _host.ShowStrategyMenu(_chart, strategies!));
         right.Children.Add(strategies);
@@ -342,6 +350,10 @@ internal sealed class ChartToolbar : UserControl
         if (c?.Model == null) return;
         _syncing = true;
         var m = c.Model;
+        Picker.IsVisible = !m.Settings.BlindReplay;
+        _practiceLabel.IsVisible = m.Settings.BlindReplay;
+        _historyBox.IsVisible = !m.Settings.BlindReplay;
+        _link.IsVisible = !m.Settings.BlindReplay;
         Picker.SetCurrent(c.FeedId, m.Instrument);
         RebuildFavorites();
         var favorites = _host.Services.Settings.FavoritePeriods;
@@ -384,6 +396,14 @@ internal sealed class ChartToolbar : UserControl
         }
 
         Picker.SetQuote(data.LastPrice, change, data.Instrument);
+        _clock.IsVisible = model.Settings.ShowClock;
+        if (_clock.IsVisible)
+        {
+            DateTime utc = data.Feed is TradingHub.Feeds.ReplayFeed replay ? replay.Clock : DateTime.UtcNow;
+            _clock.Text = model.Settings.BlindReplay ? model.Settings.ReplayElapsed(utc) :
+                TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), model.Settings.TimeZone).ToString("HH:mm:ss", TradingHub.Common.UiCulture.Current);
+            ToolTip.SetTip(_clock, model.Settings.BlindReplay ? "Practice elapsed time" : model.Settings.TimeZone.Id + (data.Feed is TradingHub.Feeds.ReplayFeed ? " · replay clock" : " · local system clock"));
+        }
     }
 }
 
@@ -414,6 +434,8 @@ internal sealed class DrawingToolStrip : UserControl
         [DrawingKind.LongPosition] = (MaterialIconKind.TrendingUp, "Long position (entry, stop, target)"),
         [DrawingKind.ShortPosition] = (MaterialIconKind.TrendingDown, "Short position (entry, stop, target)"),
         [DrawingKind.Text] = (MaterialIconKind.FormatText, "Text"),
+        [DrawingKind.AnchoredVwap] = (MaterialIconKind.Anchor, "Anchored VWAP with volume-weighted deviation"),
+        [DrawingKind.FixedRangeProfile] = (MaterialIconKind.ChartBar, "Fixed-range volume / delta profile"),
     };
 
     private readonly List<Group> _groups = new();
@@ -427,7 +449,9 @@ internal sealed class DrawingToolStrip : UserControl
             new DrawingKind?[] { DrawingKind.HorizontalLine, DrawingKind.HorizontalRay, DrawingKind.VerticalLine, DrawingKind.TrendLine, DrawingKind.Ray, DrawingKind.ExtendedLine },
             new DrawingKind?[] { DrawingKind.Rectangle },
             new DrawingKind?[] { DrawingKind.FibRetracement },
-            new DrawingKind?[] { DrawingKind.LongPosition, DrawingKind.ShortPosition },
+            new DrawingKind?[] { DrawingKind.AnchoredVwap, DrawingKind.FixedRangeProfile },
+            new DrawingKind?[] { DrawingKind.LongPosition },
+            new DrawingKind?[] { DrawingKind.ShortPosition },
             new DrawingKind?[] { DrawingKind.Ruler },
             new DrawingKind?[] { DrawingKind.Text },
         };
@@ -478,11 +502,13 @@ internal sealed class DrawingToolStrip : UserControl
         {
             g.Button.Content = Ui.Icon(Info[k].Icon, 17);
             ToolTip.SetTip(g.Button, Info[k].Name);
+            Avalonia.Automation.AutomationProperties.SetName(g.Button, Info[k].Name);
         }
         else
         {
             g.Button.Content = Ui.Icon(MaterialIconKind.CursorDefaultOutline, 17);
             ToolTip.SetTip(g.Button, "Cursor (Esc)");
+            Avalonia.Automation.AutomationProperties.SetName(g.Button, "Cursor (Esc)");
         }
     }
 

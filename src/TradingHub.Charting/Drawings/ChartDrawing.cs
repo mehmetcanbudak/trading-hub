@@ -20,6 +20,8 @@ public enum DrawingKind
     Ruler,
     LongPosition,
     ShortPosition,
+    AnchoredVwap = 12,
+    FixedRangeProfile = 13,
 }
 
 public enum LineStyleKind
@@ -53,7 +55,7 @@ public sealed class FibLevel
 }
 
 /// <summary>Objeto dibujado por el usuario sobre el gráfico.</summary>
-public sealed class ChartDrawing
+public sealed partial class ChartDrawing
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public DrawingKind Kind { get; set; }
@@ -124,7 +126,7 @@ public sealed class ChartDrawing
     public int RequiredPoints => Kind switch
     {
         DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.VerticalLine or DrawingKind.Text => 1,
-        DrawingKind.LongPosition or DrawingKind.ShortPosition => 1,
+        DrawingKind.LongPosition or DrawingKind.ShortPosition or DrawingKind.AnchoredVwap => 1,
         _ => 2,
     };
 
@@ -147,6 +149,8 @@ public sealed class ChartDrawing
         DrawingKind.Ruler => "Ruler",
         DrawingKind.LongPosition => "Long position",
         DrawingKind.ShortPosition => "Short position",
+        DrawingKind.AnchoredVwap => "Anchored VWAP",
+        DrawingKind.FixedRangeProfile => "Fixed-range volume / delta profile",
         _ => k.ToString(),
     };
 
@@ -180,6 +184,18 @@ public sealed class ChartDrawing
         TextArgb = src.TextArgb;
         Levels = src.Levels?.Select(l => l.Clone()).ToList();
         Quantity = src.Quantity;
+        AccountSize = src.AccountSize;
+        RiskPercent = src.RiskPercent;
+        AccountCurrency = src.AccountCurrency;
+        PnlCurrency = src.PnlCurrency;
+        RoundTripFeePerUnit = src.RoundTripFeePerUnit;
+        Band1 = src.Band1;
+        Band2 = src.Band2;
+        ProfileRows = src.ProfileRows;
+        ValueAreaPercent = src.ValueAreaPercent;
+        ProfileDelta = src.ProfileDelta;
+        ProfileWidthPercent = src.ProfileWidthPercent;
+        ProfileWholeSessions = src.ProfileWholeSessions;
     }
 
     // ------------------------------------------------------------------ posición larga/corta
@@ -299,7 +315,7 @@ public sealed class ChartDrawing
         _ => null,
     };
 
-    public void Render(SKCanvas canvas, ChartLayout layout, CandleSeries series, ChartTheme theme, int decimals)
+    public void Render(SKCanvas canvas, ChartLayout layout, CandleSeries series, ChartTheme theme, int decimals, ChartDrawingRuntime? runtime, TradeStore? trades = null, long generation = 0, bool concealSource = false)
     {
         if (Points.Count == 0 || !IsVisibleOn(series.Period)) return;
         var main = layout.Main;
@@ -431,13 +447,17 @@ public sealed class ChartDrawing
             case DrawingKind.ShortPosition:
                 RenderPosition(canvas, layout, series, theme, decimals, font);
                 break;
+            case DrawingKind.AnchoredVwap:
+            case DrawingKind.FixedRangeProfile:
+                if (trades != null && runtime != null) RenderTradeDrawing(canvas, layout, series, trades, theme, decimals, font, stroke, generation, concealSource, runtime);
+                break;
         }
 
         if (Selected)
         {
             using var h = new SKPaint { IsAntialias = true, Color = SKColors.White, Style = SKPaintStyle.Fill };
             using var hb = new SKPaint { IsAntialias = true, Color = theme.Selection, Style = SKPaintStyle.Stroke, StrokeWidth = 2 };
-            foreach (var (hx, hy) in HandlePositions(layout, series))
+            foreach (var (hx, hy) in HandlePositions(layout, series, runtime))
             {
                 canvas.DrawCircle(hx, hy, 4.5f, h);
                 canvas.DrawCircle(hx, hy, 4.5f, hb);
@@ -446,7 +466,7 @@ public sealed class ChartDrawing
 
         if (Locked && Selected)
         {
-            var (lx, ly) = HandlePositions(layout, series).FirstOrDefault();
+            var (lx, ly) = HandlePositions(layout, series, runtime).FirstOrDefault();
             DrawLock(canvas, lx + 9, ly - 14, theme.Selection);
         }
     }
@@ -482,8 +502,10 @@ public sealed class ChartDrawing
         double rr = riskAmt > 0 ? reward / riskAmt : 0;
         var ic = CultureInfo.InvariantCulture;
         string Ticks(double d) => tick > 0 ? $" · {Math.Round(d / tick).ToString("0", ic)} ticks" : "";
-        string Pct(double d) => entry != 0 ? $" · {(d / entry * 100).ToString("0.00", ic)}%" : "";
-        string Money(double d) => Quantity > 0 ? $" · {((double)Quantity * d).ToString("0.00", ic)}" : "";
+        string Pct(double d) => entry > 0 ? $" · {(d / entry * 100).ToString("0.00", ic)}%" : "";
+        var sizing = PositionSizing(inst);
+        string Money(double d) => sizing.IsValid && sizing.Quantity > 0
+            ? $" · {(sizing.Quantity * (decimal)d * inst.PointValue).ToString("0.00", ic)} {sizing.Currency} gross" : "";
         // las etiquetas se centran en la parte visible de la caja
         var plotRect = main.Rect;
         float vx0 = Math.Max(x0, plotRect.Left), vx1 = Math.Min(x1, plotRect.Right);
@@ -494,9 +516,13 @@ public sealed class ChartDrawing
         // la etiqueta del objetivo va del lado de afuera (arriba en la larga, abajo en la corta)
         DrawBox(canvas, font, cx, isLong ? yT - boxH - 4 : yT + 4, theme.UpCandle, tl);
         DrawBox(canvas, font, cx, isLong ? yS + 4 : yS - boxH - 4, theme.DownCandle, sl);
-        string mid = $"{(isLong ? "Long" : "Short")} {Format(entry, decimals)} · R:R {rr.ToString("0.00", ic)}" + (Quantity > 0 ? $" · Qty {Quantity.ToString(ic)}" : "") + (status.Length > 0 ? $" · {status}" : "");
+        string mid = $"{(isLong ? "Long" : "Short")} {Format(entry, decimals)} · R:R {rr.ToString("0.00", ic)}" +
+            (sizing.IsValid ? $" · Qty {sizing.Quantity.ToString(ic)}" : $" · {sizing.Limitation}") +
+            (status.Length > 0 ? $" · {status}" : "");
         var midCol = outcome == 1 ? theme.UpCandle : outcome == -1 ? theme.DownCandle : SKColors.White;
         DrawBox(canvas, font, cx, yE - boxH / 2, midCol, mid);
+        if (Selected && sizing.IsValid)
+            DrawBox(canvas, font, cx, yE + boxH, SKColors.White, $"Risk {sizing.Risk:0.00} · Reward {sizing.Reward:0.00} {sizing.Currency} · estimate, no orders", sizing.Limitation);
     }
 
     /// <summary>Cajita oscura con una o más líneas de texto, centrada en <paramref name="cx"/>.</summary>
@@ -561,9 +587,21 @@ public sealed class ChartDrawing
         return (ax, ay, bx, by);
     }
 
-    public IEnumerable<(float X, float Y)> HandlePositions(ChartLayout layout, CandleSeries series)
+    public IEnumerable<(float X, float Y)> HandlePositions(ChartLayout layout, CandleSeries series, ChartDrawingRuntime? runtime)
     {
         var main = layout.Main;
+        if (Kind == DrawingKind.FixedRangeProfile && Points.Count >= 2)
+        {
+            float y = ReferenceEquals(runtime?.Layout, layout) ? runtime?.ProfileGeometry?.MidY ?? main.Rect.MidY : main.Rect.MidY;
+            yield return (XOf(layout, series, Points[0].Time), y);
+            yield return (XOf(layout, series, Points[1].Time), y);
+            yield break;
+        }
+        if (Kind == DrawingKind.AnchoredVwap && runtime?.VwapAnchor is { } anchor && ReferenceEquals(runtime.Layout, layout))
+        {
+            yield return (anchor.X, anchor.Y);
+            yield break;
+        }
         if (IsPosition && Points.Count >= 3)
         {
             float x0 = XOf(layout, series, Points[0].Time), x1 = XOf(layout, series, Points[1].Time);
@@ -583,13 +621,13 @@ public sealed class ChartDrawing
     }
 
     /// <summary>Prueba si un punto toca el objeto. Devuelve el índice del manejador (-1 = el cuerpo).</summary>
-    public bool HitTest(ChartLayout layout, CandleSeries series, float x, float y, out int handle)
+    public bool HitTest(ChartLayout layout, CandleSeries series, ChartDrawingRuntime? runtime, float x, float y, out int handle)
     {
         handle = -1;
         if (Points.Count == 0 || !IsVisibleOn(series.Period)) return false;
         const float tol = 6;
         int k = 0;
-        foreach (var (hx, hy) in HandlePositions(layout, series))
+        foreach (var (hx, hy) in HandlePositions(layout, series, runtime))
         {
             if (Math.Abs(hx - x) <= tol && Math.Abs(hy - y) <= tol)
             {
@@ -612,6 +650,14 @@ public sealed class ChartDrawing
 
         switch (Kind)
         {
+            case DrawingKind.FixedRangeProfile:
+                return ReferenceEquals(runtime?.Layout, layout) && runtime?.ProfileGeometry is { } profile && profile.Contains(x, y);
+            case DrawingKind.AnchoredVwap:
+                if (runtime == null || !ReferenceEquals(runtime.Layout, layout)) return false;
+                for (int i = 1; i < runtime.VwapGeometry.Count; i++)
+                    if (DistanceToSegment(x, y, runtime.VwapGeometry[i - 1].Center.X, runtime.VwapGeometry[i - 1].Center.Y,
+                            runtime.VwapGeometry[i].Center.X, runtime.VwapGeometry[i].Center.Y, false) <= tol) return true;
+                return false;
             case DrawingKind.HorizontalLine:
                 return Math.Abs(y - y0) <= tol;
             case DrawingKind.HorizontalRay:

@@ -85,6 +85,13 @@ public interface ITrackedOrderReplacement
     bool IsReplacementPending(Order order);
 }
 
+/// <summary>Optional durable, account-scoped client identity, available before a placement acknowledgment and unchanged after it.
+/// Null means the adapter has no durable client identity; callers retain the exchange ID and process-local fallbacks.</summary>
+public interface IStableOrderIdentity
+{
+    string? StableOrderIdentityOf(Order order);
+}
+
 /// <summary>
 /// Real-order permission, decided when an order is sent (never only when an account is chosen): on a real account an
 /// order that opens, adds to or reverses a position needs its connection enabled with real orders allowed. Reductions

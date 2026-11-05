@@ -1,5 +1,7 @@
 [Español](README.es.md) · [English](README.md) · **中文**
 
+> **KVP 候选集成：**隔离的 `feat/kvp-adoption` 源码分支集成了已批准的完整数据、指标、图表/深度、编辑、练习、提醒、行情商、存储及代理功能，并明确保留数据质量和安全边界。这不代表已安装应用或已发布二进制。请参阅[完整范围与验收记录](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04)和[完整署名及许可证](THIRD_PARTY_NOTICES.md#kvp-capability-reference)。不包含 KVP 品牌/目录迁移、KVP Windows 分发/更新器或仅限 Windows 的外部 VPFM 启动器；未经端到端测量，不宣称 Metal 加速。
+
 <div align="center">
 
 # Trading Hub

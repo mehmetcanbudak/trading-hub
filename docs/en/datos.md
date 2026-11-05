@@ -19,6 +19,9 @@ Trade files are organized by connection, instrument and UTC day. Synthetic quote
 
 An instrument shows connection, day count and disk usage. Selecting it lists days newest-first with size-proportional bars and the complete date range/size. Use ⌘/⇧-click for multiple days.
 
+The **Lossless archive** action accepts up to 31 selected closed UTC days. It captures their stored metadata locally, provides progress/cancellation and creates lossless archives without deleting/replacing the original raw files. Copy/read/codec failures remain visible. Day/replay/delete selection is frozen while that owned operation settles; true Quit cancels/drains it before shared history resources leave.
+Each archived day has a bounded **512 MiB** input limit. An oversized/changed/unreadable day is a visible failure with the original still authoritative, not a partial success or permission to remove raw history.
+
 ### Delete days
 
 Select an instrument and days, choose **Delete** and confirm. Only those days are removed, but **deletion cannot be undone**. Do not delete data being recorded or needed by running strategies.
@@ -27,7 +30,7 @@ Select an instrument and days, choose **Delete** and confirm. Only those days ar
 
 1. Select an instrument and one or more stored days.
 2. Choose **Replay**, or double-click a day.
-3. A new ▶ tab starts at the first selected day's first trade and runs to the last day's end. It copies the active chart's period/indicators and loads earlier history from the same local files.
+3. A new ▶ **Practice** tab is created with its own run ID, replay clock, portfolio, account, orders, fills and journal. It starts paused, copies the selected period/indicators and warms up only from local files.
 
 | Control | Action |
 |---|---|
@@ -36,7 +39,13 @@ Select an instrument and days, choose **Delete** and confirm. Only those days ar
 | Clock / progress | Current replay timestamp; Completed at the end. |
 | +5 min / +30 min / +1 h | Skip forward. |
 
-Replay drawings are not persisted and replay tabs are not restored with the workspace. Simulated orders **are** recorded in simulated-account history.
+Practice drawings and tabs are not restored with the ordinary workspace. Practice fills belong **only** to their run: concurrent normal simulation and other practice runs do not share their balance, positions or journal. A practice chart cannot select a real account or use cross-trading/micro-contract routing.
+
+Strategy Apply, period changes and temporary **Visual only** mode preserve the exact practice account's ledger and owned native-style protection. Visual mode uses a separate private shadow account; it cannot restore the practice memento into that shadow or move its fills into normal simulation. Returning to practice reattaches only the same run/data/account. Natural completion first drains the final queued input batch; producer-finished alone is not completed execution.
+
+**Random / blind practice** selects among locally available instruments/days with an explicit seed and duration. Reusing the same candidates, seed, fee configuration and source data reproduces selection and estimated fills. Blind mode conceals instrument/date/absolute-time labels until **Reveal** or the run ends; it is UI concealment, not security isolation. The underlying local data remains accessible to its owner.
+
+**End / close practice position** stops that run's strategies and pending tape, cancels owned orders and closes its practice position at the run's available mark. **Result / journal** identifies run/seed, fees and source quality/resolution/corrections. Fill/fee assumptions are deterministic simulation, not a promise of executable market liquidity. Results and fills never enter the normal simulated-account history.
 
 ## Download history
 
@@ -78,11 +87,11 @@ Import Dukascopy/HistData or MetaTrader/TradingView exports for index CFDs, fore
 
    These are fixed offsets, not an automatic daylight-saving conversion; verify the file's actual convention.
 4. Choose one or more CSV/TXT files using **Import files**.
-5. Review imported trades/days, range and inferred tick size. The instrument appears under imported history and in Backtesting. The stored feed ID remains `importado` for compatibility.
+5. Review imported rows/days, range, inferred display price increment and the explicit **quality summary**. The instrument appears under imported history and in Backtesting. The stored feed ID remains `importado` for compatibility.
 
 Filename inference: USATECH/NAS100/NSX/US100/USTEC/NDX → US100; USA500/SPX/US500 → US500; USA30/US30/DJI/WS30 → US30; DEU/GER/DAX → GER40; XAU/GOLD → XAUUSD. EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, NZDUSD, XAGUSD and BTCUSD retain their pair names. Otherwise the first filename word is used; if that is empty, the legacy ticker `IMPORTADO` is retained so existing imports do not split across renamed identities.
 
-CFDs do not have centralized exchange volume. Quotes become unit-volume ticks with an inferred side; bars become synthetic trades. Suitable for price charts and price-based backtests, **not authoritative footprint/delta analysis**.
+CFDs do not have centralized exchange execution volume. Quote observations retain prices/timestamps but store unknown executed volume as **zero**, with explicit synthetic/inferred-side/partial provenance and no observed trades/footprint. OHLC paths are synthetic; reported volume, including a genuine zero, is retained, while missing volume is labelled and stored as zero rather than invented unit volume. Inferred/unknown bar intervals and source availability remain explicit. These inputs can support price analysis, but cannot silently become authoritative footprint/delta, individual large trades or causally known intrabar execution.
 
 ## Databento
 
@@ -119,6 +128,43 @@ The same applies to Tradovate + Databento / Only Tradovate / Databento. Combined
 History is under `~/Library/Application Support/Trading Hub/Ticks`, then connection (`rithmic`, `databento`, `importado`, etc.), instrument and day. **Open folder** opens Finder. See [Storage](instalacion.md#where-your-data-lives).
 
 Compatibility headers and feed IDs are intentionally retained, including recognized Spanish CSV column aliases and the historical live-trade CSV export column names. Translating identifiers would break existing consumers; new report prose and UI are English.
+
+## Raw, compact and candle history
+
+**Settings → History and depth** independently configures recent individual-trade retention, bounded initial raw/compact memory and measured compact display buckets of **1, 5, 15 or 60 minutes**. Larger raw windows do not turn older candle history into raw executions. Old raw days can be losslessly compressed; legacy binary history remains readable, with provenance-aware records preserving exact decimal quantities and availability times. Compact caches and candle fallbacks never overwrite finer raw history.
+
+Quality follows the data through trade stores, candles, SDK indicators, replay and strategy/backtest inputs:
+
+| Quality | Meaning |
+|---|---|
+| Raw | Individual source events at the available feed resolution. Aggressor side can still be unknown/inferred. |
+| Compact | Measured aggregate buckets with an explicit resolution; not individual large trades or event-complete footprint. |
+| Synthetic | OHLC-derived/quote-modelled estimates, not observed exchange executions. |
+| Inferred side | A side classification estimate; measured price/quantity is not permission to describe the side as observed. |
+| Partial | Known missing constituent/time/retention coverage. It is not an empty successful complete interval. |
+
+Mixed coverage remains mixed. Missing footprint/delta is distinct from a genuine zero. A chart period finer than its compact source cannot recover unavailable intrabucket timing or extrema. Capacity limits, cache fallback and unavailable/corrupt source warnings stay visible; they do not silently describe truncated history as complete.
+
+Current-month candle maintenance fetches missing coverage plus a bounded correction overlap rather than downloading the whole month on every request. Completed candle/profile cache identities include provider/instrument, period/configuration, source quality and correction identity. Corrupt or mismatched cache data is recomputed from intact source; same-length price-distribution corrections cannot reuse stale profiles.
+
+## Opt-in candle maintenance and offline catalogs
+
+**Settings → Candle maintenance** is off until enabled. Select/track instruments, lookback years, interval and per-cycle limits; Run and Cancel operate on the same owned, nonoverlapping worker. A disabled keeper performs no background network work. Earlier failed month/resolution slots remain retryable and visible even if later slots succeed; successfully retained finer history is not replaced by candle summaries.
+
+The instrument selector can use saved provider-scoped catalogs offline. Rows disclose provider, captured time and stale/offline status; **Use saved instrument catalogs only** prevents discovery/ticker requests. Browsing or selecting a data connection never silently chooses another trading account. A retained incompatible account stays visibly unavailable until a compatible account is explicitly selected.
+
+## Recorded depth and heatmap fidelity
+
+Depth recording is a separate **off-by-default** opt-in. Enabling a heatmap or Orderbook Delta does not grant recording permission. Recording stores received L2 changes and bounded exact snapshots with provider/venue, availability time, sequence information where supplied, gaps and I/O status. Memory, queue, selected-history, disk and retention budgets bound the recorder; loss, quota truncation and failures remain visible.
+
+The **Liquidity heatmap** displays resting size, not traded volume, clips to the selected visible chart/range and shades missing/stale intervals. Opening an older visible range loads its recorded depth without replacing another chart's selection. A reconnect, missing refresh, source change or write failure cannot become a fresh carried-forward zero book. Snapshot/BBO-only and partial provider coverage remain labelled; none of this is exchange-event-complete or MBO history.
+
+A fresh, validated **known side** can remain visible in the DOM even when the other side is unavailable. That is explicitly **missing / partial book** coverage, not a complete two-sided snapshot: heatmap/Orderbook Delta analytics remain unavailable until their full-book requirements are met. The known side still expires at the freshness limit; disconnects, sequence gaps, invalid updates and a required new full refresh cannot be bypassed by an ordinary partial update.
+
+**Orderbook Delta** distinguishes sample-average (one equal vote per received usable snapshot), duration-average (known covered time only), last fresh snapshot and separate-side maximum. For example, bid/ask `10/2` for one second followed by `30/6` for three seconds gives sample-average `20/4` (delta 16), but four-second duration-average `25/5` (delta 20). A two-second staleness limit makes the terminal last book unavailable after three seconds; gaps are not carried forward.
+
+The aggregate crypto book is explicitly from its designated **first venue**, never a consolidated or failover book. Rithmic/AMP's available BBO is one level per side and needs fresh prices **and sizes on both sides** after reconnect before a refresh is advertised. Longbridge depth is partial/snapshot-based where its API does not establish continuous sequence coverage. Source labels and the supplied feed resolution are part of the interpretation.
+
 
 ## Interactive Brokers bars and offline history
 

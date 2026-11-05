@@ -1,3 +1,5 @@
+using Avalonia;
+using Avalonia.VisualTree;
 using Avalonia.Controls;
 using Avalonia.Input;
 
@@ -12,6 +14,7 @@ public sealed record HotkeyDef(string Id, string Group, string Name, string? Def
 /// </summary>
 public static class Hotkeys
 {
+    internal static readonly object ChartQuickEntryScope = new();
     public static readonly HotkeyDef[] All =
     {
         new("buy-market", "Trade", "Buy at market"),
@@ -41,6 +44,12 @@ public static class Hotkeys
         new("go-last", "Chart", "Go to latest price"),
         new("tool-hline", "Chart", "Draw horizontal line", "Alt+H"),
         new("tool-cursor", "Chart", "Cursor (release tool)"),
+        new("reset-view", "Chart", "Reset chart view", "Alt+R"),
+        new("rectangle-zoom", "Chart", "Rectangle zoom tool"),
+        new("toggle-session-lines", "Chart", "Show or hide session lines"),
+        new("chart-timezone", "Chart", "Chart timezone and clock"),
+        new("chart-shortcuts", "Chart", "Chart keyboard help"),
+        new("chart-quick-entry", "Chart", "Symbol or period quick entry"),
 
         new("layout-1", "Chart windows", "Single-chart layout"),
         new("layout-4", "Chart windows", "Four-chart layout"),
@@ -96,6 +105,10 @@ public static class Hotkeys
     public static string? Match(AppSettings s, KeyEventArgs e, TopLevel? top)
     {
         if (e.Key is Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin) return null;
+        if (top?.FocusManager?.GetFocusedElement() is TradingHub.App.Controls.ChartView { IsTextComposing: true }) return null;
+        // A chart-entry popup is navigation-only, even when a trade shortcut has strong modifiers.
+        for (Visual? node = top?.FocusManager?.GetFocusedElement() as Visual; node != null; node = node.GetVisualParent())
+            if (node is Control control && ReferenceEquals(control.Tag, ChartQuickEntryScope)) return null;
         bool typing = top?.FocusManager?.GetFocusedElement() is TextBox;
         bool strongModifier = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta)) != 0;
         bool functionKey = e.Key is >= Key.F1 and <= Key.F24;

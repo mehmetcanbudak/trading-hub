@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using TradingHub.Market;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.Rithmic;
 
@@ -111,8 +112,9 @@ public sealed record RithmicServer(string System, string Gateway, string Uri, in
 /// <summary>Arma la lista completa sistema × servidor preguntándole a cada servidor (no hace falta usuario).</summary>
 public static class RithmicDirectory
 {
-    public static async Task<List<RithmicServer>> DiscoverAsync(CancellationToken ct)
+    public static async Task<List<RithmicServer>> DiscoverAsync(CancellationToken ct, ProxyHandlerFactory? network = null)
     {
+        var capturedNetwork = network ?? new ProxyHandlerFactory(new NetworkProxyPolicy());
         var tasks = RithmicGateways.Known.Select(async g =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -120,7 +122,7 @@ public static class RithmicDirectory
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(TimeSpan.FromSeconds(8));
-                var systems = await RithmicClient.ListSystemsInfoAsync(g.Uri, cts.Token).ConfigureAwait(false);
+                var systems = await RithmicClient.ListSystemsInfoAsync(g.Uri, cts.Token, capturedNetwork).ConfigureAwait(false);
                 int ms = (int)sw.ElapsedMilliseconds;
                 return systems.Select(s => new RithmicServer(s.Name, g.Name, g.Uri, ms, s.Aggregated)).ToList();
             }
@@ -143,18 +145,24 @@ public sealed record RithmicResult(bool Ok, string Message, IReadOnlyList<string
 public sealed class RithmicClient : IAsyncDisposable
 {
     private readonly ClientWebSocket _ws = new();
+    private readonly HttpMessageInvoker _transport;
     private readonly SemaphoreSlim _send = new(1, 1);
     private CancellationTokenSource? _heartbeatCts;
 
     public string? LastError { get; private set; }
 
-    public static async Task<IReadOnlyList<string>> ListSystemsAsync(string uri, CancellationToken ct) =>
-        (await ListSystemsInfoAsync(uri, ct).ConfigureAwait(false)).Select(s => s.Name).ToList();
+    public RithmicClient(ProxyHandlerFactory? network = null)
+    {
+        _transport = (network ?? new ProxyHandlerFactory(new NetworkProxyPolicy())).CreateWebSocketInvoker();
+    }
+
+    public static async Task<IReadOnlyList<string>> ListSystemsAsync(string uri, CancellationToken ct, ProxyHandlerFactory? network = null) =>
+        (await ListSystemsInfoAsync(uri, ct, network).ConfigureAwait(false)).Select(s => s.Name).ToList();
 
     /// <summary>Sistemas del servidor y si cada uno ofrece cotizaciones agregadas.</summary>
-    public static async Task<IReadOnlyList<(string Name, bool Aggregated)>> ListSystemsInfoAsync(string uri, CancellationToken ct)
+    public static async Task<IReadOnlyList<(string Name, bool Aggregated)>> ListSystemsInfoAsync(string uri, CancellationToken ct, ProxyHandlerFactory? network = null)
     {
-        await using var c = new RithmicClient();
+        await using var c = new RithmicClient(network);
         await c.ConnectAsync(uri, ct).ConfigureAwait(false);
         await c.SendAsync(new ProtoWriter().Int(Rp.TemplateId, Rp.RequestSystemInfo).String(Rp.UserMsg, "tradinghub"), ct).ConfigureAwait(false);
         var m = await c.ReceiveAsync(ct).ConfigureAwait(false);
@@ -168,14 +176,14 @@ public sealed class RithmicClient : IAsyncDisposable
     /// Si conviene pedir cotizaciones agregadas: solo si el sistema las ofrece (si se piden en uno que no,
     /// Rithmic rechaza el login con «an error occurred while parsing data»).
     /// </summary>
-    public static async Task<bool?> AggregatedQuotesFor(string uri, string system, bool wanted, CancellationToken ct)
+    public static async Task<bool?> AggregatedQuotesFor(string uri, string system, bool wanted, CancellationToken ct, ProxyHandlerFactory? network = null)
     {
         if (!wanted) return null;
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(8));
-            var info = await ListSystemsInfoAsync(uri, cts.Token).ConfigureAwait(false);
+            var info = await ListSystemsInfoAsync(uri, cts.Token, network).ConfigureAwait(false);
             return info.Any(s => s.Name == system && s.Aggregated) ? true : null;
         }
         catch (Exception) when (!ct.IsCancellationRequested)
@@ -191,7 +199,7 @@ public sealed class RithmicClient : IAsyncDisposable
         _ws.Options.KeepAliveTimeout = TimeSpan.FromSeconds(10);
         using var t = CancellationTokenSource.CreateLinkedTokenSource(ct);
         t.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs, 2000, 120000)));
-        await _ws.ConnectAsync(new Uri(uri), t.Token).ConfigureAwait(false);
+        await _ws.ConnectAsync(new Uri(uri), _transport, t.Token).ConfigureAwait(false);
     }
 
     public async Task SendAsync(ProtoWriter w, CancellationToken ct)
@@ -310,6 +318,7 @@ public sealed class RithmicClient : IAsyncDisposable
         }
 
         _ws.Dispose();
+        _transport.Dispose();
     }
 }
 
@@ -357,11 +366,12 @@ public sealed partial class RithmicFeed : IMarketDataFeed
         return SpecFor(root)?.PointValue ?? SpecFor(contract)?.PointValue ?? 1;
     }
 
-    public RithmicFeed(RithmicSettings settings)
+    public RithmicFeed(RithmicSettings settings, ProxyHandlerFactory? network = null)
     {
         _settings = settings;
-        _ticker = new RithmicTickerPlant(() => _settings, (inst, c) => _contracts[inst.Key] = c);
-        _history = new RithmicHistoryPlant(() => _settings);
+        var capturedNetwork = network ?? new ProxyHandlerFactory(new NetworkProxyPolicy());
+        _ticker = new RithmicTickerPlant(() => _settings, (inst, c) => _contracts[inst.Key] = c, capturedNetwork);
+        _history = new RithmicHistoryPlant(() => _settings, capturedNetwork);
     }
 
     /// <summary>Cambió la configuración (servidor, usuario…): las mismas sesiones vuelven a entrar con los datos nuevos.</summary>

@@ -69,9 +69,50 @@ public sealed class BacktestEngine : IStrategyHost
     public BacktestResult Run(CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
-        var result = new BacktestResult { Strategy = Strategy.DisplayName(_strategy.GetType()), Settings = _s.Clone() };
+        var result = new BacktestResult
+        {
+            Strategy = Strategy.DisplayName(_strategy.GetType()), Settings = _s.Clone(),
+            DataQuality = _data.Quality, ResolutionSeconds = _data.ResolutionSeconds,
+            SourceIdentity = _data.SourceIdentity, CorrectionRevision = _data.CorrectionRevision,
+            HasKnownAvailability = _data.HasKnownAvailability,
+        };
         try
         {
+            if (!_data.HasKnownAvailability)
+            {
+                result.DataWarning = "Source availability is unknown. Reimport declared source timing before running a causal backtest.";
+                throw new InvalidOperationException(result.DataWarning);
+            }
+            CandleSeries? resolutionHelper = null;
+            if (_data.ResolutionSeconds > 0)
+            {
+                if (!_period.IsTimeBased)
+                    throw new InvalidOperationException("Interval summaries require time bars containing the complete source window.");
+                resolutionHelper = new CandleSeries(_inst, _period, 1, _session);
+                long lastFrom = long.MinValue, lastTo = long.MinValue;
+                for (int i = _data.Start; i < _data.End; i++)
+                {
+                    if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
+                    var provenance = _data.Provenance(i);
+                    if (provenance.ResolutionSeconds <= 0) continue;
+                    var window = provenance.SourceWindow(new DateTime(_data.TimeTicks(i), DateTimeKind.Utc));
+                    if (window.From.Ticks == lastFrom && window.To.Ticks == lastTo) continue;
+                    if (!resolutionHelper.IsResolutionCompatible(_data.TimeTicks(i), provenance))
+                        throw new InvalidOperationException("The requested period does not contain the complete source interval. Use an aligned time period at least as coarse as its source.");
+                    lastFrom = window.From.Ticks; lastTo = window.To.Ticks;
+                }
+            }
+            var causalOrder = _data.GetCausalOrder();
+            if ((_data.Quality & (DataQuality.Compact | DataQuality.Synthetic)) != 0)
+            {
+                result.DataWarning = "This run contains compact or synthetic events, not individual observed trades. Input-event counts and intrabar paths may be estimates. Orders cannot fill from interval facts predating their submission; same-window anchors cannot execute a newly learned close signal.";
+                _log.Add(result.DataWarning);
+            }
+            else if ((_data.Quality & DataQuality.Partial) != 0 || _data.ResolutionSeconds > 0)
+            {
+                result.DataWarning = "This run contains partial coverage or interval-resolved timing. Event ordering and coverage must not be interpreted as a complete individual-trade tape.";
+                _log.Add(result.DataWarning);
+            }
             _strategy.InternalInit(this);
             if (ContextHistory is { Count: > 0 } history && _data.End > _data.Start)
             {
@@ -81,31 +122,38 @@ public sealed class BacktestEngine : IStrategyHost
             }
 
             result.Parameters = _strategy.GetParameters();
-            _builder = new BarBuilder(_inst, _period, _session, _strategy.UseFootprint);
+            _builder = new BarBuilder(_inst, _period, _session, _strategy.UseFootprint, resolutionHelper);
             bool ticks = _strategy.WantsTicks;
-            for (int i = _data.Start; i < _data.End; i++)
+            for (int offset = 0; offset < _data.Count; offset++)
             {
-                if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
-                _index = i;
+                if ((offset & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
+                int i = causalOrder?[offset] ?? _data.Start + offset;
+                _index = _data.Start + offset;
                 long t = _data.TimeTicks(i), p = _data.PriceTicks(i);
-                _timeTicks = t;
+                var provenance = _data.Provenance(i);
+                long availableTicks = _data.AvailableTimeTicks(i);
+                _timeTicks = Math.Max(_timeTicks, availableTicks);
 
                 // 1) cierre de vela (la estrategia decide con lo que había hasta el cierre)
                 var closed = _builder.Roll(t, p);
-                if (closed != null) OnBarClosed(closed);
+                if (closed != null)
+                {
+                    if (closed.AvailableAt.Ticks < _timeTicks) closed.AvailableAt = Time;
+                    OnBarClosed(closed);
+                }
                 // la fecha de sesión solo cambia al empezar la sesión siguiente: convertir de zona horaria en cada tick
                 // costaba casi tanto como el resto del motor
-                if (t >= _nextSessionTicks)
+                if (_timeTicks >= _nextSessionTicks)
                 {
-                    var day = _session.SessionDate(new DateTime(t, DateTimeKind.Utc));
-                    _nextSessionTicks = NextSessionTicks(day, t);
+                    var day = _session.SessionDate(Time);
+                    _nextSessionTicks = NextSessionTicks(day, _timeTicks);
                     if (day != _sessionDay)
                     {
                         bool first = _sessionDay == default;
                         _sessionDay = day;
                         if (!first)
                         {
-                            _submitIndex = i - 1;
+                            _submitIndex = _index - 1;
                             _strategy.InternalSession(day);
                         }
                     }
@@ -113,14 +161,15 @@ public sealed class BacktestEngine : IStrategyHost
 
                 // 2) ejecuciones con esta operación
                 _priceTicks = p;
-                if (_orders.Count > 0) ProcessFills(i, p, t);
+                if (_orders.Count > 0) ProcessFills(_index, p, _timeTicks, provenance.ResolutionSeconds > 0,
+                    availableTicks - (long)provenance.ResolutionSeconds * TimeSpan.TicksPerSecond);
 
                 // 3) la operación entra en la vela en formación
-                _builder.Append(t, p, _data.Volume(i), _data.Side(i), _data.IsSynthetic(i));
+                _builder.Append(t, p, _data.Volume(i), _data.Side(i), provenance);
                 if (_pos != 0) TrackExcursion(p);
                 if (ticks)
                 {
-                    _submitIndex = i;
+                    _submitIndex = _index;
                     _strategy.InternalTick(_data.Get(i));
                 }
             }
@@ -197,7 +246,7 @@ public sealed class BacktestEngine : IStrategyHost
 
     // ----------------------------------------------------------------- ejecuciones
 
-    private void ProcessFills(int i, long p, long t)
+    private void ProcessFills(int i, long p, long t, bool interval, long sourceFrom)
     {
         long slip = _s.SlippageTicks;
         bool touch = _s.LimitFill == LimitFillMode.Touch;
@@ -205,6 +254,7 @@ public sealed class BacktestEngine : IStrategyHost
         foreach (var o in snapshot)
         {
             if (!o.IsActive || o.SubmittedAt >= i) continue;
+            if (interval && sourceFrom < o.Time.Ticks) continue;
             long fill;
             bool buy = o.Side == OrderSide.Buy;
             long level = _inst.ToTicks(o.Price);

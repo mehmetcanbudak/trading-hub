@@ -28,8 +28,9 @@ internal static class NonKvpStudiesScene
         foreach (string evidence in new[] { "observed", "estimated", "missing", "zero-gaps" })
         {
             var instrument = new Instrument { Symbol = "STUDIES-" + evidence.ToUpperInvariant(), FeedId = "sim", TickSize = 1, VolumeStep = 1 };
-            var data = new InstrumentData(instrument, new SimulatedFeed());
             var start = new DateTime(2026, 10, 29, 0, 0, 0, DateTimeKind.Utc);
+            var feed = new KvpSceneFeed("sim", instrument) { Now = start.AddMinutes(336 * 30) };
+            var data = new InstrumentData(instrument, feed);
             long id = 1;
             for (int bar = 0; bar < 336; bar++)
             {
@@ -38,12 +39,17 @@ internal static class NonKvpStudiesScene
                 foreach (var (offset, side, volume) in new[] { (-3, TradeSide.Sell, 75m), (0, TradeSide.None, 20m), (3, TradeSide.Buy, 65m), (1, TradeSide.Buy, 12m) })
                 {
                     long tradeId = evidence == "observed" || evidence == "zero-gaps" && bar >= 48 ? id : -id;
-                    data.Trades.Add(new Trade(tradeId, time.AddSeconds(id++ % 20), evidence == "zero-gaps" ? 0 : center + offset, volume, side));
+                    var provenance = tradeId < 0
+                        ? new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide, 60, "explicit-study-ohlc", ObservedTradeCount: 0)
+                        : new TradeProvenance(DataQuality.Raw, SourceIdentity: "explicit-study-prints");
+                    data.Trades.Add(new Trade(tradeId, time.AddSeconds(id++ % 20), evidence == "zero-gaps" ? 0 : center + offset, volume, side, provenance));
                 }
             }
             using var model = new ChartModel(data, ChartPeriod.M1, new ChartSettings());
             bool estimate = evidence == "estimated";
             var flow = new AnchoredFlowVwap { Mode = evidence == "zero-gaps" ? AnchoredFlowVwap.AnchorMode.Manual : AnchoredFlowVwap.AnchorMode.Swing, SwingRadius = 2, Swing = AnchoredFlowVwap.SwingKind.Low, Weight = AnchoredFlowVwap.FlowWeight.Volume, AllowEstimated = estimate };
+            if (evidence == "zero-gaps")
+                flow.ManualUtc = start.AddMinutes(48 * 30).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
             var refill = new RefillZones { MinimumVolume = 25, PriceGrouping = 2, AbsorptionOnly = false, AllowEstimated = estimate, MaximumLifetime = 40 };
             var profile = new CompositeVolumeProfile { Period = CompositeVolumeProfile.ProfilePeriod.Session, PriceGrouping = 2, AllowEstimated = estimate, ShowTestedPocs = true };
             Indicator[] studies = { flow, refill, profile,
@@ -52,10 +58,10 @@ internal static class NonKvpStudiesScene
                 new QtCamarilla() };
             var slots = studies.Select(study => model.AddIndicator(study, applyDefaultColors: false)).ToArray();
             Check(slots.All(slot => slot.Error == null), evidence + ": all six real studies calculate without errors: " + string.Join("; ", slots.Where(s => s.Error != null).Select(s => s.Error)));
-            Check(evidence == "zero-gaps" ? flow.AnchorBar == 0 : flow.AnchorBar >= 0 && flow.ConfirmationBar > flow.AnchorBar, evidence + ": explicit history start or closed retrospective swing");
+            Check(evidence == "zero-gaps" ? flow.AnchorBar == 48 : flow.AnchorBar >= 0 && flow.ConfirmationBar > flow.AnchorBar, evidence + ": explicit known-data anchor or closed confirmed swing");
             Check(evidence == "missing" ? !flow.IsAvailable && refill.Zones.Count == 0 && profile.Profiles.All(p => p.Total == 0)
                 : flow.IsAvailable && refill.Zones.Count > 0 && profile.Profiles.Any(p => p.Total > 0), evidence + ": calculations reflect actual evidence availability");
-            Check(evidence switch { "observed" => flow.Coverage.HasFlag(StudyCoverage.Observed), "estimated" => flow.Coverage.HasFlag(StudyCoverage.Estimated), _ => flow.Coverage.HasFlag(StudyCoverage.MissingBars) }, evidence + ": fidelity is textual and truthful");
+            Check(evidence switch { "observed" or "zero-gaps" => flow.Coverage.HasFlag(StudyCoverage.Observed), "estimated" => flow.Coverage.HasFlag(StudyCoverage.Estimated), _ => flow.Coverage.HasFlag(StudyCoverage.MissingBars) }, evidence + ": fidelity is textual and truthful");
             if (evidence == "zero-gaps")
             {
                 var series = (OptionalValueDataSeries)flow.DataSeries[0];

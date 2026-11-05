@@ -78,6 +78,8 @@ dotnet run --project tools/TradingHub.UiSnapshot -- <output> 4 <scene> [<scene>.
 
 The number is initial loading seconds. With no scenes, Trading is captured. Assertion scenes return nonzero on failure. Existing diagnostic scenes may retain Spanish console wording; scene names are stable test identifiers.
 
+`--check-script-monitor` is a separate early entry with its own real dispatcher and fresh six-root fixture, preserved unchanged from reviewed startup commit `85c43954ebd4cf6acccda850cc86f356c2bdf9f5`. Its eight compiler/monitor/disposal cases and both workflow steps remain; the reported pass belongs to that commit, not an automatically repeated KVP result. The normal KVP authoring/shutdown scenes additionally exercise owned Pine/CLI/private-store drains.
+
 | Scene | Coverage |
 |---|---|
 | trading, accounts, strategies, live, data, connections, settings | Navigate and capture the section. |
@@ -94,6 +96,16 @@ The number is initial loading seconds. With no scenes, Trading is captured. Asse
 | connections+rithmic, connections+amp | Profile/server selector. |
 | trading+… | layout2/layout2r/layout3/layout4/layout6; history<hours>[+period]/historyall; jitter; float; brackets; drawings; drawsettings; links; toolbar; trader; accounts; crossdemo; strategy; domfloat; domsettings. |
 | strategies+… | backtest, optimize, wfo, code, history, reports, portfolio, claudefloat, claude, claudelab; append +File to select a class/file. |
+| kvp-operations | Actual history/depth settings; opt-in root keeper cache-write failure/rendered failed-month/retry/cursor recovery; preview/stage/restart relocation controls with cancellation/permission/hash faults. |
+| kvp-proxy | Actual settings policy, parsed provider HTTP history and authenticated WebSocket/chart consumers, captured reconnect contexts and failed-proxy no-fallback. |
+| kvp-chart, kvp-chart-accounts | Actual typed text/keyboard/IME/navigation/drawing controls; different-provider/composite account preservation and actual workspace restore without implicit routing. |
+| kvp-studies | Complete approved study groups through real catalog/settings/renderer consumers and independent numerical examples; repeat with `TRADINGHUB_LANG=es` and `zh-CN`. |
+| kvp-authoring | Built-in source resources/fork/edit/rename/delete/real compilation, recursive content monitoring and explicitly approved fake Pine drafting. |
+| kvp-depth-history | Real archive/cache/provenance and depth sink/writer/selected-reader/heatmap/Orderbook Delta consumers, corrections, gaps, stale/quota/I/O coverage. |
+| kvp-providers | Actual Longbridge/aggregate/Bybit configured consumers against loopback/injected fakes, truthful account fields, owned ACKs and credential retirement. |
+| kvp-replay-alerts | Actual practice/reveal/end/result and compiled-strategy consumers, isolated run journals, causal availability, notification consent/persistence/retry/revocation. |
+| kvp-shutdown, kvp-shutdown-platform | **Standalone processes only:** real default terminal drains held Bybit, cached Longbridge requests/PKCE loopback/browser callbacks, Pine/compiler/pending-start and global private-store work; new requests/second red-close cannot force replacement/desktop exit early. |
+| kvp-performance | Warmed actual CPU calculation/raster frames and wide-book writer/selected-history/heatmap resource measurements; no real provider or claimed Metal kernel. |
 
 
 For safety/quit coverage, use a fresh fixture with all six storage overrides and the sleep guard disabled, as in [the dashboard reproduction command](TRANSLATION_STATUS.md#reproduce). The `safety` scene includes `RunQuit`; `quit` is not a separate assertion scene.
@@ -120,10 +132,10 @@ These commands are reproduction instructions, not claims that the scenarios pass
 Isolation behavior:
 
 - Sleep guard is off and a fake JSON Keychain replaces real Keychain access.
-- Without explicit script-directory overrides, scripts are copied to temporary folders, never edited in place.
-- Without a data override, configuration/history is copied into temporary storage; Rithmic history is excluded, account history resets, API keys/real permissions are sanitized and Rithmic uses a local fake server.
+- Missing overrides receive fresh, empty owned fixture folders under the output fixture root. Personal scripts, settings, credentials, account history and market files are never copied into a scenario.
+- External/default providers are disabled and real-order permissions/keys sanitized; explicitly configured scene-owned fake endpoints/feeds are the only provider substrate. Rithmic uses a local fake server.
 - A process-held lock serializes scenarios that share temporary fixture names, waiting up to 20 minutes.
-- Explicit environment overrides are respected. Prefer fresh temporary fixtures for reproducible checks rather than copying personal state.
+- Explicit environment overrides are respected and checked against protected production paths. Prefer six fresh SSD runtime roots; keep screenshots/receipts on an evidence volume when storage is constrained.
 
 **strategies+claude / strategies+claudelab invoke the real CLI and can consume paid allowance unless TRADINGHUB_CLAUDE_CLI points to a fake executable.** Never run them casually as localization tests.
 
@@ -145,6 +157,7 @@ Diagnostics: TRADINGHUB_SNAP_INDICATORS="Name|Other" adds selected studies; TRAD
 | TRADINGHUB_ALPACA_DATA / _ALPACA_TRADING / _ALPACA_STREAM | Alpaca test endpoints, each with the full TRADINGHUB prefix. |
 | TRADINGHUB_TRADOVATE_REST / _TRADOVATE_WS / _TRADOVATE_MD | Tradovate test endpoints. |
 | TRADINGHUB_CTRADER_URL / TRADINGHUB_DATABENTO_URL | cTrader/Databento test endpoints. |
+| TRADINGHUB_BYBIT_REST / _BYBIT_MARKET_REST / _BYBIT_MARKET_WS | Isolated Bybit account/public-data endpoints; never point acceptance at a real account. |
 
 ## Add a provider
 
@@ -214,3 +227,35 @@ Other actual-host fake scenes are `nonkvp-studies`, `nonkvp-oi`, `nonkvp-ib`, `n
 The built App's import syntax is documented in [Data](datos.md#interactive-brokers-bars-and-offline-history). Its research stdio entry is `dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --research-mcp --approval <reviewed-approval-id>`; the ID must be an existing reviewed 32-hex GUID (`N` format), not a token or arbitrary bypass. Missing/invalid approval exits 2; initialization does not grant permission to call tools. Use fake servers for verification, not a real account.
 
 Parent acceptance additionally requires English/source review, source/catalog candidate/template and original 3,300-entry coverage gates, English/safety/Quit and multilingual UI scenes, tracker tests, corrected visuals and research cancellation stress. Build/publish output must contain `LICENSE`, `THIRD_PARTY_NOTICES.md` and every `licenses/` text; inspect actual output and publish trees rather than treating csproj declarations as proof. Existing platform/native/provider release gates still apply.
+
+## Selected KVP integration reproduction
+
+The complete approved capability scope is integrated in the isolated `feat/kvp-adoption` worktree based at `e6fde5a065da9aa0fdcae15b69f2a94702819932`, not installed or merged by the implementation task. Source pin/archive/full license are in [Third-party notices](../../THIRD_PARTY_NOTICES.md#kvp-capability-reference). Branding/directory migration, KVP Windows distribution/updater and the external Windows-only VPFM launcher are excluded; native Windows compatibility remains a separate gate.
+
+Use the six isolated overrides above for **every** process, fake secret storage and sleep-off. One combined `dotnet build TradingHub.slnx -c Release --artifacts-path /owned/evidence/build` keeps all SDK bin/obj outputs external; fixture copy targets resolve real `GetTargetPath` rather than assuming the conventional layout. Stage the **complete** test/child-fixture, UiSnapshot and I18n runtime sets with matching SHA-256, size and modes. Keep the UI runtime's real repository ancestor context for guide/source checks. Run the **unfiltered built test DLL** and report that exact command/counts, not an unrun canonical project command. Financial-timing fixtures must not repeat the known whole-suite external-HDD timeout conditions. If shared Data capacity is unhealthy, a separately verified task-owned bounded RAM filesystem can hold disposable fixtures; use sparse-capable APFS with sufficient headroom for the unchanged 512 MiB-plus-one-byte boundary. Never format an existing user disk or create a large backing image on the full Data volume. RAM functional tests do not certify physical storage durability. Receipts/captures stay external; no local package growth or deletion of other worktrees, personal data, caches or rollback copies.
+
+For example, after the complete staged runtime has been verified:
+
+```bash
+dotnet vstest /absolute/staged/TradingHub.Tests.dll \
+  '--logger:trx;LogFileName=full.trx' --ResultsDirectory:/owned/evidence/tests
+```
+
+Wait for all feature/consumer writers to settle before the combined Release build and full suite; do not run competing builds against half-finished files. Run the complete tracker, English/source/docs, original dictionary and current-candidate/template gates without filtering existing failures, changing timeouts or resetting historical baselines. Then run English, safety, inherited non-KVP consumers and every `kvp-*` scene above sequentially. Give each shutdown mode its own process and six fresh roots because it really disposes the default AppServices composition.
+
+For that prebuilt/staged layout, `python3 tools/check_english_translation.py --ui-snapshot-assembly /absolute/staged/TradingHub.UiSnapshot.dll` runs the **same unchanged** complete Roslyn source guard plus documentation/self checks without an implicit second build. Without this optional argument, the established default command is unchanged. A missing/invalid assembly is an error, not a source-gate bypass.
+
+The ordinary safety scene's reused fake desktop proves the finite protection decision/ACK state machine, not actual shared-service disposal. The separate default-composition shutdown scenes prove owned pending/active drains, no late publication, rejected new work, idempotence and replacement-before-exit ordering. Hiding the main window retains source monitoring and active services.
+
+`kvp-performance` compares the same correct production CPU implementation's uncached recomputation against retained per-chart caches, including warm-ups, managed allocations and complete Skia raster frames; it does not execute an excluded reference-fork or fixed-base binary. It separately measures wide-book input through the owned writer, fresh selected reader and visible heatmap, retaining actual disk bytes/drops/time and clearly labelled rate/retention projections. For actual external-volume I/O, explicitly select a fresh owned external `TRADINGHUB_DATA_DIR` for this process while keeping all other private roots/TMPDIR isolated; do not label RAM I/O as physical disk performance. Display-only versus recording-enabled is a resource-cost comparison, not equivalent persistence. No GPU/Metal improvement is inferred from a kernel-only estimate; the bounded CPU reference remains. See [the measured workload and limits](TRANSLATION_STATUS.md#apple-silicon-cpu-and-depth-measurements).
+
+Source-review export is explicit and separate from approval:
+
+```bash
+dotnet /absolute/staged/TradingHub.UiSnapshot.dll \
+  --source-fingerprints "$PWD" /path/to/individually-reviewed-paths.json /path/to/fingerprints.json
+```
+
+The input maps each reviewed relative `src/...cs` path to its own rationale. Export calls the existing, unchanged Roslyn `Structure` algorithm, including recursive template treatment; it does not edit or auto-approve the manifest. Read/review actual source and preserve the historical audit baseline/checkpoint before merging exact hashes. Bilingual additions belong in reviewed `tools/TradingHub.I18n/overrides.json`; publish with the existing provenance/collision process, retain all original upstream aliases, and re-extract the final source before complete coverage/template checks.
+
+Results belong in [the dashboard](TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04) only after observed receipt/UI evidence. Fake providers/CLIs do not certify real entitlements, OAuth/model access, installed/native Windows, physical power/thermal behavior, signatures/notarization, distribution or exchange-atomic protection.

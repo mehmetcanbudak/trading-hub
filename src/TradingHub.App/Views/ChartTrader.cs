@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using Material.Icons;
 using TradingHub.App.Controls;
 using TradingHub.App.Services;
+using TradingHub.Feeds;
 using TradingHub.Market;
 using TradingHub.Trading;
 
@@ -47,6 +48,7 @@ internal sealed class ChartTraderPanel : UserControl
     private readonly TextBlock _realWarning = new() { Text = "REAL ACCOUNT", Foreground = Brushes.OrangeRed, FontWeight = FontWeight.Bold, FontSize = 11, IsVisible = false };
     private readonly TextBlock _accountHint = new() { FontSize = 11, Height = 16, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Ui.Warn, IsVisible = false };
     private string _settingsKey = "";
+    private readonly List<Control> _executionControls = new();
     private bool _syncing;
 
     /// <param name="docked">En el panel de la derecha (junto al DOM): siempre abierto y del ancho del panel.</param>
@@ -115,6 +117,7 @@ internal sealed class ChartTraderPanel : UserControl
                 ? Ui.V(0, new TextBlock { Text = text, FontWeight = FontWeight.SemiBold, FontSize = 11.5, HorizontalAlignment = HorizontalAlignment.Center }, sub)
                 : new TextBlock { Text = text, FontSize = 11.5, HorizontalAlignment = HorizontalAlignment.Center };
             ToolTip.SetTip(b, tip);
+            _executionControls.Add(b);
             b.Click += (_, _) => onClick();
             return b;
         }
@@ -129,7 +132,7 @@ internal sealed class ChartTraderPanel : UserControl
              Trade("Sell Bid", _sellBid, "sell-soft", "Limit sell at bid (subject to liquidity)", () => AtBook(OrderDirections.Sell, ask: false))),
             (Trade("Cancel buys", null, "", "Cancel buy orders", () => CancelSide(OrderDirections.Buy)),
              Trade("Cancel sells", null, "", "Cancel sell orders", () => CancelSide(OrderDirections.Sell))),
-            (Trade("Cancel all", null, "", "Cancel all orders", () => _ = _host.AccountActionAsync(_chart, a => a.CancelAll(), "Orders canceled")),
+            (Trade("Cancel all", null, "", "Cancel all orders", () => _ = _host.AccountActionAsync(_chart, a => a.CancelAll(), "Cancel all orders")),
              Trade("Reverse", null, "", "Reverse position", () => _ = _host.ReverseAsync(_chart))));
         var be = Trade("Breakeven", null, "", "Moves stop to entry price", () => _ = _host.BracketActionAsync(_chart, b => b.MoveStopToBreakeven(), "Move stop to breakeven"));
         // parciales: cierran una parte a mercado; el stop y los objetivos se ajustan solos
@@ -145,7 +148,7 @@ internal sealed class ChartTraderPanel : UserControl
             partials.Children.Add(b);
             col += 2;
         }
-        var flat = Trade("Close position", null, "primary", "Closes position at market and cancels orders", () => _ = _host.AccountActionAsync(_chart, a => a.Flatten(), "Position closed"));
+        var flat = Trade("Close position", null, "primary", "Closes position at market and cancels orders", () => _ = _host.AccountActionAsync(_chart, a => a.Flatten(), "Close position"));
 
         // stop y objetivo automáticos (plantilla del instrumento donde se ejecuta)
         _brackets.IsCheckedChanged += (_, _) => EditTemplate(t => t.Enabled = _brackets.IsChecked == true);
@@ -258,7 +261,7 @@ internal sealed class ChartTraderPanel : UserControl
         _ = _host.AccountActionAsync(_chart, a =>
         {
             foreach (var o in a.ActiveOrders.Where(o => o.Direction == dir).ToList()) a.Cancel(o);
-        }, dir == OrderDirections.Buy ? "Buy orders canceled" : "Sell orders canceled");
+        }, dir == OrderDirections.Buy ? "Cancel buy orders" : "Cancel sell orders");
 
     private BracketTemplate? GetBracketTemplate() => _host.TradeData(_chart) is { } data ? _host.Services.Settings.BracketTemplateFor(data.Instrument.Key) : null;
 
@@ -434,6 +437,10 @@ internal sealed class ChartTraderPanel : UserControl
         var data = model.Data;
         var tradeData = _host.TradeData(_chart) ?? data;
         var inst = tradeData.Instrument;
+        var acc = _host.AccountOf(_chart);
+        bool dataOnly = data.Feed is AggregateFeed;
+        foreach (var control in _executionControls) control.IsEnabled = acc != null;
+        _cross.IsEnabled = !_chart.IsReplay && !dataOnly && !_chart.AccountSelectionUnavailable;
 
         // cuentas: la lista se rehace solo si cambió y la elegida se marca sin tocar las demás
         var accounts = _host.AccountOptions(_chart, data);
@@ -471,14 +478,20 @@ internal sealed class ChartTraderPanel : UserControl
             LoadTemplate(_host.Services.Settings.BracketTemplateFor(inst.Key));
         }
 
-        if (_docked) _chartLabel.Text = $"Trades on active chart: {_chart.Symbol} · {model.Period.DisplayName}";
+        if (_docked) _chartLabel.Text = $"Trades on active chart: {_chart.DisplaySymbol} · {model.Period.DisplayName}";
 
         // cuentas de Rithmic: si todavía no aparecen, se dice por qué (conectando, rechazo…). En los gráficos de Rithmic el
         // renglón queda reservado aunque esté vacío: que el aviso aparezca o se vaya nunca corre los botones de abajo
         var rithmic = _host.Services.RithmicStatusFor(data);
-        _accountHint.Text = rithmic ?? "";
-        ToolTip.SetTip(_accountHint, rithmic);
-        _accountHint.IsVisible = _host.Services.Connections.Enabled.Any(x => x.IsRithmic && x.MarketDataId == data.Instrument.FeedId);
+        string? accountHint = dataOnly
+            ? "DATA ONLY: Composite prices are not executable."
+            : _chart.AccountSelectionUnavailable ? "Selected account unavailable on this data connection. Choose a compatible account explicitly."
+            : _chart.IsReplay ? "Practice replay: isolated account and fills; no real orders."
+            : rithmic;
+        _accountHint.Text = accountHint ?? "";
+        ToolTip.SetTip(_accountHint, accountHint);
+        _accountHint.IsVisible = dataOnly || _chart.IsReplay || _chart.AccountSelectionUnavailable ||
+            _host.Services.Connections.Enabled.Any(x => x.IsRithmic && x.MarketDataId == data.Instrument.FeedId);
 
         _cross.Content = _chart.CrossSymbol is { } cs
             ? Ui.H(6, Ui.Icon(MaterialIconKind.SwapHorizontal, 14, Ui.Accent), new TextBlock { Text = cs, FontWeight = FontWeight.SemiBold })
@@ -503,8 +516,23 @@ internal sealed class ChartTraderPanel : UserControl
         _buyBid.Text = Px(tradeData.BestBid);
         _sellBid.Text = Px(tradeData.BestBid);
 
-        var acc = _host.AccountOf(_chart);
         var pos = acc?.Position;
+        if (acc == null)
+        {
+            _pnl.Text = _chart.AccountSelectionUnavailable ? "Account unavailable" : "Data only";
+            _pnl.Foreground = Ui.Text2;
+            _pnl.FontSize = 13;
+            _position.Text = "No executable account";
+            return;
+        }
+        if (!acc.PositionReady || !acc.OrdersReady)
+        {
+            _pnl.Text = !acc.PositionReady ? "Position unknown" : "Order state unknown";
+            _pnl.Foreground = Ui.Warn;
+            _pnl.FontSize = 13;
+            _position.Text = acc.LastError ?? "Awaiting complete account snapshots";
+            return;
+        }
         if (pos == null || pos.IsFlat)
         {
             decimal realized = Math.Round(pos?.RealizedPnL ?? 0, 2);

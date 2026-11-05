@@ -1,4 +1,5 @@
 using TradingHub.Market;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.Rithmic;
 
@@ -25,10 +26,12 @@ internal sealed class RithmicTickerPlant : IDisposable
         public long LastId;
         public OrderBookBuilder Book = new();
         public long LastBid = long.MinValue, LastAsk = long.MaxValue;
+        public bool FreshBid, FreshAsk, InitialSnapshotPublished;
         public string Key => Symbol + "|" + Exchange;
     }
 
     private readonly Func<RithmicSettings> _settings;
+    private readonly ProxyHandlerFactory _network;
     private readonly Action<Instrument, RithmicContract> _onContract;
     private readonly object _gate = new();
     private readonly Dictionary<string, Sub> _subs = new();
@@ -40,9 +43,10 @@ internal sealed class RithmicTickerPlant : IDisposable
     private TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource<(bool Ok, string Message)> _connected = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public RithmicTickerPlant(Func<RithmicSettings> settings, Action<Instrument, RithmicContract> onContract)
+    public RithmicTickerPlant(Func<RithmicSettings> settings, Action<Instrument, RithmicContract> onContract, ProxyHandlerFactory? network = null)
     {
         _settings = settings;
+        _network = network ?? new ProxyHandlerFactory(new NetworkProxyPolicy());
         _onContract = onContract;
     }
 
@@ -293,11 +297,11 @@ internal sealed class RithmicTickerPlant : IDisposable
             var conn = CancellationTokenSource.CreateLinkedTokenSource(stop);
             lock (_gate) _conn = conn;
             var ct = conn.Token;
-            var client = new RithmicClient();
+            var client = new RithmicClient(_network);
             try
             {
                 Broadcast(FeedStatus.Connecting, $"Connecting to Rithmic ({s.System})…");
-                var aggregated = await RithmicClient.AggregatedQuotesFor(s.Uri, s.System, s.AggregatedQuotes, ct).ConfigureAwait(false);
+                var aggregated = await RithmicClient.AggregatedQuotesFor(s.Uri, s.System, s.AggregatedQuotes, ct, _network).ConfigureAwait(false);
                 await client.ConnectAsync(s.Uri, ct, s.TimeoutMs).ConfigureAwait(false);
                 var login = await client.LoginAsync(s.User, s.Password, s.System, s.AppName, s.AppVersion, 1, ct, aggregated).ConfigureAwait(false);
                 Logins++;
@@ -324,6 +328,7 @@ internal sealed class RithmicTickerPlant : IDisposable
                         sub.Book = new OrderBookBuilder();
                         sub.LastBid = long.MinValue;
                         sub.LastAsk = long.MaxValue;
+                        sub.FreshBid = sub.FreshAsk = sub.InitialSnapshotPublished = false;
                     }
                 }
 
@@ -458,31 +463,50 @@ internal sealed class RithmicTickerPlant : IDisposable
             }
             case Rp.BestBidOffer:
             {
+                var receivedAt = DateTime.UtcNow;
+                long ssboe = m.Int(Rp.Ssboe);
+                var sourceTime = ssboe > 0
+                    ? DateTimeOffset.FromUnixTimeSeconds(ssboe).UtcDateTime.AddTicks(m.Int(Rp.Usecs) * 10)
+                    : receivedAt;
+                bool hasBid = m.Has(Rp.BidPrice) && m.Has(Rp.BidSize);
+                bool hasAsk = m.Has(Rp.AskPrice) && m.Has(Rp.AskSize);
                 foreach (var sub in ByContract(m.String(Rp.Symbol), m.String(Rp.Exchange)))
                 {
                     var inst = sub.Instrument;
                     DepthUpdate update;
                     lock (sub.Book)
                     {
-                        // solo mejor bid/ask: se borra el nivel anterior cuando cambia el precio
-                        if (m.Has(Rp.BidPrice))
+                        // BBO only: retire the previous level when a complete price/size report arrives.
+                        if (hasBid)
                         {
                             long bid = inst.ToTicks((decimal)m.Double(Rp.BidPrice));
                             if (sub.LastBid != long.MinValue && sub.LastBid != bid) sub.Book.Set(BookSide.Bid, sub.LastBid, 0);
                             sub.Book.Set(BookSide.Bid, bid, m.Int(Rp.BidSize));
                             sub.LastBid = bid;
+                            sub.FreshBid = true;
                         }
 
-                        if (m.Has(Rp.AskPrice))
+                        if (hasAsk)
                         {
                             long ask = inst.ToTicks((decimal)m.Double(Rp.AskPrice));
                             if (sub.LastAsk != long.MaxValue && sub.LastAsk != ask) sub.Book.Set(BookSide.Ask, sub.LastAsk, 0);
                             sub.Book.Set(BookSide.Ask, ask, m.Int(Rp.AskSize));
                             sub.LastAsk = ask;
+                            sub.FreshAsk = true;
                         }
 
-                        sub.Book.Uncross(m.Has(Rp.BidPrice) ? BookSide.Bid : BookSide.Ask);
-                        update = sub.Book.BuildUpdate(DateTime.UtcNow, 50);
+                        if (hasBid || hasAsk) sub.Book.Uncross(hasBid ? BookSide.Bid : BookSide.Ask);
+                        bool bothFresh = sub.FreshBid && sub.FreshAsk;
+                        bool fullRefresh = bothFresh && !sub.InitialSnapshotPublished;
+                        update = sub.Book.BuildUpdate(sourceTime, 1, fullRefresh: fullRefresh,
+                            providerId: RithmicFeed.FeedId, venue: RithmicFeed.FeedId,
+                            additionalCoverage: DepthCoverage.PartialBook | (bothFresh ? DepthCoverage.None : DepthCoverage.Missing),
+                            gapBefore: bothFresh ? DepthGapReason.None : DepthGapReason.Missing,
+                            message: ssboe > 0
+                                ? "Rithmic BBO only (one level per side); source timestamp supplied."
+                                : "Rithmic BBO only (one level per side); receive-time-only timestamp.",
+                            receivedAt: receivedAt);
+                        if (fullRefresh) sub.InitialSnapshotPublished = true;
                     }
 
                     foreach (var sink in Sinks(sub)) sink.OnDepth(inst, update);
@@ -512,13 +536,15 @@ internal sealed class RithmicTickerPlant : IDisposable
 internal sealed class RithmicHistoryPlant : IDisposable
 {
     private readonly Func<RithmicSettings> _settings;
+    private readonly ProxyHandlerFactory _network;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private RithmicClient? _client;
     private int _seq;
 
-    public RithmicHistoryPlant(Func<RithmicSettings> settings)
+    public RithmicHistoryPlant(Func<RithmicSettings> settings, ProxyHandlerFactory? network = null)
     {
         _settings = settings;
+        _network = network ?? new ProxyHandlerFactory(new NetworkProxyPolicy());
     }
 
     /// <summary>Veces que inició sesión (para las pruebas).</summary>
@@ -535,7 +561,7 @@ internal sealed class RithmicHistoryPlant : IDisposable
                 await DropAsync().ConfigureAwait(false);
                 var s = _settings();
                 if (string.IsNullOrWhiteSpace(s.User)) throw new InvalidOperationException("Configure your Rithmic username in Connections");
-                var c = new RithmicClient();
+                var c = new RithmicClient(_network);
                 try
                 {
                     await c.ConnectAsync(s.Uri, ct, s.TimeoutMs).ConfigureAwait(false);

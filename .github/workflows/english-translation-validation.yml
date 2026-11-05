@@ -77,6 +77,8 @@ jobs:
             dotnet tools/TradingHub.I18n/bin/Release/net10.0/TradingHub.I18n.dll coverage tools/TradingHub.I18n/provenance.json "src/TradingHub.App/Localization/$language.json"
             if ($LASTEXITCODE -ne 0) { throw "Translation coverage failed: $language" }
           }
+      - name: Verify custom-indicator hot reload and disposal
+        run: dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll --check-script-monitor
       - name: Exercise Windows UI, safety and quit scenarios
         shell: pwsh
         run: |
@@ -221,6 +223,8 @@ jobs:
           for language in es zh-CN; do
             dotnet tools/TradingHub.I18n/bin/Release/net10.0/TradingHub.I18n.dll coverage tools/TradingHub.I18n/provenance.json "src/TradingHub.App/Localization/$language.json"
           done
+      - name: Verify custom-indicator hot reload and disposal
+        run: dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll --check-script-monitor
       - name: Exercise English UI, safety and quit scenarios
         shell: bash
         env:

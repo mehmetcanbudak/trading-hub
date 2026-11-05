@@ -38,8 +38,8 @@ public static class HistorySources
         var files = new List<string>(2);
         foreach (var folder in Folders(feedId))
         {
-            var path = TickFile.DayPath(root, folder, symbol, day);
-            if (File.Exists(path) && new FileInfo(path).Length > 16) files.Add(path);
+            var path = TickFile.ExistingDayPath(root, folder, symbol, day);
+            if (path != null && new FileInfo(path).Length > 16) files.Add(path);
         }
             if (feedId == IbBarImport.FeedId)
             {
@@ -75,6 +75,63 @@ public static class HistorySources
         return null;
     }
 
+    internal static string DefaultSourceIdentity(string folder, string symbol) =>
+        folder is "binance-futures" or "binance-spot" or "bybit-linear" or "agregado" ? folder :
+        folder == "oanda" ? "oanda:legacy-untyped" :
+        folder == "ctrader" || folder.StartsWith("ctrader-", StringComparison.Ordinal) ? folder + ":" + symbol + ":bid-quote" :
+        folder + ":" + symbol;
+
+    internal static Trade AnnotateSource(in Trade trade, string folder, string sourceIdentity)
+    {
+        if (trade.Provenance.SourceIdentity != null) return trade;
+        bool legacy = trade.Id >= 0 && trade.Provenance.Quality == DataQuality.Raw && string.IsNullOrEmpty(trade.Provenance.SourceEventId);
+        var provenance = trade.Provenance with { SourceIdentity = sourceIdentity };
+        if (legacy && (folder is "oanda" or CsvImport.FeedId or "ctrader" || folder.StartsWith("ctrader-", StringComparison.Ordinal)))
+            provenance = new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide | DataQuality.Partial, 0,
+                sourceIdentity, trade.Provenance.CorrectionRevision, 0, HasKnownAvailability: folder != "oanda");
+        else if (legacy && folder is "binance-futures" or "binance-spot" or "agregado")
+            provenance = new TradeProvenance(DataQuality.Compact | DataQuality.Partial, SourceIdentity: sourceIdentity, ObservedTradeCount: 0,
+                SourceEventId: folder == "agregado" ? null : trade.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        else if (legacy && folder == "bybit-linear")
+            provenance = provenance with { Quality = provenance.Quality | DataQuality.Partial };
+        return new Trade(trade.Id, trade.Time, trade.Price, trade.Volume, trade.Side, provenance);
+    }
+
+    internal static List<Trade> ReadSourceFile(string path, string folder, string symbol, bool requireComplete = false)
+    {
+        var rows = TickFile.Read(path, out _, requireComplete);
+        string source = DefaultSourceIdentity(folder, symbol);
+        for (int i = 0; i < rows.Count; i++) rows[i] = AnnotateSource(rows[i], folder, source);
+        return TickFile.SortAndDedupe(rows);
+    }
+
+    /// <summary>Stream source days without materializing the raw day. Primary-source minute priority is retained.</summary>
+    internal static IEnumerable<Trade> EnumerateDay(string root, string feedId, string symbol, DateOnly day, CancellationToken ct)
+    {
+        if (feedId == IbBarImport.FeedId)
+        {
+            foreach (var trade in IbBarStore.ReadDay(root, symbol, day)) { ct.ThrowIfCancellationRequested(); yield return trade; }
+            yield break;
+        }
+        var files = DayFiles(root, feedId, symbol, day);
+        HashSet<long>? covered = files.Count > 1 ? [] : null;
+        foreach (var path in files)
+        {
+            string folder = Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(path))!);
+            string source = DefaultSourceIdentity(folder, symbol);
+            HashSet<long>? added = covered == null ? null : [];
+            foreach (var row in TickFile.Enumerate(path, requireOrdered: false))
+            {
+                ct.ThrowIfCancellationRequested();
+                long minute = row.Time.Ticks / TimeSpan.TicksPerMinute;
+                if (covered?.Contains(minute) == true) continue;
+                added?.Add(minute);
+                yield return AnnotateSource(row, folder, source);
+            }
+            if (added != null) covered!.UnionWith(added);
+        }
+    }
+
     /// <summary>
     /// Las operaciones de un día, ordenadas. Con más de una carpeta, la primera manda: de las demás solo entran los
     /// minutos en que la primera no tiene ninguna operación (por ejemplo, las horas en que la app estuvo cerrada y no grabó).
@@ -84,7 +141,8 @@ public static class HistorySources
         if (feedId == IbBarImport.FeedId) return IbBarStore.ReadDay(root, symbol, day);
         var files = DayFiles(root, feedId, symbol, day);
         if (files.Count == 0) return new List<Trade>();
-        var main = TickFile.SortAndDedupe(TickFile.Read(files[0]));
+        string mainFolder = Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(files[0]))!);
+        var main = ReadSourceFile(files[0], mainFolder, symbol);
         if (files.Count == 1) return main;
 
         var covered = new HashSet<long>();
@@ -93,7 +151,8 @@ public static class HistorySources
         bool added = false;
         for (int f = 1; f < files.Count; f++)
         {
-            var extra = TickFile.SortAndDedupe(TickFile.Read(files[f]));
+            string extraFolder = Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(files[f]))!);
+            var extra = ReadSourceFile(files[f], extraFolder, symbol);
             var minutes = new HashSet<long>();
             foreach (var t in extra)
             {
@@ -109,17 +168,8 @@ public static class HistorySources
 
         if (!added) return main;
 
-        // cada fuente numera a su manera: se ordena por hora (estable: a la misma hora, primero la que manda) y se
-        // vuelven a numerar, para que los ids sigan creciendo y no se repitan entre fuentes
-        var ordered = merged.Select((t, i) => (t, i)).OrderBy(x => x.t.Time.Ticks).ThenBy(x => x.i).Select(x => x.t).ToList();
-        long baseId = Math.Max(0, ordered.Min(t => t.Id));
-        for (int i = 0; i < ordered.Count; i++)
-        {
-            var t = ordered[i];
-            ordered[i] = new Trade(baseId + i, t.Time, t.Price, t.Volume, t.Side);
-        }
-
-        return ordered;
+        // Provider-qualified identity removes the need to renumber independent sources.
+        return merged.OrderBy(t => t.Time).ThenBy(t => t.Id).ToList();
     }
 
     /// <summary>

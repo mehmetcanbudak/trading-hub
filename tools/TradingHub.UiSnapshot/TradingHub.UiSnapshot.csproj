@@ -14,6 +14,8 @@
     <Compile Include="..\..\tests\TradingHub.Tests\FakeBrokers.cs" Link="FakeBrokers.cs" />
     <Compile Include="..\..\tests\TradingHub.Tests\FakeIbGateway.cs" Link="FakeIbGateway.cs" />
     <Compile Include="..\..\tests\TradingHub.Tests\SearchZoomFixture.cs" Link="SearchZoomFixture.cs" />
+    <Compile Include="..\..\tests\TradingHub.Tests\FakeProxyServer.cs" Link="FakeProxyServer.cs" />
+    <Compile Include="..\..\tests\TradingHub.Tests\DepthRecordingSizingFixture.cs" Link="DepthRecordingSizingFixture.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Headless" Version="$(AvaloniaVersion)" />

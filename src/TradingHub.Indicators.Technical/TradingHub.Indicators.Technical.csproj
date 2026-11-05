@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\TradingHub.Sdk\TradingHub.Sdk.csproj" />
+    <EmbeddedResource Include="**/*.cs" Exclude="bin/**;obj/**" LogicalName="TradingHub.IndicatorSource/%(Identity)" />
   </ItemGroup>
 </Project>

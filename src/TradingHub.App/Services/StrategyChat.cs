@@ -21,10 +21,15 @@ public sealed record StrategyChatRequest
     public string? Model { get; }
     public string? Effort { get; }
     public TradingViewAccess? TradingView { get; }
+    /// <summary>Draft-only handoffs disable execution/edit tools and all laboratory/research access.</summary>
+    public bool TextOnly { get; }
     public StrategyChatRequest(string prompt, string workDirectory, string systemPrompt, bool laboratory = false,
-        IReadOnlyList<string>? extraDirectories = null, string? model = null, string? effort = null, TradingViewAccess? tradingView = null)
+        IReadOnlyList<string>? extraDirectories = null, string? model = null, string? effort = null, TradingViewAccess? tradingView = null, bool textOnly = false)
     {
         Prompt = prompt; WorkDirectory = workDirectory; SystemPrompt = systemPrompt; Laboratory = laboratory;
+        if (textOnly && (laboratory || tradingView != null || extraDirectories is { Count: > 0 }))
+            throw new ArgumentException("Text-only requests cannot access laboratory, research or extra directories.");
+        TextOnly = textOnly;
         ExtraDirectories = System.Collections.Immutable.ImmutableArray.CreateRange(extraDirectories ?? Array.Empty<string>());
         Model = model; Effort = effort; TradingView = tradingView;
     }
@@ -61,7 +66,7 @@ public abstract class StrategyChatProcess : IStrategyChatBridge
     private CancellationTokenSource? _cancellation;
     private readonly TradingViewResearchService _research;
     protected StrategyChatProcess(TradingViewResearchService? research = null) => _research = research ?? TradingViewResearchService.Default;
-    private Process? _process;
+    private readonly object _lifetimeGate = new();
     private int _running;
     protected bool Terminal;
     protected bool Failed;
@@ -113,13 +118,26 @@ public abstract class StrategyChatProcess : IStrategyChatBridge
         if (Interlocked.CompareExchange(ref _running, 1, 0) != 0) throw new InvalidOperationException("An assistant response is already running.");
         var watch = Stopwatch.StartNew();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _cancellation = cancellation;
+        lock (_lifetimeGate) _cancellation = cancellation;
         var token = cancellation.Token;
         var diagnostics = new StringBuilder();
         Terminal = Failed = false; FinalText = ""; ReportedCost = null; Usage = null; ResetParser();
         void AccessChanged() { if (request.TradingView != null) Cancel(); }
         _research.AccessChanged += AccessChanged;
-        StrategyChatResult result;
+        Process? process = null;
+        Task feed = Task.CompletedTask, lines = Task.CompletedTask, errors = Task.CompletedTask;
+        Task? exit = null;
+        CancellationTokenRegistration termination = default;
+        Exception? failure = null;
+        Exception? terminationFailure = null;
+        int exitCode = 0;
+        int terminationRequested = 0;
+        void Terminate()
+        {
+            if (process == null || Interlocked.Exchange(ref terminationRequested, 1) != 0) return;
+            try { Kill(process); }
+            catch (Exception error) { Interlocked.CompareExchange(ref terminationFailure, error, null); }
+        }
         try
         {
             token.ThrowIfCancellationRequested();
@@ -133,37 +151,76 @@ public abstract class StrategyChatProcess : IStrategyChatBridge
             var cli = FindExecutable() ?? throw new FileNotFoundException($"{Engine} CLI was not found. Install it and sign in in Terminal, then retry.");
             var start = await BuildStartAsync(cli, request, token);
             token.ThrowIfCancellationRequested();
-            _process = Process.Start(start) ?? throw new IOException("The assistant process did not start.");
-            using var registration = token.Register(() => Kill(_process));
-            var errors = DrainDiagnosticsAsync(_process.StandardError, diagnostics);
-            var feed = FeedAsync(_process, Input(request), token);
-            var lines = ReadOutputAsync(_process.StandardOutput, token);
-            await Task.WhenAll(lines, feed, _process.WaitForExitAsync(token));
-            await errors;
+            process = Process.Start(start) ?? throw new IOException("The assistant process did not start.");
+            termination = token.Register(Terminate);
+            // Request cancellation asks the child to stop; it is never the child-exit/drain barrier.
+            exit = process.WaitForExitAsync(CancellationToken.None);
+            errors = DrainDiagnosticsAsync(process.StandardError, diagnostics, Terminate);
+            lines = ReadOutputAsync(process.StandardOutput, token, Terminate);
+            feed = FeedAsync(process, Input(request), token, Terminate);
+            await Task.WhenAll(lines, feed, errors, exit);
             token.ThrowIfCancellationRequested();
-            if (_process.ExitCode != 0) { Failed = true; FinalText = Append(FinalText, $"{Engine} exited with code {_process.ExitCode}. " + diagnostics.ToString().Trim()); }
-            if (!Terminal) { Failed = true; FinalText = Append(FinalText, $"{Engine} exited without a response. " + diagnostics.ToString().Trim()); }
-            bool login = Failed && new[] { "authenticate", "login", "not logged in", "OAuth", "unauthorized", "token_expired", "sign in", "refresh token" }.Any(value => FinalText.Contains(value, StringComparison.OrdinalIgnoreCase));
-            result = new(Failed ? StrategyChatStatus.Failed : StrategyChatStatus.Succeeded, FinalText, ReportedCost, watch.Elapsed.TotalSeconds, login, Usage);
         }
         catch (Exception ex)
         {
-            Kill(_process);
-            result = token.IsCancellationRequested ? new(StrategyChatStatus.Cancelled, "Response stopped.", null, watch.Elapsed.TotalSeconds, false)
-                : new(StrategyChatStatus.Failed, $"Could not run {Engine}: {ex.Message}", null, watch.Elapsed.TotalSeconds, false);
+            failure = ex;
+            Terminate();
         }
         finally
         {
             _research.AccessChanged -= AccessChanged;
-            _process?.Dispose(); _process = null; _cancellation = null;
-            Volatile.Write(ref _running, 0);
+            if (process != null)
+            {
+                try
+                {
+                    if (failure != null || token.IsCancellationRequested) Terminate();
+                    await (exit ??= process.WaitForExitAsync(CancellationToken.None)).ConfigureAwait(false);
+                    var redirected = Task.WhenAll(feed, lines, errors);
+                    try { await redirected.ConfigureAwait(false); }
+                    catch (Exception error)
+                    {
+                        if (redirected.IsFaulted) failure = Combine(failure, redirected.Exception ?? error);
+                        else failure ??= error;
+                    }
+                    exitCode = process.ExitCode;
+                }
+                finally
+                {
+                    termination.Dispose();
+                    process.Dispose();
+                }
+            }
+        }
+        StrategyChatResult result;
+        if (terminationFailure != null)
+            result = new(StrategyChatStatus.Failed, $"Could not terminate {Engine}: {terminationFailure.Message}", null, watch.Elapsed.TotalSeconds, false);
+        else if (failure is CliTerminationException)
+            result = new(StrategyChatStatus.Failed, failure.Message, null, watch.Elapsed.TotalSeconds, false);
+        else if (token.IsCancellationRequested)
+            result = new(StrategyChatStatus.Cancelled, "Response stopped." +
+                (failure is not null and not OperationCanceledException ? " " + failure.Message : ""), null, watch.Elapsed.TotalSeconds, false);
+        else if (failure != null)
+            result = new(StrategyChatStatus.Failed, $"Could not run {Engine}: {failure.Message}", null, watch.Elapsed.TotalSeconds, false);
+        else
+        {
+            if (exitCode != 0) { Failed = true; FinalText = Append(FinalText, $"{Engine} exited with code {exitCode}. " + diagnostics.ToString().Trim()); }
+            if (!Terminal) { Failed = true; FinalText = Append(FinalText, $"{Engine} exited without a response. " + diagnostics.ToString().Trim()); }
+            bool login = Failed && new[] { "authenticate", "login", "not logged in", "OAuth", "unauthorized", "token_expired", "sign in", "refresh token" }.Any(value => FinalText.Contains(value, StringComparison.OrdinalIgnoreCase));
+            result = new(Failed ? StrategyChatStatus.Failed : StrategyChatStatus.Succeeded, FinalText, ReportedCost, watch.Elapsed.TotalSeconds, login, Usage);
         }
         var finished = Finished;
-        Post(() => finished?.Invoke(result));
+        lock (_lifetimeGate)
+        {
+            _cancellation = null;
+            Volatile.Write(ref _running, 0);
+            Post(() => finished?.Invoke(result));
+        }
         return result;
     }
     private static string Append(string first, string second) => first.Length == 0 ? second : first + "\n" + second;
-    private async Task ReadOutputAsync(StreamReader reader, CancellationToken token)
+    private static Exception Combine(Exception? first, Exception second) =>
+        first == null || ReferenceEquals(first, second) ? second : new AggregateException(first, second);
+    private async Task ReadOutputAsync(StreamReader reader, CancellationToken token, Action terminate)
     {
         try
         {
@@ -174,19 +231,23 @@ public abstract class StrategyChatProcess : IStrategyChatBridge
                 catch (JsonException) { /* A terminal protocol event is still required. */ }
             }
         }
-        catch { Kill(_process); throw; }
+        catch { terminate(); throw; }
     }
-    private static async Task FeedAsync(Process process, string prompt, CancellationToken token)
+    private static async Task FeedAsync(Process process, string prompt, CancellationToken token, Action terminate)
     {
         try { await process.StandardInput.WriteAsync(prompt.AsMemory(), token); await process.StandardInput.FlushAsync(token); }
-        catch { Kill(process); throw; }
+        catch { terminate(); throw; }
         finally { process.StandardInput.Close(); }
     }
-    private static async Task DrainDiagnosticsAsync(StreamReader reader, StringBuilder output)
+    private static async Task DrainDiagnosticsAsync(StreamReader reader, StringBuilder output, Action? terminate = null)
     {
-        var buffer = new char[2048]; int count;
-        while ((count = await reader.ReadAsync(buffer)) != 0)
-            if (output.Length < 16384) output.Append(buffer, 0, Math.Min(count, 16384 - output.Length));
+        try
+        {
+            var buffer = new char[2048]; int count;
+            while ((count = await reader.ReadAsync(buffer)) != 0)
+                if (output.Length < 16384) output.Append(buffer, 0, Math.Min(count, 16384 - output.Length));
+        }
+        catch { terminate?.Invoke(); throw; }
     }
     protected static async Task<string> HelpAsync(string cli, string workDir, CancellationToken token, params string[] args)
     {
@@ -194,13 +255,47 @@ public abstract class StrategyChatProcess : IStrategyChatBridge
         start.Environment["PATH"] = Path.GetDirectoryName(Path.GetFullPath(cli)) + Path.PathSeparator + start.Environment["PATH"];
         using var process = Process.Start(start) ?? throw new IOException("Could not inspect CLI capabilities.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        using var registration = timeout.Token.Register(() => Kill(process));
-        process.StandardInput.Close();
+        Exception? terminationFailure = null;
+        int terminationRequested = 0;
+        void Terminate()
+        {
+            if (Interlocked.Exchange(ref terminationRequested, 1) != 0) return;
+            try { Kill(process); }
+            catch (Exception error) { Interlocked.CompareExchange(ref terminationFailure, error, null); }
+        }
+        using var registration = timeout.Token.Register(Terminate);
         var stdout = new StringBuilder(); var stderr = new StringBuilder();
-        await Task.WhenAll(DrainDiagnosticsAsync(process.StandardOutput, stdout), DrainDiagnosticsAsync(process.StandardError, stderr), process.WaitForExitAsync(timeout.Token));
+        Task output = Task.CompletedTask, errors = Task.CompletedTask;
+        Task? exit = null;
+        Exception? failure = null;
+        try
+        {
+            exit = process.WaitForExitAsync(CancellationToken.None);
+            output = DrainDiagnosticsAsync(process.StandardOutput, stdout, Terminate);
+            errors = DrainDiagnosticsAsync(process.StandardError, stderr, Terminate);
+            process.StandardInput.Close();
+            await Task.WhenAll(output, errors, exit).WaitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception error) { failure = error; Terminate(); }
+        finally
+        {
+            if (failure != null || timeout.IsCancellationRequested) Terminate();
+            await (exit ??= process.WaitForExitAsync(CancellationToken.None)).ConfigureAwait(false);
+            var redirected = Task.WhenAll(output, errors);
+            try { await redirected.ConfigureAwait(false); }
+            catch (Exception error) { failure = Combine(failure, redirected.Exception ?? error); }
+        }
+        if (terminationFailure != null) throw new CliTerminationException("Could not terminate CLI capability inspection.", terminationFailure);
+        if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         if (process.ExitCode != 0) throw new InvalidOperationException("CLI capability inspection failed: " + stderr);
         return stdout + "\n" + stderr;
     }
-    public void Cancel() { _cancellation?.Cancel(); Kill(_process); }
-    private static void Kill(Process? process) { try { if (process is { HasExited: false }) process.Kill(true); } catch (InvalidOperationException) { } }
+    public void Cancel() { lock (_lifetimeGate) _cancellation?.Cancel(); }
+    private static void Kill(Process process)
+    {
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+        catch (InvalidOperationException) when (process.HasExited) { /* The child exited between inspection and termination. */ }
+        catch (System.ComponentModel.Win32Exception) when (process.HasExited) { /* Another stop path already terminated this child. */ }
+    }
+    private sealed class CliTerminationException(string message, Exception inner) : IOException(message, inner);
 }

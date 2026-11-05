@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using TradingHub.Market;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.Alpaca;
 
@@ -31,15 +32,21 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 {
     public const string FeedId = "alpaca";
     private readonly AlpacaSettings _s;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(60) };
+    private readonly HttpMessageInvoker _socketInvoker;
+    private readonly HttpClient _http;
     private readonly SemaphoreSlim _rate = new(1, 1);
     private DateTime _lastCall = DateTime.MinValue;
     private long _liveId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    public AlpacaFeed(AlpacaSettings settings)
+    public AlpacaFeed(AlpacaSettings settings, ProxyHandlerFactory? network = null)
     {
         _s = settings;
+        network ??= new ProxyHandlerFactory(new NetworkProxyPolicy());
+        var handler = network.CreateHandler();
+        handler.AllowAutoRedirect = false;
+        _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
+        _socketInvoker = network.CreateWebSocketInvoker();
         _http.DefaultRequestHeaders.Add("APCA-API-KEY-ID", settings.KeyId.Trim());
         _http.DefaultRequestHeaders.Add("APCA-API-SECRET-KEY", settings.Secret.Trim());
     }
@@ -252,7 +259,7 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
                 using (var c = CancellationTokenSource.CreateLinkedTokenSource(conn.Token))
                 {
                     c.CancelAfter(TimeSpan.FromSeconds(15));
-                    await ws.ConnectAsync(new Uri(Stream), c.Token).ConfigureAwait(false);
+                    await ws.ConnectAsync(new Uri(Stream), _socketInvoker, c.Token).ConfigureAwait(false);
                 }
 
                 await SendAsync(ws, JsonSerializer.Serialize(new { action = "auth", key = _s.KeyId.Trim(), secret = _s.Secret.Trim() }), conn.Token).ConfigureAwait(false);
@@ -358,5 +365,9 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
         return (true, n > 0 ? "Credentials OK: consolidated SIP trade history is available (SPY, QQQ…)." : "Credentials OK, but no recent SPY trades were returned.");
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _http.Dispose();
+        _socketInvoker.Dispose();
+    }
 }

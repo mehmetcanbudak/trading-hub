@@ -27,13 +27,18 @@ public class SessionVolumeProfile : Indicator
         [Display(Name = "Bid / Ask")] BidAsk,
     }
 
+    public enum RowSizing { TickCount, TargetCount }
+    public enum ProfileLineStyle { Solid, Dash, Dot, DashDot, DashDotDot }
+
     private sealed class Profile
     {
         public int StartBar;
         public int EndBar;
         public int CommittedEnd = -1;
-        public readonly Dictionary<decimal, (decimal Bid, decimal Ask)> Committed = new();
-        public SortedDictionary<decimal, (decimal Bid, decimal Ask)> Levels = new();
+        public readonly Dictionary<decimal, (decimal Volume, decimal Bid, decimal Ask)> Committed = new();
+        public SortedDictionary<decimal, (decimal Volume, decimal Bid, decimal Ask)> Levels = new();
+        public StudyCoverage CommittedCoverage, Coverage;
+        public decimal RowStep;
         public decimal Poc;
         public decimal Vah;
         public decimal Val;
@@ -44,6 +49,10 @@ public class SessionVolumeProfile : Indicator
     private readonly List<Profile> _profiles = new();
     private ProfilePeriod _period = ProfilePeriod.Session;
     private int _valueArea = 70;
+    private int _last = -1;
+    private bool _allowInferred;
+    private RowSizing _rowSizing; private int _ticksPerRow = 1, _rowCount = 100;
+    private readonly RenderPen _pocPen = new(Color.Gold), _valueAreaPen = new(Color.SteelBlue, 1, System.Drawing.Drawing2D.DashStyle.Dash);
 
     public SessionVolumeProfile() : base(true)
     {
@@ -82,10 +91,33 @@ public class SessionVolumeProfile : Indicator
 
     [Display(Name = "Show VAH / VAL", GroupName = "Visualization", Order = 90)]
     public bool ShowValueAreaLines { get; set; } = true;
+    [Display(Name = "Allow explicitly inferred aggressors", GroupName = "Calculation")]
+    public bool AllowInferredAggressors { get => _allowInferred; set { _allowInferred = value; RecalculateValues(); } }
+    [Display(Name = "Row sizing", GroupName = "Calculation")] public RowSizing Rows { get => _rowSizing; set { _rowSizing = value; RecalculateValues(); } }
+    [Display(Name = "Ticks per row", GroupName = "Calculation"), Range(1, 100000)] public int TicksPerRow { get => _ticksPerRow; set { _ticksPerRow = Math.Clamp(value, 1, 100000); RecalculateValues(); } }
+    [Display(Name = "Target rows (maximum 4096)", GroupName = "Calculation"), Range(2, 4096)] public int RowCount { get => _rowCount; set { _rowCount = Math.Clamp(value, 2, 4096); RecalculateValues(); } }
+    [Display(Name = "POC line width", GroupName = "Visualization"), Range(1, 10)] public int PocLineWidth { get; set; } = 1;
+    [Display(Name = "POC line style", GroupName = "Visualization")] public ProfileLineStyle PocLineStyle { get; set; } = ProfileLineStyle.Solid;
+    [Display(Name = "Value area line width", GroupName = "Visualization"), Range(1, 10)] public int ValueAreaLineWidth { get; set; } = 1;
+    [Display(Name = "Value area line style", GroupName = "Visualization")] public ProfileLineStyle ValueAreaLineStyle { get; set; } = ProfileLineStyle.Dash;
+    [Browsable(false)] public decimal LatestRowStep => _profiles.Count == 0 ? 0 : _profiles[^1].RowStep;
+    [Browsable(false)] public int LatestRowCount => _profiles.Count == 0 ? 0 : _profiles[^1].Levels.Count;
+    [Browsable(false)] public decimal LatestTotal => _profiles.Count == 0 ? 0 : _profiles[^1].Total;
+    [Browsable(false)] public decimal LatestPoc => _profiles.Count == 0 ? 0 : _profiles[^1].Poc;
+    [Browsable(false)] public decimal LatestValueAreaHigh => _profiles.Count == 0 ? 0 : _profiles[^1].Vah;
+    [Browsable(false)] public decimal LatestValueAreaLow => _profiles.Count == 0 ? 0 : _profiles[^1].Val;
+    [Browsable(false)] public StudyCoverage Coverage => _profiles.Count == 0 ? 0 : _profiles[^1].Coverage;
+    [Browsable(false)] public string Status => FootprintStudyData.Label(Coverage);
 
-    protected override void OnRecalculate() => _profiles.Clear();
+    protected override void OnRecalculate() { _profiles.Clear(); _last = -1; }
 
     protected override void OnCalculate(int bar, decimal value)
+    {
+        if (bar < _last) { OnRecalculate(); Clear(); }
+        int from = bar == _last ? bar : _last + 1;
+        for (int b = from; b <= bar; b++) { Step(b); _last = b; }
+    }
+    private void Step(int bar)
     {
         bool newProfile = bar == 0 || _profiles.Count == 0 || _period switch
         {
@@ -102,7 +134,7 @@ public class SessionVolumeProfile : Indicator
         while (p.CommittedEnd < bar - 1)
         {
             p.CommittedEnd++;
-            AddTo(p.Committed, p.CommittedEnd);
+            p.CommittedCoverage |= AddTo(p.Committed, p.CommittedEnd);
         }
         p.EndBar = bar;
 
@@ -115,19 +147,36 @@ public class SessionVolumeProfile : Indicator
         };
         if (!snapshotNeeded) return;
 
-        var levels = new Dictionary<decimal, (decimal Bid, decimal Ask)>(p.Committed);
-        AddTo(levels, bar);
-        p.Levels = new SortedDictionary<decimal, (decimal Bid, decimal Ask)>(levels);
+        var levels = new Dictionary<decimal, (decimal Volume, decimal Bid, decimal Ask)>(p.Committed);
+        p.Coverage = p.CommittedCoverage | AddTo(levels, bar);
+        var source = GetCandle(p.StartBar); decimal sourceStep = source.ProfileRowSize, tick = source.MarketTickSize;
+        decimal min = decimal.MaxValue, max = decimal.MinValue;
+        foreach (decimal price in levels.Keys) { min = Math.Min(min, price); max = Math.Max(max, price); }
+        decimal requested = Rows == RowSizing.TargetCount && levels.Count > 1 ? (max - min) / (RowCount - 1) : tick * TicksPerRow;
+        p.RowStep = Math.Max(1, decimal.Ceiling(requested / sourceStep)) * sourceStep;
+        p.Levels = new();
+        foreach (var (price, value) in levels)
+        {
+            decimal row = FootprintStudyData.Nearest(price, p.RowStep); p.Levels.TryGetValue(row, out var old);
+            p.Levels[row] = (old.Volume + value.Volume, old.Bid + value.Bid, old.Ask + value.Ask);
+        }
         Finish(p);
     }
 
-    private void AddTo(Dictionary<decimal, (decimal Bid, decimal Ask)> dict, int bar)
+    private StudyCoverage AddTo(Dictionary<decimal, (decimal Volume, decimal Bid, decimal Ask)> dict, int bar)
     {
-        foreach (var lvl in GetCandle(bar).GetAllPriceLevels())
+        var candle = GetCandle(bar); bool side = !candle.HasInferredSide || AllowInferredAggressors;
+        foreach (var lvl in candle.GetProfilePriceLevels())
         {
             dict.TryGetValue(lvl.Price, out var v);
-            dict[lvl.Price] = (v.Bid + lvl.Bid, v.Ask + lvl.Ask);
+            dict[lvl.Price] = (v.Volume + lvl.Volume, v.Bid + (side ? lvl.Bid : 0), v.Ask + (side ? lvl.Ask : 0));
         }
+        var coverage = StudyMath.Coverage(candle);
+        var frame = Period == ProfilePeriod.Week ? StudyTimeFrame.Week : Period == ProfilePeriod.Visible ? StudyTimeFrame.Chart : StudyTimeFrame.Day;
+        if (!candle.CanCalculateCausally || !StudyMath.IsContained(candle, frame)) coverage |= StudyCoverage.MissingBars;
+        if (!candle.HasObservedFootprint && !candle.HasAggregatedFootprint && candle.Volume != 0) coverage |= StudyCoverage.MissingBars;
+        else if ((candle.Quality & TradingHub.Market.DataQuality.Synthetic) != 0 && candle.HasObservedFootprint) coverage |= StudyCoverage.Incomplete;
+        return coverage;
     }
 
     private void Finish(Profile p)
@@ -136,7 +185,7 @@ public class SessionVolumeProfile : Indicator
         p.Total = 0;
         foreach (var (price, v) in p.Levels)
         {
-            var vol = v.Bid + v.Ask;
+            var vol = v.Volume;
             p.Total += vol;
             if (vol > p.MaxVolume)
             {
@@ -145,37 +194,27 @@ public class SessionVolumeProfile : Indicator
             }
         }
 
-        // área de valor expandiendo desde el POC
-        var prices = p.Levels.Keys.ToList();
-        if (prices.Count == 0) return;
-        int pocIdx = prices.IndexOf(p.Poc);
-        int up = pocIdx, dn = pocIdx;
-        decimal acc = Vol(p, prices[pocIdx]);
-        decimal target = p.Total * _valueArea / 100m;
-        while (acc < target && (up < prices.Count - 1 || dn > 0))
-        {
-            decimal vu = up < prices.Count - 1 ? Vol(p, prices[up + 1]) : -1;
-            decimal vd = dn > 0 ? Vol(p, prices[dn - 1]) : -1;
-            if (vu >= vd) acc += Vol(p, prices[++up]);
-            else acc += Vol(p, prices[--dn]);
-        }
-
-        p.Vah = prices[up];
-        p.Val = prices[dn];
+        var prices = p.Levels.Keys.ToArray();
+        if (prices.Length == 0) { p.Poc = p.Vah = p.Val = 0; return; }
+        var volumes = new decimal[prices.Length]; for (int i = 0; i < prices.Length; i++) volumes[i] = p.Levels[prices[i]].Volume;
+        var area = SparseStudyValueArea.Calculate(prices, volumes, Array.BinarySearch(prices, p.Poc), p.RowStep, p.Total * _valueArea / 100);
+        p.Vah = area.High; p.Val = area.Low;
     }
 
-    private static decimal Vol(Profile p, decimal price) => p.Levels.TryGetValue(price, out var v) ? v.Bid + v.Ask : 0;
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (ChartInfo == null || _profiles.Count == 0) return;
+        FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Session profile: {Status}", Color.LightSkyBlue);
         int first = FirstVisibleBarNumber, last = LastVisibleBarNumber;
         var container = ChartInfo.PriceChartContainer;
-        int rowH = Math.Max(1, (int)Math.Round(container.PriceRowHeight));
-        var font = new RenderFont("Arial", 7);
+        var font = FootprintStudyData.TinyFont; _pocPen.Color = PocColor; _valueAreaPen.Color = ValueAreaColor;
+        _pocPen.Width = Math.Clamp(PocLineWidth, 1, 10); _pocPen.DashStyle = (System.Drawing.Drawing2D.DashStyle)PocLineStyle;
+        _valueAreaPen.Width = Math.Clamp(ValueAreaLineWidth, 1, 10); _valueAreaPen.DashStyle = (System.Drawing.Drawing2D.DashStyle)ValueAreaLineStyle;
 
         foreach (var p in _profiles)
         {
+            int rowH = (int)Math.Round(Math.Clamp(Convert.ToDouble(container.PriceRowHeight) * (double)(p.RowStep / GetCandle(p.StartBar).ProfileRowSize), 1, Math.Max(1, ChartInfo.PriceChartContainer.Region.Height)));
             if (p.EndBar < first || p.StartBar > last || p.MaxVolume <= 0) continue;
             int x0 = ChartInfo.GetXByBar(p.StartBar, true);
             int x1 = ChartInfo.GetXByBar(p.EndBar, true) + container.BarsWidth;
@@ -183,7 +222,7 @@ public class SessionVolumeProfile : Indicator
 
             foreach (var (price, v) in p.Levels)
             {
-                decimal vol = v.Bid + v.Ask;
+                decimal vol = v.Volume;
                 int y = ChartInfo.GetYByPrice(price, true);
                 bool inVa = price <= p.Vah && price >= p.Val;
                 switch (Kind)
@@ -217,7 +256,7 @@ public class SessionVolumeProfile : Indicator
             if (ExtendPoc)
             {
                 xEnd = ChartInfo.GetXByBar(Math.Min(CurrentBar - 1, last), false);
-                for (int b = p.EndBar + 1; b < CurrentBar; b++)
+                for (int b = p.EndBar + 1; b <= Math.Min(last, CurrentBar - 1); b++)
                 {
                     var c = GetCandle(b);
                     if (c.Low <= p.Poc && c.High >= p.Poc)
@@ -228,10 +267,10 @@ public class SessionVolumeProfile : Indicator
                 }
             }
 
-            context.DrawLine(new RenderPen(PocColor, 1), x0, yPoc, Math.Max(x1, xEnd), yPoc);
+            context.DrawLine(_pocPen, x0, yPoc, Math.Max(x1, xEnd), yPoc);
             if (ShowValueAreaLines)
             {
-                var pen = new RenderPen(ValueAreaColor, 1, System.Drawing.Drawing2D.DashStyle.Dash);
+                var pen = _valueAreaPen;
                 int yVah = ChartInfo.GetYByPrice(p.Vah, true);
                 int yVal = ChartInfo.GetYByPrice(p.Val, true) + rowH;
                 context.DrawLine(pen, x0, yVah, x1, yVah);

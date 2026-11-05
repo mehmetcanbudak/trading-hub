@@ -60,6 +60,12 @@ public sealed class MainWindow : Window
         Trading = new TradingView(svc, SetStatus);
         _pages["trading"] = Trading;
         svc.Live.Trading = () => Trading;
+        Action<PineImportSource> reviewPine = source =>
+        {
+            Navigate("strategies");
+            if (Page("strategies") is StrategiesView strategies) _ = strategies.ReviewPineAsync(source);
+        };
+        svc.ReviewPineSource = reviewPine;
         svc.Live.Notice += text => Dispatcher.UIThread.Post(() => SetStatus(text));
         _pageDefs = new List<Page>
         {
@@ -77,11 +83,12 @@ public sealed class MainWindow : Window
         if (Os.IsWindows) SetUpWindows();
         Navigate("trading");
 
-        _svc.Scripts = new UserScripts(_svc.Catalog);
-        _svc.Scripts.Compiled += r => SetStatus(r.Success
-            ? $"Custom indicators compiled in {r.Elapsed.TotalMilliseconds:0} ms"
-            : $"Error compiling custom indicators: {r.Diagnostics.FirstOrDefault(d => d.Severity == "error")}");
-        _svc.Scripts.CompileAll();
+        var scripts = _svc.Scripts ??= new UserScripts(_svc.Catalog);
+        void OnScriptsCompiled(TradingHub.Scripting.ScriptCompileResult result) => SetStatus(result.Success
+            ? $"Custom indicators compiled in {result.Elapsed.TotalMilliseconds:0} ms"
+            : $"Error compiling custom indicators: {result.Diagnostics.FirstOrDefault(d => d.Severity == "error")}");
+        scripts.Compiled += OnScriptsCompiled;
+        if (scripts.LastResult == null) scripts.CompileAll();
 
         Log.Entry += e =>
         {
@@ -103,6 +110,7 @@ public sealed class MainWindow : Window
             {
                 try
                 {
+                    if (_svc.IsShuttingDown) return;
                     await _svc.Live.ResumeAtStartAsync();
                 }
                 catch (Exception ex)
@@ -135,6 +143,13 @@ public sealed class MainWindow : Window
             }
 
             _svc.Settings.Save();
+            if (e.CloseReason == WindowCloseReason.WindowClosing &&
+                App.Quit is { IsQuitting: true, IsTerminalComplete: false })
+            {
+                // A second red-close must not force a desktop Exit while UI-owned drains still need this dispatcher.
+                e.Cancel = true;
+                return;
+            }
             // la cruz roja no cierra Trading Hub: queda en la barra de menú, con las estrategias y los agentes trabajando
             // (⌘Q o «Salir de Trading Hub» del panel sí la cierran del todo)
             if (e.CloseReason == WindowCloseReason.WindowClosing && _svc.Settings.KeepInMenuBar && MenuBar.Current != null)
@@ -155,6 +170,12 @@ public sealed class MainWindow : Window
             }
 
             Trading.CloseFloating();
+        };
+        Closed += (_, _) =>
+        {
+            _timer.Stop();
+            scripts.Compiled -= OnScriptsCompiled;
+            if (ReferenceEquals(svc.ReviewPineSource, reviewPine)) svc.ReviewPineSource = null;
         };
     }
 
@@ -287,7 +308,9 @@ public sealed class MainWindow : Window
             Trading.OnThemeChanged();
             InvalidateVisual();
         };
-        var right = Ui.H(12, pnl, themeButton, conn);
+        var alerts = Ui.IconButton(MaterialIconKind.BellOutline, "Alerts / delivery status", Trading.OpenAlerts, 16);
+        alerts.Name = "OpenUnifiedAlerts";
+        var right = Ui.H(12, pnl, alerts, themeButton, conn);
         // Reserve the native Windows minimize, maximize and close buttons.
         void PlaceRight() => right.Margin = new Thickness(0, 0, 14 + (Os.IsWindows && WindowState != WindowState.FullScreen ? WindowsCaptionButtonsWidth : 0), 0);
         PlaceRight();
@@ -338,6 +361,7 @@ public sealed class MainWindow : Window
 
     internal void Navigate(string id)
     {
+        if (_svc.IsShuttingDown) return;
         var def = _pageDefs.FirstOrDefault(p => p.Id == id);
         if (def == null) return;
         if (!_pages.TryGetValue(id, out var page))
@@ -437,6 +461,13 @@ public sealed class MainWindow : Window
 
         var go = new NativeMenuItem("Go") { Menu = new NativeMenu() };
         foreach (var p in _pageDefs) go.Menu.Add(Item(p.Title, () => Navigate(p.Id), p.Gesture));
+        go.Menu.Add(new NativeMenuItemSeparator());
+        go.Menu.Add(Item("Alerts / delivery status…", Trading.OpenAlerts));
+        go.Menu.Add(Item("Random / blind practice…", () =>
+        {
+            Navigate("trading");
+            Trading.OpenPracticeDialog();
+        }));
         menu.Add(go);
 
         var code = new NativeMenuItem("Code") { Menu = new NativeMenu() };
@@ -548,7 +579,7 @@ public sealed class MainWindow : Window
                 FeedStatus.Connecting or FeedStatus.Reconnecting => Ui.Warn,
                 _ => Ui.Down,
             };
-            string feedName = _svc.Connections.Find(Trading.ActiveTab!.FeedId)?.Name ?? d.Feed.DisplayName;
+            string feedName = m.Settings.BlindReplay ? "Practice" : _svc.Connections.Find(Trading.ActiveTab!.FeedId)?.Name ?? d.Feed.DisplayName;
             string state = StatusName(d.Status);
             var quiet = DateTime.UtcNow - d.LastDataAt;
             string? tip = null;
@@ -578,16 +609,28 @@ public sealed class MainWindow : Window
             }
 
             _connText.Text = $"{feedName} · {state}";
-            ToolTip.SetTip(_connText, tip ?? d.StatusMessage);
+            ToolTip.SetTip(_connText, m.Settings.BlindReplay ? "Practice replay · isolated account and clock" : tip ?? d.StatusMessage);
             _infoText.Text = d.IsLoadingHistory || d.IsExtending
                 ? $"Loading history {d.HistoryProgress * 100:0}%"
+                : m.Settings.BlindReplay ? $"{d.Trades.Count:N0} trades · {m.Series.Count:N0} bars · practice timeline"
                 : $"{d.Trades.Count:N0} trades · {m.Series.Count:N0} bars · since {TimeZoneInfo.ConvertTimeFromUtc(d.HistoryFrom, m.Settings.TimeZone):dd/MM HH:mm}";
+            if (_svc.Settings.RecordDepth) _infoText.Text += " · " + m.DepthStatusText;
+            if (!string.IsNullOrWhiteSpace(d.HistoryWarning)) _infoText.Text += " · " + d.HistoryWarning;
+            ToolTip.SetTip(_infoText, m.DepthStatusText + (d.HistoryWarning == null ? "" : "\n" + d.HistoryWarning) + (d.HistoryError == null ? "" : "\n" + d.HistoryError));
         }
 
-        // resultado del día y saldo de la cuenta simulada (guardados: no vuelven a cero al cerrar Trading Hub)
-        var (day, balance) = _svc.AccountCenter.SimSummary();
-        _pnlText.Foreground = day >= 0 ? Ui.Up : Ui.Down;
-        _pnlText.Text = $"Simulated  {day:+0.00;-0.00;0.00}  ·  {balance:N2}";
+        if (Trading.ActiveTab?.Model is { } active && _svc.ReplaySessions.TryGet(active.Data) is { } practice)
+        {
+            var result = practice.Result();
+            _pnlText.Foreground = result.RealizedNet >= 0 ? Ui.Up : Ui.Down;
+            _pnlText.Text = $"Practice  {result.RealizedNet:+0.00;-0.00;0.00}  ·  {result.Equity:N2}";
+        }
+        else
+        {
+            var (day, balance) = _svc.AccountCenter.SimSummary();
+            _pnlText.Foreground = day >= 0 ? Ui.Up : Ui.Down;
+            _pnlText.Text = $"Simulated  {day:+0.00;-0.00;0.00}  ·  {balance:N2}";
+        }
         Trading.UpdatePosition();
     }
 

@@ -52,7 +52,7 @@ public interface IMarketDataFeed : IDisposable
 /// Vela del exchange (1, 5 o 15 minutos) con el volumen comprador agresivo, para cargar historia larga
 /// (meses o años) en segundos sin bajar cada operación.
 /// </summary>
-public readonly record struct Kline(long OpenTimeMs, decimal Open, decimal High, decimal Low, decimal Close, decimal Volume, decimal BuyVolume, bool HasBuyVolume);
+public readonly record struct Kline(long OpenTimeMs, decimal Open, decimal High, decimal Low, decimal Close, decimal Volume, decimal BuyVolume, bool HasBuyVolume, TradeProvenance Provenance = default);
 
 /// <summary>Feeds que dan historia en velas (rápida). La usa la carga de historia para lo que no hay en ticks.</summary>
 public interface IKlineHistory

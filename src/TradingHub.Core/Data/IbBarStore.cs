@@ -104,7 +104,7 @@ public static class IbBarStore
                 ct.ThrowIfCancellationRequested();
                 var entry = entries[i];
                 if (entry.Existed) File.Copy(entry.Target, entry.Backup);
-                using var writer = new TickFile.Writer(entry.Staged, instrument);
+                using var writer = new TickFile.Writer(entry.Staged, instrument, includeProvenance: true);
                 foreach (var row in outputs[entry.Target]) writer.Write(row);
                 writer.Flush();
             }

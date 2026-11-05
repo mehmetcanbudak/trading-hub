@@ -4,6 +4,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.CTrader;
 
@@ -48,6 +49,7 @@ public sealed class CTraderSession : IDisposable
     public const int RefreshTokenReq = 2173, RefreshTokenRes = 2174;
 
     private readonly Func<CTraderSettings> _settings;
+    private readonly HttpMessageInvoker _webSocketInvoker;
     private readonly SemaphoreSlim _connectGate = new(1, 1);
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly SemaphoreSlim _historyGate = new(1, 1);
@@ -59,7 +61,11 @@ public sealed class CTraderSession : IDisposable
     private DateTime _lastHistory = DateTime.MinValue;
     private readonly CancellationTokenSource _life = new();
 
-    public CTraderSession(Func<CTraderSettings> settings) => _settings = settings;
+    public CTraderSession(Func<CTraderSettings> settings, ProxyHandlerFactory? network = null)
+    {
+        _settings = settings;
+        _webSocketInvoker = (network ?? new ProxyHandlerFactory(new NetworkProxyPolicy())).CreateWebSocketInvoker();
+    }
 
     public long AccountId { get; private set; }
     public string AccountTitle { get; private set; } = "";
@@ -114,7 +120,7 @@ public sealed class CTraderSession : IDisposable
         using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
             connectCts.CancelAfter(TimeSpan.FromSeconds(15));
-            await ws.ConnectAsync(new Uri(Url), connectCts.Token).ConfigureAwait(false);
+            await ws.ConnectAsync(new Uri(Url), _webSocketInvoker, connectCts.Token).ConfigureAwait(false);
         }
 
         _ws = ws;
@@ -444,6 +450,7 @@ public sealed class CTraderSession : IDisposable
     {
         _life.Cancel();
         Drop("closed");
+        _webSocketInvoker.Dispose();
     }
 }
 

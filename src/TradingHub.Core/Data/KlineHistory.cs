@@ -1,232 +1,439 @@
+using System.Buffers.Binary;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using TradingHub.Feeds;
 using TradingHub.Market;
 
 namespace TradingHub.Data;
 
 /// <summary>
-/// Historia larga en velas del exchange (1, 5 o 15 minutos): se baja en segundos aunque sean años, se
-/// guarda en caché por mes y se convierte en operaciones sintéticas que respetan exactamente el OHLC,
-/// el volumen y el delta de cada vela. Las operaciones sintéticas tienen id negativo: las velas que
-/// arman se marcan (<see cref="Candle.IsSynthetic"/>) para no inventar un footprint.
+/// Provider OHLC history, cached by calendar month and displayed as synthetic price paths.
+/// Exact source volume, side totals, resolution, phase and availability survive; price-level order flow is inferred.
 /// </summary>
 public static class KlineHistory
 {
-    /// <summary>Carpeta de la caché (la fija la app). Sin carpeta no se guarda nada.</summary>
+    /// <summary>Optional application-owned cache root.</summary>
     public static string? CacheRoot { get; set; }
 
-    /// <summary>Base de los ids sintéticos (siempre negativos y crecientes con el tiempo).</summary>
+    /// <summary>Stable negative synthetic identities, increasing with source open time.</summary>
     public const long SyntheticIdBase = long.MinValue / 2;
 
-    public static bool IsSynthetic(long tradeId) => tradeId < 0;
+    public static bool IsSynthetic(in Trade trade) => (trade.Provenance.Quality & DataQuality.Synthetic) != 0;
 
-    /// <summary>Resolución según el largo del rango: menos memoria cuando son años.</summary>
+    /// <summary>Uses coarser requested history for longer ranges.</summary>
     public static int MinutesFor(TimeSpan range) => range.TotalDays <= 400 ? 1 : range.TotalDays <= 1500 ? 5 : 15;
 
-    /// <summary>Operaciones sintéticas aproximadas que genera un rango (para avisar antes de cargar).</summary>
+    /// <summary>Estimated display events, not an observed trade count.</summary>
     public static long EstimateTrades(TimeSpan range) => (long)(range.TotalMinutes / MinutesFor(range) * 4);
 
     private static long ToMs(DateTime t) => new DateTimeOffset(DateTime.SpecifyKind(t, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 
     private static DateTime FromMs(long ms) => DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
 
-    /// <summary>Velas entre dos instantes, usando la caché para los meses ya cerrados.</summary>
+    private const int CacheMagic = 0x334B4854;
+    private const int MaximumCacheBars = 50_000;
+    private const int MaximumUncachedBars = 1_000_000;
+    private const int MaximumCacheBytes = 32 * 1024 * 1024;
+    private const DataQuality KnownQuality = DataQuality.Raw | DataQuality.Compact | DataQuality.Synthetic | DataQuality.InferredSide | DataQuality.Partial;
+    private static readonly SemaphoreSlim[] CacheGates = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
+    private sealed record MonthCache(DateTime From, DateTime To, DateTime Updated, List<Kline> Bars);
+
+    /// <summary>
+    /// Calendar-month cache with overlapping active tails. Warnings report partial-cache fallback or failed cache persistence;
+    /// valid source data remains usable when only derived cache publication fails.
+    /// </summary>
     public static async Task<List<Kline>> LoadAsync(IKlineHistory source, Instrument inst, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
-        IProgress<double>? progress, CancellationToken ct)
+        IProgress<double>? progress, CancellationToken ct, Action<string>? warning = null)
     {
+        if (!CompactHistory.Granularities.Contains(minutes)) throw new ArgumentOutOfRangeException(nameof(minutes));
+        ct.ThrowIfCancellationRequested();
+        string sourceIdentity = inst.Key;
         var result = new List<Kline>();
         if (toUtc <= fromUtc) return result;
-
-        // el simulador genera la historia hacia atrás desde el precio actual: de una sola vez y sin caché
         if (inst.FeedId == SimulatedFeed.FeedId || CacheRoot == null)
         {
-            await source.LoadKlinesAsync(inst, fromUtc, toUtc, minutes, endPrice, batch =>
-            {
-                result.AddRange(batch);
-                return !ct.IsCancellationRequested;
-            }, progress, ct).ConfigureAwait(false);
-            return result;
+            await Fetch(fromUtc, toUtc, result, MaximumUncachedBars).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            return Normalize(result, fromUtc, toUtc, minutes, sourceIdentity);
         }
-
         var months = new List<DateTime>();
-        for (var m = new DateTime(fromUtc.Year, fromUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc); m < toUtc; m = m.AddMonths(1)) months.Add(m);
-        long fromMs = ToMs(fromUtc), toMs = ToMs(toUtc);
-        for (int i = 0; i < months.Count; i++)
+        for (var month = new DateTime(fromUtc.Year, fromUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc); month < toUtc; month = month.AddMonths(1)) months.Add(month);
+        string tag = source.CacheTag + (source is IDataScopeFeed scoped ? "\u001f" + scoped.DataScopeKey : "");
+        for (int index = 0; index < months.Count; index++)
         {
             ct.ThrowIfCancellationRequested();
-            var monthStart = months[i];
-            var monthEnd = monthStart.AddMonths(1);
-            // un mes se da por cerrado (y se guarda) dos días después de terminar
-            bool closed = monthEnd <= DateTime.UtcNow.AddDays(-2);
-            int index = i;
-            var sub = new Progress<double>(p => progress?.Report((index + Math.Clamp(p, 0, 1)) / months.Count));
-            List<Kline> klines;
-            if (closed && ReadCache(inst, monthStart, minutes, source.CacheTag) is { } cached)
+            var month = months[index];
+            var end = month.AddMonths(1);
+            var requestedFrom = fromUtc > month ? fromUtc : month;
+            var requestedTo = toUtc < end ? toUtc : end;
+            bool closed = end <= DateTime.UtcNow.AddDays(-2);
+            var path = CachePath(inst, month, minutes, tag);
+            var gate = CacheGates[(StringComparer.Ordinal.GetHashCode(path) & int.MaxValue) % CacheGates.Length];
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                klines = cached;
-            }
-            else
-            {
-                var from = closed ? monthStart : (fromUtc > monthStart ? fromUtc : monthStart);
-                var to = closed ? monthEnd : (toUtc < monthEnd ? toUtc : monthEnd);
-                klines = new List<Kline>();
-                var target = klines;
-                await source.LoadKlinesAsync(inst, from, to, minutes, endPrice, batch =>
+                var cache = ReadCache(path, inst, minutes, month);
+                ct.ThrowIfCancellationRequested();
+                bool covered = cache != null && cache.From <= requestedFrom && cache.To >= requestedTo;
+                if (cache == null || !covered || !closed || DateTime.UtcNow - cache.Updated > TimeSpan.FromDays(1))
                 {
-                    target.AddRange(batch);
-                    return !ct.IsCancellationRequested;
-                }, sub, ct).ConfigureAwait(false);
-                if (closed && klines.Count > 0) WriteCache(inst, monthStart, minutes, klines, source.CacheTag);
+                    DateTime fetchFrom, fetchTo;
+                    if (closed) { fetchFrom = month; fetchTo = end; }
+                    else if (cache == null || requestedFrom < cache.From) { fetchFrom = requestedFrom; fetchTo = cache != null && cache.To > requestedTo ? cache.To : requestedTo; }
+                    else
+                    {
+                        fetchTo = requestedTo;
+                        var tail = cache.To < requestedTo ? cache.To : requestedTo;
+                        fetchFrom = tail.AddMinutes(-2 * minutes);
+                        if (fetchFrom < cache.From) fetchFrom = cache.From;
+                    }
+                    var fresh = new List<Kline>();
+                    MonthCache refreshed;
+                    try
+                    {
+                        await Fetch(fetchFrom, fetchTo, fresh, MaximumCacheBars).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        var normalized = Normalize(fresh, fetchFrom, fetchTo, minutes, sourceIdentity);
+                        var merged = cache?.Bars.Where(k => k.OpenTimeMs < ToMs(fetchFrom) || k.OpenTimeMs >= ToMs(fetchTo)).ToList() ?? new List<Kline>();
+                        merged.AddRange(normalized);
+                        var coverageFrom = cache != null && cache.From < fetchFrom ? cache.From : fetchFrom;
+                        var coverageTo = cache != null && cache.To > fetchTo ? cache.To : fetchTo;
+                        refreshed = new MonthCache(coverageFrom, coverageTo, DateTime.UtcNow, Normalize(merged, month, end, minutes, sourceIdentity));
+                    }
+                    catch (Exception error) when (error is not OperationCanceledException && cache != null)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        warning?.Invoke($"Candle history refresh failed; using the previous cache with partial coverage: {error.Message}");
+                        result.AddRange(cache.Bars.Where(k => k.OpenTimeMs >= ToMs(requestedFrom) && k.OpenTimeMs < ToMs(requestedTo))
+                            .Select(k => k with { Provenance = k.Provenance with { Quality = k.Provenance.Quality | DataQuality.Synthetic | DataQuality.Partial } }));
+                        progress?.Report((index + 1d) / months.Count);
+                        continue;
+                    }
+                    cache = refreshed;
+                    try { WriteCache(path, inst, minutes, cache, ct); }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        warning?.Invoke($"Unable to write the candle history cache '{path}': {error.Message} Loaded source history remains available but was not cached.");
+                    }
+                }
+                result.AddRange(cache!.Bars.Where(k => k.OpenTimeMs >= ToMs(requestedFrom) && k.OpenTimeMs < ToMs(requestedTo)));
             }
-
-            foreach (var k in klines)
-                if (k.OpenTimeMs >= fromMs && k.OpenTimeMs < toMs) result.Add(k);
-            progress?.Report((i + 1) / (double)months.Count);
+            finally { gate.Release(); }
+            progress?.Report((index + 1d) / months.Count);
         }
-
         return result;
+
+        async Task Fetch(DateTime start, DateTime finish, List<Kline> target, int maximumBars)
+        {
+            await source.LoadKlinesAsync(inst, start, finish, minutes, endPrice, batch =>
+            {
+                ct.ThrowIfCancellationRequested();
+                if (batch.Count > maximumBars - target.Count) throw new InvalidDataException($"The provider exceeded the bounded candle history capacity of {maximumBars} bars.");
+                target.AddRange(batch);
+                return !ct.IsCancellationRequested;
+            }, null, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static void ValidateBar(in Kline bar)
+    {
+        if (bar.High < bar.Low || bar.Open < bar.Low || bar.Open > bar.High || bar.Close < bar.Low || bar.Close > bar.High ||
+            bar.Volume < 0 || (bar.HasBuyVolume && (bar.BuyVolume < 0 || bar.BuyVolume > bar.Volume)))
+            throw new InvalidDataException("The provider returned invalid OHLCV or aggressor-side totals.");
+    }
+
+    private static TradeProvenance SourceProvenance(in Kline bar, int minutes, string sourceIdentity)
+    {
+        var provenance = bar.Provenance;
+        if ((provenance.Quality & ~KnownQuality) != 0 || provenance.ResolutionSeconds < 0 || provenance.ObservedTradeCount < 0 ||
+            provenance.ResolutionOffsetSeconds < 0 || (provenance.ResolutionSeconds == 0 ? provenance.ResolutionOffsetSeconds != 0 : provenance.ResolutionOffsetSeconds >= provenance.ResolutionSeconds))
+            throw new InvalidDataException("Candle history contains invalid source metadata.");
+        var open = FromMs(bar.OpenTimeMs);
+        int resolution = provenance.ResolutionSeconds > 0 ? provenance.ResolutionSeconds : minutes * 60;
+        int phase = (int)(open.Ticks / TimeSpan.TicksPerSecond % resolution);
+        bool exactPhase = open.Ticks % TimeSpan.TicksPerSecond == 0;
+        if (provenance.ResolutionOffsetSeconds != 0 && provenance.ResolutionOffsetSeconds != phase)
+            throw new InvalidDataException("The declared candle phase does not match its source open.");
+        provenance = provenance with {
+            Quality = (provenance.Quality & ~(DataQuality.Raw | DataQuality.Compact)) | DataQuality.Synthetic | (exactPhase ? DataQuality.None : DataQuality.Partial),
+            ResolutionSeconds = resolution, ResolutionOffsetSeconds = phase,
+            SourceIdentity = provenance.SourceIdentity ?? sourceIdentity,
+            SourceEventId = null,
+            HasKnownAvailability = exactPhase && (provenance == default || provenance.HasKnownAvailability),
+        };
+        _ = provenance.SourceWindow(open);
+        return provenance;
+    }
+
+    private static List<Kline> Normalize(IEnumerable<Kline> bars, DateTime from, DateTime to, int minutes, string sourceIdentity)
+    {
+        var latest = new Dictionary<long, Kline>();
+        var sources = new Dictionary<string, string>(StringComparer.Ordinal);
+        long first = ToMs(from), last = ToMs(to);
+        foreach (var bar in bars)
+        {
+            if (bar.OpenTimeMs < first || bar.OpenTimeMs >= last) continue;
+            ValidateBar(bar);
+            var provenance = SourceProvenance(bar, minutes, sourceIdentity);
+            var identity = provenance.SourceIdentity!;
+            if (!sources.TryGetValue(identity, out var shared)) sources.Add(identity, shared = identity);
+            latest[bar.OpenTimeMs] = bar with { Provenance = provenance with { SourceIdentity = shared } };
+        }
+        return latest.Values.OrderBy(k => k.OpenTimeMs).ToList();
     }
 
     private static string CachePath(Instrument inst, DateTime month, int minutes, string tag)
     {
-        static string Clean(string s) => string.Concat(s.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
-        return Path.Combine(CacheRoot!, Clean(inst.FeedId), Clean(inst.Symbol), $"{month:yyyy-MM}.{minutes}m{(tag.Length > 0 ? "." + tag : "")}.bin");
+        static string Clean(string value) => string.Concat(value.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+        var identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tag + "\u001f" + inst.TickSize.ToString(CultureInfo.InvariantCulture))))[..16];
+        return Path.Combine(CacheRoot!, Clean(inst.FeedId), Clean(inst.Symbol), $"{month:yyyy-MM}.{minutes}m.{identity}.bin");
     }
 
-    private static List<Kline>? ReadCache(Instrument inst, DateTime month, int minutes, string tag)
+    /// <summary>Last stored candle endpoint, not a promise of continuous trade coverage.</summary>
+    public static DateTime? CachedUntil(IKlineHistory source, Instrument instrument, int minutes)
+    {
+        if (CacheRoot == null) return null;
+        var now = DateTime.UtcNow;
+        var month = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        string tag = source.CacheTag + (source is IDataScopeFeed scoped ? "\u001f" + scoped.DataScopeKey : "");
+        for (int i = 0; i < 3; i++, month = month.AddMonths(-1))
+        {
+            var cache = ReadCache(CachePath(instrument, month, minutes, tag), instrument, minutes, month);
+            if (cache?.Bars is { Count: > 0 } bars) return FromMs(bars[^1].OpenTimeMs).AddSeconds(bars[^1].Provenance.ResolutionSeconds);
+        }
+        return null;
+    }
+
+    private static byte[] CacheDigest(Instrument instrument, int minutes, DateTime from, DateTime to, DateTime updated, ReadOnlySpan<byte> payload)
+    {
+        Span<byte> header = stackalloc byte[48];
+        BinaryPrimitives.WriteInt32LittleEndian(header, CacheMagic);
+        Span<int> bits = stackalloc int[4];
+        decimal.GetBits(instrument.TickSize, bits);
+        for (int part = 0; part < bits.Length; part++) BinaryPrimitives.WriteInt32LittleEndian(header[(4 + part * 4)..], bits[part]);
+        BinaryPrimitives.WriteInt32LittleEndian(header[20..], minutes);
+        BinaryPrimitives.WriteInt64LittleEndian(header[24..], from.Ticks);
+        BinaryPrimitives.WriteInt64LittleEndian(header[32..], to.Ticks);
+        BinaryPrimitives.WriteInt64LittleEndian(header[40..], updated.Ticks);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(header); hash.AppendData(payload);
+        return hash.GetHashAndReset();
+    }
+
+    private static MonthCache? ReadCache(string path, Instrument inst, int minutes, DateTime month)
     {
         try
         {
-            var path = CachePath(inst, month, minutes, tag);
             if (!File.Exists(path)) return null;
-            using var r = new BinaryReader(File.OpenRead(path));
-            int n = r.ReadInt32();
-            var list = new List<Kline>(n);
-            for (int i = 0; i < n; i++)
+            using var stream = File.OpenRead(path);
+            if (stream.Length > MaximumCacheBytes) return null;
+            using var reader = new BinaryReader(stream);
+            if (reader.ReadInt32() != CacheMagic || reader.ReadDecimal() != inst.TickSize || reader.ReadInt32() != minutes) return null;
+            var from = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
+            var to = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
+            var updated = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
+            if (from < month || from >= to || to > month.AddMonths(1)) return null;
+            byte[] digest = reader.ReadBytes(32);
+            var payload = reader.ReadBytes(checked((int)(stream.Length - stream.Position)));
+            if (!CacheDigest(inst, minutes, from, to, updated, payload).AsSpan().SequenceEqual(digest)) return null;
+            using var data = new BinaryReader(new MemoryStream(payload));
+            int sourceCount = data.ReadInt32();
+            if (sourceCount < 0 || sourceCount > MaximumCacheBars || sourceCount > payload.Length) return null;
+            var sources = new string[sourceCount];
+            var uniqueSources = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < sources.Length; i++)
             {
-                long t = r.ReadInt64();
-                decimal o = r.ReadDecimal(), h = r.ReadDecimal(), l = r.ReadDecimal(), c = r.ReadDecimal(), v = r.ReadDecimal(), b = r.ReadDecimal();
-                bool hb = r.ReadBoolean();
-                list.Add(new Kline(t, o, h, l, c, v, b, hb));
+                sources[i] = data.ReadString();
+                if (!uniqueSources.Add(sources[i])) return null;
             }
-
-            return list;
+            int metadataCount = data.ReadInt32();
+            if (metadataCount < 0 || metadataCount > MaximumCacheBars || (long)metadataCount * 26 > payload.Length - data.BaseStream.Position) return null;
+            var metadata = new TradeProvenance[metadataCount];
+            for (int i = 0; i < metadata.Length; i++)
+            {
+                var quality = (DataQuality)data.ReadByte();
+                int resolution = data.ReadInt32(), sourceIndex = data.ReadInt32();
+                long revision = data.ReadInt64();
+                int observed = data.ReadInt32();
+                byte known = data.ReadByte();
+                int phase = data.ReadInt32();
+                if ((quality & ~KnownQuality) != 0 || (quality & DataQuality.Synthetic) == 0 || (quality & (DataQuality.Raw | DataQuality.Compact)) != 0 ||
+                    resolution <= 0 || phase < 0 || phase >= resolution || observed < 0 || known > 1 || sourceIndex < 0 || sourceIndex >= sources.Length) return null;
+                metadata[i] = new TradeProvenance(quality, resolution, sources[sourceIndex], revision, observed, known != 0, phase);
+            }
+            int count = data.ReadInt32();
+            if (count < 0 || count > MaximumCacheBars || (long)count * 109 > payload.Length - data.BaseStream.Position) return null;
+            var bars = new List<Kline>(count);
+            long first = ToMs(from), last = ToMs(to), previous = long.MinValue;
+            for (int i = 0; i < count; i++)
+            {
+                long time = data.ReadInt64();
+                decimal open = data.ReadDecimal(), high = data.ReadDecimal(), low = data.ReadDecimal(), close = data.ReadDecimal(), volume = data.ReadDecimal(), buy = data.ReadDecimal();
+                byte hasBuy = data.ReadByte();
+                int metadataIndex = data.ReadInt32();
+                if (time < first || time >= last || time <= previous || hasBuy > 1 || (uint)metadataIndex >= (uint)metadata.Length) return null;
+                var provenance = metadata[metadataIndex];
+                _ = provenance.SourceWindow(FromMs(time));
+                var bar = new Kline(time, open, high, low, close, volume, buy, hasBuy != 0, provenance);
+                ValidateBar(bar);
+                if (SourceProvenance(bar, minutes, provenance.SourceIdentity!) != provenance) return null;
+                bars.Add(bar);
+                previous = time;
+            }
+            return data.BaseStream.Position == data.BaseStream.Length ? new MonthCache(from, to, updated, bars) : null;
         }
-        catch
-        {
-            return null; // caché dañada: se vuelve a bajar
-        }
+        catch (Exception error) when (error is IOException or InvalidDataException or ArgumentException or OverflowException) { return null; }
     }
 
-    private static void WriteCache(Instrument inst, DateTime month, int minutes, List<Kline> klines, string tag)
+    private static void WriteCache(string path, Instrument inst, int minutes, MonthCache cache, CancellationToken ct)
     {
+        if (cache.Bars.Count > MaximumCacheBars) throw new InvalidDataException("Candle history exceeds the bounded monthly cache capacity.");
+        var sources = new Dictionary<string, int>(StringComparer.Ordinal);
+        var metadata = new Dictionary<TradeProvenance, int>();
+        foreach (var bar in cache.Bars)
+        {
+            ct.ThrowIfCancellationRequested();
+            var provenance = bar.Provenance;
+            sources.TryAdd(provenance.SourceIdentity!, sources.Count);
+            metadata.TryAdd(provenance, metadata.Count);
+        }
+        long capacity = 12L + metadata.Count * 26L + cache.Bars.Count * 109L;
+        foreach (var source in sources.Keys)
+        {
+            ct.ThrowIfCancellationRequested();
+            int bytes = Encoding.UTF8.GetByteCount(source);
+            capacity += bytes + 1L;
+            for (int length = bytes; length >= 128; length >>= 7) capacity++;
+            if (capacity + 80 > MaximumCacheBytes) throw new InvalidDataException("Candle history exceeds the bounded monthly cache capacity.");
+        }
+        if (capacity + 80 > MaximumCacheBytes) throw new InvalidDataException("Candle history exceeds the bounded monthly cache capacity.");
+        using var payload = new MemoryStream(checked((int)capacity));
+        using (var writer = new BinaryWriter(payload, Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(sources.Count);
+            foreach (var source in sources.Keys) writer.Write(source);
+            writer.Write(metadata.Count);
+            foreach (var provenance in metadata.Keys)
+            {
+                writer.Write((byte)provenance.Quality); writer.Write(provenance.ResolutionSeconds); writer.Write(sources[provenance.SourceIdentity!]);
+                writer.Write(provenance.CorrectionRevision); writer.Write(provenance.ObservedTradeCount);
+                writer.Write(provenance.HasKnownAvailability); writer.Write(provenance.ResolutionOffsetSeconds);
+            }
+            writer.Write(cache.Bars.Count);
+            foreach (var bar in cache.Bars)
+            {
+                ct.ThrowIfCancellationRequested();
+                writer.Write(bar.OpenTimeMs); writer.Write(bar.Open); writer.Write(bar.High); writer.Write(bar.Low); writer.Write(bar.Close); writer.Write(bar.Volume); writer.Write(bar.BuyVolume); writer.Write(bar.HasBuyVolume);
+                writer.Write(metadata[bar.Provenance]);
+            }
+        }
+        if (cache.Bars.Count > MaximumCacheBars || payload.Length + 80 > MaximumCacheBytes) throw new InvalidDataException("Candle history exceeds the bounded monthly cache capacity.");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            var path = CachePath(inst, month, minutes, tag);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var tmp = path + ".tmp";
-            using (var w = new BinaryWriter(File.Create(tmp)))
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                w.Write(klines.Count);
-                foreach (var k in klines)
-                {
-                    w.Write(k.OpenTimeMs);
-                    w.Write(k.Open);
-                    w.Write(k.High);
-                    w.Write(k.Low);
-                    w.Write(k.Close);
-                    w.Write(k.Volume);
-                    w.Write(k.BuyVolume);
-                    w.Write(k.HasBuyVolume);
-                }
+                using var writer = new BinaryWriter(stream);
+                writer.Write(CacheMagic); writer.Write(inst.TickSize); writer.Write(minutes); writer.Write(cache.From.Ticks); writer.Write(cache.To.Ticks); writer.Write(cache.Updated.Ticks);
+                writer.Write(CacheDigest(inst, minutes, cache.From, cache.To, cache.Updated, payload.GetBuffer().AsSpan(0, (int)payload.Length)));
+                writer.Write(payload.GetBuffer().AsSpan(0, (int)payload.Length));
+                stream.Flush(flushToDisk: true);
             }
-
-            File.Move(tmp, path, overwrite: true);
+            ct.ThrowIfCancellationRequested();
+            File.Move(temporary, path, overwrite: true);
         }
-        catch
-        {
-            // sin caché: la próxima vez se baja de nuevo
-        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     /// <summary>
-    /// Convierte velas en operaciones sintéticas: cuatro por vela (apertura, mínimo/máximo, máximo/mínimo y
-    /// cierre), con el volumen comprador y vendedor exacto. Solo usa las velas que caen enteras dentro de
-    /// alguna de las ventanas (los huecos sin ticks reales).
+    /// Displays OHLC as four negative-ID synthetic events without manufacturing volume or price-level side observations.
+    /// Only complete declared source windows inside a selected fallback window may be synthesized.
     /// </summary>
     public static void Synthesize(IReadOnlyList<Kline> klines, Instrument inst, int minutes, IReadOnlyList<(DateTime From, DateTime To)> windows, List<Trade> output)
     {
-        long step = minutes * 60_000L;
-        long quarter = step / 4;
+        if (!CompactHistory.Granularities.Contains(minutes)) throw new ArgumentOutOfRangeException(nameof(minutes));
         int w = 0;
         var prints = new (decimal Vol, TradeSide Side)[4];
         var prices = new decimal[4];
+        var sources = new Dictionary<string, string>(StringComparer.Ordinal);
+        string sourceIdentity = inst.Key;
         foreach (var k in klines)
         {
-            if (k.Volume <= 0) continue;
+            ValidateBar(k);
             var open = FromMs(k.OpenTimeMs);
-            var close = open.AddMilliseconds(step);
-            while (w < windows.Count && windows[w].To <= open) w++;
+            var provenance = SourceProvenance(k, minutes, sourceIdentity);
+            var sourceWindow = provenance.SourceWindow(open);
+            while (w < windows.Count && windows[w].To <= sourceWindow.From) w++;
             if (w >= windows.Count) break;
-            if (open < windows[w].From || close > windows[w].To) continue;
-
-            decimal buy = k.HasBuyVolume ? Math.Clamp(k.BuyVolume, 0, k.Volume) : k.Volume / 2;
-            decimal sell = k.Volume - buy;
+            var actualEnd = open.AddSeconds(provenance.ResolutionSeconds);
+            if (sourceWindow.From < windows[w].From || sourceWindow.To > windows[w].To || actualEnd > windows[w].To) continue;
+            var identity = provenance.SourceIdentity!;
+            if (!sources.TryGetValue(identity, out var shared)) sources.Add(identity, shared = identity);
+            provenance = provenance with {
+                Quality = provenance.Quality | DataQuality.InferredSide,
+                SourceIdentity = shared, ObservedTradeCount = 0,
+            };
+            long quarter = (sourceWindow.To.Ticks - open.Ticks) / 4;
+            decimal buy = k.HasBuyVolume ? k.BuyVolume : 0;
+            decimal sell = k.HasBuyVolume ? k.Volume - buy : 0;
             bool up = k.Close >= k.Open;
-            decimal o = inst.RoundPrice(k.Open), h = inst.RoundPrice(k.High), l = inst.RoundPrice(k.Low), c = inst.RoundPrice(k.Close);
-            prices[0] = o;
-            prices[1] = up ? l : h;
-            prices[2] = up ? h : l;
-            prices[3] = c;
+            prices[0] = inst.RoundPrice(k.Open);
+            prices[1] = inst.RoundPrice(up ? k.Low : k.High);
+            prices[2] = inst.RoundPrice(up ? k.High : k.Low);
+            prices[3] = inst.RoundPrice(k.Close);
 
-            // compras en la apertura y el extremo a favor, ventas en el otro extremo y el cierre;
-            // si un lado no tiene volumen, el otro se reparte en los cuatro puntos (así el OHLC queda exacto)
-            if (buy <= 0)
-                for (int j = 0; j < 4; j++) prints[j] = (sell / 4, TradeSide.Sell);
-            else if (sell <= 0)
-                for (int j = 0; j < 4; j++) prints[j] = (buy / 4, TradeSide.Buy);
+            if (!k.HasBuyVolume || buy == 0 || sell == 0)
+            {
+                var side = !k.HasBuyVolume ? TradeSide.None : buy == 0 ? TradeSide.Sell : TradeSide.Buy;
+                decimal part = k.Volume / 4;
+                for (int j = 0; j < 3; j++) prints[j] = (part, side);
+                prints[3] = (k.Volume - part - part - part, side);
+            }
             else
             {
-                prints[0] = (buy / 2, TradeSide.Buy);
-                prints[1] = (sell / 2, TradeSide.Sell);
-                prints[2] = (buy / 2, TradeSide.Buy);
-                prints[3] = (sell / 2, TradeSide.Sell);
+                decimal firstBuy = buy / 2, firstSell = sell / 2;
+                prints[0] = (firstBuy, TradeSide.Buy);
+                prints[1] = (firstSell, TradeSide.Sell);
+                prints[2] = (buy - firstBuy, TradeSide.Buy);
+                prints[3] = (sell - firstSell, TradeSide.Sell);
             }
 
             long baseId = SyntheticIdBase + k.OpenTimeMs * 4;
             for (int j = 0; j < 4; j++)
-                output.Add(new Trade(baseId + j, open.AddMilliseconds(quarter * j), prices[j], prints[j].Vol, prints[j].Side));
+                output.Add(new Trade(baseId + j, open.AddTicks(quarter * j), prices[j], prints[j].Vol, prints[j].Side, provenance));
         }
     }
 
-    /// <summary>
-    /// Intervalos donde hay ticks reales (los cortes de más de 3 minutos los separan), redondeados a minutos
-    /// completos para que ninguna vela se superponga con operaciones reales.
-    /// </summary>
+    /// <summary>Measured source windows, with point prints rounded to full minutes before candle fallback.</summary>
     public static List<(DateTime From, DateTime To)> Coverage(IReadOnlyList<Trade> real)
     {
-        var res = new List<(DateTime, DateTime)>();
-        if (real.Count == 0) return res;
-        static DateTime Floor(DateTime t) => new(t.Ticks - t.Ticks % TimeSpan.TicksPerMinute, DateTimeKind.Utc);
-        var start = real[0].Time;
-        var last = real[0].Time;
-        for (int i = 1; i < real.Count; i++)
+        var res = new List<(DateTime From, DateTime To)>();
+        foreach (var trade in real)
         {
-            var t = real[i].Time;
-            if (t - last > TimeSpan.FromMinutes(3))
+            if (!trade.Provenance.IsMeasured) continue;
+            DateTime start, end;
+            if (trade.Provenance.ResolutionSeconds > 0) (start, end) = trade.Provenance.SourceWindow(trade.Time);
+            else
             {
-                res.Add((Floor(start), Floor(last).AddMinutes(1)));
-                start = t;
+                start = new DateTime(trade.Time.Ticks / TimeSpan.TicksPerMinute * TimeSpan.TicksPerMinute, DateTimeKind.Utc);
+                end = start.AddMinutes(1);
             }
-
-            last = t;
+            while (res.Count > 0 && start.Ticks <= res[^1].To.Ticks + 2 * TimeSpan.TicksPerMinute)
+            {
+                var previous = res[^1];
+                res.RemoveAt(res.Count - 1);
+                if (previous.From < start) start = previous.From;
+                if (previous.To > end) end = previous.To;
+            }
+            res.Add((start, end));
         }
-
-        res.Add((Floor(start), Floor(last).AddMinutes(1)));
         return res;
     }
 
-    /// <summary>Resta a las ventanas los tramos cubiertos.</summary>
+    /// <summary>Subtracts covered intervals from the requested fallback windows.</summary>
     public static List<(DateTime From, DateTime To)> Subtract(IReadOnlyList<(DateTime From, DateTime To)> windows, IReadOnlyList<(DateTime From, DateTime To)> covered)
     {
         var res = new List<(DateTime, DateTime)>();
@@ -257,7 +464,7 @@ public static class KlineHistory
         return res.OrderBy(p => p.Item1).ToList();
     }
 
-    /// <summary>Une dos listas ordenadas por tiempo.</summary>
+    /// <summary>Merges two chronological lists without changing stable trade identities.</summary>
     public static List<Trade> MergeByTime(List<Trade> a, List<Trade> b)
     {
         if (a.Count == 0) return b;
@@ -270,7 +477,7 @@ public static class KlineHistory
         return res;
     }
 
-    /// <summary>Lee un CSV de velas de los archivos públicos de Binance (con o sin encabezado).</summary>
+    /// <summary>Reads public Binance OHLC CSV, with or without a header.</summary>
     public static List<Kline> ParseBinanceCsv(TextReader reader)
     {
         var list = new List<Kline>(45_000);
@@ -281,7 +488,7 @@ public static class KlineHistory
             var f = line.Split(',');
             if (f.Length < 10) continue;
             long t = long.Parse(f[0], CultureInfo.InvariantCulture);
-            if (t > 100_000_000_000_000) t /= 1000; // desde 2025 spot viene en microsegundos
+            if (t > 100_000_000_000_000) t /= 1000; // Spot archives use microseconds from 2025 onward.
             decimal D(int k) => decimal.Parse(f[k], NumberStyles.Float, CultureInfo.InvariantCulture);
             list.Add(new Kline(t, D(1), D(2), D(3), D(4), D(5), D(9), true));
         }

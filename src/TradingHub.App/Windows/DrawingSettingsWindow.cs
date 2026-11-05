@@ -30,17 +30,19 @@ public sealed class DrawingSettingsWindow : Window
     private readonly ChartPeriod _period;
     private readonly Action _changed;
     private readonly AppServices _svc;
+    private readonly bool _concealTimestamps;
 
     /// <param name="changed">Se llama en cada cambio (redibujar y guardar).</param>
     /// <param name="delete">Borra el dibujo de su lista.</param>
     /// <param name="duplicate">Agrega una copia.</param>
-    public DrawingSettingsWindow(AppServices svc, ChartDrawing drawing, Instrument instrument, ChartPeriod period, Action changed, Action delete, Action duplicate)
+    public DrawingSettingsWindow(AppServices svc, ChartDrawing drawing, Instrument instrument, ChartPeriod period, Action changed, Action delete, Action duplicate, bool concealTimestamps = false)
     {
         _svc = svc;
         _d = drawing;
         _instrument = instrument;
         _period = period;
         _changed = changed;
+        _concealTimestamps = concealTimestamps;
         Title = ChartDrawing.KindName(drawing.Kind);
         Width = 430;
         Height = 640;
@@ -58,6 +60,8 @@ public sealed class DrawingSettingsWindow : Window
         if (drawing.Kind is DrawingKind.TrendLine or DrawingKind.Rectangle or DrawingKind.HorizontalRay or DrawingKind.FibRetracement) body.Children.Add(ExtendSection());
         if (drawing.Kind == DrawingKind.FibRetracement) body.Children.Add(LevelsSection());
         if (drawing.IsPosition) body.Children.Add(PositionSection());
+        else if (drawing.Kind == DrawingKind.AnchoredVwap) body.Children.Add(AnchoredVwapSection());
+        else if (drawing.Kind == DrawingKind.FixedRangeProfile) body.Children.Add(ProfileSection());
         else if (drawing.Kind != DrawingKind.VerticalLine) body.Children.Add(PricesSection());
         body.Children.Add(VisibilitySection());
 
@@ -301,42 +305,91 @@ public sealed class DrawingSettingsWindow : Window
 
     private Control PositionSection()
     {
-        var rr = new TextBlock { Classes = { "muted" } };
-        void UpdateRr()
+        var sized = new TextBlock { Classes = { "muted" }, TextWrapping = TextWrapping.Wrap };
+        NumericUpDown? qty = null;
+        void Refresh()
         {
-            double risk = Math.Abs(_d.Points[0].Price - _d.Points[2].Price), reward = Math.Abs(_d.Points[1].Price - _d.Points[0].Price);
-            rr.Text = risk > 0 ? $"Risk/reward 1 : {reward / risk:0.00}" : "";
+            var result = _d.PositionSizing(_instrument);
+            sized.Text = result.IsValid
+                ? $"Effective quantity {result.Quantity:0.########} · risk {result.Risk:0.00} · reward {result.Reward:0.00} {result.Currency}\n{result.Limitation}"
+                : result.Limitation;
+            if (qty != null) qty.IsEnabled = _d.AccountSize <= 0;
         }
+        var entry = PriceBox(_d.Points[0].Price, v => { _d.Points[0] = new ChartPoint(_d.Points[0].Time, v); Refresh(); });
+        var target = PriceBox(_d.Points[1].Price, v => { _d.Points[1] = new ChartPoint(_d.Points[1].Time, v); Refresh(); });
+        var stop = PriceBox(_d.Points[2].Price, v => { _d.Points[2] = new ChartPoint(_d.Points[2].Time, v); Refresh(); });
+        NumericUpDown Number(string name, decimal value, decimal minimum, decimal maximum, decimal increment, Action<decimal> set)
+        {
+            var box = new NumericUpDown { Value = Math.Clamp(value, minimum, maximum), Minimum = minimum, Maximum = maximum, Increment = increment, FormatString = "0.########", MinWidth = 160, NumberFormat = CultureInfo.InvariantCulture.NumberFormat };
+            Avalonia.Automation.AutomationProperties.SetName(box, name);
+            box.ValueChanged += (_, _) => { set(box.Value ?? 0); Refresh(); Changed(); };
+            return box;
+        }
+        qty = Number("Drawing quantity", _d.Quantity, 0, decimal.MaxValue, Math.Max(_instrument.VolumeStep, 0.00000001m), v => _d.Quantity = v);
+        var account = Number("Reference account size", _d.AccountSize, 0, decimal.MaxValue, 100, v => _d.AccountSize = v);
+        var risk = Number("Risk percent", _d.RiskPercent, 0, 100, 0.25m, v => _d.RiskPercent = v);
+        var fees = Number("Round-trip fee per quantity", _d.RoundTripFeePerUnit, 0, decimal.MaxValue, 0.01m, v => _d.RoundTripFeePerUnit = v);
+        var accountCurrency = new TextBox { Text = _d.AccountCurrency, Watermark = "Account currency, e.g. USD", MinWidth = 160 };
+        Avalonia.Automation.AutomationProperties.SetName(accountCurrency, "Reference account currency");
+        accountCurrency.TextChanged += (_, _) => { _d.AccountCurrency = accountCurrency.Text?.Trim().ToUpperInvariant() ?? ""; Refresh(); Changed(); };
+        var pnlCurrency = new TextBox { Text = string.IsNullOrWhiteSpace(_instrument.QuoteAsset) ? _d.PnlCurrency : _instrument.QuoteAsset, IsReadOnly = !string.IsNullOrWhiteSpace(_instrument.QuoteAsset), Watermark = "Confirm linear P&L currency", MinWidth = 160 };
+        Avalonia.Automation.AutomationProperties.SetName(pnlCurrency, "Linear P&L currency");
+        pnlCurrency.TextChanged += (_, _) => { _d.PnlCurrency = pnlCurrency.Text?.Trim().ToUpperInvariant() ?? ""; Refresh(); Changed(); };
+        Refresh();
+        return Section("Visual risk / reward",
+            Labeled("Entry", entry), Labeled("Target", target), Labeled("Stop", stop), Labeled("Quantity", qty),
+            Labeled("Reference account size", account), Labeled("Risk (%)", risk), Labeled("Account currency", accountCurrency),
+            Labeled("Linear P&L currency", pnlCurrency), Labeled("Round-trip fee / unit", fees), sized,
+            Note($"Point value {_instrument.PointValue:0.########} · quantity increment {_instrument.VolumeStep:0.########}. A positive reference account size enables risk sizing; quantity is always rounded down."),
+            Note("Amounts are a linear point-value estimate, not inverse/quanto contract or FX conversion. Confirm the P&L currency. Fee input is round-trip per quantity; zero excludes fees. Slippage, funding and taxes are excluded. This drawing never places orders or changes the selected account."));
+    }
 
-        UpdateRr();
-        var entry = PriceBox(_d.Points[0].Price, v =>
+    private Control TimestampRow(string label, int point)
+    {
+        if (_concealTimestamps) return Note(label + " · practice timeline (reveal to inspect timestamps)");
+        var box = new TextBox { Text = _d.Points[point].Time.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss.fffffff", CultureInfo.InvariantCulture), MinWidth = 220 };
+        Avalonia.Automation.AutomationProperties.SetName(box, label + " UTC");
+        var error = new TextBlock { Classes = { "faint", "small" } };
+        box.KeyDown += (_, e) =>
         {
-            _d.Points[0] = new ChartPoint(_d.Points[0].Time, v);
-            UpdateRr();
-        });
-        var target = PriceBox(_d.Points[1].Price, v =>
-        {
-            _d.Points[1] = new ChartPoint(_d.Points[1].Time, v);
-            UpdateRr();
-        });
-        var stop = PriceBox(_d.Points[2].Price, v =>
-        {
-            _d.Points[2] = new ChartPoint(_d.Points[2].Time, v);
-            UpdateRr();
-        });
-        var qty = new NumericUpDown { Value = _d.Quantity, Minimum = 0, Increment = _instrument.VolumeStep > 0 ? _instrument.VolumeStep : 1, FormatString = "0.########", MinWidth = 160, NumberFormat = CultureInfo.InvariantCulture.NumberFormat };
-        qty.ValueChanged += (_, _) =>
-        {
-            _d.Quantity = qty.Value ?? 0;
-            Changed();
+            if (e.Key != Avalonia.Input.Key.Enter) return;
+            if (DateTime.TryParse(box.Text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var time))
+            {
+                _d.Points[point] = new ChartPoint(time, _d.Points[point].Price);
+                error.Text = "";
+                Changed();
+            }
+            else error.Text = "Enter a valid UTC timestamp.";
+            e.Handled = true;
         };
-        return Section("Prices",
-            Labeled("Entry", entry),
-            Labeled("Target", target),
-            Labeled("Stop", stop),
-            Labeled("Quantity", qty),
-            rr,
-            Note("With a quantity, shows potential profit or loss. Marks bars touching the target or stop."));
+        return Ui.V(4, Labeled(label + " (UTC)", box), error);
+    }
+
+    private Control AnalysisNumber(string label, decimal value, decimal min, decimal max, Action<decimal> set)
+    {
+        var box = new NumericUpDown { Value = Math.Clamp(value, min, max), Minimum = min, Maximum = max, Increment = 1, FormatString = "0.##", MinWidth = 150, NumberFormat = CultureInfo.InvariantCulture.NumberFormat };
+        Avalonia.Automation.AutomationProperties.SetName(box, label);
+        box.ValueChanged += (_, _) => { set(box.Value ?? min); Changed(); };
+        return Labeled(label, box);
+    }
+
+    private Control AnchoredVwapSection() => Section("Anchored VWAP",
+        TimestampRow("Anchor", 0),
+        AnalysisNumber("Deviation band 1 (σ)", double.IsFinite(_d.Band1) ? (decimal)Math.Clamp(_d.Band1, 0, 10) : 1, 0, 10, v => _d.Band1 = (double)v),
+        AnalysisNumber("Deviation band 2 (σ)", double.IsFinite(_d.Band2) ? (decimal)Math.Clamp(_d.Band2, 0, 10) : 2, 0, 10, v => _d.Band2 = (double)v),
+        Note("Volume-weighted mean and deviation use every available record from the exact anchor. Compact aggregates remain labelled aggregates; synthetic candle estimates and inferred aggressor side remain visible. A zero band hides it. No orders."));
+
+    private Control ProfileSection()
+    {
+        var delta = new CheckBox { Content = "Show signed bid/ask delta", IsChecked = _d.ProfileDelta };
+        delta.IsCheckedChanged += (_, _) => { _d.ProfileDelta = delta.IsChecked == true; Changed(); };
+        var sessions = new CheckBox { Content = "Expand endpoints to whole exchange sessions", IsChecked = _d.ProfileWholeSessions };
+        sessions.IsCheckedChanged += (_, _) => { _d.ProfileWholeSessions = sessions.IsChecked == true; Changed(); };
+        return Section("Fixed-range profile", TimestampRow("From", 0), TimestampRow("Through", 1),
+            AnalysisNumber("Maximum rows", _d.ProfileRows, 1, TradeDrawingCalc.MaximumProfileRows, v => _d.ProfileRows = (int)v),
+            AnalysisNumber("Value area (%)", _d.ValueAreaPercent, 1, 100, v => _d.ValueAreaPercent = (int)v),
+            AnalysisNumber("Profile width (%)", _d.ProfileWidthPercent, 5, 100, v => _d.ProfileWidthPercent = (int)v),
+            delta, sessions, Note("Both endpoints are inclusive. Sparse, row-aware CPU calculation preserves decimal volume, including measured compact price/side aggregates. Unknown aggressor volume is included in volume, not delta. Coverage, synthetic estimates and inferred-side limitations are displayed on the chart."));
     }
 
     private Control PricesSection()

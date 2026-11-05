@@ -8,17 +8,21 @@ using TradingHub.Rendering.Tools;
 namespace TradingHub.Indicators.Native;
 
 [Flags]
-public enum StudyCoverage { Missing = 0, Observed = 1, Estimated = 2, Incomplete = 4, MissingBars = 8 }
+public enum StudyCoverage { Missing = 0, Observed = 1, Estimated = 2, Incomplete = 4, MissingBars = 8, Compact = 16, InferredSide = 32, Partial = 64 }
 
 internal readonly record struct StudyLevel(decimal Price, decimal Volume, decimal Bid, decimal Ask, decimal Width = 0);
 
 internal static class FootprintStudyData
 {
     private static readonly RenderFont LegendFont = new("Arial", 10);
-    internal static string Label(StudyCoverage coverage) => (coverage & (StudyCoverage.Observed | StudyCoverage.Estimated)) == 0 ? "Missing footprint (estimation off or zero volume)" :
+    internal static readonly RenderFont SmallFont = new("Arial", 8), AnnotationFont = new("Arial", 9), TinyFont = new("Arial", 7), BoldFont = new("Arial", 8, FontStyle.Bold);
+    internal static string Label(StudyCoverage coverage) => (coverage & (StudyCoverage.Observed | StudyCoverage.Compact | StudyCoverage.Estimated)) == 0 ? "Missing footprint (estimation off or zero volume)" :
         ((coverage & StudyCoverage.Observed) != 0 ? "Observed footprint" : "") +
-        ((coverage & StudyCoverage.Estimated) != 0 ? ((coverage & StudyCoverage.Observed) != 0 ? " + estimated OHLC" : "Estimated OHLC / aggregate") : "") +
+        ((coverage & StudyCoverage.Compact) != 0 ? ((coverage & StudyCoverage.Observed) != 0 ? " + compact measured aggregates" : "Compact measured aggregates") : "") +
+        ((coverage & StudyCoverage.Estimated) != 0 ? ((coverage & (StudyCoverage.Observed | StudyCoverage.Compact)) != 0 ? " + estimated OHLC" : "Estimated OHLC / aggregate") : "") +
         ((coverage & StudyCoverage.Incomplete) != 0 ? " (incomplete observed contribution)" : "") +
+        ((coverage & StudyCoverage.InferredSide) != 0 ? "; inferred aggressors" : "") +
+        ((coverage & StudyCoverage.Partial) != 0 ? "; partial source/period coverage" : "") +
         ((coverage & StudyCoverage.MissingBars) != 0 ? " + missing bars" : "");
 
     // A single observed row is evidence. Never augment mixed candles with invented residual order flow.
@@ -26,14 +30,14 @@ internal static class FootprintStudyData
         List<StudyLevel> destination)
     {
         destination.Clear();
-        if (candle.HasObservedFootprint)
+        if (candle.HasObservedFootprint || candle.HasAggregatedFootprint)
         {
-            foreach (var row in candle.GetAllPriceLevels())
+            foreach (var row in candle.GetProfilePriceLevels())
             {
                 if (row.Volume < 0 || row.Bid < 0 || row.Ask < 0) throw new InvalidOperationException("Negative footprint volume.");
                 destination.Add(new(row.Price, row.Volume, row.Bid, row.Ask));
             }
-            return StudyCoverage.Observed | (candle.IsFootprintComplete ? 0 : StudyCoverage.Incomplete);
+            return StudyMath.Coverage(candle);
         }
         if (!estimate || candle.Volume <= 0) return StudyCoverage.Missing;
         if (step <= 0) throw new ArgumentOutOfRangeException(nameof(step));
@@ -75,7 +79,7 @@ internal static class FootprintStudyData
                 left -= volume; bidLeft -= bid; askLeft -= ask;
             }
         }
-        return StudyCoverage.Estimated;
+        return StudyMath.Coverage(candle) | StudyCoverage.Estimated;
     }
 
     internal static decimal Nearest(decimal price, decimal step) => decimal.Round(price / step, 0, MidpointRounding.AwayFromZero) * step;

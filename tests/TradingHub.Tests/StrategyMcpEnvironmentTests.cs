@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using TradingHub.App.Services;
+using TradingHub.Common;
 
 namespace TradingHub.Tests;
 
@@ -13,6 +14,8 @@ public sealed class StrategyMcpEnvironmentTests
     {
         string root = Path.Combine(Path.GetTempPath(), "assistant MCP Unicode 'quoted' = " + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
+        // Resolve OS aliases once, before publishing any fixture path to a child.
+        root = new StorageLocationStore(root, root).Resolve().AppRoot;
         string dotnet = DotnetHost();
         string fixture = Path.Combine(AppContext.BaseDirectory, "AssistantCliFixture", "TradingHub.AssistantCliFixture.dll");
         Assert.True(File.Exists(fixture), "The spawned assistant fixture must be built and copied with the test project.");
@@ -59,6 +62,8 @@ public sealed class StrategyMcpEnvironmentTests
             var bridge = new CodexBridge(research);
             var result = await bridge.SendAsync(new("Fixture only; start owned local MCP children.", root, "No network or model call.", true, tradingView: access))
                 .WaitAsync(TimeSpan.FromSeconds(45));
+            if (result.Status != StrategyChatStatus.Succeeded)
+                Assert.Fail(FailureDiagnostics(result, root));
             Assert.Equal(StrategyChatStatus.Succeeded, result.Status);
             Assert.Equal("2", File.ReadAllText(Path.Combine(root, "children.json")));
             using var sealedLaunch = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "research-launch.json")));
@@ -104,6 +109,16 @@ public sealed class StrategyMcpEnvironmentTests
         }
         finally { File.Delete(output); }
     }
+    private static string FailureDiagnostics(StrategyChatResult result, string root)
+    {
+        var diagnostic = new StringBuilder()
+            .Append("The real generated MCP children did not complete successfully. Status: ").AppendLine(result.Status.ToString())
+            .AppendLine(result.Text);
+        foreach (string capture in Directory.EnumerateFiles(root, "*.mcp.*.txt").OrderBy(path => path, StringComparer.Ordinal))
+            diagnostic.AppendLine().AppendLine(Path.GetFileName(capture)).AppendLine(File.ReadAllText(capture));
+        return diagnostic.ToString();
+    }
+
 
     private static string DotnetHost()
     {

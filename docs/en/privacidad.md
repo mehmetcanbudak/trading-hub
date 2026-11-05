@@ -2,7 +2,7 @@
 
 # Privacy and security
 
-Trading Hub runs locally: app, market data, scripts, backtests and connection credentials. It has no Trading Hub account/backend and the reviewed source does not implement usage telemetry or automatic error uploads. Configured providers and optional Claude Code still make network requests.
+Trading Hub runs locally: app, market data, scripts, backtests and connection credentials. It has no Trading Hub account/backend and the reviewed source does not implement usage telemetry or automatic error uploads. Configured providers, explicitly enabled assistant/research actions and consented external alert destinations still make network requests.
 
 ## Local storage
 
@@ -19,14 +19,18 @@ See [Installation](instalacion.md#where-your-data-lives) for exact paths. AI-rel
 
 - Production secrets use macOS `security`/Keychain or native Windows Credential Manager (`CredRead`/`CredWrite`/`CredDelete`), not normal JSON files.
 - connections.json contains name, username, server, public API identifiers and options. Public IDs/account names can still be sensitive metadata; avoid sharing them unnecessarily.
-- Deleting a connection also deletes its native-store secrets. Windows uninstall intentionally retains data, scripts and credentials.
+- Deleting a connection never deletes history. Captured Bybit private contexts needed for unresolved operations/exposure/protection remain available until safely reconciled and drained; failed private-store writes do not silently replace them. Windows uninstall intentionally retains data, scripts and credentials.
 - Laboratory tools do not expose stored credentials. Do not put credentials into source, prompts or reports, where file-reading tools could access them.
+- Both Bybit API credentials, Longbridge tokens, proxy authentication, Telegram tokens and **complete capability webhook URLs** belong in the private store. A webhook hostname/path/query can itself be a credential; ordinary alert state/logs must not retain a supposedly harmless origin or full URL.
+- Native private-store work has bounded admission/cancellation and owned process/stdout/stderr drain. Local alerts never wait on native secret reads. Revocation closes local egress permission even when private cleanup/persistence fails, with the failure visible; deleting a setting is not proof of confirmed credential removal.
+- Already-durable external alert bodies are stored as revision-bound **AES-GCM ciphertext** with a private per-grant key, not plaintext placeholders or a general credential vault. Private-store unavailability pauses delivery without discarding that encrypted outbox across shutdown/restart. Authenticated-metadata/ciphertext tampering cannot be bypassed by Retry. Intake still waiting for required private material is visibly **not yet durable**; a local alert is not proof of a persisted external delivery.
+- Deferred intake captures its original destination/grant revision at acceptance. Grant changes/new recipients never acquire an earlier event implicitly. Active credential redactions remain pinned separately from bounded preview history; final confirmed material is applied again before sealing/sending, so unsaved previews cannot evict live secret protection.
 
 ## Network access
 
 | Feature | When | Destination |
 |---|---|---|
-| Market data | Opening/using an instrument on an enabled connection. | Configured Binance, Bybit, Rithmic, Tradovate, OANDA, Alpaca or cTrader provider. |
+| Market data | Opening/using an instrument on an enabled connection. | Configured Binance, Bybit, Longbridge, aggregate constituents, Rithmic, Tradovate, OANDA, Alpaca or cTrader provider. |
 | History | User download or laboratory download_data request. | Public archives or configured provider APIs. |
 | Long-history/context bars | Loading older charts or context without stored ticks. | Relevant market provider; crypto can use public Binance/Bybit bars without account login. |
 | Orders | Manual or strategy submission to a broker account. | That broker; simulated orders are internal. |
@@ -34,6 +38,9 @@ See [Installation](instalacion.md#where-your-data-lives) for exact paths. AI-rel
 | Claude Code | Assistant, laboratory or risk-agent invocation. | Anthropic through the user's CLI/account. |
 | Interactive Brokers probe | Test connection only. | TWS/IB Gateway, local by default. |
 | Links / cTrader authorization | Clicking external links or authorizing access. | System browser and the selected provider/author site. |
+| Candle maintenance | Only after explicit enable/selected instruments, or an explicit Run. | The configured provider, with bounded nonoverlapping work and visible partial/failure status. |
+| External alerts | Only while an explicitly consented destination remains authorized. | The privately stored webhook or Telegram endpoint; persistent at-least-once retry may duplicate after uncertain remote acceptance. Practice events remain local. |
+| Pine handoff | Only after original-source preview and explicit selected-assistant send confirmation. | The user's own selected CLI/model provider; text-only drafting with no automatic C# save/compile/execute. |
 
 There is no built-in updater or automatic crash-report submission in the reviewed source. Building requires NuGet/network access independently of normal app operation. Providers and CLI software have their own policies; this is not a packet-level audit of third-party components.
 
@@ -61,7 +68,7 @@ Localization tests do not enable privileged closed-lid operation or request brok
 
 ## Development isolation
 
-Tests/scenes use temporary data, strategy and indicator directories plus fake JSON credentials. Default screenshot tooling copies/sanitizes configuration, disables real orders and points Rithmic at a local fake server. Explicit fresh fixtures are preferred to copying user history. See [Development](desarrollo.md).
+Tests/scenes use six fresh data/script/backtest/live roots and fake JSON credentials, with sleep/power integration disabled. Screenshot tooling starts from empty owned fixtures, never copies personal profiles/history/scripts, disables external/default providers and uses explicitly configured fakes. See [Development](desarrollo.md).
 
 TRADINGHUB_KEYCHAIN_FILE is a **plaintext testing override**, not encrypted production credential storage. Do not place real secrets there or include it in diagnostics.
 
@@ -83,3 +90,7 @@ Strategy chat defaults to Claude and optionally uses the user's own Codex CLI lo
 TradingView research starts off. Explicit app-owned OAuth uses dedicated native secret entries; nonsecret grant/review metadata and schema fingerprints are stored in `tradingview-research.json`. Discovery retrieves paginated metadata; approved calls send arguments to the official remote MCP endpoint and may send returned research into model context. Review/revocation is enforced before calls, but cannot retract data already sent or provider charges already incurred. Essential+ eligibility excludes trials; supported client registration and real account interoperability remain unverified.
 
 No CLI credential scraping or global CLI configuration rewrite is used. A workspace CLI network restriction is not a remote-MCP firewall or an in-process C# sandbox. Do not put secrets in prompts, sources or shared captures; see [assistant boundaries](asistente-claude.md#optional-tradingview-research). IB data requires its own Gateway/entitlements unless explicitly offline; OI uses Binance public observations. Imported bars remain synthetic, not execution records.
+
+Built-in source viewing does not execute that source. Editable copies preserve attribution and require real compilation; imported C#/DLLs remain unsandboxed. Pine originals are preserved byte-for-byte, the complete request/instructions are previewed, and explicit consent is separate from import. The selected CLI can add its own account/system context and retain content under its policies; the app's draft-only handoff is not a security/equivalence guarantee.
+
+Depth recording is a separate off-by-default local data collection choice; turning on a heatmap is not consent to record. Optional verified storage relocation leaves originals intact and honors environment overrides. Captured app HTTP/WebSocket proxy policy does not control native IB TCP or external CLI/browser networking. True Quit/restart waits producer/provider/assistant work, then the application-global private store, before replacement/desktop exit; close-to-tray does not dispose those services.

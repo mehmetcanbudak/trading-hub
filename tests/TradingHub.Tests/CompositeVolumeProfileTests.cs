@@ -119,7 +119,8 @@ public class CompositeVolumeProfileTests
         var study = new CompositeVolumeProfile { PriceGrouping = 1, AllowEstimated = true };
         Assert.Null(model.AddIndicator(study, applyDefaultColors: false).Error);
         var profile = Assert.Single(study.Profiles); Assert.Equal(101m, profile.Total); Assert.InRange(profile.Levels.Count, 1, 200);
-        Assert.Equal(StudyCoverage.Estimated, profile.Coverage);
+        Assert.True(profile.Coverage.HasFlag(StudyCoverage.Estimated)); Assert.True(profile.Coverage.HasFlag(StudyCoverage.InferredSide));
+        Assert.True(profile.Coverage.HasFlag(StudyCoverage.MissingBars)); Assert.False(profile.Coverage.HasFlag(StudyCoverage.Observed));
         Replace(model.Series[0], 0, 0); study.HostCalculate(0); Assert.Empty(Assert.Single(study.Profiles).Levels);
     }
     [Theory]

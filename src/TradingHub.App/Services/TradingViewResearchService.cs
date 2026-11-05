@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Avalonia.Controls;
 using TradingHub.App.Windows;
+using TradingHub.Networking;
 
 namespace TradingHub.App.Services;
 
@@ -44,6 +45,8 @@ public sealed class TradingViewResearchService : IAsyncDisposable
     private static readonly Lazy<TradingViewResearchService> DefaultService = new(() =>
         new(Path.Combine(AppPaths.Root, "tradingview-research.json"), Keychain.Store));
     public static TradingViewResearchService Default => DefaultService.Value;
+    internal static ValueTask DisposeDefaultAsync() => DefaultService.IsValueCreated
+        ? DefaultService.Value.DisposeAsync() : ValueTask.CompletedTask;
 
     private static readonly ImmutableHashSet<string> Candidates = ImmutableHashSet.Create(StringComparer.Ordinal,
         "get_ohlcv", "get_economic_data", "get_economic_symbols", "search_symbols", "get_symbol_data", "run_screener",
@@ -78,14 +81,17 @@ public sealed class TradingViewResearchService : IAsyncDisposable
     /// <summary>The factory is injectable for isolated fake-server tests. Construction performs no network or secret reads.</summary>
     public TradingViewResearchService(string statePath, ISecretStore secrets,
         Func<TradingViewResearchConnection, CancellationToken, Task<ITradingViewResearchTransport>>? factory = null,
-        Uri? endpoint = null, Func<string, CancellationToken, Task<string>>? revokeTokens = null)
+        Uri? endpoint = null, Func<string, CancellationToken, Task<string>>? revokeTokens = null,
+        Func<ProxyHandlerFactory>? networkFactory = null)
     {
         _statePath = Path.GetFullPath(statePath);
         _secrets = secrets;
         _endpoint = endpoint ?? OfficialEndpoint;
-        _revokeTokens = revokeTokens ?? ((saved, ct) => TradingViewResearchSdk.RevokeTokensAsync(saved, ct));
+        var createNetwork = networkFactory ?? (() => new AppNetworkProxy(AppSettings.Load(), _secrets).CreateFactory());
+        _revokeTokens = revokeTokens ?? ((saved, ct) => TradingViewResearchSdk.RevokeTokensAsync(saved, ct, network: createNetwork()));
         _factory = factory ?? (async (connection, ct) => await TradingViewResearchSdk.ConnectAsync(connection,
-            new TradingViewSecretTokenCache(_secrets, connection.GrantId, () => ReadState().GrantId == connection.GrantId), ct).ConfigureAwait(false));
+            new TradingViewSecretTokenCache(_secrets, connection.GrantId, () => ReadState().GrantId == connection.GrantId), ct,
+            network: createNetwork()).ConfigureAwait(false));
     }
 
     internal sealed record State(string Endpoint, string? GrantId, string? ApprovalId, string? Fingerprint,

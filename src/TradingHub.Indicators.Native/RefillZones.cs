@@ -36,7 +36,7 @@ public class RefillZones : Indicator
     private readonly RenderPen _zonePen = new(Color.Empty);
     private int _last = -1, _lifetime;
     private decimal _minimum = 50, _group = 10;
-    private bool _estimate, _absorption = true, _project = true;
+    private bool _estimate, _absorption = true, _project = true, _allowInferred;
     public RefillZones() : base(true)
     {
         DataSeries[0].IsHidden = true; ((ValueDataSeries)DataSeries[0]).VisualType = VisualMode.Hide;
@@ -50,6 +50,8 @@ public class RefillZones : Indicator
     public bool AbsorptionOnly { get => _absorption; set { _absorption = value; RecalculateValues(); } }
     [Display(Name = "Allow estimated OHLC (threshold x 0.4, maximum 200 buckets)", GroupName = "Calculation")]
     public bool AllowEstimated { get => _estimate; set { _estimate = value; RecalculateValues(); } }
+    [Display(Name = "Allow explicitly inferred aggressors", GroupName = "Calculation")]
+    public bool AllowInferredAggressors { get => _allowInferred; set { _allowInferred = value; RecalculateValues(); } }
     [Display(Name = "Project until mitigation", GroupName = "Visualization")]
     public bool ProjectZones { get => _project; set { _project = value; RecalculateValues(); } }
     [Display(Name = "Keep mitigated zones", GroupName = "Visualization")] public bool ShowMitigated { get; set; } = true;
@@ -110,8 +112,9 @@ public class RefillZones : Indicator
             if (bucket.Volume <= 0 || bucket.Volume < _minimum * (estimated ? 0.4m : 1)) continue;
             decimal low = bucket.Price, high = low + bucket.Width, mid = low / 2 + high / 2, range = candle.High - candle.Low;
             ZoneDirection direction = ZoneDirection.Neutral;
-            if (bucket.Bid > bucket.Ask && bucket.Bid >= bucket.Volume * 0.52m && low <= candle.Low + range * 0.35m && candle.Close > mid) direction = ZoneDirection.Buyer;
-            else if (bucket.Ask > bucket.Bid && bucket.Ask >= bucket.Volume * 0.52m && high >= candle.High - range * 0.35m && candle.Close < mid) direction = ZoneDirection.Seller;
+            bool sideAllowed = (Coverage & StudyCoverage.InferredSide) == 0 || AllowInferredAggressors;
+            if (sideAllowed && bucket.Bid > bucket.Ask && bucket.Bid >= bucket.Volume * 0.52m && low <= candle.Low + range * 0.35m && candle.Close > mid) direction = ZoneDirection.Buyer;
+            else if (sideAllowed && bucket.Ask > bucket.Bid && bucket.Ask >= bucket.Volume * 0.52m && high >= candle.High - range * 0.35m && candle.Close < mid) direction = ZoneDirection.Seller;
             if (_absorption && direction == ZoneDirection.Neutral) continue;
             var zone = new Zone { Bar = bar, Low = low, High = high, Volume = bucket.Volume, Direction = direction, Coverage = Coverage };
             zone.AnnotationText = $"{direction} {FootprintStudyData.Label(Coverage)}";

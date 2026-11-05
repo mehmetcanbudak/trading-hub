@@ -193,6 +193,11 @@ internal static class NonKvpSearchZoomScene
             Check(!elsewhere.IsVisible && !Field<bool>(picker, "_open"), "detaching control cancels popup and late UI publication");
 
             chart.Model = dense;
+            Until(() =>
+            {
+                dense.Update(); // Standalone view owns the bounded update normally driven by TradingView.Tick.
+                return dense.Series.Count >= 50_000;
+            });
             Check(dense.Series.Count >= 50_000, "actual chart contains at least 50,000 deterministic candles with unsampled spikes");
             foreach (double width in new[] { 0.1, 0.5, 1.5, 8.0 })
             {

@@ -40,6 +40,7 @@ internal sealed class StrategyChartWindow : Window
     private readonly List<(PropertyInfo Prop, Func<object?> Read)> _editors = new();
     private readonly Avalonia.Threading.DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private StrategyFile? _file;
+    private bool _accountChoiceChanged;
 
     public StrategyChartWindow(TradingView host, ChartTab chart, ChartStrategy cs)
     {
@@ -58,13 +59,15 @@ internal sealed class StrategyChartWindow : Window
         _visual.IsChecked = !cs.Live;
         _live.IsChecked = cs.Live;
         _visual.IsCheckedChanged += (_, _) => UpdateMode();
+        _live.IsCheckedChanged += (_, _) => UpdateMode();
         var accounts = chart.Model != null ? host.AccountOptions(chart, chart.Model.Data) : new List<AccountOption>();
         Ui.SyncAccounts(_account, accounts, cs.AccountId);
         if (_account.SelectedItem == null && _account.Items.Count > 0) _account.SelectedIndex = 0;
+        _account.SelectionChanged += (_, _) => _accountChoiceChanged = true;
         BuildParameters();
 
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(20, 18, 20, 18) };
-        body.Children.Add(Ui.V(4, Ui.H2(cs.Overlay.Name), Note($"{chart.Symbol} · {chart.Model?.Period.DisplayName}. Shows entries (arrows) and exits (crosses with PnL) on historical and new bars."), _state));
+        body.Children.Add(Ui.V(4, Ui.H2(cs.Overlay.Name), Note($"{chart.DisplaySymbol} · {chart.Model?.Period.DisplayName}. Shows entries (arrows) and exits (crosses with PnL) on historical and new bars."), _state));
         body.Children.Add(Section("Execution mode", _visual, _live, Ui.Field("Account", _account), _accountNote));
         body.Children.Add(Section("Parameters", _params));
         var curve = new Border { Child = _curve, Background = Ui.Bg0, CornerRadius = new CornerRadius(10), Padding = new Thickness(6, 8), ClipToBounds = true };
@@ -192,6 +195,15 @@ internal sealed class StrategyChartWindow : Window
 
     private void Refresh()
     {
+        bool concealed = _chart.Model?.Settings.BlindReplay == true;
+        if (concealed)
+        {
+            _state.Text = "Practice · concealed";
+            _results.IsVisible = false;
+            _emptyResults.IsVisible = true;
+            _emptyResults.Text = "Historical dates and results stay concealed until Reveal or End.";
+            return;
+        }
         _state.Text = (_cs.Overlay.Error != null ? "⚠ " + _cs.Overlay.Error + " · " : "") + "Status: " + _cs.Overlay.Status;
         _state.Foreground = _cs.Overlay.Error != null ? Ui.Down : _cs.Overlay.Live ? Ui.Accent : Ui.Text1;
         var m = _cs.HistoryMetrics;
@@ -291,7 +303,15 @@ internal sealed class StrategyChartWindow : Window
         }
 
         _cs.Live = _live.IsChecked == true;
-        if (_cs.Live && _account.SelectedItem is ComboBoxItem { Tag: AccountOption a }) _cs.AccountId = a.Id;
+        if (_cs.Live && _account.SelectedItem is ComboBoxItem { Tag: AccountOption a })
+        {
+            if (_accountChoiceChanged && _cs.AccountId != a.Id)
+            {
+                _cs.PersistentOwnerKey = null;
+                _cs.ExplicitAccountChange = true;
+            }
+            _cs.AccountId = a.Id;
+        }
         _cs.Paused = false;
         _ = _host.RunStrategyAsync(_chart, _cs);
         Refresh();

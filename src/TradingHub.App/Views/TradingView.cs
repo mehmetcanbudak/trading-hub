@@ -38,6 +38,7 @@ public sealed class ChartTab
     public string Symbol { get; set; } = "SIM-BTC";
     public string AccountId { get; set; } = "sim";
     public double HistoryHours { get; set; }
+    internal bool AccountSelectionUnavailable { get; set; }
 
     /// <summary>Grupo de vinculación por color (0 = sin vincular).</summary>
     public int LinkGroup { get; set; }
@@ -71,7 +72,8 @@ public sealed class ChartTab
 
     public bool IsReplay => Model?.Data.Feed is ReplayFeed;
 
-    public string Caption => Model == null ? Symbol : $"{(IsReplay ? "▶ " : "")}{Symbol} · {Model.Period.DisplayName}";
+    public string DisplaySymbol => Model?.Settings.BlindReplay == true ? "Practice" : Symbol;
+    public string Caption => Model == null ? DisplaySymbol : $"{(IsReplay ? "▶ " : "")}{DisplaySymbol} · {Model.Period.DisplayName}";
 
     /// <summary>Estrategias puestas en este gráfico (como indicadores: visuales o ejecutando en una cuenta).</summary>
     public List<ChartStrategy> Strategies { get; } = new();
@@ -146,6 +148,7 @@ public sealed partial class TradingView : UserControl
         _toolbar = new ChartToolbar(this, false, Ui.Divider(true), _layoutChoice, BuildPanelsButton(), popOut, newTab);
         _svc.BracketsCreated += HookBrackets;
         Content = BuildLayout();
+        InitializeAlertUi();
     }
 
     internal IEnumerable<ChartTab> AllCharts => _pages.SelectMany(p => p.Charts).Concat(_floating.Select(w => w.Chart));
@@ -449,6 +452,7 @@ public sealed partial class TradingView : UserControl
         var period = new[] { ChartPeriod.M1, ChartPeriod.M5, ChartPeriod.M15, ChartPeriod.H1, ChartPeriod.M30, ChartPeriod.H4, ChartPeriod.Parse("Daily"), ChartPeriod.Parse("S15") }
             .Where(p => !used.Contains(p)).DefaultIfEmpty(ChartPeriod.M5).First();
         var chart = CreateChart(src?.FeedId ?? SimulatedFeed.FeedId, src?.Symbol ?? "SIM-BTC", src?.AccountId ?? "sim", src?.HistoryHours ?? 0);
+        chart.AccountSelectionUnavailable = src?.AccountSelectionUnavailable == true;
         page.Charts.Add(chart);
         chart.Page = page;
         await OpenInTabAsync(chart, chart.FeedId, chart.Symbol, period, src?.Model?.Settings.Clone(), copyIndicatorsFrom: src);
@@ -547,6 +551,7 @@ public sealed partial class TradingView : UserControl
         view.DrawingDoubleClicked += d => EditDrawing(chart, d);
         view.OrderDragged += (o, price) => _ = MoveOrderAsync(chart, o, price);
         view.BracketDropped += (d, price) => _ = OnBracketDroppedAsync(chart, d, price);
+        InitializeChartQuickEntry(chart);
         return chart;
     }
 
@@ -567,11 +572,12 @@ public sealed partial class TradingView : UserControl
     }
 
     /// <summary>Pestaña nueva con un gráfico.</summary>
-    internal async Task<ChartTab> NewTabAsync(string feedId, string symbol, ChartPeriod period, ChartSettings? settings = null, bool activate = true, string accountId = "sim", double historyHours = 0, PaneLayout layout = PaneLayout.One)
+    internal async Task<ChartTab> NewTabAsync(string feedId, string symbol, ChartPeriod period, ChartSettings? settings = null, bool activate = true, string accountId = "sim", double historyHours = 0, PaneLayout layout = PaneLayout.One, bool preserveAccountSelection = false)
     {
         var page = CreatePage();
         page.Layout = layout;
         var chart = CreateChart(feedId, symbol, accountId, historyHours);
+        chart.AccountSelectionUnavailable = preserveAccountSelection;
         page.Charts.Add(chart);
         page.Active = chart;
         chart.Page = page;
@@ -584,9 +590,10 @@ public sealed partial class TradingView : UserControl
     }
 
     /// <summary>Agrega un gráfico a una pestaña existente (lo usa la restauración del espacio de trabajo).</summary>
-    internal async Task<ChartTab> AddToPageAsync(ChartPage page, string feedId, string symbol, ChartPeriod period, ChartSettings? settings, string accountId, double historyHours)
+    internal async Task<ChartTab> AddToPageAsync(ChartPage page, string feedId, string symbol, ChartPeriod period, ChartSettings? settings, string accountId, double historyHours, bool preserveAccountSelection = false)
     {
         var chart = CreateChart(feedId, symbol, accountId, historyHours);
+        chart.AccountSelectionUnavailable = preserveAccountSelection;
         page.Charts.Add(chart);
         chart.Page = page;
         Arrange(page);
@@ -597,9 +604,20 @@ public sealed partial class TradingView : UserControl
     internal async Task OpenInTabAsync(ChartTab tab, string feedId, string symbol, ChartPeriod period, ChartSettings? settings) =>
         await OpenInTabAsync(tab, feedId, symbol, period, settings, copyIndicatorsFrom: tab);
 
+    internal Task OpenChartSelectionAsync(ChartTab tab, string feedId, string symbol, ChartPeriod period,
+        ChartSettings settings, ChartModel expectedModel, Window expectedOwner) =>
+        OpenInTabAsync(tab, feedId, symbol, period, settings, copyIndicatorsFrom: tab, expectedModel, expectedOwner);
+
     /// <summary>Carga (o cambia) el instrumento de un gráfico. Copia los indicadores del gráfico indicado.</summary>
-    private async Task OpenInTabAsync(ChartTab tab, string feedId, string symbol, ChartPeriod period, ChartSettings? settings, ChartTab? copyIndicatorsFrom)
+    private async Task OpenInTabAsync(ChartTab tab, string feedId, string symbol, ChartPeriod period, ChartSettings? settings,
+        ChartTab? copyIndicatorsFrom, ChartModel? expectedModel = null, Window? expectedOwner = null)
     {
+        CancelChartQuickEntry(tab);
+        if (tab.IsReplay)
+        {
+            _status("Practice keeps its run-owned instrument and account. Open a separate normal chart to choose another symbol.");
+            return;
+        }
         try
         {
             var profile = _svc.Connections.Find(feedId);
@@ -610,6 +628,9 @@ public sealed partial class TradingView : UserControl
             }
 
             var instruments = await InstrumentPicker.InstrumentsAsync(_svc, profile.Id);
+            if (expectedModel != null && (!ReferenceEquals(tab.Model, expectedModel) ||
+                !ReferenceEquals(TopLevel.GetTopLevel(tab.View), expectedOwner) || !tab.View.IsEffectivelyVisible ||
+                tab.Page == null && tab.Window == null)) return;
             var inst = instruments.FirstOrDefault(i => i.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
             if (inst == null)
             {
@@ -621,28 +642,39 @@ public sealed partial class TradingView : UserControl
             var oldIndicators = copyIndicatorsFrom?.Model?.Indicators.Select(s => s.Indicator).ToList();
             tab.Model?.Dispose();
             var data = _svc.Open(profile.Id, inst);
+            bool preserveAccount = expectedModel != null || tab.AccountSelectionUnavailable;
+            tab.AccountSelectionUnavailable = preserveAccount &&
+                (data.Feed is AggregateFeed || !_svc.AccountsFor(data).Any(option => option.Id == tab.AccountId));
             var model = new ChartModel(data, period, settings ?? new ChartSettings())
             {
-                Trading = _svc.SimBrokerFor(data),
+                Trading = data.Feed is AggregateFeed || tab.AccountSelectionUnavailable ? null : _svc.SimBrokerFor(data),
                 Statistics = _svc.StatsProvider,
             };
-            model.Settings.TimeZoneId = _svc.Settings.TimeZoneId;
+            model.Settings.BlindReplay = false;
+            model.Settings.BlindReplayStart = default;
+            if (settings == null) model.Settings.TimeZoneId = _svc.Settings.TimeZoneId;
             model.Viewport.BarWidth = model.Settings.Style == ChartStyle.Footprint ? 110 : 8;
-            model.AlertRaised += a => Dispatcher.UIThread.Post(() => ShowAlert(a));
+            model.AlertRaised += alert => Dispatcher.UIThread.Post(() => PublishChartAlert(tab, alert));
             tab.Model = model;
             tab.FeedId = profile.Id;
             tab.Symbol = inst.Symbol;
             tab.View.Model = model;
             // una cuenta de Rithmic se mantiene aunque su sesión todavía se esté conectando
-            if (!tab.AccountId.StartsWith("rithmic|", StringComparison.Ordinal) && !_svc.AccountsFor(data).Any(a => a.Id == tab.AccountId)) tab.AccountId = "sim";
+            if (!preserveAccount)
+            {
+                if (data.Feed is AggregateFeed) tab.AccountId = "";
+                else if (!tab.AccountId.StartsWith("rithmic|", StringComparison.Ordinal) && !_svc.AccountsFor(data).Any(a => a.Id == tab.AccountId)) tab.AccountId = "sim";
+            }
+            if (tab.AccountSelectionUnavailable)
+                _status("Selected account retained but unavailable on this data connection. Choose a compatible account explicitly to enable trading.");
             if (instrumentChanged && tab.CrossSymbol != null)
             {
                 tab.CrossSymbol = null;
                 tab.CrossData = null;
             }
 
-            model.Account = AccountOf(tab) ?? _svc.AccountFor(data, tab.AccountId);
-            model.Brackets = _svc.BracketsFor(model.Account);
+            model.Account = AccountOf(tab);
+            model.Brackets = model.Account != null ? _svc.BracketsFor(model.Account) : null;
             tab.Trader?.Rebind();
             Workspace.LoadDrawings(tab);
             if (tab.HistoryHours != 0) _ = LoadHistoryAsync(tab, tab.HistoryHours, quiet: true);
@@ -689,6 +721,7 @@ public sealed partial class TradingView : UserControl
         var page = chart.Page;
         if (page == null) return;
         bool changed = !ReferenceEquals(chart, _active);
+        if (changed) CancelChartQuickEntry();
         page.Active = chart;
         if (!ReferenceEquals(page, _page))
         {
@@ -710,6 +743,7 @@ public sealed partial class TradingView : UserControl
 
     private void OnPageChanged()
     {
+        CancelChartQuickEntry();
         if (_switching) return;
         _page = _pages.FirstOrDefault(p => ReferenceEquals(p.Item, _tabControl.SelectedItem));
         if (_page == null) return;
@@ -721,6 +755,7 @@ public sealed partial class TradingView : UserControl
 
     private void DisposeChart(ChartTab chart)
     {
+        CancelChartQuickEntry(chart);
         // las estrategias del gráfico se detienen (las posiciones abiertas quedan como están)
         foreach (var cs in chart.Strategies) StopStrategy(cs);
         chart.Model?.Dispose();
@@ -811,6 +846,7 @@ public sealed partial class TradingView : UserControl
     /// <summary>Saca un gráfico a su propia ventana (se puede llevar a otro monitor).</summary>
     internal ChartWindow? Detach(ChartTab chart, PixelPoint? position = null, Size? size = null)
     {
+        CancelChartQuickEntry(chart);
         var page = chart.Page;
         if (page == null) return null;
         bool lastChart = _pages.Count == 1 && page.Charts.Count == 1;
@@ -842,7 +878,9 @@ public sealed partial class TradingView : UserControl
                 // la ventana principal nunca queda sin gráficos: deja una copia
                 _pages.Remove(page);
                 _tabControl.Items.Remove(page.Item);
-                _ = NewTabAsync(chart.FeedId, chart.Symbol, chart.Model?.Period ?? ChartPeriod.M5, chart.Model?.Settings.Clone(), accountId: chart.AccountId);
+                _ = chart.IsReplay
+                    ? NewTabAsync(SimulatedFeed.FeedId, "SIM-BTC", ChartPeriod.M5, new ChartSettings { Layout = FootprintLayout.Presets[1].Clone() })
+                    : NewTabAsync(chart.FeedId, chart.Symbol, chart.Model?.Period ?? ChartPeriod.M5, chart.Model?.Settings.Clone(), accountId: chart.AccountId, preserveAccountSelection: chart.AccountSelectionUnavailable);
             }
             else
             {
@@ -867,6 +905,7 @@ public sealed partial class TradingView : UserControl
     /// <summary>Devuelve un gráfico de una ventana aparte a la pestaña activa (o a una nueva si está llena).</summary>
     internal void DockBack(ChartWindow w)
     {
+        CancelChartQuickEntry(w.Chart);
         var chart = w.Chart;
         w.ReleaseChart();
         _floating.Remove(w);
@@ -903,8 +942,10 @@ public sealed partial class TradingView : UserControl
     /// <summary>Cierra las ventanas aparte (al salir de la app).</summary>
     internal void CloseFloating()
     {
+        CancelChartQuickEntry();
         foreach (var w in _floating.ToList()) w.Close();
         ClosePanelWindowsForShutdown();
+        DisposeAlertUi();
     }
 
     internal void RefreshLayoutBoxes()
@@ -913,91 +954,6 @@ public sealed partial class TradingView : UserControl
         foreach (var w in _floating) w.Toolbar.RefreshLayoutBox();
     }
 
-    // ===================================================================== replay
-
-    private readonly Border _replayBar = new() { IsVisible = false };
-    private readonly ToggleButton _replayPlay = new() { Width = 34, Height = 30, Padding = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Center };
-    private readonly TextBlock _replayClock = new() { FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, MinWidth = 150 };
-    private readonly ProgressBar _replayProgress = new() { Minimum = 0, Maximum = 1, Height = 4, MinWidth = 160, VerticalAlignment = VerticalAlignment.Center };
-    private Ui.Segmented<double>? _replaySpeed;
-
-    private ReplayFeed? ActiveReplay => _active?.Model?.Data.Feed as ReplayFeed;
-
-    private Control BuildReplayBar()
-    {
-        _replayPlay.Click += (_, _) =>
-        {
-            if (ActiveReplay is { } r) r.Paused = _replayPlay.IsChecked != true;
-            UpdateReplayBar();
-        };
-        _replaySpeed = new Ui.Segmented<double>(new[] { 1.0, 2, 5, 10, 30, 60, 300 }.Select(v => (v, $"{v:0}×", (string?)null)));
-        _replaySpeed.SelectionChanged += v =>
-        {
-            if (ActiveReplay is { } r) r.Speed = v;
-        };
-        Button Jump(string text, TimeSpan by) => Ui.Button(text, null, () =>
-        {
-            if (ActiveReplay is { } r) r.SeekForward(r.Clock + by);
-        });
-
-        var badge = new Border { Child = Ui.H(6, Ui.Icon(MaterialIconKind.PlayCircleOutline, 15, Ui.Accent), new TextBlock { Text = "REPLAY", FontSize = 11, FontWeight = FontWeight.Bold }), Classes = { "pill" } };
-        var row = Ui.H(12, badge, _replayPlay, _replaySpeed, _replayClock, _replayProgress, Ui.H(6, Jump("+5 min", TimeSpan.FromMinutes(5)), Jump("+30 min", TimeSpan.FromMinutes(30)), Jump("+1 h", TimeSpan.FromHours(1))));
-        row.Margin = new Thickness(12, 8);
-        _replayBar.Child = row;
-        _replayBar.Background = Ui.Bg1;
-        _replayBar.BorderBrush = Ui.Line;
-        _replayBar.BorderThickness = new Thickness(0, 1, 0, 0);
-        return _replayBar;
-    }
-
-    private void UpdateReplayBar()
-    {
-        var r = ActiveReplay;
-        _replayBar.IsVisible = r != null;
-        if (r == null || _active?.Model == null) return;
-        _replayPlay.IsChecked = !r.Paused && !r.IsFinished;
-        _replayPlay.Content = Ui.Icon(r.Paused || r.IsFinished ? MaterialIconKind.Play : MaterialIconKind.Pause, 18);
-        _replaySpeed?.Select(r.Speed);
-        var local = TimeZoneInfo.ConvertTimeFromUtc(r.Clock, _active.Model.Settings.TimeZone);
-        _replayClock.Text = r.IsFinished ? "Finished" : local.ToString("ddd dd/MM HH:mm:ss", TradingHub.Common.UiCulture.Current);
-        _replayProgress.Value = r.Progress;
-    }
-
-    /// <summary>Abre un replay en una pestaña nueva.</summary>
-    internal async Task OpenReplayAsync(Instrument source, DateTime startUtc, DateTime endUtc, ChartPeriod period)
-    {
-        var data = _svc.OpenReplay(source, startUtc, endUtc, TimeSpan.FromHours(3));
-        var page = CreatePage();
-        var chart = CreateChart(data.Instrument.FeedId, source.Symbol, "sim", 0);
-        chart.OnClosed = () => data.Feed.Dispose();
-        page.Charts.Add(chart);
-        page.Active = chart;
-        chart.Page = page;
-        var settings = _active?.Model?.Settings.Clone() ?? new ChartSettings();
-        var model = new ChartModel(data, period, settings) { Trading = _svc.SimBrokerFor(data), Statistics = _svc.StatsProvider };
-        model.Settings.TimeZoneId = _svc.Settings.TimeZoneId;
-        model.Viewport.BarWidth = model.Settings.Style == ChartStyle.Footprint ? 110 : 8;
-        model.Account = _svc.SimBrokerFor(data);
-        model.Brackets = _svc.BracketsFor(model.Account);
-        if (_active?.Model != null)
-        {
-            foreach (var ind in _active.Model.Indicators.Select(s => s.Indicator))
-            {
-                var copy = Workspace.CloneIndicator(_svc, ind);
-                if (copy != null) model.AddIndicator(copy, applyDefaultColors: false);
-            }
-        }
-
-        chart.Model = model;
-        chart.View.Model = model;
-        _pages.Add(page);
-        Arrange(page);
-        _tabControl.Items.Add(page.Item);
-        _tabControl.SelectedItem = page.Item;
-        UpdateTitles(chart);
-        _status($"Replay of {source.Symbol} from {TimeZoneInfo.ConvertTimeFromUtc(startUtc, model.Settings.TimeZone):dd/MM HH:mm}: trade with the simulated account as if live.");
-        await Task.CompletedTask;
-    }
 
     // ===================================================================== historia
 
@@ -1079,6 +1035,7 @@ public sealed partial class TradingView : UserControl
     /// </summary>
     private void UpdateTradeMarks(ChartTab c)
     {
+        if (UpdatePracticeTradeMarks(c)) return;
         if (c.Model is not { } m || c.IsReplay) return;
         var inst = (c.CrossData ?? m.Data).Instrument;
         string key = m.Settings.ShowTradeMarks ? $"{c.AccountId}|{inst.Key}|{_svc.Journal.CountOf(c.AccountId)}" : "off";
@@ -1300,7 +1257,7 @@ public sealed partial class TradingView : UserControl
                 copy.Selected = true;
                 model.Drawings.Add(copy);
                 Changed();
-            });
+            }, concealTimestamps: model.Settings.BlindReplay);
         _drawingWindows[d.Id] = w;
         w.Closed += (_, _) => _drawingWindows.Remove(d.Id);
         w.Show(owner);
@@ -1316,11 +1273,7 @@ public sealed partial class TradingView : UserControl
         new FootprintEditorWindow(chart.Model, this).Show(owner);
     }
 
-    private void ShowAlert(AlertInfo a)
-    {
-        _status($"🔔 {a.Source}: {a.Message}");
-        Sound.Play();
-    }
+    private void ShowAlert(AlertInfo alert) => PublishChartAlert(alert);
 
     internal async Task RestoreOrDefaultAsync()
     {
@@ -1353,6 +1306,7 @@ public sealed partial class TradingView : UserControl
     {
         _frame++;
         bool slowFrame = _frame % 15 == 0;
+        TickReplayRuns();
         var visible = new HashSet<ChartTab>(ReferenceEqualityComparer.Instance);
         if (mainVisible && _page != null)
             foreach (var c in _page.Charts.Take(PaneCount(_page.Layout))) visible.Add(c);
@@ -1392,7 +1346,6 @@ public sealed partial class TradingView : UserControl
         }
 
         if (!mainVisible && !slowFrame && !AnyPanelFloating) return;
-        if (++_replayTick % 10 == 0 && _replayBar.IsVisible | ActiveReplay != null) UpdateReplayBar();
 
         var data = _dom.Dom?.Data;
         if (data != null && (data.Trades.Count != _lastTradeCount || !ReferenceEquals(data.Depth, _lastDepth)))
@@ -1405,7 +1358,6 @@ public sealed partial class TradingView : UserControl
         }
     }
 
-    private int _replayTick;
 
     private void CheckAlerts(ChartTab t)
     {
@@ -1422,8 +1374,7 @@ public sealed partial class TradingView : UserControl
                 d.Dashed = false;
                 d.LineStyle = LineStyleKind.Solid;
                 DrawingsTouched(t);
-                _status($"🔔 {t.Symbol} touched {m.Instrument.FormatPrice(level)}");
-                Sound.Play();
+                _svc.Alerts.Raise(AlertKind.Price, t.DisplaySymbol, "Price alert", $"{t.DisplaySymbol} touched {m.Instrument.FormatPrice(level)}", allowExternal: !t.IsReplay);
                 m.Invalidate();
             }
 

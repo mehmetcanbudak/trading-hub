@@ -2,6 +2,8 @@
 
 > Original de upstream 1d5a774, conservado con enlaces de idioma adaptados. Los instaladores enlazados son del autor original y no incluyen las correcciones exclusivas de este fork. Para usar este fork, compilá la rama `memoshi` siguiendo la [guía de instalación](docs/en/instalacion.md); no se publican binarios de este fork. La validación disponible y sus límites figuran en el [estado de validación](docs/en/TRANSLATION_STATUS.md). No se afirma certificación de brokers reales/demo ni de suspensión física. Licencia: código disponible bajo MIT + Commons Clause, no código abierto aprobado por OSI.
 
+> **Candidato KVP:** la rama aislada `feat/kvp-adoption` integra el alcance completo aprobado de datos, estudios, gráficos/profundidad, edición, práctica, alertas, proveedores, almacenamiento y proxy, con límites de calidad y seguridad explícitos. No equivale a una app instalada ni a un binario publicado. Consultá el [alcance y la evidencia de aceptación](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04) y la [atribución/licencia completa](THIRD_PARTY_NOTICES.md#kvp-capability-reference). Se excluyen el cambio de marca/directorios, la distribución/actualizador Windows de KVP y el lanzador externo VPFM exclusivo de Windows. No se afirma aceleración Metal sin medición integral.
+
 <div align="center">
 
 # Trading Hub

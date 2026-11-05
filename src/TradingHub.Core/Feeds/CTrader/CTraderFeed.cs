@@ -2,14 +2,14 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TradingHub.Market;
+using TradingHub.Networking;
 
 namespace TradingHub.Feeds.CTrader;
 
 /// <summary>
-/// Datos de cualquier broker con cTrader (IC Markets, Pepperstone, FxPro, Fusion…) por su Open API gratuita: CFDs de
-/// índices (US100/NAS100, US500, GER40…), forex, metales y más. Precios en vivo, historia tick a tick (bid) y velas.
-/// Las cotizaciones no son operaciones: cada tick cuenta como una operación de volumen 1 al precio bid y el lado sale
-/// de si subió o bajó (igual que los archivos importados).
+/// Broker market data through the cTrader Open API: live prices, historical bid quotes and candles.
+/// Quote updates preserve price but have no executed volume or observed aggressor side. Their inferred
+/// direction is retained with explicit synthetic and partial provenance, never as observed trade prints.
 /// </summary>
 public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 {
@@ -20,10 +20,10 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     private readonly ConcurrentDictionary<long, List<(Instrument Inst, IMarketDataSink Sink, LiveState State)>> _sinks = new();
     private long _liveId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
 
-    public CTraderFeed(Func<CTraderSettings> settings, string feedId = FeedId)
+    public CTraderFeed(Func<CTraderSettings> settings, string feedId = FeedId, ProxyHandlerFactory? network = null)
     {
         _feedId = feedId;
-        _session = new CTraderSession(settings);
+        _session = new CTraderSession(settings, network);
         _session.Spot += OnSpot;
         _session.ConnectionChanged += (up, why) =>
         {
@@ -38,7 +38,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     public string DisplayName => "cTrader";
     public bool SupportsHistory => true;
     public bool IsLive => true;
-    public string HistoryNote => "broker bid ticks through cTrader Open API";
+    public string HistoryNote => "cTrader Open API bid quotes; executed volume and aggressor side are unavailable";
 
     public async Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(CancellationToken ct)
     {
@@ -131,9 +131,14 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
         return all;
     }
 
+    private static TradeProvenance QuoteProvenance(Instrument instrument) =>
+        new(DataQuality.Synthetic | DataQuality.InferredSide | DataQuality.Partial,
+            SourceIdentity: $"{instrument.FeedId}:{instrument.Symbol}:bid-quote", ObservedTradeCount: 0);
+
     private static List<Trade> ToTrades(Instrument instrument, List<(long Ms, long Price)> ticks)
     {
         var res = new List<Trade>(ticks.Count);
+        var provenance = QuoteProvenance(instrument);
         long lastId = 0;
         decimal last = 0;
         var side = TradeSide.Buy;
@@ -141,7 +146,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
         {
             decimal price = instrument.RoundPrice(raw / PriceScale);
             var time = DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
-            res.Add(new Trade(HistoryBuilder.TimeId(time, ref lastId), time, price, 1, HistoryBuilder.TickRule(price, ref last, ref side)));
+            res.Add(new Trade(HistoryBuilder.TimeId(time, ref lastId), time, price, 0, HistoryBuilder.TickRule(price, ref last, ref side), provenance));
         }
 
         return res;
@@ -211,8 +216,9 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 
     // ===================================================================== en vivo
 
-    private sealed class LiveState
+    private sealed class LiveState(TradeProvenance provenance)
     {
+        public readonly TradeProvenance Provenance = provenance;
         public decimal LastPrice;
         public TradeSide LastSide = TradeSide.Buy;
         public long Bid, Ask;
@@ -220,7 +226,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
 
     public IDisposable Subscribe(Instrument instrument, IMarketDataSink sink)
     {
-        var state = new LiveState();
+        var state = new LiveState(QuoteProvenance(instrument));
         var sub = new Subscription(this, instrument, sink, state);
         _ = Task.Run(async () =>
         {
@@ -266,7 +272,7 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
                 {
                     decimal price = inst.RoundPrice(b / PriceScale);
                     var side = HistoryBuilder.TickRule(price, ref st.LastPrice, ref st.LastSide);
-                    sink.OnTrades(inst, new[] { new Trade(Interlocked.Increment(ref _liveId), time, price, 1, side) });
+                    sink.OnTrades(inst, new[] { new Trade(Interlocked.Increment(ref _liveId), time, price, 0, side, st.Provenance) });
                 }
             }
 
@@ -318,9 +324,12 @@ public static class CTraderAuth
         $"{AuthBase}/auth?client_id={Uri.EscapeDataString(clientId)}&redirect_uri={Uri.EscapeDataString(redirectUri)}&scope=trading";
 
     /// <summary>Cambia el código de la redirección por los tokens (acceso y renovación).</summary>
-    public static async Task<(string Access, string Refresh, long ExpiresIn)> ExchangeAsync(string clientId, string clientSecret, string code, string redirectUri, CancellationToken ct, string authBase = AuthBase)
+    public static async Task<(string Access, string Refresh, long ExpiresIn)> ExchangeAsync(string clientId, string clientSecret, string code, string redirectUri, CancellationToken ct, string authBase = AuthBase, ProxyHandlerFactory? network = null)
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var transport = network ?? new ProxyHandlerFactory(new NetworkProxyPolicy());
+        var handler = transport.CreateHandler();
+        handler.AllowAutoRedirect = false;
+        using var http = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(30) };
         var url = $"{authBase}/token?grant_type=authorization_code&code={Uri.EscapeDataString(code)}&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
                   $"&client_id={Uri.EscapeDataString(clientId)}&client_secret={Uri.EscapeDataString(clientSecret)}";
         using var doc = JsonDocument.Parse(await http.GetStringAsync(url, ct).ConfigureAwait(false));

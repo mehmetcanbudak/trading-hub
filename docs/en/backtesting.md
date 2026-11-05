@@ -25,6 +25,12 @@ Bar period accepts case-insensitive codes and chart abbreviations. Existing Span
 
 Quick buttons include M1, M5, M15, H1, H4, D1, Tick500 and Range20. **Renko is unavailable in backtests.**
 
+### Source timing and fidelity
+
+Price location and **availability** are separate. Interval facts are scheduled when their source window becomes available, not backdated to its opening. Unknown/inferred legacy bar availability requires a declared-timing reimport before a causal run; the engine rejects it before strategy callbacks. Time bars must contain each complete source window with an aligned phase. Non-time bars cannot invent an observed trade sequence from interval summaries.
+
+Measured compact history conserves exact grouped volume/side totals and signed price information, but is not individual observed trades, raw intrabar extrema or an observed MaxTrade. Synthetic OHLC/quotes and partial coverage remain labelled. Even where accepted for analysis, input counts/paths can be estimates; a newly learned interval-close signal cannot execute against an earlier anchor in that same source window. Existing raw-trade sequence rules are retained.
+
 ## Execution costs and rules
 
 | Setting | Default | Meaning |

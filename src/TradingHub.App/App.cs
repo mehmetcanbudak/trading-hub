@@ -19,6 +19,10 @@ namespace TradingHub.App;
 public sealed class App : Application
 {
     public static AppServices Services { get; private set; } = null!;
+    private readonly Func<AppServices> _createServices;
+
+    public App() : this(static () => new AppServices()) { }
+    internal App(Func<AppServices> createServices) => _createServices = createServices ?? throw new ArgumentNullException(nameof(createServices));
 
     /// <summary>How Trading Hub quits (null without a desktop, as in tools).</summary>
     internal static QuitFlow? Quit { get; private set; }
@@ -36,7 +40,7 @@ public sealed class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        Services = new AppServices();
+        Services = _createServices();
         TradingHub.App.Services.AppTheme.Apply(Services.Settings.ThemeMode);
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -68,9 +72,16 @@ public sealed class App : Application
     /// </summary>
     internal static QuitFlow UseQuit(IClassicDesktopStyleApplicationLifetime desktop)
     {
-        var quit = new QuitFlow(Services, () => desktop.MainWindow, () => desktop.Shutdown());
+        var quit = new QuitFlow(Services, () => desktop.MainWindow,
+            new ApplicationQuitTerminal(Services, () => desktop.Shutdown()));
         desktop.ShutdownRequested += quit.OnShutdownRequested;
-        desktop.Exit += (_, _) => Services.Shutdown();
+        desktop.Exit += (_, _) =>
+        {
+            Services.Shutdown();
+            // Normal terminal exit already completed this; the native fallback is idempotent and
+            // native-store process/I/O drains do not depend on the UI dispatcher.
+            Keychain.ShutdownAsync().GetAwaiter().GetResult();
+        };
         return Quit = quit;
     }
 }
@@ -88,6 +99,47 @@ internal enum QuitMode
     ClosePositions,
 }
 
+/// <summary>One ordered terminal operation: drain, optional replacement handoff, then lifetime exit.</summary>
+internal interface IQuitTerminalLifetime
+{
+    Task CompleteAsync(Action? beforeExit);
+}
+
+/// <summary>The desktop always uses this composition; a replacement cannot outrun owned shutdown.</summary>
+internal sealed class ApplicationQuitTerminal(AppServices services, Action exit) : IQuitTerminalLifetime
+{
+    private readonly object _gate = new();
+    private TaskCompletionSource? _completion;
+
+    public Task CompleteAsync(Action? beforeExit)
+    {
+        TaskCompletionSource completion;
+        lock (_gate)
+        {
+            if (_completion != null) return _completion.Task;
+            completion = _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        _ = CompleteCoreAsync(completion, beforeExit);
+        return completion.Task;
+    }
+
+    private async Task CompleteCoreAsync(TaskCompletionSource completion, Action? beforeExit)
+    {
+        try
+        {
+            await services.ShutdownAsync();
+            await Keychain.ShutdownAsync();
+            beforeExit?.Invoke();
+        }
+        catch (Exception error) { CrashLog.Write(error); }
+        finally
+        {
+            try { exit(); }
+            finally { completion.TrySetResult(); }
+        }
+    }
+}
+
 /// <summary>
 /// Quitting Trading Hub, the same from ⌘Q (the platform's shutdown request, also on a Dock or logout quit), from the menu
 /// bar's «Quit Trading Hub» and from closing the main window when it is not kept in the menu bar. While live strategies
@@ -95,33 +147,35 @@ internal enum QuitMode
 /// positions, or don't quit); without positions it quits as ⌘Q always did. Then it saves the live state, stops the
 /// strategies that way and exits, once.
 /// </summary>
-internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit)
+internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, IQuitTerminalLifetime terminal)
 {
     private static CultureInfo En => TradingHub.Common.UiCulture.Current;
     private QuitDialog? _asking;
     private bool _quitting;
+    private bool _terminalCompleted;
 
     /// <summary>Bounded wait for broker acknowledgment of quit-time closes and cancellations.</summary>
     internal TimeSpan CloseWait { get; set; } = TimeSpan.FromSeconds(10);
 
-    /// <summary>Decided: it is stopping the strategies and exiting, so a further close or shutdown request goes through.</summary>
+    /// <summary>The protection decision is accepted. Terminal completion still precedes any actual exit.</summary>
     internal bool IsQuitting => _quitting;
+
+    /// <summary>Owned terminal work and the desktop handoff have completed; acceptance alone is not this boundary.</summary>
+    internal bool IsTerminalComplete => _terminalCompleted;
 
     /// <summary>Live strategies holding a position: what the question is about.</summary>
     private List<LiveStrategyRunner> Holding() =>
         svc.Runners.Where(r => r is { IsRunning: true, Persist: true } && r.OwnPosition != 0).ToList();
 
     /// <summary>
-    /// A platform shutdown request proceeds directly only when there is no position decision or outstanding order
-    /// acknowledgment. Otherwise the async quit path asks if needed and waits without blocking the UI thread.
+    /// Every first platform request is canceled and posted to the asynchronous protected path, even without
+    /// positions: owned provider, authoring and recorder drains must not be bypassed by a fast exit.
     /// </summary>
     public void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs e)
     {
-        if (_quitting) return;
-        if (_asking == null && Holding().Count == 0 && !svc.Runners.Any(r => r.IsClosing || r.HasWorkingOrders))
+        if (_quitting)
         {
-            _quitting = true;
-            svc.StopLiveForQuit(QuitMode.CancelStops);
+            e.Cancel = !_terminalCompleted;
             return;
         }
 
@@ -167,15 +221,16 @@ internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, Action exit
         try
         {
             await StopAsync(mode);
-            beforeExit?.Invoke();
         }
         catch (Exception ex)
         {
             CrashLog.Write(ex);
+            beforeExit = null;
         }
         finally
         {
-            exit();
+            await terminal.CompleteAsync(beforeExit);
+            _terminalCompleted = true;
         }
     }
 

@@ -184,6 +184,7 @@ internal sealed class MenuBarPanel : Window
     {
         _positions.Children.Clear();
         int count = 0;
+        bool coverageIncomplete = false;
         foreach (var a in _svc.AccountCenter.Accounts())
         {
             AccountSnapshot snap;
@@ -193,7 +194,15 @@ internal sealed class MenuBarPanel : Window
             }
             catch
             {
+                coverageIncomplete = true;
+                _positions.Children.Add(new TextBlock { Text = $"{a.Name} · account snapshot unavailable", Foreground = Ui.Warn, FontSize = 12 });
                 continue;
+            }
+
+            if (!snap.PositionsKnown || !snap.Connected)
+            {
+                coverageIncomplete = true;
+                _positions.Children.Add(new TextBlock { Text = $"{a.Name} · account snapshot incomplete", Foreground = Ui.Warn, FontSize = 12 });
             }
 
             foreach (var p in snap.Positions.Where(p => p.Net != 0))
@@ -202,9 +211,9 @@ internal sealed class MenuBarPanel : Window
                 var left = new TextBlock { Text = $"{p.Symbol} · {a.Name}{(a.IsReal ? " · REAL" : "")}", FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
                 var right = new TextBlock
                 {
-                    Text = $"{Side(p.Net, p.AvgPrice.ToString("#,##0.####", Es), p.Symbol)} · {Money(p.OpenPnl)}",
+                    Text = $"{(snap.PositionsKnown ? "" : "Last known: ")}{Side(p.Net, p.AvgPrice.ToString("#,##0.####", Es), p.Symbol)} · {(snap.OpenPnlKnown ? Money(p.OpenPnl) : "—")}",
                     FontSize = 12,
-                    Foreground = MoneyBrush(p.OpenPnl),
+                    Foreground = !snap.PositionsKnown || !snap.OpenPnlKnown ? Ui.Warn : MoneyBrush(p.OpenPnl),
                     VerticalAlignment = VerticalAlignment.Center,
                 };
                 var row = new DockPanel();
@@ -215,7 +224,7 @@ internal sealed class MenuBarPanel : Window
             }
         }
 
-        if (count == 0) _positions.Children.Add(Empty("No open positions."));
+        if (count == 0 && !coverageIncomplete) _positions.Children.Add(Empty("No open positions."));
     }
 
 }

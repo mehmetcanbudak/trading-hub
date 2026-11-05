@@ -12,6 +12,8 @@ Created by [@ralphtradesz](https://x.com/ralphtradesz). English work in this for
 
 **Upstream updates:** [Daily monitoring and the reviewed English sync process](docs/en/upstream-sync.md) track new original-repository commits without automatic merges or deployment.
 
+**KVP capability candidate:** the isolated `feat/kvp-adoption` source branch implements the complete approved history/study/chart/depth/authoring/practice/alert/provider/storage/proxy scope over the reviewed C# base, with correctness redesigns rather than a parallel trading engine. Its source/local/fake acceptance is complete; it remains unmerged, uninstalled and not a released binary. See the [complete capability and acceptance record](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04), [feature guides](docs/en/README.md) and [pinned attribution/full license](THIRD_PARTY_NOTICES.md#kvp-capability-reference). Branding/directory migration, KVP Windows distribution/updater and external Windows-only VPFM are excluded. The bounded CPU/cache path has measured end-to-end evidence; no Apple GPU acceleration is claimed.
+
 **Using Windows?** See [Windows installation and platform integration](docs/en/portar-a-windows.md).
 
 **Using a Mac (M1 or newer)?** To install **this fork**, use the [manual build instructions](#option-2-install-manually) or the [installation guide](docs/en/instalacion.md). This fork currently publishes no prebuilt downloads. The [original upstream Mac app](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Mac.zip) is available, but does not include this fork's additional fixes. For that archive, unzip it and drag the app to Applications; after verifying its source and signature, macOS may require System Settings → Privacy & Security → **Open Anyway** on the first launch. Do not disable system security checks or replace this fork's installation unintentionally.
@@ -28,6 +30,7 @@ Supported market connections include:
 - **Cryptocurrency:** Binance and Bybit, including free public market data.
 - **Forex and CFDs:** OANDA, cTrader, and CSV imports.
 - **US stocks:** Alpaca.
+- **Candidate data-only sources:** Longbridge with explicit OAuth/metadata and aggregate Binance/Bybit data with partial-constituent coverage/first-venue book; composite prices have no order route.
 
 Claude Code integration uses your own Claude subscription and local CLI, rather than separate API credentials. It can help write, compile, test, and report on C# trading strategies. An additional AI agent assists with live strategy risk allocation.
 

@@ -5,8 +5,8 @@ using System.Text;
 namespace TradingHub.App.Services;
 
 /// <summary>
-/// One Windows process per data directory. A second launch requests the first window and exits.
-/// The exclusive file lease also protects aliases and other logon sessions that do not share Local named objects.
+/// One writer per data directory. Windows also requests activation of the first window.
+/// The exclusive file lease protects storage relocation and aliases on both desktop platforms.
 /// macOS retains its application-activation behavior.
 /// </summary>
 internal static class SingleInstance
@@ -25,12 +25,47 @@ internal static class SingleInstance
     public static bool Claim(string dataRoot) => Claim(dataRoot, message =>
     {
         CrashLog.Write(new IOException(message));
-        MessageBox(IntPtr.Zero, message, "Trading Hub could not start", 0x10);
+        ReportStartupError(message);
     });
+
+    internal static void ReportStartupError(string message)
+    {
+        Console.Error.WriteLine(message);
+        if (OperatingSystem.IsWindows()) MessageBox(IntPtr.Zero, message, "Trading Hub could not start", 0x10);
+        else if (OperatingSystem.IsMacOS())
+        {
+            try
+            {
+                string escaped = message.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace('\r', ' ').Replace('\n', ' ');
+                var start = new System.Diagnostics.ProcessStartInfo("/usr/bin/osascript") { UseShellExecute = false };
+                start.ArgumentList.Add("-e");
+                start.ArgumentList.Add("display alert \"Trading Hub could not start\" message \"" + escaped + "\" as critical");
+                using var alert = System.Diagnostics.Process.Start(start);
+                alert?.WaitForExit();
+            }
+            catch (Exception error) { Console.Error.WriteLine(error.Message); }
+        }
+    }
 
     internal static bool Claim(string dataRoot, Action<string> reportError)
     {
-        if (!OperatingSystem.IsWindows()) return true;
+        if (!OperatingSystem.IsWindows())
+        {
+            if (_fileLease != null)
+            {
+                if (_claimedName == NameFor(dataRoot)) return true;
+                reportError("This process already owns a different data directory.");
+                return false;
+            }
+            _fileLease = TryAcquireDataLease(dataRoot);
+            if (_fileLease == null)
+            {
+                reportError("Trading Hub could not establish exclusive access to its data directory. Close the other instance or check directory permissions before retrying.");
+                return false;
+            }
+            _claimedName = NameFor(dataRoot);
+            return true;
+        }
         Mutex? mutex = null;
         EventWaitHandle? request = null;
         FileStream? lease = null;
@@ -53,9 +88,7 @@ internal static class SingleInstance
                 return false;
             }
 
-            Directory.CreateDirectory(dataRoot);
-            lease = new FileStream(Path.Combine(dataRoot, ".tradinghub.instance.lock"), FileMode.OpenOrCreate,
-                FileAccess.ReadWrite, FileShare.None);
+            lease = TryAcquireDataLease(dataRoot) ?? throw new IOException("The data directory is already in use or unavailable.");
             _mutex = mutex;
             _showRequest = request;
             _fileLease = lease;
@@ -87,6 +120,18 @@ internal static class SingleInstance
             if (ownsMutex && mutex != null) mutex.ReleaseMutex();
             mutex?.Dispose();
         }
+    }
+
+    /// <summary>Holds the same writer lease during pre-start relocation; never opens application data.</summary>
+    internal static FileStream? TryAcquireDataLease(string dataRoot)
+    {
+        try
+        {
+            Directory.CreateDirectory(dataRoot);
+            return new FileStream(Path.Combine(dataRoot, ".tradinghub.instance.lock"), FileMode.OpenOrCreate,
+                FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>The callback runs on a background thread; callers dispatch window activation to the UI thread.</summary>

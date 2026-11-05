@@ -631,7 +631,7 @@ public class BrokerConnectionTests
             ["id"] = id, ["accountId"] = 101, ["contractId"] = 555, ["action"] = "Buy",
             ["ordStatus"] = "Canceled", ["timestamp"] = DateTime.UtcNow.ToString("O")
         });
-        await Until(() => order.Canceled);
+        await Until(() => order.Canceled && !broker.ActiveOrders.Any() && !session.HasOpenPositionsOrOrders);
         Assert.True(order.Canceled);
         Assert.Equal(1m, order.Filled);
         Assert.Empty(broker.ActiveOrders);
