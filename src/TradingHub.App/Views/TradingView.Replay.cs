@@ -181,7 +181,8 @@ public sealed partial class TradingView
     private bool UpdatePracticeTradeMarks(ChartTab chart)
     {
         if (chart.Model is not { } model || _svc.ReplaySessions.TryGet(model.Data) is not { } run) return false;
-        string key = model.Settings.ShowTradeMarks ? run.AccountId + ":" + run.Account.Journal.Count : "off";
+        var key = (Account: run.AccountId, Instrument: model.Instrument.Key,
+            Revision: model.Settings.ShowTradeMarks ? run.Account.ExecutionRevision : 0L, Visible: model.Settings.ShowTradeMarks);
         if (key == chart.MarksKey) return true;
         chart.MarksKey = key;
         var fills = model.Settings.ShowTradeMarks ? run.Account.Journal : Array.Empty<TradingHub.Trading.AccountFill>();

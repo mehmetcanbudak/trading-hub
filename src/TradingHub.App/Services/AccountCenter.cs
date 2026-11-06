@@ -49,6 +49,7 @@ public sealed class AccountSnapshot
     public List<OrderLine> Orders { get; } = new();
     public IReadOnlyList<AccountFill> Fills { get; set; } = Array.Empty<AccountFill>();
     public long ExecutionRevision { get; set; }
+    public long HistoryRevision { get; set; }
     public RoundTripResult Analysis { get; set; } = RoundTrips.Analyze(Array.Empty<AccountFill>());
 }
 
@@ -59,7 +60,7 @@ public sealed class AccountSnapshot
 public sealed class AccountCenter
 {
     private readonly AppServices _svc;
-    private readonly Dictionary<string, (int Count, long ExecutionRevision, RoundTripResult Result)> _cache = new();
+    private readonly Dictionary<string, (long HistoryRevision, long ExecutionRevision, int Count, RoundTripResult Result)> _cache = new();
 
     public AccountCenter(AppServices svc)
     {
@@ -135,23 +136,33 @@ public sealed class AccountCenter
         return list;
     }
 
-    /// <summary>Reuses immutable fill analysis until its count or the producer's execution-content revision changes.</summary>
-    public RoundTripResult Analysis(string accountId, IReadOnlyList<AccountFill> fills, long executionRevision = 0)
+    /// <summary>Reuses analysis only for the committed journal and native execution-content revisions.</summary>
+    private RoundTripResult Analysis(string accountId, (long Revision, IReadOnlyList<AccountFill> Fills) snapshot, long executionRevision = 0)
     {
         lock (_cache)
         {
-            if (_cache.TryGetValue(accountId, out var c) && c.Count == fills.Count && c.ExecutionRevision == executionRevision) return c.Result;
-            var r = RoundTrips.Analyze(fills);
-            _cache[accountId] = (fills.Count, executionRevision, r);
+            if (_cache.TryGetValue(accountId, out var c) && c.HistoryRevision == snapshot.Revision &&
+                c.ExecutionRevision == executionRevision && c.Count == snapshot.Fills.Count) return c.Result;
+            var r = RoundTrips.Analyze(snapshot.Fills);
+            _cache[accountId] = (snapshot.Revision, executionRevision, snapshot.Fills.Count, r);
             return r;
         }
+    }
+
+    private RoundTripResult Analysis(string accountId)
+    {
+        long revision = _svc.Journal.RevisionOf(accountId);
+        lock (_cache)
+        {
+            if (_cache.TryGetValue(accountId, out var c) && c.HistoryRevision == revision && c.ExecutionRevision == 0) return c.Result;
+        }
+        return Analysis(accountId, _svc.Journal.SnapshotOf(accountId));
     }
 
     /// <summary>Resultado del día y saldo de la cuenta simulada (para la barra de arriba).</summary>
     public (decimal DayPnl, decimal Balance) SimSummary()
     {
-        var fills = _svc.Journal.FillsOf(SimId);
-        var r = Analysis(SimId, fills);
+        var r = Analysis(SimId);
         decimal open = _svc.SimBrokers.Sum(b => b.Position?.UnrealizedPnL ?? 0);
         decimal today = r.Realized.Where(x => IsToday(x.Time)).Sum(x => x.Net);
         return (today + open, _svc.Settings.SimStartBalance + r.RealizedNet + open);
@@ -184,10 +195,11 @@ public sealed class AccountCenter
             (Executions: (IReadOnlyList<BybitExecution>)Array.Empty<BybitExecution>(), Revision: 0L);
         s.ExecutionRevision = executionState.Revision;
         string journalId = bybit != null ? AppServices.BybitJournalId(a.Profile!.Id, bybit) : a.Id;
-        var fills = _svc.Journal.FillsOf(journalId);
+        var journal = _svc.Journal.SnapshotOf(journalId);
+        s.HistoryRevision = journal.Revision;
         if (bybit != null)
         {
-            var actual = fills.ToDictionary(fill => fill.Id, StringComparer.Ordinal);
+            var actual = journal.Fills.ToDictionary(fill => fill.Id, StringComparer.Ordinal);
             foreach (var fill in executionState.Executions)
             {
                 string id = "bybit-" + fill.Symbol + "-" + fill.OrderId + "-" + fill.Id;
@@ -195,9 +207,9 @@ public sealed class AccountCenter
                     fill.HasQuoteFee ? fill.Fee!.Value : 0, fill.OrderId);
             }
             s.Fills = actual.Values.OrderBy(fill => fill.Time).ThenBy(fill => fill.Id, StringComparer.Ordinal).ToArray();
-            s.Analysis = Analysis(journalId, s.Fills, executionState.Revision);
+            s.Analysis = Analysis(journalId, (journal.Revision, s.Fills), executionState.Revision);
         }
-        else { s.Fills = fills; s.Analysis = Analysis(journalId, fills); }
+        else { s.Fills = journal.Fills; s.Analysis = Analysis(journalId, journal); }
         s.TradesToday = s.Analysis.Trades.Count(t => IsToday(t.CloseTime));
         decimal realizedToday = s.Analysis.Realized.Where(x => IsToday(x.Time)).Sum(x => x.Net);
         if (a.Kind == AccountKind.Sim) FillSim(s, realizedToday);
@@ -398,12 +410,12 @@ public sealed class AccountCenter
         if (p.Net == 0) return NothingToClose(p.Symbol, 0);
         if (p.Ref is SimBroker b)
         {
-            b.Flatten();
+            OrderActions.Flatten(b);
             return null;
         }
         if (a.Kind == AccountKind.Replay && p.Ref is ITradingAccount replay)
         {
-            replay.Flatten();
+            OrderActions.Flatten(replay);
             return null;
         }
         if (a.Kind == AccountKind.Bybit && p.Ref is (BybitTradingSession bybit, BybitPosition position))

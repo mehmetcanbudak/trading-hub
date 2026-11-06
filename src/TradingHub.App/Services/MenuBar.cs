@@ -6,6 +6,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using SkiaSharp;
 using TradingHub.App.Windows;
+using TradingHub.Strategies;
 
 namespace TradingHub.App.Services;
 
@@ -118,13 +119,13 @@ internal sealed class MenuBar
         {
             var r = e.Runner!;
             var ledger = r.Ledger;
-            decimal open = ledger.OpenPnL(r.Data.LastPrice);
             decimal pos = ledger.Position;
             var plan = _svc.Live.PlanOf(e);
             string side = pos == 0 ? "flat" : $"{(pos > 0 ? "long" : "short")} {Math.Abs(pos).ToString("0.####", Es)} {ledger.OpenSymbol ?? plan.Symbol}";
             string state = e.Paused ? " · paused" : r.DailyLimitActive ? " · stopped for today" : "";
+            state += ledger.FinancialQuality == LiveFinancialQuality.Authoritative ? "" : $" · {ledger.FinancialQuality} accounting";
             string each = plan.Units <= 0 ? "no new entries" : $"{plan.Text} per order{(plan.Micro ? " (micro)" : "")}";
-            lines.Add(new MenuLine($"s:{e.Key}", $"   {e.Info.Strategy} · {r.Data.Instrument.Symbol} · {each} · {side} · open {Money(open)} · today {Money(r.TodayPnL)}{state}", true, ShowPanel));
+            lines.Add(new MenuLine($"s:{e.Key}", $"   {e.Info.Strategy} · {r.Data.Instrument.Symbol} · {each} · {side} · open {(ledger.KnownOpenPnL(r.Data.LastPrice) is { } knownOpen ? Money(knownOpen) : "pending")} · today {(r.AvailableTodayPnL is { } today ? Money(today) : "pending")}{state}", true, ShowPanel));
         }
 
         if (running.Count == 0) lines.Add(new MenuLine("live-none", "   None running"));

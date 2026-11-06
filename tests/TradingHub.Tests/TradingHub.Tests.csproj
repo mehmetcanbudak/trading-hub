@@ -28,6 +28,7 @@
     <ProjectReference Include="..\TradingHub.LedgerCrashFixture\TradingHub.LedgerCrashFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\TradingHub.QuantColdFixture\TradingHub.QuantColdFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\TradingHub.AssistantCliFixture\TradingHub.AssistantCliFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TradingHub.IbSnapshotCrashFixture\TradingHub.IbSnapshotCrashFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <Target Name="CopyLedgerCrashFixture" AfterTargets="Build">
@@ -69,6 +70,19 @@
       <AssistantCliFixtureFiles Include="$(_AssistantCliFixtureDirectory)**/*" />
     </ItemGroup>
     <Copy SourceFiles="@(AssistantCliFixtureFiles)" DestinationFiles="@(AssistantCliFixtureFiles->'$(OutDir)AssistantCliFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+  <Target Name="CopyIbSnapshotCrashFixture" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildProjectDirectory)/../TradingHub.IbSnapshotCrashFixture/TradingHub.IbSnapshotCrashFixture.csproj" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)" RebaseOutputs="true">
+      <Output TaskParameter="TargetOutputs" ItemName="IbSnapshotCrashFixtureTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <_IbSnapshotCrashFixtureDirectory>@(IbSnapshotCrashFixtureTarget->'%(RootDir)%(Directory)')</_IbSnapshotCrashFixtureDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <IbSnapshotCrashFixtureFiles Include="$(_IbSnapshotCrashFixtureDirectory)**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(IbSnapshotCrashFixtureFiles)" DestinationFiles="@(IbSnapshotCrashFixtureFiles->'$(OutDir)IbSnapshotCrashFixture/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
 

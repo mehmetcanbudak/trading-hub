@@ -5,9 +5,10 @@ using TradingHub.Trading;
 namespace TradingHub.Feeds.Bybit;
 
 /// <summary>A symbol view over one immutable UTA credential context. Native reducing exits are set before dispatch.</summary>
-public sealed class BybitBroker : ITradingAccount, ITrackedOrderReplacement, IStableOrderIdentity, IAccountExecutionSource, IDisposable
+public sealed class BybitBroker : ITradingAccount, ITrackedOrderReplacement, IStableOrderIdentity, IAccountExecutionSource, ICoordinatedPositionOperations, IDisposable
 {
     private readonly InstrumentData _data;
+    private readonly Position _position;
     private static readonly AccountExecutionSnapshot UnknownExecutions = new(Array.Empty<AccountExecution>(), false);
     private readonly bool _ownsSession;
     private string? _localError;
@@ -24,8 +25,9 @@ public sealed class BybitBroker : ITradingAccount, ITrackedOrderReplacement, ISt
         Session = session;
         Name = name;
         _ownsSession = ownsSession;
-        Position = new Position { Security = new Security { Code = Instrument.Symbol, SecurityId = Instrument.Key, TickSize = Instrument.TickSize } };
+        _position = new Position { Security = new Security { Code = Instrument.Symbol, SecurityId = Instrument.Key, TickSize = Instrument.TickSize } };
         session.Changed += OnChanged;
+        session.RegisterInstrument(data.Instrument);
         OnChanged();
     }
     public BybitTradingSession Session { get; }
@@ -33,7 +35,16 @@ public sealed class BybitBroker : ITradingAccount, ITrackedOrderReplacement, ISt
     public bool IsReal => Session.IsReal;
     public Instrument Instrument => _data.Instrument;
     public decimal LastPrice => _data.LastPrice;
-    public Position Position { get; }
+    public Position Position
+    {
+        get
+        {
+            RefreshPosition();
+            return _position;
+        }
+    }
+    public OrderContext OrderContext => Session.OrderContext;
+    public IExecutionSource Executions => Session.ExecutionSource;
     public bool PositionReady => Session.PositionReady;
     public bool OrdersReady => Session.OrdersReady;
     public long ExecutionRevision => Session.ExecutionRevision;
@@ -41,17 +52,39 @@ public sealed class BybitBroker : ITradingAccount, ITrackedOrderReplacement, ISt
     public string? LastError => _localError ?? Session.LastError;
     public IEnumerable<Order> ActiveOrders => Session.OrdersFor(Instrument.Symbol).Where(o => o.State == OrderStates.Active);
     public event Action? Changed;
+    private void RefreshPosition()
+    {
+        if (!Session.PositionReady) return;
+        // Capture one committed native symbol snapshot. Execution callbacks can precede the final Changed event.
+        var position = Session.PositionFor(Instrument.Symbol);
+        _position.Volume = position?.Size ?? 0; // Only a complete authoritative account snapshot proves absent = flat.
+        _position.AveragePrice = position?.AvgPrice ?? 0;
+        _position.UnrealizedPnL = position?.UnrealizedPnl ?? 0;
+    }
+
     private void OnChanged()
     {
         if (_disposed) return;
-        if (Session.PositionReady)
-        {
-            var position = Session.PositionFor(Instrument.Symbol);
-            Position.Volume = position?.Size ?? 0; // Only a complete authoritative account snapshot proves absent = flat.
-            Position.AveragePrice = position?.AvgPrice ?? 0;
-            Position.UnrealizedPnL = position?.UnrealizedPnl ?? 0;
-        }
+        RefreshPosition();
         Changed?.Invoke();
+    }
+    public Order Submit(PreparedOrderIntent intent)
+    {
+        if (_disposed || (_retired && !intent.Request.ReduceOnly))
+        {
+            _localError = "This Bybit account view is retired; only native reducing exits and cancel remain available.";
+            return new Order { Direction = intent.Request.Direction, Type = intent.Request.Type,
+                QuantityToFill = intent.Request.Quantity, Unfilled = intent.Request.Quantity,
+                State = OrderStates.Failed, Status = OrderStatus.Rejected };
+        }
+        _localError = null;
+        return Session.Submit(Instrument, LastPrice, intent, ViewPermission);
+    }
+
+    public Order Replace(Order order, PreparedOrderIntent intent)
+    {
+        if (_retired && !order.ReduceOnly) { _localError = "A retired Bybit account view cannot amend opening exposure."; Changed?.Invoke(); return order; }
+        return Session.Replace(order, intent, Instrument, ViewPermission);
     }
     private Order Send(OrderDirections direction, OrderTypes type, decimal quantity, decimal price, string comment, bool reduceOnly = false)
     {

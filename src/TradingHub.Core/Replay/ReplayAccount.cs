@@ -27,6 +27,7 @@ public sealed class ReplayAccount : TradingManager, ITradingAccount, ITrackedOrd
     {
         _run = run;
         PersistentAccountIdentity = run.AccountId;
+        OrderContext = OrderContext.EphemeralSimulation(run.AccountId);
         _fees = fees;
         _orderView = _orders.AsReadOnly();
         _tradeView = _trades.AsReadOnly();
@@ -40,6 +41,8 @@ public sealed class ReplayAccount : TradingManager, ITradingAccount, ITrackedOrd
     }
 
     public Instrument Instrument { get; }
+    public OrderContext OrderContext { get; }
+    public IExecutionSource Executions => OrderContext.Executions;
     public string Name => "Replay practice · " + _run.RunId.ToString("N")[..8];
     public bool IsReal => false;
     public string? LastError { get; private set; }
@@ -74,8 +77,33 @@ public sealed class ReplayAccount : TradingManager, ITradingAccount, ITrackedOrd
     public bool IsReplacementPending(Order order) => false;
 
     private bool ValidQuantity(decimal quantity) => quantity > 0 && quantity % Instrument.VolumeStep == 0;
+    public Order Submit(PreparedOrderIntent intent)
+    {
+        var request = intent.Request;
+        return Submit(request.Direction, request.Type, request.Quantity, request.Price, request.ReduceOnly, request.Comment, prepared: intent);
+    }
 
-    private Order Submit(OrderDirections dir, OrderTypes type, decimal quantity, decimal price, bool reduceOnly, string comment, Order? supplied = null)
+    public Order Replace(Order order, PreparedOrderIntent intent)
+    {
+        string? error = OrderContext.Validate(intent, order);
+        if (error == null && intent.Request.Instrument != Instrument.Key) error = "The replacement belongs to another replay instrument.";
+        if (error == null && !_run.Ended && _orders.Contains(order) && order.State == OrderStates.Active)
+        {
+            decimal quantity = intent.IsPriceOnlyReplacement ? order.Unfilled : intent.Request.Quantity;
+            if (!ValidQuantity(quantity)) error = "Replacement quantity must match the instrument's quantity step.";
+            else error = OrderContext.BindOrder(order, intent) ?? OrderContext.StartDispatch(intent, Instrument.Symbol, Instrument.Exchange);
+            if (error == null)
+            {
+                if (order.NativeIdentity != null) error = OrderContext.BindNative(intent, order.NativeIdentity);
+                if (error == null) return ApplyReplacement(order, intent.Request.Price, quantity);
+            }
+        }
+        LastError = error ?? "The replay predecessor is no longer working.";
+        Notify();
+        return order;
+    }
+
+    private Order Submit(OrderDirections dir, OrderTypes type, decimal quantity, decimal price, bool reduceOnly, string comment, Order? supplied = null, PreparedOrderIntent? prepared = null)
     {
         if (supplied != null && (supplied.State != OrderStates.None || (supplied.Portfolio.IsReplay() && !ReferenceEquals(supplied.Portfolio, Portfolio))))
             throw new InvalidOperationException("An owned or already submitted order cannot be moved into another replay run.");
@@ -92,10 +120,18 @@ public sealed class ReplayAccount : TradingManager, ITradingAccount, ITrackedOrd
         if (type == OrderTypes.Stop) order.TriggerPrice = Instrument.RoundPrice(price);
         else if (type == OrderTypes.Limit) order.Price = Instrument.RoundPrice(price);
         _orders.Add(order);
-        if (_run.Ended || !ValidQuantity(quantity) || !Enum.IsDefined(dir) || type is not (OrderTypes.Market or OrderTypes.Limit or OrderTypes.Stop)
+        prepared ??= OrderContext.Prepare(OrderContext.ManualOwner, new(Instrument.Key, dir, type, quantity, price, reduceOnly, comment));
+        string? ownershipError = prepared.Request.Instrument != Instrument.Key ? "The order belongs to another replay instrument."
+            : OrderContext.BindOrder(order, prepared) ?? OrderContext.StartDispatch(prepared, Instrument.Symbol, Instrument.Exchange);
+        if (ownershipError == null)
+        {
+            order.NativeIdentity = new("replay:order", order.ExchangeOrderId);
+            ownershipError = OrderContext.BindNative(prepared, order.NativeIdentity);
+        }
+        if (ownershipError != null || _run.Ended || !ValidQuantity(quantity) || !Enum.IsDefined(dir) || type is not (OrderTypes.Market or OrderTypes.Limit or OrderTypes.Stop)
             || (type == OrderTypes.Market && !HasObservedPrice))
         {
-            LastError = _run.Ended ? "Replay has ended; orders are disabled." : "Replay order needs a valid quantity step, price and delivered market print.";
+            LastError = ownershipError ?? (_run.Ended ? "Replay has ended; orders are disabled." : "Replay order needs a valid quantity step, price and delivered market print.");
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
         }
@@ -127,21 +163,15 @@ public sealed class ReplayAccount : TradingManager, ITradingAccount, ITrackedOrd
     {
         foreach (var order in ActiveOrders.ToArray()) Cancel(order);
     }
-    public void Modify(Order order, decimal newPrice)
+    public void Modify(Order order, decimal newPrice) => OrderActions.Reprice(this, order, newPrice);
+    public Order Replace(Order order, decimal newPrice, decimal newQuantity) => OrderActions.Replace(this, order, newPrice, newQuantity);
+    private Order ApplyReplacement(Order order, decimal newPrice, decimal newQuantity)
     {
-        if (_run.Ended || !_orders.Contains(order) || order.State != OrderStates.Active) return;
+        order.QuantityToFill = order.Filled + newQuantity;
+        order.Unfilled = newQuantity;
         if (order.Type == OrderTypes.Stop) order.TriggerPrice = Instrument.RoundPrice(newPrice);
         else order.Price = Instrument.RoundPrice(newPrice);
         Notify();
-    }
-    public Order Replace(Order order, decimal newPrice, decimal newQuantity)
-    {
-        if (_run.Ended || !_orders.Contains(order) || order.State != OrderStates.Active) return order;
-        if (newQuantity == 0) { Cancel(order); return order; }
-        if (!ValidQuantity(newQuantity)) { LastError = "Replacement quantity must match the instrument's quantity step."; Notify(); return order; }
-        order.QuantityToFill = order.Filled + newQuantity;
-        order.Unfilled = newQuantity;
-        Modify(order, newPrice);
         return order;
     }
     public void Flatten()
@@ -180,7 +210,13 @@ public sealed class ReplayAccount : TradingManager, ITradingAccount, ITrackedOrd
                     ? order.Direction == OrderDirections.Buy ? trade.Price >= order.TriggerPrice : trade.Price <= order.TriggerPrice
                     : order.Direction == OrderDirections.Buy ? trade.Price <= order.Price : trade.Price >= order.Price);
                 if (!triggered) continue;
-                if (order.Type == OrderTypes.Stop) order.Type = OrderTypes.Market;
+                if (order.Type == OrderTypes.Stop)
+                {
+                    if (order.NativeIdentity is { } native)
+                        LastError = OrderContext.RecordNativeWorkingType(order, native, native, OrderTypes.Market,
+                            Instrument.Key, Instrument.Symbol, Instrument.Exchange, notify: false);
+                    order.Type = OrderTypes.Market;
+                }
                 decimal filled = Fill(order, order.Type == OrderTypes.Limit ? order.Price : trade.Price, Math.Min(order.Unfilled, remaining));
                 remaining -= filled;
             }
@@ -224,6 +260,16 @@ public sealed class ReplayAccount : TradingManager, ITradingAccount, ITrackedOrd
         _journal.Add(fill);
         if (!_executions.TryGetValue(order, out var executions)) _executions.Add(order, executions = new ReplayExecutions());
         executions.Add(new AccountExecution(fill.Id, quantity, price, _run.ClockUtc, fee, Instrument.QuoteAsset, fee, sequence));
+        OrderContext.ObserveQuantity(order, Instrument.Symbol, Instrument.PointValue);
+        ((ExecutionLog)Executions).Publish(new ExecutionReport(
+            new(new ExecutionScope("simulator", _run.AccountId, "replay", Instrument.Key, _run.RunId.ToString("N"))
+                { ContextId = OrderContext.Descriptor.Id }, fill.Id),
+            order.Id, Instrument.Symbol, _run.ClockUtc, direction > 0, quantity, price, Instrument.PointValue,
+            Instrument.QuoteAsset, new[] { new ExecutionFee(fee, Instrument.QuoteAsset) }, true)
+        {
+            ContextId = OrderContext.Descriptor.Id, IntentId = order.IntentId, ClientOrderId = order.ClientOrderId,
+            NativeOrder = order.NativeIdentity, Sequence = sequence, Estimated = true,
+        });
         var ownTrade = new MyTrade { Id = sequence, Order = order, Security = Security!, Portfolio = Portfolio,
             Time = _run.ClockUtc, OrderDirection = order.Direction, Price = price, Volume = quantity, Commission = fee, RealizedPnL = gross - fee };
         _trades.Add(ownTrade);

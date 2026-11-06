@@ -112,7 +112,7 @@ internal static class KvpProvidersScene
         private static string Label(Button button) => button.Content is string text ? text : button.Content is Control control
             ? string.Join(" ", control.GetVisualDescendants().OfType<TextBlock>().Select(block => block.Text)) : "";
         private static bool TextIs(string? actual, string expected) => actual == expected || actual == Lang.T(expected);
-        private static Button Button(Control root, string text) => root.GetVisualDescendants().OfType<Button>().Single(button => TextIs(Label(button), text));
+        private static Button Button(Control root, string text) => root.GetVisualDescendants().OfType<Button>().Single(button => button.IsEffectivelyVisible && TextIs(Label(button), text));
         private static T Input<T>(Control root, string label) where T : Control => root.GetVisualDescendants().OfType<StackPanel>()
             .Single(panel => panel.Children.OfType<TextBlock>().Any(text => TextIs(text.Text, label)) && panel.Children.OfType<T>().Any()).Children.OfType<T>().Single();
         private void Type(TextBox box, string value)
@@ -403,6 +403,13 @@ internal static class KvpProvidersScene
             Check(demoBroker.Session == demoSession && testBroker.Session == testSession && realBroker.Session == realSession && !demoBroker.IsReal && !testBroker.IsReal && realBroker.IsReal &&
                 demoData.Instrument.FeedId == BybitFeed.LinearId && testData.Instrument.FeedId == BybitFeed.TestnetId,
                 "actual account factory maps demo/main-market, testnet/separate-market and real UTA contexts truthfully");
+            var demoProtection = Services.BracketsFor(demoBroker);
+            var repeatedDemo = Services.AccountFor(demoData, demo.Id);
+            Check(ReferenceEquals(demoBroker, repeatedDemo) &&
+                ReferenceEquals(demoProtection, Services.BracketsFor(repeatedDemo)) &&
+                ReferenceEquals(demoSession, ((BybitBroker)repeatedDemo).Session) &&
+                repeatedDemo.Position.Volume == .75m,
+                "unchanged Bybit account selection retains its native facade and existing chart-protection controller");
             Check(Services.AccountsFor(demoData).Any(option => option.Id == demo.Id) && !Services.AccountsFor(demoData).Any(option => option.Id == testnet.Id || option.Id == real.Id) &&
                 Services.AccountsFor(testData).Any(option => option.Id == testnet.Id) && !Services.AccountsFor(testData).Any(option => option.Id == demo.Id || option.Id == real.Id),
                 "actual chart-account options reject cross-environment routing and omit unapproved real increases");

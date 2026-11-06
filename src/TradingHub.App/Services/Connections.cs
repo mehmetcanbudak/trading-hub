@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TradingHub.Common.Logging;
+using TradingHub.Common;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Feeds.Binance;
@@ -380,6 +381,9 @@ public enum ConnectionKind
 public sealed class ConnectionProfile
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+    /// <summary>Opaque local trading namespace and cooperating configuration generation, not a native account ID.</summary>
+    public string TradingNamespace { get; set; } = "";
+    public string TradingGeneration { get; set; } = "";
     public ConnectionKind Kind { get; set; }
     public string Name { get; set; } = "";
     public bool Enabled { get; set; } = true;
@@ -508,6 +512,9 @@ public sealed class ConnectionManager
     private readonly List<IMarketDataFeed> _retiredFeeds = new();
     // Hub retains consumers; IB scopes stay alive until application shutdown.
     private readonly Dictionary<string, IbFeed> _ibScopes = new(StringComparer.Ordinal);
+    // Compared only in memory. Never serialize this snapshot into order identity records.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TradingRouteState> _tradingRoutes = new(StringComparer.Ordinal);
+    private string? _tradingPersistenceError;
 
     // Tradovate shares its feed transport with account management; do not sever a live or unresolved consumer.
     internal Func<IMarketDataFeed, bool>? FeedInUse { get; set; }
@@ -556,7 +563,9 @@ public sealed class ConnectionManager
                 Profiles.AddRange(JsonSerializer.Deserialize<List<ConnectionProfile>>(File.ReadAllText(_filePath), Json) ?? new());
             foreach (var profile in Profiles.Where(p => p.Kind == ConnectionKind.Simulator && p.Name == "Simulador"))
                 profile.Name = "Simulator";
-            if (Profiles.Any(p => p.Kind == ConnectionKind.Bybit && p.ApiKey.Length > 0)) Save();
+            bool missing = Profiles.Any(p => TradesNatively(p) && (p.TradingNamespace.Length == 0 || p.TradingGeneration.Length == 0));
+            foreach (var profile in Profiles) RefreshTradingIdentity(profile);
+            if (missing || Profiles.Any(p => p.Kind == ConnectionKind.Bybit && p.ApiKey.Length > 0)) Save();
         }
         catch (Exception ex)
         {
@@ -572,8 +581,27 @@ public sealed class ConnectionManager
             SetSecret(p, "apikey", p.ApiKey);
             p.ApiKey = "";
         }
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_filePath))!);
-        File.WriteAllText(_filePath, JsonSerializer.Serialize(Profiles, Json));
+        string directory = Path.GetDirectoryName(Path.GetFullPath(_filePath))!;
+        Directory.CreateDirectory(directory);
+        foreach (var profile in Profiles) RefreshTradingIdentity(profile);
+        string temporary = _filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(file, Profiles, Json);
+                StorageSync.Flush(file);
+            }
+            File.Move(temporary, _filePath, overwrite: true);
+            StorageSync.SyncDirectory(directory);
+            _tradingPersistenceError = null;
+        }
+        catch (Exception ex)
+        {
+            _tradingPersistenceError = "Trading configuration namespace is not committed: " + ex.Message;
+            throw;
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
         Changed?.Invoke();
     }
 
@@ -581,6 +609,7 @@ public sealed class ConnectionManager
 
     public void SetSecret(ConnectionProfile p, string? secret)
     {
+        AdvanceTradingCredentials(p);
         _secretStore.Set(p.SecretAccount, secret);
         if (p.Kind is ConnectionKind.Bybit or ConnectionKind.Longbridge && _secretStore.Get(p.SecretAccount) != (secret ?? ""))
             throw new IOException("The private credential store did not confirm the connection secret; existing settings were not replaced.");
@@ -591,6 +620,7 @@ public sealed class ConnectionManager
 
     public void SetSecret(ConnectionProfile p, string name, string? secret)
     {
+        AdvanceTradingCredentials(p);
         _secretStore.Set(p.SecretAccountFor(name), secret);
         if (p.Kind is ConnectionKind.Bybit or ConnectionKind.Longbridge && _secretStore.Get(p.SecretAccountFor(name)) != (secret ?? ""))
             throw new IOException("The private credential store did not confirm the connection secret; existing settings were not replaced.");
@@ -603,6 +633,60 @@ public sealed class ConnectionManager
         RetireLongbridgeContext(p.Id);
         SetSecret(p, null);
         foreach (var name in new[] { "apisecret", "token", "refresh", "apikey", "longbridge-oauth" }) SetSecret(p, name, null);
+    }
+
+    private static bool TradesNatively(ConnectionProfile p) => p.IsRithmic ||
+        p.Kind is ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot or ConnectionKind.Tradovate;
+
+    private sealed class TradingRouteState(ConnectionProfile profile)
+    {
+        private readonly ConnectionKind _kind = profile.Kind;
+        private readonly bool _testnet = profile.Testnet;
+        private readonly string _apiKey = profile.ApiKey, _rithmicUri = profile.RithmicUri,
+            _rithmicSystem = profile.RithmicSystem, _rithmicUser = profile.RithmicUser,
+            _tradovateUser = profile.TradovateUser, _tradovateCid = profile.TradovateCid, _tradovateAppId = profile.TradovateAppId;
+        private readonly string? _binance = Environment.GetEnvironmentVariable("TRADINGHUB_BINANCE_REST"),
+            _tradovateRest = Environment.GetEnvironmentVariable("TRADINGHUB_TRADOVATE_REST"),
+            _tradovateWs = Environment.GetEnvironmentVariable("TRADINGHUB_TRADOVATE_WS");
+        public bool Matches(ConnectionProfile p, bool endpoints = false) =>
+            _kind == p.Kind && _testnet == p.Testnet && _apiKey == p.ApiKey && _rithmicUri == p.RithmicUri &&
+            _rithmicSystem == p.RithmicSystem && _rithmicUser == p.RithmicUser && _tradovateUser == p.TradovateUser &&
+            _tradovateCid == p.TradovateCid && _tradovateAppId == p.TradovateAppId &&
+            (!endpoints || (_binance == Environment.GetEnvironmentVariable("TRADINGHUB_BINANCE_REST") &&
+                _tradovateRest == Environment.GetEnvironmentVariable("TRADINGHUB_TRADOVATE_REST") &&
+                _tradovateWs == Environment.GetEnvironmentVariable("TRADINGHUB_TRADOVATE_WS")));
+    }
+
+    private void RefreshTradingIdentity(ConnectionProfile profile)
+    {
+        if (!TradesNatively(profile)) return;
+        if (profile.TradingNamespace.Length == 0) profile.TradingNamespace = Guid.NewGuid().ToString("N");
+        bool exists = _tradingRoutes.TryGetValue(profile.Id, out var route);
+        bool matches = route?.Matches(profile, endpoints: true) == true;
+        if (profile.TradingGeneration.Length == 0 || (exists && !matches))
+            profile.TradingGeneration = Guid.NewGuid().ToString("N");
+        if (!matches) _tradingRoutes[profile.Id] = new(profile);
+    }
+
+    public void EnsureTradingIdentity(ConnectionProfile profile)
+    {
+        string oldNamespace = profile.TradingNamespace, oldGeneration = profile.TradingGeneration;
+        RefreshTradingIdentity(profile);
+        if (oldNamespace != profile.TradingNamespace || oldGeneration != profile.TradingGeneration || _tradingPersistenceError != null) Save();
+    }
+
+    public bool IsTradingGenerationCurrent(ConnectionProfile profile, string generation) =>
+        _tradingPersistenceError == null && profile.TradingGeneration == generation &&
+        _tradingRoutes.TryGetValue(profile.Id, out var route) && route.Matches(profile);
+
+    private void AdvanceTradingCredentials(ConnectionProfile profile)
+    {
+        if (!TradesNatively(profile)) return;
+        RefreshTradingIdentity(profile);
+        profile.TradingGeneration = Guid.NewGuid().ToString("N");
+        // Publish the new opaque namespace generation before changing credentials. An interrupted credential write
+        // can disable additions, but must never silently reuse the previous account's ownership identity.
+        if (Profiles.Contains(profile)) Save();
     }
 
     /// <summary>Cambió la configuración de una conexión (las de Rithmic avisan para que su sesión de órdenes también se actualice).</summary>

@@ -368,7 +368,7 @@ public sealed partial class TradingView
             {
                 // en visual sigue desde donde quedó la historia: si el backtest terminó con una posición abierta, la
                 // simulada propia la abre y la estrategia la sigue gestionando (la salida se une a esa entrada)
-                shadow.Market(open.IsLong ? OrderDirections.Buy : OrderDirections.Sell, open.Quantity, "Historical position");
+                OrderActions.Manual(shadow, OrderTypes.Market, open.IsLong ? OrderDirections.Buy : OrderDirections.Sell, open.Quantity, comment: "Historical position");
                 if (shadow.Position?.Volume is { } v && v != 0)
                     runner.SeedPosition(new LiveFill(open.EntryTime, open.IsLong, open.Quantity, open.AveragePrice));
             }
@@ -460,7 +460,7 @@ public sealed partial class TradingView
     /// Marcas de cada estrategia: las operaciones históricas y las nuevas (de su cuenta), con la posición abierta si hay.
     /// Se llama unas veces por segundo; solo se rehace si cambió algo.
     /// </summary>
-    private void UpdateStrategySignals(ChartTab chart)
+    private void UpdateStrategySignals(ChartTab chart, ref List<LiveEntry>? committedEntries)
     {
         if (chart.Model is not { } model || chart.Strategies.Count == 0) return;
         foreach (var cs in chart.Strategies)
@@ -478,9 +478,15 @@ public sealed partial class TradingView
 
             UpdateStrategyDrawings(model, cs);
             var ledger = cs.Runner?.Ledger ?? cs.SavedLedger;
+            if (cs.Live && cs.Runner is not ({ IsRunning: true } or { IsClosing: true } or { HasWorkingOrders: true }))
+            {
+                committedEntries ??= _svc.Live.Entries();
+                ledger = committedEntries.FirstOrDefault(entry => ReferenceEquals(entry.ChartStrategy, cs))?.Ledger;
+                cs.SavedLedger = ledger;
+            }
             // la visual todavía no tomó la posición de la historia (por ejemplo, sin precio en vivo): se dibuja la de la historia
             var historyOpen = !cs.Live && cs.HistoryOpen != null && (ledger == null || ledger.Fills.Count == 0) ? cs.HistoryOpen : null;
-            string key = $"{cs.History.Count}|{ledger?.Fills.Count ?? 0}|{ledger?.Position ?? 0}|{historyOpen?.EntryTime.Ticks ?? 0}";
+            string key = $"{cs.History.Count}|{ledger?.Revision ?? 0}|{ledger?.Position ?? 0}|{historyOpen?.EntryTime.Ticks ?? 0}";
             if (key == cs.SignalsKey)
             {
                 // con una posición abierta, la línea de la entrada al precio actual se mueve con el mercado
@@ -494,19 +500,21 @@ public sealed partial class TradingView
             var signals = new List<StrategySignal>();
             var links = new List<TradeLink>();
             string Money(decimal v) => v.ToString("+#,##0.##;-#,##0.##;0", CultureInfo.InvariantCulture);
-            void AddTrade(ClosedTrade t)
+            void AddTrade(ClosedTrade t, decimal? net)
             {
                 signals.Add(new StrategySignal(t.EntryTime, t.EntryPrice, t.IsLong, true, t.IsLong ? "L" : "S"));
-                signals.Add(new StrategySignal(t.ExitTime, t.ExitPrice, !t.IsLong, false, Money(t.NetPnl)));
-                links.Add(new TradeLink(t.EntryTime, t.EntryPrice, t.ExitTime, t.ExitPrice, t.IsLong, t.NetPnl));
+                signals.Add(new StrategySignal(t.ExitTime, t.ExitPrice, !t.IsLong, false, net.HasValue ? Money(net.Value) : "—"));
+                if (net.HasValue)
+                    links.Add(new TradeLink(t.EntryTime, t.EntryPrice, t.ExitTime, t.ExitPrice, t.IsLong, net.Value));
             }
 
-            foreach (var t in cs.History) AddTrade(t);
+            foreach (var t in cs.History) AddTrade(t, t.NetPnl);
             if (ledger != null)
             {
-                foreach (var t in ledger.Trades.ToList()) AddTrade(t);
+                bool netKnown = !ledger.HasPendingFinancials;
+                foreach (var t in ledger.Trades.ToList()) AddTrade(t, netKnown ? t.NetPnl : null);
                 // posición abierta: la entrada desde la última vez que estuvo plana
-                if (ledger.Position != 0)
+                if (ledger.Position != 0 && !ledger.HasPendingPrices)
                 {
                     decimal pos = 0;
                     DateTime? opened = null;
@@ -588,12 +596,13 @@ public sealed partial class TradingView
         if (model.Settings.BlindReplay) return "practice · concealed";
         decimal units = runner.UnitsFor(LiveCenter.QuantityOf(runner.StrategyInstance.GetParameters()));
         string each = units > 0 ? $"{units.ToString("0.####", TradingHub.Common.UiCulture.Current)} {runner.ExecInstrument.Symbol} per order" : "size is zero";
-        return $"live · {TradingHub.Common.EnglishText.Of(runner.Account.Name)} · {each}";
+        return $"live · {TradingHub.Common.EnglishText.Of(runner.Account.Name)} · {each} · {runner.FinancialQuality} accounting";
     }
 
     /// <summary>Posición abierta: línea punteada de la entrada al precio actual, del color del resultado abierto.</summary>
     private static void SetOpenLink(ChartModel model, ChartStrategy cs, LiveLedger ledger)
     {
+        if (ledger.HasPendingPrices) return;
         DateTime opened = DateTime.MinValue;
         decimal pos = 0;
         foreach (var f in ledger.Fills.ToList())

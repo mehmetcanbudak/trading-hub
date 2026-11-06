@@ -35,17 +35,17 @@ public static class HistorySources
     /// <summary>Los archivos de un día que existen, en el orden de <see cref="Folders"/>.</summary>
     public static List<string> DayFiles(string root, string feedId, string symbol, DateOnly day)
     {
+        if (feedId == IbBarImport.FeedId)
+        {
+            using var snapshot = IbBarStore.OpenSnapshot(root, symbol);
+            return snapshot.DayFiles(day);
+        }
         var files = new List<string>(2);
         foreach (var folder in Folders(feedId))
         {
             var path = TickFile.ExistingDayPath(root, folder, symbol, day);
             if (path != null && new FileInfo(path).Length > 16) files.Add(path);
         }
-            if (feedId == IbBarImport.FeedId)
-            {
-                var barPath = TickFile.DayPath(root, IbBarStore.BarFolder, symbol, day);
-                if (File.Exists(barPath)) files.Add(barPath);
-            }
 
         return files;
     }
@@ -55,18 +55,26 @@ public static class HistorySources
     /// <summary>Los días con datos en cualquiera de las carpetas de la fuente, ordenados.</summary>
     public static List<DateOnly> AvailableDays(string root, string feedId, string symbol)
     {
+        if (feedId == IbBarImport.FeedId)
+        {
+            using var snapshot = IbBarStore.OpenSnapshot(root, symbol);
+            return snapshot.AvailableDays().ToList();
+        }
         var days = new SortedSet<DateOnly>();
         foreach (var folder in Folders(feedId))
             foreach (var d in TickFile.AvailableDays(root, folder, symbol))
                 days.Add(d);
-        if (feedId == IbBarImport.FeedId)
-            foreach (var day in TickFile.AvailableDays(root, IbBarStore.BarFolder, symbol)) days.Add(day);
         return days.ToList();
     }
 
     /// <summary>El tick con que se guardó el instrumento (del último día guardado), o null si no hay archivos.</summary>
     public static decimal? StoredTickSize(string root, string feedId, string symbol)
     {
+        if (feedId == IbBarImport.FeedId)
+        {
+            using var snapshot = IbBarStore.OpenSnapshot(root, symbol);
+            return snapshot.StoredTickSize();
+        }
         var days = AvailableDays(root, feedId, symbol);
         if (days.Count == 0) return null;
         foreach (var file in DayFiles(root, feedId, symbol, days[^1]))

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using TradingHub.Data;
@@ -10,17 +11,23 @@ using TradingHub.Trading;
 
 namespace TradingHub.Tests;
 
-public sealed class BybitExecutionFactsTests
+public sealed class BybitExecutionFactsTests : IDisposable
 {
     private static readonly Instrument Btc = new() { Symbol = "BTCUSDT", FeedId = BybitFeed.LinearId, TickSize = .1m,
         VolumeStep = .001m, BaseAsset = "BTC", QuoteAsset = "USDT" };
+    private readonly string _stateRoot = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-execution-state-" + Guid.NewGuid().ToString("N"));
+    private string NewStatePath() => Path.Combine(_stateRoot, Guid.NewGuid().ToString("N"), "orders.json");
+    public void Dispose()
+    {
+        if (Directory.Exists(_stateRoot)) Directory.Delete(_stateRoot, recursive: true);
+    }
 
     [Fact]
     public async Task Reported_partial_fill_keeps_only_confirmed_native_facts_until_missing_execution_ids_arrive()
     {
         using var protocol = new FakeBybitProtocol();
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var broker = new BybitBroker(data, session, "Bybit fake");
         var source = Assert.IsAssignableFrom<IAccountExecutionSource>(broker);
@@ -85,7 +92,7 @@ public sealed class BybitExecutionFactsTests
     {
         using var protocol = new FakeBybitProtocol();
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var broker = new BybitBroker(data, session, "Bybit fake");
         var source = (IAccountExecutionSource)broker;
@@ -156,7 +163,7 @@ public sealed class BybitExecutionFactsTests
     {
         using var protocol = new FakeBybitProtocol { UnknownCreate = true, HideOrders = true };
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var broker = new BybitBroker(data, session, "Bybit fake");
         var source = (IAccountExecutionSource)broker;
@@ -187,7 +194,7 @@ public sealed class BybitExecutionFactsTests
     {
         using var protocol = new FakeBybitProtocol();
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var broker = new BybitBroker(data, session, "Bybit fake");
         var source = (IAccountExecutionSource)broker;
@@ -232,7 +239,7 @@ public sealed class BybitExecutionFactsTests
     {
         using var protocol = new FakeBybitProtocol();
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var broker = new BybitBroker(data, session, "Bybit fake");
         var source = (IAccountExecutionSource)broker;
@@ -270,7 +277,7 @@ public sealed class BybitExecutionFactsTests
         Assert.Empty(ethBroker.GetExecutions(first).Executions);
         Assert.False(ethBroker.GetExecutions(first).CompleteCoverage);
 
-        await using var recovered = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var recovered = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var recoveredBroker = new BybitBroker(data, recovered, "Recovered native orders");
         await recovered.RefreshAsync();
         var recoveredHandle = recovered.Orders.Single(order => order.ExchangeOrderId == first.ExchangeOrderId);
@@ -288,7 +295,7 @@ public sealed class BybitExecutionFactsTests
     {
         using var protocol = new FakeBybitProtocol();
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var broker = new BybitBroker(data, session, "Bybit fake");
         await session.RefreshAsync();
@@ -373,7 +380,7 @@ public sealed class BybitExecutionFactsTests
             Assert.Equal(stableOrder, restoredBroker.StableOrderIdentityOf(restoredHandle));
 
             var rotated = protocol.Settings with { ApiKey = "rotated-fake-key", ApiSecret = "rotated-fake-secret" };
-            await using var rotatedSession = new BybitTradingSession(rotated, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+            await using var rotatedSession = new BybitTradingSession(rotated, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
             using var rotatedBroker = new BybitBroker(restoredData, rotatedSession, "Rotated credentials");
             Assert.Null(rotatedSession.PersistentAccountIdentity);
             await rotatedSession.RefreshAsync();
@@ -386,7 +393,7 @@ public sealed class BybitExecutionFactsTests
 
             protocol.ResponseFor = request => request.Path == "/v5/user/query-api"
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"retCode":0,"result":{"userID":7654321,"readOnly":0}}""") } : null;
-            await using var differentAccount = new BybitTradingSession(rotated, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+            await using var differentAccount = new BybitTradingSession(rotated, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
             using var differentBroker = new BybitBroker(restoredData, differentAccount, "Other UID");
             await differentAccount.RefreshAsync();
             var differentFact = Assert.Single(differentBroker.GetExecutions(Assert.Single(differentAccount.Orders)).Executions);
@@ -401,12 +408,74 @@ public sealed class BybitExecutionFactsTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task Static_account_operation_waits_for_opening_cancel_and_uses_reconciled_late_fill_quantity(bool reverse)
+    {
+        using var protocol = new FakeBybitProtocol { NetPosition = 1, ApplyCancelImmediately = false };
+        using var http = new HttpClient(protocol);
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http,
+            clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        using var data = new InstrumentData(Btc, new SimulatedFeed());
+        data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime, 100, 1, TradeSide.Buy));
+        using var broker = new BybitBroker(data, session, "Static operation fixture");
+        session.FillReceived += _ => { };
+        await session.RefreshAsync();
+        var opening = broker.Limit(OrderDirections.Buy, 1, 99);
+        await Observe(session, () => opening.ExchangeOrderId.Length > 0);
+        await session.RefreshAsync();
+        var cancelEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        protocol.ResponseForAsync = async (request, ct) =>
+        {
+            if (request.Path != "/v5/order/cancel") return null;
+            cancelEntered.TrySetResult();
+            await cancelRelease.Task.WaitAsync(ct);
+            return null;
+        };
+        try
+        {
+            if (reverse) OrderActions.Reverse(broker);
+            else OrderActions.Flatten(broker);
+            // A requested account operation is not permission to send a close before the opening settles.
+            Assert.Single(session.Orders);
+            await cancelEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            protocol.Fill("opening-during-cancel", .4m, 99, .02m, orderId: opening.ExchangeOrderId, closedQuantity: 0);
+            protocol.NetPosition = 1.4m;
+            await session.RefreshAsync();
+            Assert.Equal(1.4m, broker.Position.Volume);
+            Assert.Equal(.4m, opening.Filled);
+            Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create");
+            cancelRelease.TrySetResult();
+            await protocol.CancelReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await session.RefreshAsync();
+            Assert.Equal(OrderStates.Active, opening.State); // Cancel transport acceptance is not terminal native evidence.
+            Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create");
+            protocol.ConfirmCancel();
+            await session.RefreshAsync();
+            await Observe(session, () => session.Orders.Count == 2 && session.Orders.Any(order =>
+                !ReferenceEquals(order, opening) && order.ExchangeOrderId.Length > 0));
+            var close = Assert.Single(session.Orders, order => !ReferenceEquals(order, opening));
+            var creates = protocol.Requests.Where(request => request.Path == "/v5/order/create").ToArray();
+            Assert.Equal(2, creates.Length);
+            var native = JsonNode.Parse(creates[1].Body)!;
+            Assert.Equal("Market", native["orderType"]!.GetValue<string>());
+            Assert.Equal("Sell", native["side"]!.GetValue<string>());
+            Assert.Equal(reverse ? "2.8" : "1.4", native["qty"]!.GetValue<string>());
+            Assert.Equal(!reverse, native["reduceOnly"]!.GetValue<bool>());
+            Assert.Equal(reverse ? 2.8m : 1.4m, close.QuantityToFill);
+            Assert.Equal(OrderStatus.Canceled, opening.Status);
+            Assert.NotNull(session.OrderContext.Find(close.IntentId));
+        }
+        finally { cancelRelease.TrySetResult(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task Flatten_waits_for_authoritative_cancel_and_fresh_position_then_sends_one_native_reducing_close(bool ambiguousClose)
     {
         using var protocol = new FakeBybitProtocol { NetPosition = 1, ApplyCancelImmediately = false };
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings with { Environment = BybitEnvironment.Real }, httpClient: http,
-            sendGuard: (_, _, _, _) => "Real-account exposure permission revoked.", clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings with { Environment = BybitEnvironment.Real }, statePath: NewStatePath(), httpClient: http, sendGuard: (_, _, _, _) => "Real-account exposure permission revoked.", clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime, 100, 1, TradeSide.Buy));
         using var broker = new BybitBroker(data, session, "Bybit fake");
@@ -559,9 +628,8 @@ public sealed class BybitExecutionFactsTests
         using var protocol = new FakeBybitProtocol { NetPosition = 1 };
         using var http = new HttpClient(protocol);
         bool allowed = true;
-        await using var session = new BybitTradingSession(protocol.Settings with { Environment = BybitEnvironment.Real }, httpClient: http,
-            sendGuard: (_, _, _, _) => allowed ? null : "Real-account exposure permission revoked.",
-            clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings with { Environment = BybitEnvironment.Real }, statePath: NewStatePath(), httpClient: http, sendGuard: (_, _, _, _) => allowed ? null : "Real-account exposure permission revoked.",
+        clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime, 100, 1, TradeSide.Buy));
         using var broker = new BybitBroker(data, session, "Bybit fake");
@@ -627,7 +695,7 @@ public sealed class BybitExecutionFactsTests
             _ => null,
         };
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         await session.RefreshAsync();
 
         var stale = BybitAccountMetrics.From(session, TimeZoneInfo.Utc, FakeBybitProtocol.Now.UtcDateTime);
@@ -654,7 +722,7 @@ public sealed class BybitExecutionFactsTests
         var fill = Execution("late-close-size", "native-order", "", "BTCUSDT", .25m, 101, FakeBybitProtocol.Now.ToUnixTimeMilliseconds(), .01m, "USDT");
         protocol.ResponseFor = request => request.Path == "/v5/execution/list" ? Rows(fill) : null;
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         long empty = session.ExecutionRevision;
         await session.RefreshAsync();
         long actual = session.ExecutionRevision;
@@ -686,7 +754,7 @@ public sealed class BybitExecutionFactsTests
     {
         using var protocol = new FakeBybitProtocol { NetPosition = 1 };
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var broker = new BybitBroker(data, session, "Closed view");
         await session.RefreshAsync();
@@ -711,9 +779,9 @@ public sealed class BybitExecutionFactsTests
         using var protocol = new FakeBybitProtocol();
         using var http = new HttpClient(protocol);
         var settings = protocol.Settings with { BaseUrl = firstOrigin };
-        await using var first = new BybitTradingSession(settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var first = new BybitTradingSession(settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         var rotated = settings with { BaseUrl = secondOrigin, ApiKey = "rotated-fake-key", ApiSecret = "rotated-fake-secret" };
-        await using var second = new BybitTradingSession(rotated, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var second = new BybitTradingSession(rotated, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var firstBroker = new BybitBroker(data, first, "Identical display name");
         using var secondBroker = new BybitBroker(data, second, "Identical display name");
@@ -741,9 +809,8 @@ public sealed class BybitExecutionFactsTests
     {
         using var protocol = new FakeBybitProtocol();
         using var http = new HttpClient(protocol);
-        await using var demo = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
-        await using var real = new BybitTradingSession(protocol.Settings with { Environment = BybitEnvironment.Real },
-            httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var demo = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var real = new BybitTradingSession(protocol.Settings with { Environment = BybitEnvironment.Real }, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         await demo.RefreshAsync();
         await real.RefreshAsync();
 
@@ -795,7 +862,7 @@ public sealed class BybitExecutionFactsTests
         protocol.ResponseFor = request => request.Path == "/v5/user/query-api"
             ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent($$$"""{"retCode":0,"result":{"userID":{{{uid}}},"readOnly":0}}""") } : null;
         using var http = new HttpClient(protocol);
-        await using var session = new BybitTradingSession(protocol.Settings, httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+        await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
         using var data = new InstrumentData(Btc, new SimulatedFeed());
         using var broker = new BybitBroker(data, session, "Pinned account view");
         var source = (IAccountExecutionSource)broker;
@@ -842,6 +909,55 @@ public sealed class BybitExecutionFactsTests
             Assert.Null(source.PersistentAccountIdentity);
         }
         finally { metadataRelease.TrySetResult(); }
+    }
+
+    [Fact]
+    public async Task Unmarked_Kvp_native_counters_require_real_order_replay_instead_of_promoting_saved_financial_quantity()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-native-cutover-" + Guid.NewGuid().ToString("N"));
+        string state = Path.Combine(root, "orders.json");
+        using var protocol = new FakeBybitProtocol();
+        using var http = new HttpClient(protocol);
+        try
+        {
+            await using (var original = new BybitTradingSession(protocol.Settings, state, http,
+                clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now)))
+            {
+                await original.RefreshAsync();
+                var order = original.Place(Btc, 100, OrderDirections.Buy, OrderTypes.Limit, 1, 99);
+                await Observe(original, () => order.ExchangeOrderId.Length > 0);
+                protocol.Fill("actual-native-partial", .4m, 99, .02m);
+                await original.RefreshAsync();
+                Assert.Equal(.4m, order.Filled);
+            }
+            // Actual old SavedOrder shape: no source-authority bit, and its cumulative counter may have come from history.
+            var envelope = JsonNode.Parse(File.ReadAllText(state))!.AsObject();
+            var payload = JsonNode.Parse(envelope["Payload"]!.GetValue<string>())!.AsObject();
+            var saved = Assert.Single(payload["Orders"]!.AsArray())!.AsObject();
+            saved.Remove("NativeQuantityOnly");
+            saved["Executed"] = 1m;
+            saved["State"] = (int)OrderStates.Done;
+            saved["Status"] = (int)OrderStatus.Filled;
+            string oldPayload = payload.ToJsonString();
+            envelope["Payload"] = oldPayload;
+            envelope["Sha256"] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(oldPayload)));
+            File.WriteAllText(state, envelope.ToJsonString());
+            await using var restored = new BybitTradingSession(protocol.Settings, state, http,
+                clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+            var handle = Assert.Single(restored.Orders);
+            Assert.False(restored.OrdersReady);
+            Assert.Equal(0m, handle.Filled);
+            Assert.NotEqual(OrderStatus.Filled, handle.Status);
+            await restored.RefreshAsync();
+            Assert.True(restored.OrdersReady);
+            Assert.Equal(.4m, handle.Filled);
+            Assert.Equal(.6m, handle.Unfilled);
+            Assert.Equal(OrderStates.Active, handle.State);
+            Assert.Equal(OrderStatus.PartlyFilled, handle.Status);
+            Assert.Equal(.4m, Assert.Single(restored.Executions).Quantity);
+            Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
     private static async Task Observe(BybitTradingSession session, Func<bool> condition)

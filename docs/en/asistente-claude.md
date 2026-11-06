@@ -57,7 +57,7 @@ Laboratory mode starts the same app with `--mcp`, without windows, speaking JSON
 | run_walk_forward | Grid/Bayesian walk-forward, plateau, PBO and CPCV; can estimate duration only. |
 | list_runs | Saved runs for a strategy. |
 | analyze_portfolio / suggest_portfolio | Combine runs/correlation or find lower-correlation combinations improving Sharpe. |
-| live_portfolio | Read-only live sizes, positions, PnL, PF and drawdown. |
+| live_portfolio | Read-only live sizes, positions, accounting quality, nullable confirmed results and explicitly labelled estimates. |
 | propose_sizing | Create pending proposals; does not apply them. |
 | save_report | Generate and save a professional report. |
 
@@ -75,6 +75,22 @@ Runs enter History with a Claude laboratory note. Instructions prescribe reviewi
 The codes remain Spanish for saved-report compatibility; UI and new explanatory text follow the selected runtime language. These are screening heuristics, not guarantees.
 
 For live exposure, tools can propose up to ×3 for stronger strategies, reductions/zero for deterioration, with evidence and no firm conclusions from tiny samples. Proposals await approval in **Live → Proposals**.
+
+### Live-portfolio accounting
+
+Inspect `financial_quality` before interpreting live results. **Null means unavailable, not zero.**
+
+| Field | Meaning |
+|---|---|
+| `financial_quality` | `authoritative` for complete reported execution economics, `estimated` for legacy estimates, or `pending` while required prices, fees or fee-currency information are missing. |
+| `net`, `open_pnl`, `metrics`, recent metrics and drawdown | Confirmed values are nullable. Strategy `net` includes realized accounting plus an available open valuation. |
+| Fields ending in `_estimate` | Best-available numeric values, retained separately rather than presented as confirmed results. |
+| `last_trades` | Includes quality, nullable confirmed `pnl` and prices, plus explicit `pnl_estimate`, `entry_price_estimate` and `exit_price_estimate` values. |
+
+Legacy history remains estimated; it is not rewritten as broker-reported executions. Reported fill fees retain their currency, and unknown fees or conversions are not invented. Execution PnL is not a complete broker cash statement including funding or financing.
+
+Do not recommend increased exposure solely from estimated or incomplete financial results. These accounting fields do not certify authenticated provider coverage or exactly-once order delivery.
+
 
 ## Reports
 

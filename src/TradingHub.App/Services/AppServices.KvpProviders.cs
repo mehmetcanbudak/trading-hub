@@ -165,7 +165,7 @@ public sealed partial class AppServices
                     if (current.MaxOrderQuantity > 0 && Math.Abs(signedQuantity) > current.MaxOrderQuantity && RealOrderPermission.IncreasesExposure(position, signedQuantity))
                         return "Bybit order quantity exceeds this connection's configured maximum.";
                     return RealOrderPermission.Check(settings.IsReal, (current.Name, current.Enabled, current.AllowRealOrders), position, signedQuantity);
-                }, ownsHttpClient: true);
+                }, ownsHttpClient: true, executionRoot: _executionRoot);
         }
         catch { http.Dispose(); throw; }
         session.FillReceived += fill => Journal.Add(BybitJournalId(profile.Id, session),

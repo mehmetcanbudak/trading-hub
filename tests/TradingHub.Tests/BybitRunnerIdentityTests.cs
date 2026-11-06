@@ -31,7 +31,8 @@ public sealed class BybitRunnerIdentityTests
         long oldLocalId;
         try
         {
-            await using (var first = new BybitTradingSession(protocol.Settings, state, http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now)))
+            await using (var first = new BybitTradingSession(protocol.Settings, state, http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now),
+                executionRoot: LiveStore.Root))
             {
                 using var broker = new BybitBroker(data, first, "Bybit fake account");
                 await first.RefreshAsync();
@@ -53,7 +54,8 @@ public sealed class BybitRunnerIdentityTests
             }
 
             protocol.HoldCreate = false;
-            await using var recovered = new BybitTradingSession(protocol.Settings, state, http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now));
+            await using var recovered = new BybitTradingSession(protocol.Settings, state, http, clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now),
+                executionRoot: LiveStore.Root);
             using var recoveredBroker = new BybitBroker(data, recovered, "Bybit fake account");
             var loaded = Assert.Single(recovered.Orders);
             Assert.NotEqual(oldLocalId, loaded.Id);

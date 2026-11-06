@@ -75,6 +75,13 @@ public class Order
 
     public long Id { get; set; } = Interlocked.Increment(ref _nextId);
     public string ExchangeOrderId { get; set; } = "";
+    /// <summary>Durable ownership is distinct from this process's Id and the display exchange ID.</summary>
+    public string? ContextId { get; internal set; }
+    public string? OwnerId { get; internal set; }
+    public string? IntentId { get; internal set; }
+    public string? LogicalOrderId { get; internal set; }
+    public string? ClientOrderId { get; internal set; }
+    public NativeOrderIdentity? NativeIdentity { get; internal set; }
     public Security Security { get; set; } = new();
     public Portfolio Portfolio { get; set; } = new();
     public OrderDirections Direction { get; set; }

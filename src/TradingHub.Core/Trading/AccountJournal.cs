@@ -119,8 +119,44 @@ public sealed class AccountJournal
     private readonly string _dir;
     private readonly object _gate = new();
     private readonly Func<string, Stream> _openAppend;
-    private readonly Dictionary<string, List<AccountFill>> _fills = new();
-    private readonly Dictionary<string, HashSet<string>> _ids = new();
+    private readonly Dictionary<string, History> _accounts = new();
+
+    private sealed class History
+    {
+        private IReadOnlyList<AccountFill>? _snapshot;
+        public List<AccountFill> Fills { get; } = new();
+        public Dictionary<string, int> Indices { get; } = new();
+        public long Revision { get; private set; }
+        public IReadOnlyList<AccountFill> Snapshot =>
+            _snapshot ??= Fills.Count == 0 ? Array.Empty<AccountFill>() : Array.AsReadOnly(Fills.ToArray());
+
+        public bool Accept(AccountFill fill)
+        {
+            if (Indices.TryGetValue(fill.Id, out int index))
+            {
+                if (Fills[index] == fill) return false;
+                Fills[index] = fill;
+            }
+            else
+            {
+                Indices.Add(fill.Id, Fills.Count);
+                Fills.Add(fill);
+            }
+            Revision++;
+            _snapshot = null;
+            return true;
+        }
+
+        public bool Clear()
+        {
+            if (Fills.Count == 0) return false;
+            Fills.Clear();
+            Indices.Clear();
+            Revision++;
+            _snapshot = null;
+            return true;
+        }
+    }
 
     public AccountJournal(string dir, Func<string, Stream>? openAppend = null)
     {
@@ -136,11 +172,10 @@ public sealed class AccountJournal
     private string FileOf(string account) =>
         Path.Combine(_dir, string.Concat(account.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '_')) + ".jsonl");
 
-    private List<AccountFill> Load(string account)
+    private History Load(string account)
     {
-        if (_fills.TryGetValue(account, out var list)) return list;
-        list = new List<AccountFill>();
-        var ids = new HashSet<string>();
+        if (_accounts.TryGetValue(account, out var history)) return history;
+        history = new History();
         var path = FileOf(account);
         if (File.Exists(path))
         {
@@ -148,7 +183,7 @@ public sealed class AccountJournal
             {
                 try
                 {
-                    if (JsonSerializer.Deserialize<AccountFill>(line) is { } f && ids.Add(f.Id)) list.Add(f);
+                    if (JsonSerializer.Deserialize<AccountFill>(line) is { } fill) history.Accept(fill);
                 }
                 catch (JsonException)
                 {
@@ -157,32 +192,47 @@ public sealed class AccountJournal
             }
         }
 
-        _fills[account] = list;
-        _ids[account] = ids;
-        return list;
+        _accounts[account] = history;
+        return history;
     }
 
-    /// <summary>Cuántas ejecuciones tiene la cuenta (para saber si cambió sin copiar la lista).</summary>
+    /// <summary>The number of effective executions, with one entry per durable fill ID.</summary>
     public int CountOf(string account)
     {
-        lock (_gate) return Load(account).Count;
+        lock (_gate) return Load(account).Fills.Count;
+    }
+
+    /// <summary>A constant-time change token, including corrections and history resets.</summary>
+    public long RevisionOf(string account)
+    {
+        lock (_gate) return Load(account).Revision;
+    }
+
+    /// <summary>Returns a stable read-only snapshot and its atomic token, reused until the next revision.</summary>
+    public (long Revision, IReadOnlyList<AccountFill> Fills) SnapshotOf(string account)
+    {
+        lock (_gate)
+        {
+            var history = Load(account);
+            return (history.Revision, history.Snapshot);
+        }
     }
 
     public IReadOnlyList<AccountFill> FillsOf(string account)
     {
-        lock (_gate) return Load(account).ToList();
+        lock (_gate) return Load(account).Snapshot;
     }
 
-    /// <summary>Guarda una ejecución (las repetidas, con el mismo id, se ignoran).</summary>
+    /// <summary>Durably appends new or corrected executions; exact duplicates are ignored.</summary>
     public bool Add(string account, AccountFill fill)
     {
         lock (_gate)
         {
-            var list = Load(account);
-            if (_ids[account].Contains(fill.Id)) return false;
+            var history = Load(account);
+            if (history.Indices.TryGetValue(fill.Id, out int index) && history.Fills[index] == fill) return false;
             using (var stream = _openAppend(FileOf(account)))
             {
-                // A failed prior append may leave a partial last line. Preserve it, but never join a retry onto that fragment.
+                // Preserve a failed append fragment, but never join a retry onto that fragment.
                 bool needsBoundary = stream.Length > 0;
                 if (needsBoundary)
                 {
@@ -191,13 +241,13 @@ public sealed class AccountJournal
                 }
                 stream.Seek(0, SeekOrigin.End);
                 if (needsBoundary) stream.WriteByte((byte)'\n');
-                stream.Write(JsonSerializer.SerializeToUtf8Bytes(fill));
+                JsonSerializer.Serialize(stream, fill);
                 stream.WriteByte((byte)'\n');
-                if (stream is FileStream file) file.Flush(flushToDisk: true); else stream.Flush();
+                if (stream is FileStream file) Common.StorageSync.Flush(file); else stream.Flush();
             }
-            // Only a successful durable append acknowledges delivery. A retry after failure must not hit an in-memory duplicate.
-            _ids[account].Add(fill.Id);
-            list.Add(fill);
+            Common.StorageSync.SyncDirectory(_dir);
+            // A failed append never acknowledges delivery or supersedes the last confirmed correction.
+            history.Accept(fill);
         }
 
         Changed?.Invoke(account);
@@ -205,16 +255,25 @@ public sealed class AccountJournal
     }
 
     /// <summary>Empieza de cero (el archivo anterior queda guardado aparte, no se borra).</summary>
-    public void Restart(string account)
+    public void Restart(string account) => Restart(account, static directory => Common.StorageSync.SyncDirectory(directory));
+
+    internal void Restart(string account, Action<string> syncDirectory)
     {
+        bool changed;
         lock (_gate)
         {
+            var history = Load(account);
             var path = FileOf(account);
-            if (File.Exists(path)) File.Move(path, path + $".{DateTime.Now:yyyyMMdd-HHmmss}.bak");
-            _fills[account] = new List<AccountFill>();
-            _ids[account] = new HashSet<string>();
+            bool renamed = File.Exists(path);
+            if (renamed)
+            {
+                File.Move(path, path + $".{DateTime.Now:yyyyMMdd-HHmmss}.bak");
+            }
+            changed = history.Clear();
+            // The active namespace is already empty after rename, even if durability confirmation fails.
+            if (renamed) syncDirectory(_dir);
         }
 
-        Changed?.Invoke(account);
+        if (changed) Changed?.Invoke(account);
     }
 }

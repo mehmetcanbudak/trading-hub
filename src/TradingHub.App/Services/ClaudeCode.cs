@@ -518,6 +518,9 @@ public sealed class ClaudeCodeBridge : StrategyChatProcess
         8. For multiple strategies or instruments with backtests, use analyze_portfolio to measure daily-PnL correlation and
            suggest_portfolio to find combinations with correlation < 0.5 that improve aggregate Sharpe and reduce drawdown.
            For a live-portfolio review, use live_portfolio: inspect total/recent-20-trade PF, current/maximum drawdown and results.
+           Check reported financial quality before interpreting live metrics. Null financial values are unavailable, not zero;
+           explicitly labelled estimates and legacy records are not confirmed execution economics. Do not infer zero fees,
+           exchange rates or slippage, or recommend increasing exposure solely from incomplete or estimated results.
            Use propose_sizing to suggest larger sizes (up to ×3) for consistent performers, or reductions/pause (0) for degradation,
            with concrete numerical reasons. Do not draw conclusions from fewer than about 10 trades. Nothing applies automatically:
            the user approves every change. A live review does not require save_report unless requested.

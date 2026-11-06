@@ -1,5 +1,5 @@
 using System.Security.Cryptography;
-using System.Text.Json;
+using TradingHub.Common;
 using TradingHub.Feeds;
 using TradingHub.Market;
 
@@ -11,6 +11,16 @@ public static class IbBarStore
     public const string BarFolder = "ib-bars";
     internal static event Action<string, string>? HistoryChanged;
     internal static void NotifyHistoryChanged(string root, string symbol) => HistoryChanged?.Invoke(root, symbol);
+    /// <summary>Owns one publication generation across a complete load; dispose before network awaits or playback.</summary>
+    public static IbHistorySnapshot OpenSnapshot(string root, string symbol, CancellationToken ct = default) =>
+        OpenSnapshot(root, symbol, ct, StorageSync.SyncDirectory);
+    internal static IbHistorySnapshot OpenSnapshot(string root, string symbol, CancellationToken ct, Func<string, bool> syncDirectory) =>
+        new(IbHistoryCoordinator.Enter(root, symbol, ct, syncDirectory));
+    public static IbHistoryStamp GetStamp(string root, string symbol, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+    {
+        using var snapshot = OpenSnapshot(root, symbol, ct);
+        return snapshot.GetStamp(fromUtc, toUtc);
+    }
     public static string Fingerprint(string path)
     {
         if (!File.Exists(path)) return "absent";
@@ -29,6 +39,11 @@ public static class IbBarStore
     }
     internal static List<Trade> ReadRecordedDay(string root, string symbol, DateOnly day, decimal? expectedTickSize = null)
     {
+        using var snapshot = OpenSnapshot(root, symbol);
+        return snapshot.ReadRecordedDay(day, expectedTickSize);
+    }
+    internal static List<Trade> ReadRecordedDayOwned(string root, string symbol, DateOnly day, decimal? expectedTickSize = null)
+    {
         string path = TickFile.DayPath(root, IbBarImport.FeedId, symbol, day);
         if (!File.Exists(path)) return new();
         using var lease = TickFile.TryLock(root, IbBarImport.FeedId, symbol, failOnNonSharingError: true);
@@ -39,46 +54,63 @@ public static class IbBarStore
         return rows;
     }
 
-    public static List<Trade> ReadDay(string root, string symbol, DateOnly day)
+    public static List<Trade> ReadDay(string root, string symbol, DateOnly day, decimal? expectedTickSize = null)
     {
-        var recorded = TickFile.SortAndDedupe(ReadRecordedDay(root, symbol, day));
-        var realMinutes = recorded.Where(t => t.Id >= 0).Select(t => t.Time.Ticks / TimeSpan.TicksPerMinute).ToHashSet();
-        var synthetic = ReadChecked(TickFile.DayPath(root, BarFolder, symbol, day));
-        if (synthetic.Any(t => t.Id >= 0)) throw new InvalidDataException("IB bar store contains a nonsynthetic trade ID.");
-        var legacyMinutes = recorded.Where(t => t.Id < 0).Select(t => t.Time.Ticks / TimeSpan.TicksPerMinute).ToHashSet();
-        return recorded.Where(t => t.Id >= 0 || !realMinutes.Contains(t.Time.Ticks / TimeSpan.TicksPerMinute))
-            .Concat(synthetic.Where(t => !realMinutes.Contains(t.Time.Ticks / TimeSpan.TicksPerMinute) && !legacyMinutes.Contains(t.Time.Ticks / TimeSpan.TicksPerMinute)))
+        using var snapshot = OpenSnapshot(root, symbol);
+        return snapshot.ReadDay(day, expectedTickSize);
+    }
+    internal static List<Trade> ReadDayOwned(string root, string symbol, DateOnly day, decimal? expectedTickSize = null)
+    {
+        var recorded = ReadRecordedDayOwned(root, symbol, day, expectedTickSize);
+        string source = HistorySources.DefaultSourceIdentity(IbBarImport.FeedId, symbol);
+        for (int i = 0; i < recorded.Count; i++) recorded[i] = HistorySources.AnnotateSource(recorded[i], IbBarImport.FeedId, source);
+        recorded = TickFile.SortAndDedupe(recorded);
+        var measuredTimes = recorded.Where(t => t.Provenance.IsMeasured).Select(t => t.Time.Ticks).Order().ToList();
+        var synthetic = ReadBarDayOwned(root, symbol, day, expectedTickSize);
+        recorded.RemoveAll(t => HistoricalData.OverlapsMeasured(t, measuredTimes));
+        var legacyMinutes = recorded.Where(t => !t.Provenance.IsMeasured).Select(t => t.Time.Ticks / TimeSpan.TicksPerMinute).ToHashSet();
+        return recorded.Concat(synthetic.Where(t => !HistoricalData.OverlapsMeasured(t, measuredTimes) && !legacyMinutes.Contains(t.Time.Ticks / TimeSpan.TicksPerMinute)))
             .OrderBy(t => t.Time).ThenBy(t => t.Id).ToList();
     }
-    public static IReadOnlyList<Trade> LoadRange(string root, string symbol, DateTime from, DateTime to, CancellationToken ct = default)
+    internal static List<Trade> ReadBarDayOwned(string root, string symbol, DateOnly day, decimal? expectedTickSize = null)
     {
+        var rows = ReadChecked(TickFile.DayPath(root, BarFolder, symbol, day), expectedTickSize);
+        if (rows.Any(t => t.Id >= 0)) throw new InvalidDataException("IB bar store contains a nonsynthetic trade ID.");
+        return rows;
+    }
+    public static IReadOnlyList<Trade> LoadRange(string root, string symbol, DateTime from, DateTime to, CancellationToken ct = default, decimal? expectedTickSize = null)
+    {
+        using var snapshot = OpenSnapshot(root, symbol, ct);
         var rows = new List<Trade>();
         for (var day = DateOnly.FromDateTime(from); day <= DateOnly.FromDateTime(to); day = day.AddDays(1))
         {
             ct.ThrowIfCancellationRequested();
-            rows.AddRange(ReadDay(root, symbol, day).Where(t => t.Time >= from && t.Time < to));
+            rows.AddRange(snapshot.ReadDay(day, expectedTickSize).Where(t => t.Time >= from && t.Time < to));
         }
         return rows;
     }
     public static void MergeBars(string root, Instrument instrument, IReadOnlyList<Kline> bars, CancellationToken ct)
     {
         if (bars.Count == 0) return;
-        // Bar-only writers have their own lease; the tick recorder can continue safely in ib/.
-        using var lease = TickFile.TryLock(root, BarFolder, instrument.Symbol) ?? throw new IOException("IB bar history is in use by another writer.");
-        var outputs = new Dictionary<string, IReadOnlyList<Trade>>(StringComparer.Ordinal);
-        foreach (var group in bars.Where(b => b.Volume > 0).GroupBy(b => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(b.OpenTimeMs).UtcDateTime)))
+        using (var ownership = IbHistoryCoordinator.Enter(root, instrument.Symbol, ct))
+        using (var writers = ownership.Writers(raw: false, bars: true))
         {
-            ct.ThrowIfCancellationRequested();
-            string path = TickFile.DayPath(root, BarFolder, instrument.Symbol, group.Key);
-            var old = ReadChecked(path, instrument.TickSize);
-            if (old.Any(t => t.Id >= 0)) throw new InvalidDataException("IB bar store contains nonsynthetic IDs; refusing to overwrite it.");
-            var covered = group.Select(b => b.OpenTimeMs / 60000).ToHashSet();
-            old.RemoveAll(t => covered.Contains(new DateTimeOffset(t.Time).ToUnixTimeMilliseconds() / 60000));
-            var fresh = Synthesize(group.GroupBy(b => b.OpenTimeMs).Select(b => b.Last()).OrderBy(b => b.OpenTimeMs).ToList(), instrument, group.Key);
-            old.AddRange(fresh);
-            outputs[path] = old.OrderBy(t => t.Time).ThenBy(t => t.Id).ToList();
+            var outputs = new Dictionary<string, IReadOnlyList<Trade>>(StringComparer.Ordinal);
+            foreach (var group in bars.Where(b => b.Volume > 0).GroupBy(b => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(b.OpenTimeMs).UtcDateTime)))
+            {
+                ct.ThrowIfCancellationRequested();
+                string path = TickFile.DayPath(ownership.Root, BarFolder, instrument.Symbol, group.Key);
+                IbHistoryCoordinator.CheckPath(ownership.Root, path);
+                var old = ReadChecked(path, instrument.TickSize);
+                if (old.Any(t => t.Id >= 0)) throw new InvalidDataException("IB bar store contains nonsynthetic IDs; refusing to overwrite it.");
+                var covered = group.Select(b => b.OpenTimeMs / 60000).ToHashSet();
+                old.RemoveAll(t => covered.Contains(new DateTimeOffset(t.Time).ToUnixTimeMilliseconds() / 60000));
+                var fresh = Synthesize(group.GroupBy(b => b.OpenTimeMs).Select(b => b.Last()).OrderBy(b => b.OpenTimeMs).ToList(), instrument, group.Key);
+                old.AddRange(fresh);
+                outputs[path] = old.OrderBy(t => t.Time).ThenBy(t => t.Id).ToList();
+            }
+            Publish(ownership, instrument, outputs, ct);
         }
-        Publish(root, instrument, outputs, ct);
     }
     internal static List<Trade> Synthesize(IReadOnlyList<Kline> bars, Instrument instrument, DateOnly day)
     {
@@ -89,57 +121,88 @@ public static class IbBarStore
         return rows.OrderBy(t => t.Time).ThenBy(t => t.Id).ToList();
     }
     public sealed record PublishResult(string BackupDirectory, int Files);
-    /// <summary>Stages every output, preserves originals and journals each publish. Per-file rename is atomic; the set is not.</summary>
-    internal static PublishResult Publish(string root, Instrument instrument, IReadOnlyDictionary<string, IReadOnlyList<Trade>> outputs, CancellationToken ct, Action<int>? beforePublish = null)
+    internal static PublishResult Publish(IbHistoryCoordinator.Ownership ownership, Instrument instrument, IReadOnlyDictionary<string, IReadOnlyList<Trade>> outputs, CancellationToken ct, Action<int>? beforePublish = null) =>
+        ownership.Publish(instrument, outputs.Select(pair => new IbHistoryCoordinator.Output(pair.Key, pair.Value)).ToArray(), ct, beforePublish);
+
+    internal static void WriteDay(string root, Instrument instrument, DateOnly day, IReadOnlyList<Trade> trades, bool replace)
     {
-        string transaction = Path.Combine(root, ".ib-import-backups", DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffffff") + "-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(transaction);
-        var entries = outputs.Select((pair, index) => new Entry(pair.Key, Path.Combine(transaction, index + ".original"), Path.Combine(transaction, index + ".staged"), File.Exists(pair.Key))).ToList();
-        string journal = Path.Combine(transaction, "transaction.json");
-        var published = new List<Entry>();
+        bool recorded = instrument.FeedId == IbBarImport.FeedId;
+        using var ownership = IbHistoryCoordinator.Enter(root, instrument.Symbol);
+        using var writers = ownership.Writers(raw: recorded, bars: !recorded);
+        string folder = recorded ? IbBarImport.FeedId : BarFolder;
+        string path = TickFile.DayPath(ownership.Root, folder, instrument.Symbol, day);
+        IbHistoryCoordinator.CheckPath(ownership.Root, path);
+        bool rawReplacement = replace && (!recorded || trades.All(t => t.IsObservedTrade));
+        var all = rawReplacement ? new List<Trade>() : ReadChecked(path, instrument.TickSize);
+        string source = HistorySources.DefaultSourceIdentity(instrument.FeedId, instrument.Symbol);
+        for (int i = 0; i < all.Count; i++) all[i] = HistorySources.AnnotateSource(all[i], instrument.FeedId, source);
+        foreach (var trade in trades) all.Add(HistorySources.AnnotateSource(trade, instrument.FeedId, source));
+        var rows = TickFile.SortAndDedupe(all).Where(t => DateOnly.FromDateTime(t.Time) == day).ToList();
+        if (recorded)
+        {
+            var measuredTimes = rows.Where(t => t.Provenance.IsMeasured).Select(t => t.Time.Ticks).Order().ToList();
+            rows.RemoveAll(t => HistoricalData.OverlapsMeasured(t, measuredTimes));
+        }
+        if (!recorded && rows.Any(t => t.Id >= 0)) throw new InvalidDataException("IB bar store requires synthetic trade IDs.");
+        WriteSingleDay(ownership, instrument, path, rows);
+    }
+
+    internal static int RepairDay(string root, Instrument instrument, DateOnly day)
+    {
+        bool recorded = instrument.FeedId == IbBarImport.FeedId;
+        using var ownership = IbHistoryCoordinator.Enter(root, instrument.Symbol);
+        using var writers = ownership.Writers(raw: recorded, bars: !recorded);
+        string path = TickFile.DayPath(ownership.Root, recorded ? IbBarImport.FeedId : BarFolder, instrument.Symbol, day);
+        IbHistoryCoordinator.CheckPath(ownership.Root, path);
+        var rows = TickFile.Read(path, out int dropped);
+        if (dropped == 0) return 0;
+        if (!recorded && rows.Any(t => t.Id >= 0)) throw new InvalidDataException("IB bar store requires synthetic trade IDs.");
+        WriteSingleDay(ownership, instrument, path, rows);
+        return dropped;
+    }
+
+    private static void WriteSingleDay(IbHistoryCoordinator.Ownership ownership, Instrument instrument, string path, IReadOnlyList<Trade> rows)
+    {
+        // One atomic day replacement needs no multi-target rollback journal. Keep import backups import-specific.
+        string prepared = path + ".ib-write-" + Guid.NewGuid().ToString("N");
+        IbHistoryCoordinator.CheckPath(ownership.Root, prepared);
+        bool published = false;
         try
         {
-            for (int i = 0; i < entries.Count; i++)
+            using (var writer = new TickFile.Writer(prepared, instrument, includeProvenance: true))
             {
-                ct.ThrowIfCancellationRequested();
-                var entry = entries[i];
-                if (entry.Existed) File.Copy(entry.Target, entry.Backup);
-                using var writer = new TickFile.Writer(entry.Staged, instrument, includeProvenance: true);
-                foreach (var row in outputs[entry.Target]) writer.Write(row);
-                writer.Flush();
+                foreach (var row in rows) writer.Write(row);
+                writer.FlushToDisk();
             }
-            File.WriteAllText(journal, JsonSerializer.Serialize(new { State = "staged", Entries = entries }));
-            ct.ThrowIfCancellationRequested();
-            for (int i = 0; i < entries.Count; i++)
-            {
-                var entry = entries[i];
-                beforePublish?.Invoke(i);
-                Directory.CreateDirectory(Path.GetDirectoryName(entry.Target)!);
-                File.Move(entry.Staged, entry.Target, true);
-                published.Add(entry);
-                File.WriteAllText(journal, JsonSerializer.Serialize(new { State = "publishing", Published = published.Count, Entries = entries }));
-            }
-            File.WriteAllText(journal, JsonSerializer.Serialize(new { State = "committed", Entries = entries }));
-            return new(transaction, entries.Count);
+            ownership.Invalidate();
+            File.Move(prepared, path, true);
+            published = true;
+            StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
         }
-        catch (Exception error)
+        catch (Exception error) when (published)
         {
-            var rollbackErrors = new List<string>();
-            foreach (var entry in published.AsEnumerable().Reverse())
-            {
-                try
-                {
-                    if (entry.Existed) File.Copy(entry.Backup, entry.Target, true);
-                    else File.Delete(entry.Target);
-                }
-                catch (Exception rollback) { rollbackErrors.Add(rollback.Message); }
-            }
-            try { File.WriteAllText(journal, JsonSerializer.Serialize(new { State = rollbackErrors.Count == 0 ? "rolled-back" : "recovery-required", Error = error.Message, RollbackErrors = rollbackErrors, Entries = entries })); }
-            catch (Exception journalError) { rollbackErrors.Add("Could not update recovery journal: " + journalError.Message); }
-            if (error is OperationCanceledException && published.Count == 0 && rollbackErrors.Count == 0)
-                throw new OperationCanceledException($"IB import canceled before publication. Staging journal: {transaction}", error, ct);
-            throw new IOException($"IB publication failed; {(rollbackErrors.Count == 0 ? "original files restored" : "manual recovery required")}. Backups and journal: {transaction}", error);
+            throw new IOException($"IB day replacement was published, but namespace synchronization failed: {path}", error);
         }
+        finally { if (File.Exists(prepared)) File.Delete(prepared); }
     }
-    private sealed record Entry(string Target, string Backup, string Staged, bool Existed);
+
+    internal static void DeleteDays(string root, string symbol, IEnumerable<DateOnly> days)
+    {
+        using (var ownership = IbHistoryCoordinator.Enter(root, symbol))
+        using (var writers = ownership.Writers(raw: true, bars: true))
+        {
+            var outputs = new List<IbHistoryCoordinator.Output>();
+            foreach (var day in days.Distinct())
+            {
+                foreach (string folder in new[] { IbBarImport.FeedId, BarFolder })
+                {
+                    string path = TickFile.DayPath(ownership.Root, folder, symbol, day);
+                    IbHistoryCoordinator.CheckPath(ownership.Root, path);
+                    if (File.Exists(path)) outputs.Add(new(path, null));
+                }
+            }
+            ownership.Publish(IbBarImport.InstrumentFor(symbol), outputs, default, null);
+        }
+        NotifyHistoryChanged(root, symbol);
+    }
 }

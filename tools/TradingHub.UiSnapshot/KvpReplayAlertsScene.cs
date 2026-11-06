@@ -116,7 +116,7 @@ internal static class KvpReplayAlertsScene
             var normalAccountBefore = services.AccountCenter.Snapshot(normalEntry);
             decimal normalNetBefore = services.Portfolio.RealizedPnL;
             decimal normalCommissionBefore = services.Portfolio.Commission;
-            normal.Market(OrderDirections.Buy, 1, "Isolated normal simulation, not a practice fill");
+            OrderActions.Manual(normal, OrderTypes.Market, OrderDirections.Buy, 1, comment: "Isolated normal simulation, not a practice fill");
             proof.Check(normal.Position!.Volume == 1 && normal.MyTrades.Last().Price == 101,
                 "normal simulated entry uses its normal one-tick spread at 101, not replay's print-fill policy");
 
@@ -261,7 +261,7 @@ internal static class KvpReplayAlertsScene
 
             var firstPending = first.Account.Stop(OrderDirections.Buy, 1, 200);
             var secondPending = second.Account.Stop(OrderDirections.Buy, 2, 200);
-            var normalPending = normal.Stop(OrderDirections.Sell, 1, 80);
+            var normalPending = OrderActions.Manual(normal, OrderTypes.Stop, OrderDirections.Sell, 1, 80);
             second.Account.Cancel(firstPending);
             proof.Check(firstPending.State == OrderStates.Active, "another run cannot cancel a foreign owned order handle");
             first.Account.Cancel(firstPending);
@@ -353,7 +353,7 @@ internal static class KvpReplayAlertsScene
 
             feed.PushTrades(source, new Trade(100, Start.AddMinutes(1), 120, 10, TradeSide.Buy));
             proof.Until(() => normalModel.Data.LastPrice == 120, "normal simulation consumes only its separate fake live print");
-            normal.Flatten();
+            OrderActions.Flatten(normal);
             var normalAfter = services.Journal.FillsOf(AccountCenter.SimId);
             var added = normalAfter.Where(fill => !normalBefore.Any(old => old.Id == fill.Id)).ToArray();
             proof.Check(normal.Position!.Volume == 0 && services.Portfolio.RealizedPnL - normalNetBefore == 179m
@@ -391,7 +391,7 @@ internal static class KvpReplayAlertsScene
             if (normal != null)
             {
                 normal.CancelAll();
-                if (normal.Position!.Volume != 0) normal.Flatten();
+                if (normal.Position!.Volume != 0) OrderActions.Flatten(normal);
                 normal.CommissionPerUnit = oldNormalFee;
                 normal.CommissionRate = oldNormalRate;
             }
@@ -475,8 +475,10 @@ internal static class KvpReplayAlertsScene
                 proof.Check(runner.IsRunning && !runner.Persist && ReferenceEquals(runner.Account, run.Account)
                     && runner.OwnPosition == 1 && runner.Ledger.AveragePrice == 110 && runner.Ledger.Fills.Count == 1
                     && runner.Ledger.Fills[0].Price == 110 && runner.Ledger.Fills[0].Time == Start.AddSeconds(1)
-                    && runner.Ledger.Fills[0].AccountFee == 2.1m && runner.Ledger.Fees == 2.1m
-                    && runner.Ledger.Fills[0].ExecutionId == confirmed.Executions[0].Id
+                    && runner.Ledger.Fills[0].FeesComplete
+                    && runner.Ledger.Fills[0].Fees is { Length: 1 } fees && fees[0].Amount == 2.1m && fees[0].Currency == "USD"
+                    && runner.Ledger.Fees == 2.1m
+                    && runner.Ledger.Fills[0].ExecutionId?.Id == confirmed.Executions[0].Id
                     && runner.Ledger.Realized == -2.1m && runner.Ledger.CostsComplete && run.Account.Journal.Count == 1,
                     stage + ": actual strategy ledger retains its owned position, confirmed fill price/time and single booked execution");
                 proof.Check(runner.ProtectionOrderIds.Order(StringComparer.Ordinal).SequenceEqual(protectionIds)
@@ -523,12 +525,12 @@ internal static class KvpReplayAlertsScene
                     && runner.Ledger.Fills.Count == 1 && runner.Ledger.Realized == 0
                     && shadow.MyTrades.Count == 1 && shadow.MyTrades[0].Price == 111 && shadow.MyTrades[0].Commission == 0,
                     stage + ": actual visual strategy trades its distinct zero-fee private simulator at synthetic ask111, not the owned replay account");
-                proof.Check(runner.Ledger.Fills[0].ExecutionId != confirmed.Executions[0].Id && runner.Ledger.Fees == 0,
+                proof.Check(runner.Ledger.Fills[0].ExecutionId?.Id != confirmed.Executions[0].Id && runner.Ledger.Fees == 0,
                     stage + ": private shadow ledger never adopts the authoritative owned replay execution ID or its 2.10 fee");
                 proof.Check(run.Account.Position!.Volume == 1 && run.Account.Journal.Count == 1
                     && run.Account.Journal[0].Price == 110 && run.Account.Journal[0].Commission == 2.1m
                     && ownedBeforeVisual.OwnPosition == 1 && ownedBeforeVisual.Ledger.Fills.Count == 1
-                    && ownedBeforeVisual.Ledger.Fills[0].ExecutionId == confirmed.Executions[0].Id
+                    && ownedBeforeVisual.Ledger.Fills[0].ExecutionId?.Id == confirmed.Executions[0].Id
                     && ownedBeforeVisual.Ledger.Realized == -2.1m && ownedBeforeVisual.Ledger.AveragePrice == 110
                     && run.Account.ActiveOrders.Count() == 2 && run.Account.ActiveOrders.Contains(stop) && run.Account.ActiveOrders.Contains(target)
                     && stop.State == OrderStates.Active && target.State == OrderStates.Active

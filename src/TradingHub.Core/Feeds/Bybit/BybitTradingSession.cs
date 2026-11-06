@@ -18,6 +18,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
     private readonly BybitAccountClient _client;
     private readonly HttpClient? _ownedHttp;
     private readonly string? _statePath;
+    private readonly string? _executionRoot;
     private readonly Func<string, decimal, decimal, bool, string?>? _sendGuard;
     private readonly TimeProvider _clock;
     private readonly object _gate = new();
@@ -34,12 +35,16 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
     private IReadOnlyList<BybitClosedPnl> _closedPnl = Array.Empty<BybitClosedPnl>();
     private IReadOnlyList<BybitExecution>? _executionSnapshot;
     private readonly HashSet<string> _publishedExecutions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, BybitExecution> _reportedExecutions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Instrument> _instruments = new(StringComparer.Ordinal);
+    private readonly ExecutionLog _executionSource = new(ExecutionAvailability.Synchronizing);
     private readonly HashSet<string> _reversing = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FlattenIntent> _flattening = new(StringComparer.Ordinal);
     private readonly HashSet<Task> _operations = new();
     private FileStream? _lease;
     private Task? _poll;
     private Task? _disposeTask;
+    private bool _ownershipVerified;
     private bool _validated;
     private bool _identityMismatch;
     private string? _persistentAccountIdentity;
@@ -83,20 +88,22 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         public AccountExecutionSnapshot? CompleteSnapshot;
         public AccountExecutionSnapshot? PartialSnapshot;
     }
-    private sealed record Amendment(decimal Price, decimal Total, bool Sent = false);
+    private sealed record Amendment(decimal Price, decimal Total, bool Sent = false, string? OwnershipIntentId = null);
     private sealed record FlattenIntent(Instrument Instrument, string CloseLinkId);
     private sealed record SavedOrder(string Symbol, string LinkId, bool Own, string OrderId, OrderDirections Direction, OrderTypes Type,
         decimal Quantity, decimal Executed, decimal Price, decimal Trigger, bool ReduceOnly, OrderStates State, OrderStatus Status,
         DateTime Time, string Comment, bool SubmissionUnconfirmed, bool CancelRequested, bool CancelSent, Amendment? Amendment,
-        Amendment? QueuedAmendment, long UpdatedTimeMs, decimal AverageFill, DateTime LastSeen, DateTime? ExecutionScanCursor = null);
+        Amendment? QueuedAmendment, long UpdatedTimeMs, decimal AverageFill, DateTime LastSeen, DateTime? ExecutionScanCursor = null,
+        bool NativeQuantityOnly = false);
     private sealed record SavedState(string ContextIdentity, List<SavedOrder> Orders, List<BybitExecution> Executions, DateTime ExecutionWatermark,
         string AccountIdentity, bool RecoveryRequired = true, List<FlattenIntent>? FlattenIntents = null);
     private sealed record Envelope(string Payload, string Sha256);
 
-    /// <param name="statePath">Provider-owned durable intents. Null is an explicitly nonpersistent fake fixture.</param>
+    /// <param name="statePath">Provider-owned durable native state. Orders require this path or an explicit execution root; a missing path never grants ephemeral native dispatch.</param>
     /// <param name="sendGuard">Rechecked at dispatch, including queued amendments; native reductions and cancels remain possible.</param>
     public BybitTradingSession(BybitAccountSettings settings, string? statePath = null, HttpClient? httpClient = null,
-        Func<string, decimal, decimal, bool, string?>? sendGuard = null, TimeProvider? clock = null, bool ownsHttpClient = false)
+        Func<string, decimal, decimal, bool, string?>? sendGuard = null, TimeProvider? clock = null, bool ownsHttpClient = false,
+        string? executionRoot = null)
     {
         Settings = settings with { };
         ContextIdentity = settings.ContextIdentity;
@@ -107,12 +114,104 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         _sendGuard = sendGuard;
         ExecutionCoverageStart = _clock.GetUtcNow().UtcDateTime.AddDays(-7).AddSeconds(1);
         _executionWatermark = ExecutionCoverageStart;
+        string? root = executionRoot ?? (statePath == null ? null : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(statePath))!, "Execution"));
+        _executionRoot = root == null ? null : Path.GetFullPath(root);
+        // Neither a credential fingerprint nor a saved UID grants provisional native ownership.
+        OrderContext = new(new("unverified:bybit:" + ContextIdentity, "Bybit", "linear-uta", Settings.EnvironmentName,
+            ContextIdentity, ContextIdentity, OwnershipNamespace: "bybit:" + ContextIdentity), executions: _executionSource);
         Load();
     }
 
     public BybitAccountSettings Settings { get; }
     public bool IsReal => Settings.IsReal;
     public string ContextIdentity { get; }
+    public OrderContext OrderContext { get; }
+    public IExecutionSource ExecutionSource => _executionSource;
+    internal void RegisterInstrument(Instrument instrument)
+    {
+        lock (_gate)
+        {
+            bool changed = !_instruments.TryGetValue(instrument.Symbol, out var prior) ||
+                prior.Key != instrument.Key || prior.PointValue != instrument.PointValue;
+            _instruments[instrument.Symbol] = instrument;
+            if (changed)
+                foreach (var history in _executionTotals)
+                    if (history.Key.Symbol == instrument.Symbol)
+                        history.Value.CompleteSnapshot = history.Value.PartialSnapshot = null;
+        }
+        PublishExecutionFacts();
+    }
+
+    private void PublishExecutionFacts()
+    {
+        var reports = new List<ExecutionReport>();
+        var quantities = new List<OwnedOrderQuantity>();
+        ExecutionAvailability availability;
+        lock (_gate)
+        {
+            if (!_validated) return;
+            foreach (var tracked in _byLink.Values)
+            {
+                if (!_instruments.TryGetValue(tracked.Symbol, out var instrument) || tracked.Order.ExchangeOrderId.Length == 0) continue;
+                var order = tracked.Order;
+                order.Security.SecurityId = instrument.Key;
+                var native = new NativeOrderIdentity("bybit:order", order.ExchangeOrderId);
+                if (order.ContextId != null && order.ContextId != OrderContext.Descriptor.Id)
+                    throw new InvalidDataException("A verified Bybit native handle belongs to another account context.");
+                order.ContextId = OrderContext.Descriptor.Id;
+                order.NativeIdentity = native;
+                order.ClientOrderId = tracked.LinkId;
+                if (order.IntentId == null)
+                    OrderContext.RecoverNativeOrder(order, tracked.LinkId, native, instrument.Key, instrument.Symbol, instrument.Exchange, notify: false);
+                if (order.IntentId == null) continue;
+                if (OrderContext.BindNative(order, native, notify: false) is { } bindingError) { LastError = bindingError; continue; }
+                if (OrderContext.Find(order.IntentId)?.Request.Type == OrderTypes.Stop && order.Type == OrderTypes.Market &&
+                    OrderContext.RecordNativeWorkingType(order, native, native, OrderTypes.Market, instrument.Key, instrument.Symbol, instrument.Exchange, notify: false) is { } workingError)
+                {
+                    LastError = workingError;
+                    OrderContext.ReportProjectionFault(workingError);
+                }
+                if (OrderContext.CaptureQuantityObservation(order, instrument.Symbol, instrument.PointValue,
+                    tracked.SubmissionUnconfirmed ? null : tracked.Executed) is { } quantity) quantities.Add(quantity);
+            }
+            foreach (var pair in _executions)
+            {
+                var fill = pair.Value;
+                if (!_instruments.TryGetValue(fill.Symbol, out var instrument) ||
+                    (_reportedExecutions.TryGetValue(pair.Key, out var prior) && prior == fill)) continue;
+                _byId.TryGetValue(fill.OrderId, out var tracked);
+                if (tracked?.Order.IntentId == null) continue;
+                if (OrderContext.Find(tracked.Order.IntentId) is not { } ownership) continue;
+                reports.Add(ExecutionFact(fill, tracked, instrument, ownership));
+                _reportedExecutions[pair.Key] = fill;
+            }
+            availability = ExecutionsReady && OrdersReady ? ExecutionAvailability.Ready : ExecutionAvailability.Synchronizing;
+            _executionSource.PublishBatch(reports, notify: false);
+            _executionSource.SetProducerAvailability(this, availability, notify: false);
+        }
+        // Provider and ownership callbacks may reenter the account: never dispatch them under _gate.
+        foreach (var quantity in quantities) OrderContext.NotifyQuantityChanged(quantity);
+        OrderContext.NotifyOwnershipChanged();
+        _executionSource.NotifyChanged();
+    }
+
+    private ExecutionReport ExecutionFact(BybitExecution fill, Tracked tracked, Instrument instrument, OwnedOrderIntent? ownership)
+    {
+        var native = tracked.Order.NativeIdentity is { } known && known.Id == fill.OrderId
+            ? known : new NativeOrderIdentity("bybit:order", fill.OrderId);
+        var fees = fill.Fee.HasValue ? new[] { new ExecutionFee(fill.Fee.Value, fill.FeeCurrency) } : Array.Empty<ExecutionFee>();
+        return new(new(new ExecutionScope("Bybit", _persistentAccountIdentity!, Settings.EnvironmentName, instrument.Key)
+            { ContextId = OrderContext.Descriptor.Id, Product = OrderContext.Descriptor.Product },
+            "bybit:" + AccountIdentity + ":" + fill.Symbol + ":" + fill.OrderId + ":" + fill.Id),
+            tracked.Order.Id, fill.Symbol, fill.Time, fill.Buy, fill.Quantity, fill.Price, instrument.PointValue, "USDT",
+            fees, fill.Fee.HasValue)
+        {
+            ContextId = OrderContext.Descriptor.Id, IntentId = ownership?.Id,
+            ClientOrderId = tracked.LinkId, NativeOrder = native,
+            AccountingOrder = ownership == null ? null
+                : new(native, (OrderContext.Find(ownership.LogicalOrderId) ?? ownership).QuantityBaseline),
+        };
+    }
     public string AccountIdentity { get; private set; } = "";
     /// <summary>Verified provider/environment/origin/UID scope; a saved UID alone never authorizes persistent account state.</summary>
     public string? PersistentAccountIdentity { get { lock (_gate) return _validated ? _persistentAccountIdentity : null; } }
@@ -222,8 +321,18 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 });
                 history.Facts = Array.AsReadOnly(facts);
             }
-            if (complete) return history.CompleteSnapshot ??= new(history.Facts, true);
-            return history.PartialSnapshot ??= new(history.Facts, false);
+            IReadOnlyList<ExecutionReport>? executionFacts = null;
+            if (_validated && _instruments.TryGetValue(tracked.Symbol, out var instrument))
+            {
+                var typed = new ExecutionReport[history.ById.Count];
+                int index = 0;
+                foreach (var fill in history.ById.Values) typed[index++] = ExecutionFact(fill, tracked, instrument, ownership: null);
+                executionFacts = Array.AsReadOnly(typed);
+            }
+            var snapshot = new AccountExecutionSnapshot(history.Facts, complete) { ExecutionFacts = executionFacts };
+            if (complete) history.CompleteSnapshot = snapshot;
+            else history.PartialSnapshot = snapshot;
+            return snapshot;
         }
     }
     public async Task<Instrument> GetInstrumentAsync(string symbol, CancellationToken ct)
@@ -347,6 +456,15 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 }
                 AccountIdentity = identity;
                 _persistentAccountIdentity ??= "bybit:" + identity + ":" + new Uri(Settings.RestBase).GetLeftPart(UriPartial.Authority);
+                if (!_ownershipVerified)
+                {
+                    OrderContext.Configure(OrderContext.Descriptor with
+                    {
+                        Id = _persistentAccountIdentity,
+                        VerifiedNativeAccount = identity,
+                    }, _executionRoot);
+                    _ownershipVerified = true;
+                }
                 _validated = true;
             }
             long version;
@@ -472,16 +590,8 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                     decimal quantity = total?.Quantity ?? 0;
                     if (tracked.Executed > quantity) executionGap = true;
                     tracked.ExecutionQuantity = quantity;
-                    tracked.Executed = Math.Max(tracked.Executed, quantity);
-                    tracked.Order.QuantityToFill = Math.Max(tracked.Order.QuantityToFill, tracked.Executed);
-                    tracked.Order.Unfilled = Math.Max(0, tracked.Order.QuantityToFill - tracked.Executed);
+                    // Financial history covers prices and fees only. Native cumulative/state come exclusively from order reports.
                     if (total is { Quantity: > 0 } && total.Quantity >= tracked.Executed) tracked.AverageFill = total.Value / total.Quantity;
-                    if (tracked.Order.QuantityToFill > 0 && tracked.Executed >= tracked.Order.QuantityToFill)
-                    {
-                        tracked.Order.State = OrderStates.Done; tracked.Order.Status = OrderStatus.Filled;
-                        tracked.SubmissionUnconfirmed = tracked.CancelRequested = tracked.CancelSent = false;
-                        tracked.Amendment = tracked.QueuedAmendment = null;
-                    }
                 }
                 _positions.Clear();
                 foreach (var position in positions) _positions[position.Symbol] = position;
@@ -497,6 +607,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 if (!PositionReady) LastError ??= "Bybit position snapshot overlapped an order request; refreshing before new exposure.";
                 Save();
             }
+            PublishExecutionFacts();
             foreach (var fill in publish)
             {
                 var receiver = FillReceived;
@@ -517,6 +628,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         catch
         {
             lock (_gate) { PositionReady = OrdersReady = ExecutionsReady = ClosedPnlReady = false; Save(); }
+            _executionSource.SetProducerAvailability(this, ExecutionAvailability.Unavailable);
             throw;
         }
         finally { _refreshGate.Release(); }
@@ -600,7 +712,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         bool stale = report.UpdatedTimeMs > 0 && report.UpdatedTimeMs < tracked.UpdatedTimeMs;
         bool terminal = order.State is OrderStates.Done or OrderStates.Failed;
         bool newReport = !terminal || report.UpdatedTimeMs > tracked.UpdatedTimeMs || report.Executed > tracked.Executed;
-        tracked.Executed = Math.Max(tracked.Executed, Math.Max(tracked.ExecutionQuantity, report.Executed));
+        tracked.Executed = Math.Max(tracked.Executed, report.Executed);
         order.QuantityToFill = Math.Max(order.QuantityToFill, tracked.Executed);
         order.Unfilled = Math.Max(0, order.QuantityToFill - tracked.Executed);
         if (stale || (terminal && !report.Terminal)) return;
@@ -674,23 +786,43 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
     public Order Place(Instrument instrument, decimal lastPrice, OrderDirections direction, OrderTypes type, decimal quantity, decimal price, string comment = "", bool reduceOnly = false, Func<string?>? viewGuard = null) =>
         PlaceCore(instrument, lastPrice, direction, type, quantity, price, comment, reduceOnly, viewGuard, null);
 
+    internal Order Submit(Instrument instrument, decimal lastPrice, PreparedOrderIntent intent, Func<string?>? viewGuard)
+    {
+        var request = intent.Request;
+        return PlaceCore(instrument, lastPrice, request.Direction, request.Type, request.Quantity, request.Price,
+            request.Comment, request.ReduceOnly, viewGuard, null, intent);
+    }
+
     private Order PlaceCore(Instrument instrument, decimal lastPrice, OrderDirections direction, OrderTypes type, decimal quantity, decimal price,
-        string comment, bool reduceOnly, Func<string?>? viewGuard, string? reservedLinkId)
+        string comment, bool reduceOnly, Func<string?>? viewGuard, string? reservedLinkId, PreparedOrderIntent? prepared = null)
     {
         decimal level = type == OrderTypes.Market ? 0 : instrument.RoundPrice(price);
         var order = Rejected(instrument, direction, type, quantity, level, comment, reduceOnly);
         order.Time = _clock.GetUtcNow().UtcDateTime;
+        prepared ??= OrderContext.Prepare(OrderContext.ManualOwner, new(instrument.Key, direction, type, quantity, level, reduceOnly, comment),
+            clientOrderId: reservedLinkId);
+        string? ownershipError = prepared.Request.Instrument != instrument.Key ? "The prepared Bybit order routes to another instrument."
+            : OrderContext.BindOrder(order, prepared);
+        if (ownershipError != null) { LastError = ownershipError; return order; }
         Tracked tracked;
         lock (_gate)
         {
+            _instruments[instrument.Symbol] = instrument;
             string? error = quantity <= 0 || (instrument.VolumeStep > 0 && quantity % instrument.VolumeStep != 0)
                 ? "Bybit quantity must be positive and match the instrument quantity step."
                 : type is not (OrderTypes.Market or OrderTypes.Limit or OrderTypes.Stop) ? "Unsupported Bybit order type."
                 : type != OrderTypes.Market && level <= 0 ? "Bybit order price must be positive."
                 : type == OrderTypes.Stop && (lastPrice <= 0 || lastPrice == level) ? "A current venue last price is required for the Bybit stop trigger direction."
                 : Check(instrument.Symbol, direction == OrderDirections.Buy ? quantity : -quantity, reduceOnly);
+            if (error != null)
+            {
+                if (!prepared.Attempted) OrderContext.RecordRejected(prepared, error);
+                LastError = error;
+                return order;
+            }
+            error = OrderContext.StartDispatch(prepared, instrument.Symbol, instrument.Exchange);
             if (error != null) { LastError = error; return order; }
-            string linkId = reservedLinkId ?? "th-" + Guid.NewGuid().ToString("N"); // Persisted before dispatch and never replaced after ambiguity.
+            string linkId = prepared.ClientOrderId;
             order.State = OrderStates.Active;
             order.Status = OrderStatus.None;
             tracked = new Tracked { Order = order, Symbol = instrument.Symbol, LinkId = linkId, Own = true, SubmissionUnconfirmed = true,
@@ -700,6 +832,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             if (!Save() && (!reduceOnly || reservedLinkId != null))
             {
                 order.State = OrderStates.Failed; order.Status = OrderStatus.Rejected; tracked.SubmissionUnconfirmed = tracked.Sending = false;
+                OrderContext.RecordRejected(prepared, _storageError ?? "The native state could not be committed before transport.");
                 return order;
             }
             OrdersReady = false;
@@ -709,17 +842,20 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 {
                     lock (_gate)
                     {
-                        string? permission = AtTransport(instrument.Symbol, direction == OrderDirections.Buy ? quantity : -quantity, reduceOnly, viewGuard);
+                        string? permission = OrderContext.CheckDispatch(prepared) ??
+                            AtTransport(instrument.Symbol, direction == OrderDirections.Buy ? quantity : -quantity, reduceOnly, viewGuard);
                         if (permission != null) throw new BybitApiException(-1, permission);
                         _mutationVersion++;
                         PositionReady = false;
                     }
                     string id = await _client.PlaceOrderAsync(instrument.Symbol, direction, type, quantity, level, reduceOnly, linkId, lastPrice, _cts.Token,
-                        () => AtTransport(instrument.Symbol, direction == OrderDirections.Buy ? quantity : -quantity, reduceOnly, viewGuard)).ConfigureAwait(false);
+                        () => OrderContext.CheckDispatch(prepared) ?? AtTransport(instrument.Symbol, direction == OrderDirections.Buy ? quantity : -quantity, reduceOnly, viewGuard)).ConfigureAwait(false);
                     lock (_gate)
                     {
                         if (order.ExchangeOrderId.Length > 0 && order.ExchangeOrderId != id) throw new InvalidDataException("Bybit acknowledged a different tracked order.");
                         order.ExchangeOrderId = id;
+                        order.NativeIdentity = new("bybit:order", id);
+                        if (OrderContext.BindNative(order, order.NativeIdentity, notify: false) is { } bindingError) LastError = bindingError;
                         _byId[id] = tracked;
                         // Keep submission unconfirmed until an authoritative order report arrives.
                     }
@@ -734,6 +870,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                             tracked.CancelRequested = tracked.CancelSent = false;
                             tracked.Amendment = tracked.QueuedAmendment = null;
                             tracked.AmendmentViewGuard = null;
+                            OrderContext.RecordRejected(prepared, ex.Message);
                         }
                         LastError = ex.Message;
                     }
@@ -742,6 +879,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 finally
                 {
                     lock (_gate) { tracked.Sending = false; Save(); }
+                    OrderContext.NotifyOwnershipChanged();
                     DispatchDeferred(); Changed?.Invoke(); Wake();
                 }
             });
@@ -762,8 +900,16 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         }
         DispatchDeferred(); Wake(); Changed?.Invoke();
     }
-    public Order Replace(Order order, decimal newPrice, decimal newQuantity, Instrument instrument, Func<string?>? viewGuard = null)
+    public Order Replace(Order order, decimal newPrice, decimal newQuantity, Instrument instrument, Func<string?>? viewGuard = null) =>
+        Replace(order, OrderContext.PrepareReplacement(order, newPrice, newQuantity), instrument, viewGuard);
+
+    internal Order Replace(Order order, PreparedOrderIntent intent, Instrument instrument, Func<string?>? viewGuard = null)
     {
+        decimal newPrice = intent.Request.Price;
+        decimal newQuantity = intent.IsPriceOnlyReplacement ? order.Unfilled : intent.Request.Quantity;
+        string? ownershipError = OrderContext.Validate(intent, order);
+        if (intent.Request.Instrument != instrument.Key) ownershipError = "The replacement routes to another Bybit instrument.";
+        if (ownershipError != null) { LastError = ownershipError; return order; }
         lock (_gate)
         {
             if (Find(order) is not { } tracked || order.State != OrderStates.Active) return order;
@@ -771,10 +917,15 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             { LastError = "Bybit replacement quantity must be positive and match the quantity step."; return order; }
             decimal price = instrument.RoundPrice(newPrice);
             if (price <= 0 || order.Type == OrderTypes.Market) { LastError = "Bybit market orders cannot be amended; a positive working price is required."; return order; }
-            tracked.QueuedAmendment = new(price, order.Filled + newQuantity);
+            ownershipError = OrderContext.BindOrder(order, intent) ?? OrderContext.StartDispatch(intent, instrument.Symbol, instrument.Exchange);
+            if (ownershipError == null && order.NativeIdentity != null)
+                ownershipError = OrderContext.BindNative(order, order.NativeIdentity, notify: false);
+            if (ownershipError != null) { LastError = ownershipError; return order; }
+            tracked.QueuedAmendment = new(price, order.Filled + newQuantity, OwnershipIntentId: intent.Id);
             tracked.AmendmentViewGuard = viewGuard;
             Save();
         }
+        OrderContext.NotifyOwnershipChanged();
         DispatchDeferred(); Wake(); Changed?.Invoke();
         return order;
     }
@@ -829,12 +980,15 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 var requested = tracked.QueuedAmendment;
                 tracked.QueuedAmendment = null;
                 var amendmentGuard = tracked.AmendmentViewGuard;
+                var ownership = OrderContext.Find(requested.OwnershipIntentId);
+                var ticket = ownership == null ? null : new PreparedOrderIntent(OrderContext, ownership) { BoundOrder = tracked.Order };
                 if (requested.Total <= tracked.Executed)
                 {
                     tracked.CancelRequested = true; tracked.CancelSent = false; Wake(); continue;
                 }
                 decimal signed = (tracked.Order.Direction == OrderDirections.Buy ? 1 : -1) * Math.Max(0, requested.Total - tracked.Executed);
-                string? denied = Check(tracked.Symbol, signed, tracked.Order.ReduceOnly);
+                string? denied = ticket == null ? "Bybit amendment ownership is unavailable; request the amendment again after reconciliation."
+                    : OrderContext.CheckDispatch(ticket, Math.Abs(signed)) ?? Check(tracked.Symbol, signed, tracked.Order.ReduceOnly);
                 if (denied != null) { LastError = denied; Save(); continue; }
                 tracked.Amendment = requested with { Sent = true };
                 tracked.OperationBusy = true;
@@ -845,12 +999,14 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                     {
                         lock (_gate)
                         {
-                            string? permission = AtTransport(tracked.Symbol, signed, tracked.Order.ReduceOnly, amendmentGuard);
+                            string? permission = OrderContext.CheckDispatch(ticket!, Math.Abs(signed)) ??
+                                AtTransport(tracked.Symbol, signed, tracked.Order.ReduceOnly, amendmentGuard);
                             if (permission != null) throw new BybitApiException(-1, permission);
                             _mutationVersion++; PositionReady = false;
                         }
                         await _client.AmendOrderAsync(tracked.Symbol, tracked.Order.ExchangeOrderId, requested.Total, requested.Price, tracked.Order.Type == OrderTypes.Stop, _cts.Token,
-                            () => AtTransport(tracked.Symbol, (tracked.Order.Direction == OrderDirections.Buy ? 1 : -1) *
+                            () => OrderContext.CheckDispatch(ticket!, Math.Max(0, requested.Total - tracked.Executed)) ??
+                                AtTransport(tracked.Symbol, (tracked.Order.Direction == OrderDirections.Buy ? 1 : -1) *
                                 Math.Max(0, requested.Total - tracked.Executed), tracked.Order.ReduceOnly, amendmentGuard)).ConfigureAwait(false);
                     }
                     catch (BybitApiException ex) { lock (_gate) { tracked.Amendment = null; LastError = ex.Message; } }
@@ -925,13 +1081,17 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             AccountIdentity = state.AccountIdentity ?? "";
             foreach (var saved in state.Orders)
             {
+                // Old KVP counters could include financial-history quantities. Only a current native report can establish their order state.
+                bool replayNative = !saved.NativeQuantityOnly && saved.OrderId.Length > 0;
+                decimal nativeExecuted = saved.NativeQuantityOnly ? saved.Executed : 0;
                 var order = new Order { Security = new Security { Code = saved.Symbol }, ExchangeOrderId = saved.OrderId, Direction = saved.Direction,
-                    Type = saved.Type, QuantityToFill = saved.Quantity, Unfilled = Math.Max(0, saved.Quantity - saved.Executed), Price = saved.Price,
-                    TriggerPrice = saved.Trigger, ReduceOnly = saved.ReduceOnly, State = saved.State, Status = saved.Status, Time = saved.Time, Comment = saved.Comment };
+                    Type = saved.Type, QuantityToFill = saved.Quantity, Unfilled = Math.Max(0, saved.Quantity - nativeExecuted), Price = saved.Price,
+                    TriggerPrice = saved.Trigger, ReduceOnly = saved.ReduceOnly, State = replayNative ? OrderStates.Active : saved.State,
+                    Status = replayNative ? OrderStatus.None : saved.Status, Time = saved.Time, Comment = saved.Comment };
                 var tracked = new Tracked { Order = order, Symbol = saved.Symbol, LinkId = saved.LinkId, Own = saved.Own,
-                    SubmissionUnconfirmed = saved.SubmissionUnconfirmed || saved.State == OrderStates.Active, CancelRequested = saved.CancelRequested,
+                    SubmissionUnconfirmed = replayNative || saved.SubmissionUnconfirmed || saved.State == OrderStates.Active, CancelRequested = saved.CancelRequested,
                     CancelSent = saved.CancelSent, Amendment = saved.Amendment, QueuedAmendment = saved.QueuedAmendment,
-                    Executed = saved.Executed, AverageFill = saved.AverageFill, UpdatedTimeMs = saved.UpdatedTimeMs, LastSeen = saved.LastSeen,
+                    Executed = nativeExecuted, AverageFill = saved.AverageFill, UpdatedTimeMs = replayNative ? 0 : saved.UpdatedTimeMs, LastSeen = saved.LastSeen,
                     ExecutionScanCursor = saved.ExecutionScanCursor };
                 _byLink.Add(saved.LinkId, tracked);
                 _byOrder.Add(order, tracked);
@@ -957,7 +1117,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             var orders = _byLink.Values.Select(t => new SavedOrder(t.Symbol, t.LinkId, t.Own, t.Order.ExchangeOrderId, t.Order.Direction,
                 t.Order.Type, t.Order.QuantityToFill, t.Executed, t.Order.Price, t.Order.TriggerPrice, t.Order.ReduceOnly, t.Order.State,
                 t.Order.Status, t.Order.Time, t.Order.Comment, t.SubmissionUnconfirmed, t.CancelRequested, t.CancelSent,
-                t.Amendment, t.QueuedAmendment, t.UpdatedTimeMs, t.AverageFill, t.LastSeen, t.ExecutionScanCursor)).ToList();
+                t.Amendment, t.QueuedAmendment, t.UpdatedTimeMs, t.AverageFill, t.LastSeen, t.ExecutionScanCursor, NativeQuantityOnly: true)).ToList();
             string payload = JsonSerializer.Serialize(new SavedState(ContextIdentity, orders, _executions.Values.ToList(), _executionWatermark,
                 AccountIdentity, _shutdownRecoveryRequired ?? (!SnapshotReady || _flattening.Count > 0 || _positions.Values.Any(p => p.Size != 0) ||
                     _byLink.Values.Any(t => t.Order.State == OrderStates.Active || t.Sending || t.OperationBusy) ||

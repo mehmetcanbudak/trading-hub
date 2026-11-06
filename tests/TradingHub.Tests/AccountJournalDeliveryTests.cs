@@ -58,6 +58,36 @@ public sealed class AccountJournalDeliveryTests : IDisposable
         Assert.Equal(new[] { prefix, Fill }, new AccountJournal(_root).FillsOf("account"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Failed_correction_delivery_keeps_the_committed_snapshot_and_retries_the_same_execution_without_a_second_fill(bool failFlush)
+    {
+        Assert.True(new AccountJournal(_root).Add("account", Fill));
+        int opens = 0, changed = 0;
+        var journal = new AccountJournal(_root, path =>
+        {
+            var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, 4096, FileOptions.WriteThrough);
+            return Interlocked.Increment(ref opens) == 1 ? new FailedAppend(file, failFlush) : file;
+        });
+        journal.Changed += _ => changed++;
+        var before = journal.SnapshotOf("account");
+        var correction = Fill with { Price = 111, Commission = .08m };
+        Assert.Throws<IOException>(() => journal.Add("account", correction));
+        var failed = journal.SnapshotOf("account");
+        Assert.Equal(before.Revision, failed.Revision);
+        Assert.Same(before.Fills, failed.Fills);
+        Assert.Equal(Fill, Assert.Single(failed.Fills));
+        Assert.Equal(0, changed);
+        Assert.True(journal.Add("account", correction));
+        Assert.False(journal.Add("account", correction));
+        Assert.Equal(1, changed);
+        Assert.Equal(1, journal.CountOf("account"));
+        Assert.Equal(correction, Assert.Single(journal.FillsOf("account")));
+        Assert.Equal(correction, Assert.Single(new AccountJournal(_root).FillsOf("account")));
+        Assert.True(journal.RevisionOf("account") > before.Revision);
+    }
+
     [Fact]
     public async Task Concurrent_duplicate_delivery_commits_once_and_preserves_logical_order()
     {

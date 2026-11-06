@@ -5,23 +5,83 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using TradingHub.Common;
+using TradingHub.Trading;
+using TradingHub.Data;
 
 [assembly: InternalsVisibleTo("TradingHub.Tests")]
 [assembly: InternalsVisibleTo("TradingHub.LedgerCrashFixture")]
 
 namespace TradingHub.Strategies;
 
-/// <summary>
-/// Un llenado de una estrategia en vivo. <paramref name="Symbol"/> y <paramref name="PointValue"/> dicen en qué contrato
-/// se ejecutó (por ejemplo MNQ aunque la estrategia mire el NQ); los llenados viejos no los tienen y usan los del
-/// instrumento de la estrategia.
-/// </summary>
-public sealed record LiveFill(DateTime Time, bool Buy, decimal Quantity, decimal Price, string? Symbol = null, decimal PointValue = 0,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExecutionId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? Fee = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FeeCurrency = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? AccountFee = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExecutionSequence = null);
+public enum LiveFillKind { LegacyEstimate, QuantityObservation, Execution, ImportedExecution }
+public enum LiveFinancialQuality { Authoritative, Estimated, Pending }
+
+/// <summary>Append-only ledger event. Old six-field rows remain estimates. Quantity observations carry no price
+/// or fee claim; execution rows carry actual facts and their scoped identity. Unknown fees remain unknown.</summary>
+public sealed record LiveFill(DateTime Time, bool Buy, decimal Quantity, decimal Price, string? Symbol = null, decimal PointValue = 0)
+{
+    public LiveFillKind Kind { get; init; } = LiveFillKind.LegacyEstimate;
+    public string? OrderId { get; init; }
+    public decimal CumulativeQuantity { get; init; }
+    public ExecutionIdentity? ExecutionId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PhysicalOrderAccounting? AccountingOrder { get; init; }
+    /// <summary>Local durable financial admission, not a native provider revision or a quantity counter.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ProjectionRevision { get; init; }
+    public ExecutionFee[]? Fees { get; init; }
+    public bool FeesComplete { get; init; }
+    public string? Currency { get; init; }
+    public long? ExecutionSequence { get; init; }
+    public bool Estimated { get; init; }
+    /// <summary>Original account-scoped identity from a pre-ownership journal. It proves a financial row, never a native claim.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ImportedExecutionId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContextId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OwnerId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? OwnerGeneration { get; init; }
+
+    public bool Equals(LiveFill? other) =>
+        ReferenceEquals(this, other) || other is not null &&
+        Time == other.Time && Buy == other.Buy && Quantity == other.Quantity && Price == other.Price &&
+        Symbol == other.Symbol && PointValue == other.PointValue && Kind == other.Kind && OrderId == other.OrderId &&
+        CumulativeQuantity == other.CumulativeQuantity && ExecutionId == other.ExecutionId && AccountingOrder == other.AccountingOrder &&
+        FeesComplete == other.FeesComplete && Currency == other.Currency && ContextId == other.ContextId &&
+        OwnerId == other.OwnerId && OwnerGeneration == other.OwnerGeneration && ProjectionRevision == other.ProjectionRevision &&
+        ExecutionSequence == other.ExecutionSequence && Estimated == other.Estimated && ImportedExecutionId == other.ImportedExecutionId &&
+        (Fees ?? Array.Empty<ExecutionFee>()).AsSpan().SequenceEqual(other.Fees ?? Array.Empty<ExecutionFee>());
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Time);
+        hash.Add(Buy);
+        hash.Add(Quantity);
+        hash.Add(Price);
+        hash.Add(Symbol);
+        hash.Add(PointValue);
+        hash.Add(Kind);
+        hash.Add(OrderId);
+        hash.Add(CumulativeQuantity);
+        hash.Add(ExecutionId);
+        hash.Add(AccountingOrder);
+        hash.Add(ProjectionRevision);
+        hash.Add(FeesComplete);
+        hash.Add(Currency);
+        hash.Add(ContextId);
+        hash.Add(OwnerId);
+        hash.Add(OwnerGeneration);
+        hash.Add(ExecutionSequence);
+        hash.Add(Estimated);
+        hash.Add(ImportedExecutionId);
+        foreach (var fee in Fees ?? Array.Empty<ExecutionFee>()) hash.Add(fee);
+        return hash.ToHashCode();
+    }
+}
 
 /// <summary>
 /// Contabilidad propia de una estrategia en vivo: sus llenados, su posición (aunque otras estrategias
@@ -31,10 +91,74 @@ public sealed class LiveLedger
 {
     private DateTime _openTime;
     private int _number;
-    private decimal _openFees, _peakRealized;
-    private bool _hasConfirmedCosts, _curveInitialized;
-    private readonly Dictionary<string, int> _executionIndices = new(StringComparer.Ordinal);
-    private List<EquityPoint>? _realizedCurve;
+    private decimal _financialPosition, _financialAverage, _openCommission;
+    private decimal _financialPointValue;
+    private decimal _lastKnownOpenPnL;
+    private DateTime _lastFinancialTime;
+    private string? _financialSymbol;
+    private int _pendingOrders, _estimatedRows, _legacyRows;
+    private bool _openFeesPending;
+    private readonly List<DateTime> _pendingFeeTimes = new();
+    private readonly List<LiveFill> _priced = new();
+    private readonly List<(DateTime Time, decimal Net)> _realizedChanges = new();
+    private readonly Dictionary<ExecutionIdentity, int> _executionIndex = new();
+    private readonly Dictionary<string, int> _importedExecutionIndex = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OrderAccounting> _orders = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Context, NativeOrderIdentity Order), PhysicalAccounting> _physicalOrders = new();
+    private readonly Dictionary<string, decimal> _contextPositions = new(StringComparer.Ordinal);
+    private sealed class OrderAccounting
+    {
+        public decimal Observed, Executed;
+        public decimal ObservationCorrection;
+        public required string? ContextId, OwnerId, Symbol;
+        public required Guid? OwnerGeneration;
+        public required bool Buy;
+        public required decimal PointValue;
+    }
+    private sealed record PhysicalAccounting(OrderAccounting Accounting, decimal QuantityBaseline);
+
+    private static OrderAccounting NewAccounting(LiveFill fill) => new()
+    {
+        ContextId = fill.ContextId, OwnerId = fill.OwnerId, OwnerGeneration = fill.OwnerGeneration,
+        Symbol = fill.Symbol, Buy = fill.Buy, PointValue = fill.PointValue,
+    };
+
+    private OrderAccounting ResolveAccounting(LiveFill fill, out PhysicalAccounting? physical)
+    {
+        physical = null;
+        _orders.TryGetValue(fill.OrderId!, out var accounting);
+        if (fill.AccountingOrder is not { } evidence)
+        {
+            if (accounting == null) _orders.Add(fill.OrderId!, accounting = NewAccounting(fill));
+            return accounting;
+        }
+        if (string.IsNullOrEmpty(fill.ContextId) || string.IsNullOrEmpty(fill.OwnerId) || fill.OwnerGeneration == null ||
+            string.IsNullOrEmpty(fill.Symbol) || fill.PointValue <= 0 || evidence.QuantityBaseline < 0 ||
+            string.IsNullOrEmpty(evidence.Order.Kind) || string.IsNullOrEmpty(evidence.Order.Id) ||
+            (fill.Kind == LiveFillKind.QuantityObservation
+                ? evidence.CumulativeQuantity is not { } raw || raw < 0 || raw - evidence.QuantityBaseline != fill.CumulativeQuantity
+                : evidence.CumulativeQuantity != null || fill.ExecutionId?.Scope.ContextId != fill.ContextId))
+            throw new IOException("Physical order accounting requires exact scoped ownership and independent native quantity evidence.");
+        var key = (fill.ContextId, evidence.Order);
+        if (_physicalOrders.TryGetValue(key, out physical))
+        {
+            var current = physical.Accounting;
+            if (current.ContextId != fill.ContextId || current.OwnerId != fill.OwnerId || current.OwnerGeneration != fill.OwnerGeneration ||
+                current.Symbol != fill.Symbol || current.Buy != fill.Buy || current.PointValue != fill.PointValue ||
+                (accounting != null && !ReferenceEquals(accounting, current)))
+                throw new IOException("A physical native order cannot move between ledger owners, account scopes or instruments.");
+            if (accounting == null) _orders.Add(fill.OrderId!, current);
+            return current;
+        }
+        accounting ??= NewAccounting(fill);
+        if (accounting.ContextId != fill.ContextId || accounting.OwnerId != fill.OwnerId || accounting.OwnerGeneration != fill.OwnerGeneration ||
+            accounting.Symbol != fill.Symbol || accounting.Buy != fill.Buy || accounting.PointValue != fill.PointValue)
+            throw new IOException("Physical accounting does not prove the existing logical order's exact scoped ownership.");
+        _orders.TryAdd(fill.OrderId!, accounting);
+        physical = new(accounting, evidence.QuantityBaseline);
+        _physicalOrders.Add(key, physical);
+        return accounting;
+    }
 
     public LiveLedger(string key, decimal pointValue)
     {
@@ -46,18 +170,82 @@ public sealed class LiveLedger
 
     /// <summary>Valor del punto del instrumento de la estrategia (el de los llenados que no traen el suyo).</summary>
     public decimal PointValue { get; }
-    public List<LiveFill> Fills { get; } = new();
+    /// <summary>Effective priced executions/legacy estimates, not the quantity-only journal events.</summary>
+    public List<LiveFill> Fills => _priced;
+    public LiveFill? Execution(ExecutionIdentity identity) => _executionIndex.TryGetValue(identity, out int index) ? _priced[index] : null;
+    internal decimal? KnownPhysicalQuantity(OwnedOrderIntent intent, NativeOrderIdentity native, string symbol, decimal pointValue)
+    {
+        if (intent.Owner.LedgerKey != Key ||
+            !_physicalOrders.TryGetValue((intent.ContextId, native), out var physical) ||
+            !_orders.TryGetValue(intent.LogicalOrderId, out var logical) ||
+            !ReferenceEquals(logical, physical.Accounting)) return null;
+        var accounting = physical.Accounting;
+        if (accounting.ContextId != intent.ContextId || accounting.OwnerId != intent.Owner.Id ||
+            accounting.OwnerGeneration != intent.Owner.LedgerGeneration || accounting.Symbol != symbol ||
+            accounting.Buy != (intent.Request.Direction == OrderDirections.Buy) || accounting.PointValue != pointValue)
+            return null;
+        // Keep independent quantity observations while prices are pending, using the first physical
+        // ownership baseline rather than a later credential's adoption prefix.
+        return physical.QuantityBaseline + Math.Max(accounting.Observed, accounting.Executed);
+    }
+
+    public LiveFill? ImportedExecution(ExecutionIdentity identity, string? symbol, bool buy, decimal pointValue)
+    {
+        if (!_importedExecutionIndex.TryGetValue(identity.Id, out int index)) return null;
+        var original = _priced[index];
+        var scope = identity.Scope;
+        int nativeEnd = scope.Account.StartsWith("bybit:", StringComparison.Ordinal) ? scope.Account.IndexOf(':', "bybit:".Length) : -1;
+        return scope.Provider == "Bybit" && nativeEnd > 0 && Key.EndsWith("|" + scope.Account, StringComparison.Ordinal) &&
+            identity.Id.StartsWith(scope.Account[..nativeEnd] + ":" + symbol + ":", StringComparison.Ordinal) &&
+            original.Kind == LiveFillKind.ImportedExecution && original.Symbol == symbol && original.Buy == buy &&
+            (original.PointValue > 0 ? original.PointValue : PointValue) == (pointValue > 0 ? pointValue : PointValue)
+            ? original : null;
+    }
 
     /// <summary>Posición en unidades del contrato en el que está abierta (<see cref="OpenSymbol"/>).</summary>
     public decimal Position { get; private set; }
+
+    /// <summary>Effective exposure owned by this account context. Unambiguous context-free legacy
+    /// history stays with its sole context; another scoped context's units are never borrowed.</summary>
+    public decimal PositionInContext(string contextId)
+    {
+        if (!_contextPositions.TryGetValue(contextId, out var position))
+            return _contextPositions.Count == 0 ? Position : 0;
+        return _contextPositions.Count == 1 ? Position : position;
+    }
     public decimal AveragePrice { get; private set; }
+    public string? OpenContextId { get; private set; }
+    public bool OpenContextConflict { get; private set; }
+    /// <summary>Best-available numeric subtotal/legacy estimate, retained for existing strategy code.
+    /// NetRealized and FinancialQuality distinguish complete, pending and estimated economics.</summary>
     public decimal Realized { get; private set; }
+    public decimal GrossRealized { get; private set; }
     public decimal Fees { get; private set; }
-    public bool CostsComplete { get; private set; } = true;
-    public LiveFill? Execution(string id) => _executionIndices.TryGetValue(id, out int index) ? Fills[index] : null;
+    public bool CostsComplete => !HasPendingPrices && _pendingFeeTimes.Count == 0 && _legacyRows == 0;
     public long Revision { get; private set; }
-    internal decimal PeakRealized => _peakRealized;
+    public bool HasPendingPrices => _pendingOrders > 0;
+    public bool HasPendingFinancials => OpenContextConflict || HasPendingPrices || _pendingFeeTimes.Count > 0;
+    public LiveFinancialQuality FinancialQuality => HasPendingFinancials ? LiveFinancialQuality.Pending
+        : _estimatedRows > 0 ? LiveFinancialQuality.Estimated : LiveFinancialQuality.Authoritative;
+    /// <summary>Complete net, or null while ownership context, quantity, price, fee or currency is unresolved.
+    /// Estimated legacy results remain distinguishable through FinancialQuality.</summary>
+    public decimal? NetRealized => HasPendingFinancials ? null : Realized;
+    public decimal? AuthoritativeNet => FinancialQuality == LiveFinancialQuality.Authoritative ? Realized : null;
+    public decimal? AuthoritativeGross => !OpenContextConflict && !HasPendingPrices && _estimatedRows == 0 ? GrossRealized : null;
     public List<ClosedTrade> Trades { get; } = new();
+    public IReadOnlyList<(DateTime Time, decimal Net)> RealizedChanges => _realizedChanges;
+
+    /// <summary>Completeness required by a session-local loss limit. Old closed fee uncertainty remains in global
+    /// quality, but does not affect a later flat session. Uncertainty in the open position episode carries forward.
+    /// Callers cache this query by ledger revision and configured session date, not on every market update.</summary>
+    public bool HasPendingFinancialsForSession(SessionSettings session, DateOnly day)
+    {
+        if (OpenContextConflict || HasPendingPrices || _openFeesPending) return true;
+        if (day == default) return HasPendingFinancials;
+        foreach (var time in _pendingFeeTimes)
+            if (session.SessionDate(time) == day) return true;
+        return false;
+    }
 
     /// <summary>Contrato de la posición abierta (null = el de la estrategia, o plana).</summary>
     public string? OpenSymbol { get; private set; }
@@ -71,139 +259,262 @@ public sealed class LiveLedger
     /// </summary>
     public int SkippedLines { get; internal set; }
 
-    public decimal OpenPnL(decimal last, bool priceKnown = false) => Position == 0 || (!priceKnown && last <= 0) ? 0 : (last - AveragePrice) * Position * (OpenPointValue > 0 ? OpenPointValue : PointValue);
+    public decimal? KnownOpenPnL(decimal last, bool priceKnown = false) => OpenContextConflict ? null : Position == 0 ? 0
+        : (!priceKnown && last <= 0) || HasPendingPrices ? null : (last - AveragePrice) * Position * (OpenPointValue > 0 ? OpenPointValue : PointValue);
+
+    /// <summary>Best-available/last-known numeric estimate for the existing decimal strategy interface.</summary>
+    public decimal OpenPnL(decimal last, bool priceKnown = false)
+    {
+        if (KnownOpenPnL(last, priceKnown) is { } known) _lastKnownOpenPnL = known;
+        return _lastKnownOpenPnL;
+    }
 
     public void Apply(LiveFill f)
     {
-        if (f.ExecutionId is { Length: > 0 } id)
+        int index = -1;
+        if (f.Kind is LiveFillKind.QuantityObservation or LiveFillKind.Execution && string.IsNullOrEmpty(f.OrderId))
+            throw new IOException("A quantity or execution ledger event has no order ownership.");
+        PhysicalAccounting? physical = null;
+        var accounting = f.Kind is LiveFillKind.QuantityObservation or LiveFillKind.Execution
+            ? ResolveAccounting(f, out physical) : null;
+        if (f.Kind == LiveFillKind.Execution)
         {
-            if (_executionIndices.TryGetValue(id, out int index))
+            if (f.ExecutionId == null || f.OrderId == null)
+                throw new IOException("An execution ledger event has no execution identity or order ownership.");
+            if (_executionIndex.TryGetValue(f.ExecutionId, out int found))
             {
-                if (Fills[index] == f) return;
-                var previous = Fills[index];
-                Fills[index] = f;
-                // A confirmed correction is appended as another optional-ID row, never a rewrite of durable history.
-                if (previous.Time != f.Time || previous.ExecutionSequence != f.ExecutionSequence) RebuildChronological();
-                else RebuildFinancialState();
-                Revision++;
-                return;
+                index = found;
+                if (_priced[index].Equals(f)) return;
+                if (f.ProjectionRevision is { } revision && _priced[index].ProjectionRevision is { } current && revision < current) return;
+                if (_priced[index].OrderId != f.OrderId &&
+                    (physical == null || _priced[index].AccountingOrder == null ||
+                        !ReferenceEquals(accounting, ResolveAccounting(_priced[index], out _))))
+                    throw new IOException("An execution identity cannot move to another ledger order owner.");
             }
-            _executionIndices.Add(id, Fills.Count);
+            else if (_importedExecutionIndex.TryGetValue(f.ExecutionId.Id, out int imported))
+            {
+                var original = _priced[imported];
+                if (ImportedExecution(f.ExecutionId, f.Symbol, f.Buy, f.PointValue) == null)
+                    throw new IOException("The replayed execution does not prove the imported row's exact native account and instrument scope.");
+                // This removes the old financial row's units, never changes a broker handle or native counter.
+                Position -= original.Buy ? original.Quantity : -original.Quantity;
+                _importedExecutionIndex.Remove(f.ExecutionId.Id);
+                _executionIndex.Add(f.ExecutionId, imported);
+                index = imported;
+            }
         }
-        Fills.Add(f);
-        if (f.ExecutionId != null && Fills.Count > 1 &&
-            (f.Time < Fills[^2].Time || (f.Time == Fills[^2].Time && f.ExecutionSequence is { } sequence &&
-                Fills[^2].ExecutionSequence is { } previousSequence && sequence < previousSequence)))
-            RebuildChronological();
-        else ApplyCore(f);
+        if (f.Kind == LiveFillKind.ImportedExecution)
+        {
+            if (string.IsNullOrWhiteSpace(f.ImportedExecutionId)) throw new IOException("An imported execution has no original account-scoped identity.");
+            string account = Key[(Key.LastIndexOf('|') + 1)..];
+            int nativeEnd = account.StartsWith("bybit:", StringComparison.Ordinal) ? account.IndexOf(':', "bybit:".Length) : -1;
+            if (!account.StartsWith("bybit:", StringComparison.Ordinal) || nativeEnd < 0 || string.IsNullOrWhiteSpace(f.Symbol) ||
+                !f.ImportedExecutionId.StartsWith(account[..nativeEnd] + ":" + f.Symbol + ":", StringComparison.Ordinal))
+                throw new IOException("The imported execution does not match this ledger's verified native account identity.");
+            if (_importedExecutionIndex.TryGetValue(f.ImportedExecutionId, out int imported))
+            {
+                index = imported;
+                if (f.ProjectionRevision is { } revision && _priced[index].ProjectionRevision is { } current && revision < current) return;
+                if (f.ExecutionSequence == null) f = f with { ExecutionSequence = _priced[index].ExecutionSequence };
+                if (_priced[index].Equals(f)) return;
+            }
+        }
+
+        decimal delta = f.Quantity - (f.Kind == LiveFillKind.ImportedExecution && index >= 0 ? _priced[index].Quantity : 0);
+        if (f.Kind is LiveFillKind.QuantityObservation or LiveFillKind.Execution)
+        {
+            var order = accounting!;
+            decimal previous = Math.Max(order.Observed, order.Executed);
+            bool wasPending = order.Observed > order.Executed;
+            if (f.Kind == LiveFillKind.QuantityObservation)
+            {
+                // Broker cumulative counters can retain superseded execution units. Carry the
+                // correction into every later observation, including genuine new raw-counter advances.
+                decimal observed = physical == null ? f.CumulativeQuantity
+                    : Math.Max(0, f.AccountingOrder!.CumulativeQuantity!.Value - physical.QuantityBaseline);
+                order.Observed = Math.Max(order.Observed, Math.Max(0, observed + order.ObservationCorrection));
+            }
+            else
+            {
+                decimal oldQuantity = index >= 0 && _priced[index].Kind == LiveFillKind.Execution ? _priced[index].Quantity : 0;
+                decimal correction = f.Quantity - oldQuantity;
+                order.Executed += f.Quantity - oldQuantity;
+                if (index >= 0 && _priced[index].Kind == LiveFillKind.Execution && f.Quantity != oldQuantity)
+                {
+                    order.ObservationCorrection += correction;
+                    // A correction replaces only this execution's units. Preserve the remainder of the
+                    // cumulative observation: those units still exist even while their prices are unknown.
+                    order.Observed = Math.Max(0, order.Observed + correction);
+                }
+            }
+            delta = Math.Max(order.Observed, order.Executed) - previous;
+            _pendingOrders += (order.Observed > order.Executed ? 1 : 0) - (wasPending ? 1 : 0);
+        }
+
         Revision++;
+        decimal before = Position;
+        Position += f.Buy ? delta : -delta;
+        if (Position == 0)
+        {
+            OpenSymbol = null; OpenPointValue = 0;
+            OpenContextId = null; OpenContextConflict = false;
+        }
+        else if (before == 0 || Math.Sign(before) != Math.Sign(Position))
+        {
+            OpenSymbol = f.Symbol;
+            OpenPointValue = f.PointValue > 0 ? f.PointValue : PointValue;
+        }
+        UpdateOpenContext(f.ContextId ?? f.ExecutionId?.Scope.ContextId, f.Buy ? delta : -delta);
+        if (f.Kind != LiveFillKind.QuantityObservation)
+        {
+            bool rebuild = index >= 0 || f.Time < _lastFinancialTime || (f.Time == _lastFinancialTime && f.ExecutionSequence.HasValue);
+            if (index >= 0) _priced[index] = f;
+            else
+            {
+                if (f.ExecutionId != null) _executionIndex.Add(f.ExecutionId, _priced.Count);
+                if (f.ImportedExecutionId != null) _importedExecutionIndex.Add(f.ImportedExecutionId, _priced.Count);
+                _priced.Add(f);
+            }
+            if (rebuild) RebuildFinancials();
+            else ApplyFinancial(f);
+        }
+        AveragePrice = Position == 0 ? 0 : HasPendingPrices ? AveragePrice : _financialAverage;
+        if (Position != 0 && !HasPendingPrices)
+        {
+            OpenSymbol = _financialSymbol;
+            OpenPointValue = _financialPointValue;
+        }
     }
-    private void RebuildChronological()
+
+    private void UpdateOpenContext(string? context, decimal delta)
     {
-        // Stable UTC order; only a complete authoritative sequence orders equal-time facts.
-        // Missing sequences retain observation order instead of inventing causality from IDs.
-        var ordered = Chronological(Fills).ToArray();
-        Fills.Clear();
-        Fills.AddRange(ordered);
-        _executionIndices.Clear();
-        for (int i = 0; i < Fills.Count; i++)
-            if (Fills[i].ExecutionId is { Length: > 0 } id) _executionIndices.Add(id, i);
-        RebuildFinancialState();
+        if (context != null && delta != 0)
+        {
+            _contextPositions.TryGetValue(context, out decimal previous);
+            decimal current = previous + delta;
+            if (current == 0) _contextPositions.Remove(context);
+            else _contextPositions[context] = current;
+        }
+        // Only contexts with effective exposure can conflict. Closed-context corrections may temporarily
+        // reopen that context; correcting its other leg must also be able to clear the conflict.
+        OpenContextId = null;
+        OpenContextConflict = _contextPositions.Count > 1;
+        if (Position != 0 && _contextPositions.Count == 1)
+            foreach (var position in _contextPositions)
+            {
+                OpenContextId = position.Key;
+                break;
+            }
     }
-    private void RebuildFinancialState()
+
+
+    private void RebuildFinancials()
     {
-        Position = AveragePrice = Realized = Fees = _openFees = _peakRealized = 0;
-        _openTime = default;
-        _number = 0;
-        OpenSymbol = null;
-        OpenPointValue = 0;
-        CostsComplete = true;
-        _hasConfirmedCosts = _curveInitialized = false;
+        _financialPosition = _financialAverage = _financialPointValue = _openCommission = Realized = GrossRealized = Fees = 0;
+        _number = _estimatedRows = _legacyRows = 0;
+        _openFeesPending = false;
+        _pendingFeeTimes.Clear();
+        _lastFinancialTime = default;
+        _financialSymbol = null;
         Trades.Clear();
-        _realizedCurve?.Clear();
-        foreach (var fill in Fills) ApplyCore(fill);
-    }
-    private static IEnumerable<LiveFill> Chronological(IEnumerable<LiveFill> fills)
-    {
-        foreach (var group in fills.OrderBy(f => f.Time).GroupBy(f => f.Time))
+        _realizedChanges.Clear();
+        var orderedFills = new List<LiveFill>(_priced.Count);
+        foreach (var group in _priced.OrderBy(f => f.Time).GroupBy(f => f.Time))
         {
             IEnumerable<LiveFill> ordered = group;
             if (group.All(f => f.ExecutionSequence.HasValue)) ordered = group.OrderBy(f => f.ExecutionSequence!.Value);
-            foreach (var fill in ordered) yield return fill;
+            orderedFills.AddRange(ordered);
+        }
+        if (_priced.Exists(static fill => fill.Kind == LiveFillKind.LegacyEstimate))
+        {
+            // Legacy rows identify append events, not replaceable executions. Keep their slots and order,
+            // while actual executions still expose their corrected chronology in the remaining slots.
+            int next = 0;
+            for (int i = 0; i < _priced.Count; i++)
+            {
+                if (_priced[i].Kind == LiveFillKind.LegacyEstimate) continue;
+                while (orderedFills[next].Kind == LiveFillKind.LegacyEstimate) next++;
+                _priced[i] = orderedFills[next++];
+            }
+        }
+        else
+        {
+            _priced.Clear();
+            _priced.AddRange(orderedFills);
+        }
+        _executionIndex.Clear();
+        _importedExecutionIndex.Clear();
+        for (int i = 0; i < _priced.Count; i++)
+        {
+            var fill = _priced[i];
+            if (fill.ExecutionId != null) _executionIndex.Add(fill.ExecutionId, i);
+            if (fill.ImportedExecutionId != null) _importedExecutionIndex.Add(fill.ImportedExecutionId, i);
+            ApplyFinancial(fill);
         }
     }
 
-    private void ApplyCore(LiveFill f)
+    private void ApplyFinancial(LiveFill f)
     {
-        decimal fee = f.AccountFee ?? 0;
-        Fees += fee;
-        CostsComplete &= f.AccountFee.HasValue;
-        _hasConfirmedCosts |= f.AccountFee.HasValue;
-        Realized -= fee;
-        decimal pv = f.PointValue > 0 ? f.PointValue : PointValue;
-        decimal signed = f.Buy ? f.Quantity : -f.Quantity;
-        decimal before = Position;
-        if (before == 0 || Math.Sign(before) == Math.Sign(signed))
-        {
-            if (before == 0)
+        if (f.Time > _lastFinancialTime) _lastFinancialTime = f.Time;
+        bool legacy = f.Kind == LiveFillKind.LegacyEstimate;
+        if (legacy) _legacyRows++;
+        if (legacy || f.Estimated) _estimatedRows++;
+        bool feesKnown = legacy || f.FeesComplete;
+        decimal commission = 0;
+        if (!legacy && f.Fees != null)
+            foreach (var fee in f.Fees)
             {
-                _openTime = f.Time;
-                OpenSymbol = f.Symbol;
-                OpenPointValue = pv;
+                if (fee.Amount != 0 && (f.Currency == null || fee.Currency != f.Currency)) feesKnown = false;
+                else commission += fee.Amount;
             }
-
-            decimal total = Math.Abs(before) + f.Quantity;
-            AveragePrice = total > 0 ? (AveragePrice * Math.Abs(before) + f.Price * f.Quantity) / total : f.Price;
-            Position = before + signed;
-            _openFees += fee;
-            AddCurvePoint(f.Time);
+        if (!feesKnown) _pendingFeeTimes.Add(f.Time);
+        Fees += commission;
+        decimal pv = f.PointValue > 0 ? f.PointValue : PointValue;
+        decimal signed = f.Buy ? f.Quantity : -f.Quantity, before = _financialPosition;
+        Realized -= commission;
+        if (commission != 0) _realizedChanges.Add((f.Time, -commission));
+        if (f.Quantity == 0)
+        {
+            // A busted execution can retain a real fee or unresolved fee state, but has no units to
+            // average, close or allocate commission across. Keep the fee fact without a phantom trade.
+            if (before != 0) _openFeesPending |= !feesKnown;
             return;
         }
-
+        if (before == 0 || Math.Sign(before) == Math.Sign(signed))
+        {
+            if (before == 0) { _openTime = f.Time; _financialPointValue = pv; _financialSymbol = f.Symbol; }
+            _openFeesPending = before == 0 ? !feesKnown : _openFeesPending || !feesKnown;
+            _financialAverage = (_financialAverage * Math.Abs(before) + f.Price * f.Quantity) / (Math.Abs(before) + f.Quantity);
+            _financialPosition += signed;
+            _openCommission += commission;
+            return;
+        }
         decimal closing = Math.Min(Math.Abs(before), f.Quantity);
-        decimal pnl = (f.Price - AveragePrice) * closing * Math.Sign(before) * (OpenPointValue > 0 ? OpenPointValue : pv);
+        decimal pnl = (f.Price - _financialAverage) * closing * Math.Sign(before) * _financialPointValue;
+        decimal entryCommission = _openCommission * closing / Math.Abs(before);
+        decimal exitCommission = commission * closing / f.Quantity;
+        _openCommission -= entryCommission;
         Realized += pnl;
-        decimal entryFee = _openFees * closing / Math.Abs(before);
-        decimal exitFee = fee * closing / f.Quantity;
-        _openFees -= entryFee;
-        Trades.Add(new ClosedTrade(++_number, before > 0, _openTime, AveragePrice, f.Time, f.Price, closing, pnl, entryFee + exitFee, 0, 0, "", "", 0));
-        Position = before + signed;
-        if (Position == 0)
+        if (pnl != 0) _realizedChanges.Add((f.Time, pnl));
+        GrossRealized += pnl;
+        Trades.Add(new ClosedTrade(++_number, before > 0, _openTime, _financialAverage, f.Time, f.Price, closing,
+            pnl, entryCommission + exitCommission, 0, 0, "", "", 0));
+        _financialPosition += signed;
+        if (_financialPosition == 0)
         {
-            AveragePrice = 0;
-            OpenSymbol = null;
-            OpenPointValue = 0;
-            _openFees = 0;
+            _financialAverage = _openCommission = 0;
+            _openFeesPending = false;
         }
-        else if (Math.Sign(Position) != Math.Sign(before))
+        else if (Math.Sign(_financialPosition) != Math.Sign(before))
         {
-            // dio vuelta: lo que sobra abre al precio del llenado
-            AveragePrice = f.Price;
+            _financialAverage = f.Price;
+            _financialPointValue = pv;
+            _financialSymbol = f.Symbol;
             _openTime = f.Time;
-            OpenSymbol = f.Symbol;
-            OpenPointValue = pv;
-            _openFees = fee - exitFee;
+            _openCommission = commission - exitCommission;
+            _openFeesPending = !feesKnown;
         }
-        AddCurvePoint(f.Time, closedCurrent: true);
-    }
-    private void AddCurvePoint(DateTime time, bool closedCurrent = false)
-    {
-        _peakRealized = Math.Max(_peakRealized, Realized);
-        if (!_hasConfirmedCosts) return; // Preserve the legacy close-only curve without allocating per-fill history.
-        _realizedCurve ??= new();
-        if (!_curveInitialized)
-        {
-            decimal equity = 0, peak = 0;
-            for (int i = 0; i < Trades.Count - (closedCurrent ? 1 : 0); i++)
-            {
-                var trade = Trades[i];
-                equity += trade.NetPnl;
-                peak = Math.Max(peak, equity);
-                _realizedCurve.Add(new EquityPoint(trade.ExitTime, equity, peak - equity));
-            }
-            _curveInitialized = true;
-        }
-        _realizedCurve.Add(new EquityPoint(time, Realized, _peakRealized - Realized));
+        else _openFeesPending |= !feesKnown;
     }
 
     /// <summary>Curva de capital al cierre de cada operación (empieza en 0).</summary>
@@ -212,16 +523,11 @@ public sealed class LiveLedger
         var res = new List<EquityPoint>();
         decimal eq = capital, peak = capital;
         if (Fills.Count > 0) res.Add(new EquityPoint(Fills[0].Time, capital, 0));
-        if (_hasConfirmedCosts)
+        foreach (var change in _realizedChanges)
         {
-            foreach (var point in _realizedCurve!) res.Add(point with { Equity = capital + point.Equity });
-            return res;
-        }
-        foreach (var t in Trades)
-        {
-            eq += t.NetPnl;
+            eq += change.Net;
             peak = Math.Max(peak, eq);
-            res.Add(new EquityPoint(t.ExitTime, eq, peak - eq));
+            res.Add(new EquityPoint(change.Time, eq, peak - eq));
         }
 
         return res;
@@ -248,6 +554,9 @@ public sealed class LiveRunnerInfo
     public decimal Position { get; set; }
     public decimal OpenPnL { get; set; }
     public decimal Realized { get; set; }
+    public decimal? CompleteNet { get; set; }
+    public decimal? AvailableOpenPnL { get; set; }
+    public LiveFinancialQuality FinancialQuality { get; set; } = LiveFinancialQuality.Estimated;
     public int Trades { get; set; }
 
     /// <summary>De dónde se lanzó (panel, chart u otro), cuenta y conexión, para volver a lanzarla igual.</summary>
@@ -381,7 +690,12 @@ public sealed class LiveStats
 {
     public LiveRunnerInfo Info { get; set; } = new();
     public PerformanceMetrics Metrics { get; set; } = new();
+    public decimal Position { get; set; }
+    public decimal OpenPnLEstimate { get; set; }
+    public decimal? AvailableOpenPnL { get; set; }
     public decimal Net { get; set; }
+    public LiveFinancialQuality FinancialQuality { get; set; }
+    public decimal? CompleteNet { get; set; }
     public decimal CurrentDrawdown { get; set; }
     public decimal RecentProfitFactor { get; set; }
     public decimal RecentExpectancy { get; set; }
@@ -438,27 +752,387 @@ public static class LiveStore
     }
 
     private static string Clean(string key) => string.Concat(key.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c is ':' or '|' ? '_' : c));
-    private static string LedgerPath(string key) => Path.Combine(Root, "llenados", Clean(key) + ".jsonl");
+    private static string LedgerPath(string key) => LedgerPath(Root, key);
+    private static string LedgerPath(string root, string key) => Path.Combine(root, "llenados", Clean(key) + ".jsonl");
 
     /// <summary>Archivo de llenados de una estrategia (para saber si cambió).</summary>
     public static string LedgerFile(string key) => LedgerPath(key);
 
-    /// <summary>
-    /// Deletes this history and pending fills. A durable deletion marker prevents an interrupted deletion from resurrecting
-    /// a journaled fill. I/O failures are reported to the caller; a later operation completes the deletion first.
-    /// </summary>
-    public static void DeleteFills(string key)
+    internal static string LedgerFile(string root, string key) => Path.GetFullPath(LedgerPath(root, key));
+
+    /// <summary>Captures ownership of the current history generation, using an explicitly bound storage root.</summary>
+    public static Guid CaptureLedgerGeneration(string root, string key)
     {
         lock (Gate)
         {
-            string path = LedgerPath(key);
+            string path = LedgerPath(root, key);
             using var lease = AcquireLedger(path);
-            using (var marker = new FileStream(path + ".delete", FileMode.OpenOrCreate, FileAccess.Write, FileShare.None))
-                marker.Flush(flushToDisk: true);
-            Pending.Remove(path);
             CompleteDeletion(path);
+            return EnsureGeneration(path, out _, static directory => StorageSync.SyncDirectory(directory));
         }
     }
+
+    public enum ExecutionProjectionStatus { Applied, Unchanged, Retired, Error, Superseded }
+    public readonly record struct ExecutionProjectionResult(ExecutionProjectionStatus Status, string? Error = null, long Revision = 0);
+
+    private sealed record PhysicalObservation(long Revision, LiveFill Fill);
+    private sealed record PhysicalAuthority(int Version, Guid Generation, ExecutionIdentity Identity, long Revision,
+        long CommittedRevision, string HeadReceipt, string? CommittedReceipt, Dictionary<string, PhysicalObservation> Observations,
+        long? AttemptedRevision = null);
+    private sealed record AuthorityEnvelope(string Payload, string Hash);
+
+    /// <summary>Durably admits a local observation, not a provider revision or a wall-clock ordering claim.
+    /// Its complete authorized head survives a crash before the credential-scoped receipt is saved.</summary>
+    public static ExecutionProjectionResult AdmitExecution(string root, string key, Guid expectedGeneration,
+        string receiptId, LiveFill execution)
+    {
+        lock (Gate)
+        {
+            string path = LedgerPath(root, key);
+            try
+            {
+                using var lease = AcquireLedger(path);
+                if (!CurrentGeneration(path, expectedGeneration)) return new(ExecutionProjectionStatus.Retired);
+                ValidateOwnedExecution(execution, expectedGeneration);
+                if (string.IsNullOrEmpty(receiptId)) throw new IOException("A physical execution admission requires its immutable receipt identity.");
+                string identity = ExecutionKey(execution.ExecutionId!);
+                var authority = ReadAuthority(path, expectedGeneration, identity);
+                if (authority != null)
+                {
+                    ValidatePhysicalOwner(authority.Observations[authority.HeadReceipt].Fill, execution);
+                    if (authority.Observations.TryGetValue(receiptId, out var known))
+                    {
+                        if (!known.Fill.Equals(execution)) throw new IOException("An immutable physical execution receipt changed its authorized fact.");
+                        return new(ExecutionProjectionStatus.Unchanged);
+                    }
+                }
+                // An identical current fact is not a new financial transition, even with a new source receipt.
+                // Bind that receipt immutably to the current revision; differing metadata still gets a new rank.
+                bool alias = authority != null && authority.Observations[authority.HeadReceipt].Fill.Equals(execution);
+                long revision = alias && authority != null ? authority.Revision : checked((authority?.Revision ?? 0) + 1);
+                var observations = authority?.Observations ?? new Dictionary<string, PhysicalObservation>(StringComparer.Ordinal);
+                observations.Add(receiptId, new(revision, execution));
+                var next = new PhysicalAuthority(1, expectedGeneration, execution.ExecutionId!, revision,
+                    authority?.CommittedRevision ?? 0, receiptId, authority?.CommittedReceipt, observations, authority?.AttemptedRevision);
+                if (!alias || next.CommittedRevision < next.Revision) EnsureAuthorityMarker(path, expectedGeneration, identity);
+                WriteAuthority(path, identity, next);
+                return new(ExecutionProjectionStatus.Applied);
+            }
+            catch (Exception ex) { return new(ExecutionProjectionStatus.Error, "Could not admit the physical execution receipt: " + ex.Message); }
+        }
+    }
+
+    private static bool CurrentGeneration(string path, Guid generation)
+    {
+        if (Exists(path + ".delete"))
+        {
+            AccountExecutionProjector.RetireLedgerObservers(path);
+            return false;
+        }
+        return generation != Guid.Empty && ReadGeneration(path) == generation;
+    }
+
+    // Cold subscription validation is read-only: it never creates a generation or adopts an old owner.
+    internal static bool IsLedgerGenerationCurrent(string root, string key, Guid expectedGeneration)
+    {
+        lock (Gate)
+        {
+            string path = LedgerPath(root, key);
+            using var lease = AcquireLedger(path);
+            return CurrentGeneration(path, expectedGeneration);
+        }
+    }
+
+    private static void ValidateOwnedExecution(LiveFill fill, Guid generation)
+    {
+        bool financialOnly = fill.Kind == LiveFillKind.ImportedExecution && fill.ImportedExecutionId != null &&
+            fill.ImportedExecutionId == fill.ExecutionId?.Id && fill.AccountingOrder == null;
+        if ((!financialOnly && fill.Kind != LiveFillKind.Execution) || fill.ExecutionId?.Scope.ContextId == null ||
+            fill.ContextId != fill.ExecutionId.Scope.ContextId || string.IsNullOrEmpty(fill.OwnerId) ||
+            (!financialOnly && string.IsNullOrEmpty(fill.OrderId)) || fill.OwnerGeneration != generation)
+            throw new IOException("Physical execution authority requires the exact scoped owner and history generation.");
+    }
+
+    private static void ValidatePhysicalOwner(LiveFill known, LiveFill candidate)
+    {
+        if (known.ExecutionId != candidate.ExecutionId || known.ContextId != candidate.ContextId ||
+            known.OwnerId != candidate.OwnerId || known.OwnerGeneration != candidate.OwnerGeneration ||
+            known.Symbol != candidate.Symbol || known.Buy != candidate.Buy || known.PointValue != candidate.PointValue ||
+            (known.OrderId != candidate.OrderId &&
+                (known.AccountingOrder == null || candidate.AccountingOrder == null ||
+                    known.AccountingOrder.Order != candidate.AccountingOrder.Order)))
+            throw new IOException("A physical execution cannot cross financial owner, account, native-order or instrument authority.");
+    }
+
+    private static string ExecutionKey(ExecutionIdentity identity) =>
+        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(identity)));
+    private static string AuthorityDirectory(string path, Guid generation) => Path.Combine(path + ".executions", generation.ToString("N"));
+
+    private static PhysicalAuthority? ReadAuthority(string path, Guid generation, string identity)
+    {
+        string file = Path.Combine(AuthorityDirectory(path, generation), identity + ".json");
+        using var stream = OpenHistory(file);
+        if (stream == null) return null;
+        var envelope = JsonSerializer.Deserialize<AuthorityEnvelope>(stream) ?? throw new IOException("Physical execution authority is empty.");
+        if (envelope.Payload == null || envelope.Hash != Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(envelope.Payload))))
+            throw new IOException("Physical execution authority checksum does not match.");
+        var authority = JsonSerializer.Deserialize<PhysicalAuthority>(envelope.Payload) ?? throw new IOException("Physical execution authority has no fact.");
+        if (authority.Version != 1 || authority.Generation != generation || authority.Identity == null ||
+            ExecutionKey(authority.Identity) != identity || authority.Revision <= 0 ||
+            authority.CommittedRevision < 0 || authority.CommittedRevision > authority.Revision || authority.Observations == null ||
+            string.IsNullOrEmpty(authority.HeadReceipt) || !authority.Observations.TryGetValue(authority.HeadReceipt, out var head) ||
+            head == null || head.Fill == null || head.Revision != authority.Revision)
+            throw new IOException("Physical execution authority has an invalid identity, generation or head.");
+        var revisions = new Dictionary<long, LiveFill>();
+        foreach (var observation in authority.Observations)
+        {
+            if (string.IsNullOrEmpty(observation.Key) || observation.Value?.Fill == null ||
+                observation.Value.Revision <= 0 || observation.Value.Revision > authority.Revision ||
+                (revisions.TryGetValue(observation.Value.Revision, out var bound) && !bound.Equals(observation.Value.Fill)) ||
+                observation.Value.Fill.ExecutionId != authority.Identity)
+                throw new IOException("Physical execution authority has an invalid immutable receipt binding.");
+            ValidateOwnedExecution(observation.Value.Fill, generation);
+            ValidatePhysicalOwner(head.Fill, observation.Value.Fill);
+            revisions.TryAdd(observation.Value.Revision, observation.Value.Fill);
+        }
+        if ((authority.CommittedRevision == 0) != (authority.CommittedReceipt == null) ||
+            (authority.CommittedReceipt != null &&
+                (!authority.Observations.TryGetValue(authority.CommittedReceipt, out var committed) ||
+                    committed.Revision != authority.CommittedRevision)))
+            throw new IOException("Physical execution authority has an invalid committed revision.");
+        if (authority.AttemptedRevision is { } attempted &&
+            (attempted <= authority.CommittedRevision || attempted > authority.Revision || !revisions.ContainsKey(attempted)))
+            throw new IOException("Physical execution authority has an invalid attempted revision.");
+        return authority;
+    }
+
+    private static void EnsureAuthorityMarker(string path, Guid generation, string identity)
+    {
+        string directory = AuthorityDirectory(path, generation);
+        if (!Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+            StorageSync.SyncDirectory(directory);
+            StorageSync.SyncDirectory(Path.GetDirectoryName(directory)!);
+            StorageSync.SyncDirectory(Path.GetDirectoryName(Path.GetDirectoryName(directory)!)!);
+        }
+        string marker = Path.Combine(directory, identity + ".pending");
+        if (Exists(marker)) return;
+        using (var stream = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.None)) StorageSync.Flush(stream);
+        StorageSync.SyncDirectory(directory);
+    }
+
+    private static void WriteAuthority(string path, string identity, PhysicalAuthority authority)
+    {
+        string file = Path.Combine(AuthorityDirectory(path, authority.Generation), identity + ".json");
+        string payload = JsonSerializer.Serialize(authority);
+        var envelope = new AuthorityEnvelope(payload, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))));
+        using (var stream = new FileStream(file + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            JsonSerializer.Serialize(stream, envelope);
+            StorageSync.Flush(stream);
+        }
+        File.Move(file + ".tmp", file, overwrite: true);
+        StorageSync.SyncDirectory(Path.GetDirectoryName(file)!);
+    }
+
+    private static bool CommittedPhysicalHeadEquals(string path, Guid generation, LiveFill head)
+    {
+        using var file = OpenHistory(path, false);
+        ValidateHistory(file, null, generation, false);
+        if (file == null) return false;
+        LiveFill? current = null;
+        using var reader = new StreamReader(file);
+        while (reader.ReadLine() is { } line)
+        {
+            if (line.Length == 0) continue;
+            LiveFill? fill;
+            try { fill = DecodeFill(line); }
+            catch (JsonException) { return false; }
+            if (fill?.ExecutionId == head.ExecutionId) current = fill;
+        }
+        // Recovery of an attempted append must prove its exact local delivery fence as well as its full fact.
+        return current != null && current.Equals(head);
+    }
+
+    private static void CompleteAuthorityLeased(string path, string identity, PhysicalAuthority authority)
+    {
+        if (!CurrentGeneration(path, authority.Generation))
+            throw new IOException("A retired history generation cannot recover a physical execution.");
+        var head = authority.Observations[authority.HeadReceipt];
+        if (authority.CommittedRevision < authority.Revision)
+        {
+            bool recoveringAttempt = authority.AttemptedRevision == head.Revision;
+            string? error = SavePendingLeased(path, null, OpenLedger, static directory => StorageSync.SyncDirectory(directory));
+            if (error != null) throw new IOException(error);
+            if (!recoveringAttempt || !CommittedPhysicalHeadEquals(path, authority.Generation,
+                head.Fill with { ProjectionRevision = head.Revision }))
+            {
+                // This durable attempt fence precedes the existing WAL. Only a retry of this very
+                // revision can need the rare history check; ordinary new heads never scan old fills.
+                authority = authority with { AttemptedRevision = head.Revision };
+                WriteAuthority(path, identity, authority);
+                error = SavePendingLeased(path, head.Fill with { ProjectionRevision = head.Revision }, OpenLedger,
+                    static directory => StorageSync.SyncDirectory(directory));
+                if (error != null) throw new IOException(error);
+            }
+            WriteAuthority(path, identity, authority with
+            {
+                CommittedRevision = authority.Revision, CommittedReceipt = authority.HeadReceipt, AttemptedRevision = null,
+            });
+        }
+        // Publication only queues data. Neither live callbacks nor the subscription registry are entered under
+        // the store gate/lease; readers and quantity writers must deliver the same actual recovered head.
+        string marker = Path.Combine(AuthorityDirectory(path, authority.Generation), identity + ".pending");
+        if (authority.CommittedRevision < authority.Revision || Exists(marker))
+            AccountExecutionProjector.QueueCommittedFinancialFact(path, authority.Generation,
+                head.Fill with { ProjectionRevision = head.Revision });
+        File.Delete(marker);
+        StorageSync.SyncDirectory(AuthorityDirectory(path, authority.Generation));
+    }
+
+    private static void RecoverAuthoritiesLeased(string path, Guid generation)
+    {
+        if (generation == Guid.Empty) return;
+        string directory = AuthorityDirectory(path, generation);
+        if (!Directory.Exists(directory)) return;
+        foreach (string marker in Directory.EnumerateFiles(directory, "*.pending"))
+        {
+            string identity = Path.GetFileNameWithoutExtension(marker);
+            if (identity.Length != 64 || identity.Any(character => !Uri.IsHexDigit(character)))
+                throw new IOException("Physical execution recovery marker has an invalid identity.");
+            var authority = ReadAuthority(path, generation, identity);
+            if (authority == null)
+            {
+                // Marker publication precedes the first atomic admission. No authorized fact exists in this crash gap.
+                File.Delete(marker);
+                StorageSync.SyncDirectory(directory);
+            }
+            else CompleteAuthorityLeased(path, identity, authority);
+        }
+    }
+
+    /// <summary>Projects only the latest durably admitted physical head through the existing financial WAL.
+    /// A pending retry reuses its immutable admission and can never acquire a later rank.</summary>
+    public static ExecutionProjectionResult ProjectExecution(string root, string key, Guid expectedGeneration,
+        LiveFill execution, string receiptId)
+    {
+        lock (Gate)
+        {
+            string path = LedgerPath(root, key);
+            try
+            {
+                using var lease = AcquireLedger(path);
+                if (!CurrentGeneration(path, expectedGeneration)) return new(ExecutionProjectionStatus.Retired);
+                ValidateOwnedExecution(execution, expectedGeneration);
+                string identity = ExecutionKey(execution.ExecutionId!);
+                var authority = ReadAuthority(path, expectedGeneration, identity) ??
+                    throw new IOException("A pending execution has no durable physical admission; retain it for reconciliation.");
+                if (!authority.Observations.TryGetValue(receiptId, out var observation) || !observation.Fill.Equals(execution))
+                    throw new IOException("The physical execution receipt has no exact immutable authorized binding.");
+                bool superseded = observation.Revision < authority.Revision;
+                bool changed = authority.CommittedRevision < authority.Revision;
+                try { CompleteAuthorityLeased(path, identity, authority); }
+                catch (Exception ex)
+                {
+                    return new(superseded ? ExecutionProjectionStatus.Superseded : ExecutionProjectionStatus.Error,
+                        "The admitted physical head remains pending: " + ex.Message, observation.Revision);
+                }
+                return new(superseded ? ExecutionProjectionStatus.Superseded
+                    : changed ? ExecutionProjectionStatus.Applied : ExecutionProjectionStatus.Unchanged, Revision: observation.Revision);
+            }
+            catch (Exception ex) { return new(ExecutionProjectionStatus.Error, "Could not project the admitted physical execution: " + ex.Message); }
+        }
+    }
+
+    /// <summary>Generation-bound live quantity/estimate persistence. Retired owners cannot recreate deleted history.</summary>
+    public static ExecutionProjectionResult AppendOwnedEvent(string root, string key, Guid expectedGeneration, LiveFill ledgerEvent) =>
+        AppendOwnedEventCore(root, key, expectedGeneration, ledgerEvent);
+
+    private static ExecutionProjectionResult AppendOwnedEventCore(string root, string key, Guid expectedGeneration, LiveFill execution)
+    {
+        lock (Gate)
+        {
+            string path = LedgerPath(root, key);
+            bool handedToWal = false;
+            try
+            {
+                using var lease = AcquireLedger(path);
+                if (File.Exists(path + ".delete") || expectedGeneration == Guid.Empty || ReadGeneration(path) != expectedGeneration)
+                    return new(ExecutionProjectionStatus.Retired);
+                if (string.IsNullOrEmpty(execution.ContextId) || string.IsNullOrEmpty(execution.OwnerId) ||
+                    execution.OwnerGeneration != expectedGeneration)
+                    return new(ExecutionProjectionStatus.Error, "Ledger event requires a durable scoped owner and matching history generation.");
+                RecoverAuthoritiesLeased(path, expectedGeneration);
+                handedToWal = true;
+                string? error = SavePendingLeased(path, execution, OpenLedger,
+                    static directory => StorageSync.SyncDirectory(directory));
+                return error == null ? new(ExecutionProjectionStatus.Applied) : new(ExecutionProjectionStatus.Error, error);
+            }
+            catch (Exception ex)
+            {
+                if (!handedToWal)
+                {
+                    if (!Pending.TryGetValue(path, out var waiting))
+                        Pending[path] = waiting = new PendingLedger(expectedGeneration);
+                    if (waiting.Generation == expectedGeneration || waiting.Generation == Guid.Empty)
+                    {
+                        waiting.Generation = expectedGeneration;
+                        waiting.Fills.Enqueue(execution);
+                    }
+                }
+                return new(ExecutionProjectionStatus.Error, $"Could not project ledger '{path}': {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Deletes this history and pending ledger events. A durable deletion marker prevents an interrupted deletion from
+    /// resurrecting a journaled event. I/O failures are reported to the caller; a later operation completes the deletion.
+    /// </summary>
+    public static void DeleteFills(string key) => DeleteFills(Root, key);
+
+    public static void DeleteFills(string root, string key)
+    {
+        lock (Gate)
+        {
+            string path = LedgerPath(root, key);
+            using var lease = AcquireLedger(path);
+            DeleteFillsLeased(path);
+        }
+    }
+
+    // The caller holds the projector's ownership admission fence. Store publication and deletion
+    // share this gate and lease, so a reader cannot reopen the generation between proof and retirement.
+    internal static bool TryDeleteFlatLedger(string root, string key, Guid expectedGeneration, decimal pointValue)
+    {
+        lock (Gate)
+        {
+            string path = LedgerPath(root, key);
+            using var lease = AcquireLedger(path);
+            CompleteDeletion(path);
+            if (!CurrentGeneration(path, expectedGeneration)) return false;
+            RecoverAuthoritiesLeased(path, expectedGeneration);
+            if (SavePendingLeased(path, null, OpenLedger, static directory => StorageSync.SyncDirectory(directory)) is { } error)
+                throw new IOException(error);
+            if (AccountExecutionProjector.HasQueuedFinancialFactUnderResetFence(path, expectedGeneration)) return false;
+            var ledger = ReadLedgerLeased(path, key, expectedGeneration, pointValue);
+            if (ledger.Position != 0 || ledger.OpenContextConflict || ledger.SkippedLines != 0) return false;
+            DeleteFillsLeased(path);
+            return true;
+        }
+    }
+
+    private static void DeleteFillsLeased(string path)
+    {
+        AccountExecutionProjector.RetireLedgerObservers(path);
+        using (var marker = new FileStream(path + ".delete", FileMode.OpenOrCreate, FileAccess.Write, FileShare.None))
+            StorageSync.Flush(marker);
+        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
+        Pending.Remove(path);
+        CompleteDeletion(path);
+    }
+
     private static string RunnersPath => Path.Combine(Root, "estrategias.json");
     private static string ProposalsPath => Path.Combine(Root, "propuestas.json");
     private static string PortfoliosPath => Path.Combine(Root, "portafolios.json");
@@ -466,32 +1140,58 @@ public static class LiveStore
     private static string? _lastRunnersPath;
 
     /// <summary>
-    /// Adds a distinct fill, including when its content matches another fill. Returns null only after the durable intent,
-    /// main-file write, disk flush, close and commit cleanup succeed. Failures retain ordered pending fills in this process;
-    /// a published intent also survives process exit. Recovery replays the recorded byte range, never a provider execution.
+    /// Appends a ledger event; identical legacy fills remain distinct. Returns null only after the durable intent,
+    /// main-file write, disk flush, close and commit cleanup succeed. Failures retain ordered pending events in this process;
+    /// a published intent also survives process exit. Recovery replays its byte range; execution identities govern projection.
     /// This is a single-filesystem process-crash guarantee, not power-loss durability or exactly-once broker-event delivery.
     /// </summary>
     public static string? AppendFill(string key, LiveFill f) => AppendFill(key, f, OpenLedger);
+    public static string? AppendFill(string root, string key, LiveFill fill) => SavePending(root, key, fill, OpenLedger);
 
     /// <summary>
-    /// Durably saves only existing local pending fills and a recovered append intent, without creating an execution.
+    /// Durably saves existing pending ledger events and a recovered append intent, without creating an execution.
     /// Uses the same transaction and error contract as <see cref="AppendFill(string, LiveFill)"/>; an empty history is a no-op.
     /// </summary>
-    public static string? SavePendingFills(string key) => SavePending(key, null, OpenLedger);
+    public static string? SavePendingLedgerEvents(string key) => SavePending(key, null, OpenLedger);
+    public static string? SavePendingLedgerEvents(string root, string key) => SavePending(root, key, null, OpenLedger);
 
     // A per-call internal I/O adapter exercises the real public operation without reflection or global fault switches.
-    internal static string? AppendFill(string key, LiveFill f, Func<string, Stream> openLedger) =>
-        SavePending(key, f, openLedger);
+    internal static string? AppendFill(string key, LiveFill f, Func<string, Stream> openLedger, Action<string>? syncDirectory = null) =>
+        SavePending(key, f, openLedger, syncDirectory);
 
-    private static string? SavePending(string key, LiveFill? f, Func<string, Stream> openLedger)
+    private static string? SavePending(string key, LiveFill? f, Func<string, Stream> openLedger, Action<string>? syncDirectory = null) =>
+        SavePending(Root, key, f, openLedger, syncDirectory);
+
+    private static string? SavePending(string root, string key, LiveFill? f, Func<string, Stream> openLedger, Action<string>? syncDirectory = null)
     {
+        syncDirectory ??= static directory => StorageSync.SyncDirectory(directory);
         lock (Gate)
         {
-            string path = LedgerPath(key);
-            PendingLedger? pending = null;
+            string path = LedgerPath(root, key);
             try
             {
                 using var lease = AcquireLedger(path);
+                CompleteDeletion(path);
+                RecoverAuthoritiesLeased(path, ReadGeneration(path));
+                return SavePendingLeased(path, f, openLedger, syncDirectory);
+            }
+            catch (Exception ex)
+            {
+                if (f != null)
+                {
+                    if (!Pending.TryGetValue(path, out var waiting)) Pending[path] = waiting = new PendingLedger(Guid.Empty);
+                    waiting.Fills.Enqueue(f);
+                }
+                return $"Could not persist ledger '{path}': {ex.Message}";
+            }
+        }
+    }
+
+    private static string? SavePendingLeased(string path, LiveFill? f, Func<string, Stream> openLedger, Action<string> syncDirectory)
+    {
+            PendingLedger? pending = null;
+            try
+            {
                 CompleteDeletion(path);
                 if (f == null)
                 {
@@ -506,7 +1206,7 @@ public static class LiveStore
                         return null;
                     }
                 }
-                Guid generation = EnsureGeneration(path, out bool newHistory);
+                Guid generation = EnsureGeneration(path, out bool newHistory, syncDirectory);
                 pending = PendingFor(path, generation, newHistory);
                 if (f != null) pending.Fills.Enqueue(f);
                 var intent = ReadIntent(path, generation);
@@ -521,8 +1221,7 @@ public static class LiveStore
                         if (intent == null)
                         {
                             intent = CreateIntent(file, generation, pending.Fills.Peek());
-                            PublishIntent(path, intent, openLedger);
-                            pending.Intent = intent;
+                            PublishIntent(path, intent, openLedger, syncDirectory, pending);
                         }
 
                         ValidateAppendRange(file, intent);
@@ -540,9 +1239,12 @@ public static class LiveStore
                             throw;
                         }
                     }
+                    // Make a newly created history name reachable before removing its recovery authority.
+                    syncDirectory(Path.GetDirectoryName(path)!);
 
                     // A reader takes the same cross-process lease and cannot observe commit cleanup in progress.
                     File.Delete(path + ".wal");
+                    syncDirectory(Path.GetDirectoryName(path)!);
                     if (pending.Intent?.Id == intent.Id)
                     {
                         pending.Fills.Dequeue();
@@ -566,14 +1268,15 @@ public static class LiveStore
                 return $"Could not persist ledger '{path}': {ex.Message}";
             }
         }
-    }
 
-    /// <summary>Unacknowledged fills, including a durable intent left by an exited process.</summary>
-    public static int PendingFills(string key)
+    /// <summary>Uncommitted ledger events, including a durable intent left by an exited process.</summary>
+    public static int PendingLedgerEvents(string key) => PendingLedgerEvents(Root, key);
+
+    public static int PendingLedgerEvents(string root, string key)
     {
         lock (Gate)
         {
-            string path = LedgerPath(key);
+            string path = LedgerPath(root, key);
             using var lease = AcquireLedger(path);
             CompleteDeletion(path);
             Guid generation = ReadGeneration(path);
@@ -582,56 +1285,36 @@ public static class LiveStore
             if (pending != null) ReconcileCommitted(path, pending, intent);
             using var file = OpenHistory(path, pending?.NewHistory == true);
             ValidateHistory(file, intent, generation, pending?.NewHistory == true);
-            return (pending?.Fills.Count ?? 0) + (intent != null && pending?.Intent?.Id != intent.Id ? 1 : 0);
+            int admitted = 0;
+            string directory = AuthorityDirectory(path, generation);
+            if (generation != Guid.Empty && Directory.Exists(directory))
+                foreach (string marker in Directory.EnumerateFiles(directory, "*.pending"))
+                    if (ReadAuthority(path, generation, Path.GetFileNameWithoutExtension(marker)) is { } authority &&
+                        authority.CommittedRevision < authority.Revision) admitted++;
+            return (pending?.Fills.Count ?? 0) + (intent != null && pending?.Intent?.Id != intent.Id ? 1 : 0) + admitted;
         }
     }
 
     /// <summary>
-    /// Streams committed legacy JSONL and recovers the journaled fill once, followed by local pending fills. Malformed
+    /// Streams committed JSONL and recovers the journaled event once, followed by local pending events. Malformed
     /// committed lines remain untouched and are counted. Missing history is empty; inaccessible history, a damaged journal,
     /// or a truncated/mismatched authoritative range throws an actionable I/O error instead of claiming a flat position.
     /// </summary>
-    public static LiveLedger LoadLedger(string key, decimal pointValue)
+    public static LiveLedger LoadLedger(string key, decimal pointValue) => LoadLedger(Root, key, pointValue);
+
+    /// <summary>Recovers a ledger from an already bound account storage root without changing global storage.</summary>
+    public static LiveLedger LoadLedger(string root, string key, decimal pointValue)
     {
         lock (Gate)
         {
-            string path = LedgerPath(key);
+            string path = LedgerPath(root, key);
             try
             {
                 using var lease = AcquireLedger(path);
                 CompleteDeletion(path);
                 Guid generation = ReadGeneration(path);
-                var pending = ExistingPending(path, generation);
-                var intent = ReadIntent(path, generation);
-                if (pending != null) ReconcileCommitted(path, pending, intent);
-                var ledger = new LiveLedger(key, pointValue);
-                using var file = OpenHistory(path, pending?.NewHistory == true);
-                ValidateHistory(file, intent, generation, pending?.NewHistory == true);
-                if (file != null)
-                {
-                    using var reader = new StreamReader(intent != null ? new LedgerPrefixStream(file, intent.Start) : file);
-                    while (reader.ReadLine() is { } line)
-                    {
-                        if (line.Length == 0) continue;
-                        LiveFill? fill;
-                        try { fill = JsonSerializer.Deserialize<LiveFill>(line); }
-                        catch (JsonException) { fill = null; }
-                        if (fill != null) ledger.Apply(fill);
-                        else ledger.SkippedLines++;
-                    }
-                }
-
-                if (intent != null) ledger.Apply(IntentFill(intent));
-                if (pending != null)
-                {
-                    bool skipIntent = intent != null && pending.Intent?.Id == intent.Id;
-                    foreach (var fill in pending.Fills)
-                    {
-                        if (skipIntent) { skipIntent = false; continue; }
-                        ledger.Apply(fill);
-                    }
-                }
-                return ledger;
+                RecoverAuthoritiesLeased(path, generation);
+                return ReadLedgerLeased(path, key, generation, pointValue);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
@@ -639,6 +1322,42 @@ public static class LiveStore
             }
         }
     }
+
+    private static LiveLedger ReadLedgerLeased(string path, string key, Guid generation, decimal pointValue)
+    {
+        var pending = ExistingPending(path, generation);
+        var intent = ReadIntent(path, generation);
+        if (pending != null) ReconcileCommitted(path, pending, intent);
+        var ledger = new LiveLedger(key, pointValue);
+        using var file = OpenHistory(path, pending?.NewHistory == true);
+        ValidateHistory(file, intent, generation, pending?.NewHistory == true);
+        if (file != null)
+        {
+            using var reader = new StreamReader(intent != null ? new LedgerPrefixStream(file, intent.Start) : file);
+            while (reader.ReadLine() is { } line)
+            {
+                if (line.Length == 0) continue;
+                LiveFill? fill;
+                try { fill = DecodeFill(line); }
+                catch (JsonException) { fill = null; }
+                if (fill != null) ledger.Apply(fill);
+                else ledger.SkippedLines++;
+            }
+        }
+
+        if (intent != null) ledger.Apply(IntentFill(intent));
+        if (pending != null)
+        {
+            bool skipIntent = intent != null && pending.Intent?.Id == intent.Id;
+            foreach (var fill in pending.Fills)
+            {
+                if (skipIntent) { skipIntent = false; continue; }
+                ledger.Apply(fill);
+            }
+        }
+        return ledger;
+    }
+
 
     private static Stream OpenLedger(string path) =>
         new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0);
@@ -677,11 +1396,7 @@ public static class LiveStore
         }
     }
 
-    private static void FlushLedger(Stream file)
-    {
-        if (file is FileStream native) native.Flush(flushToDisk: true);
-        else file.Flush();
-    }
+    private static void FlushLedger(Stream file) => StorageSync.Flush(file);
 
     private static FileStream? OpenHistory(string path, bool allowUnwrittenDirectory = false)
     {
@@ -701,6 +1416,7 @@ public static class LiveStore
     private static void CompleteDeletion(string path)
     {
         if (!Exists(path + ".delete")) return;
+        AccountExecutionProjector.RetireLedgerObservers(path);
         Pending.Remove(path);
         // A directory is not a ledger; leave it in place rather than deleting unrelated contents.
         if (!Directory.Exists(path)) File.Delete(path);
@@ -708,7 +1424,10 @@ public static class LiveStore
         File.Delete(path + ".wal.tmp");
         File.Delete(path + ".id");
         File.Delete(path + ".id.tmp");
+        if (Directory.Exists(path + ".executions")) Directory.Delete(path + ".executions", recursive: true);
+        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
         File.Delete(path + ".delete");
+        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
     }
 
     private static Guid ReadGeneration(string path)
@@ -722,18 +1441,26 @@ public static class LiveStore
         catch (DirectoryNotFoundException) { return Guid.Empty; }
     }
 
-    private static Guid EnsureGeneration(string path, out bool created)
+    private static Guid EnsureGeneration(string path, out bool created, Action<string> syncDirectory)
     {
         var generation = ReadGeneration(path);
         created = generation == Guid.Empty;
         if (generation != Guid.Empty) return generation;
         generation = Guid.NewGuid();
+        // An existing generation must never describe a legitimately absent history, even if namespace sync fails.
+        if (!Exists(path))
+        {
+            using var history = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            StorageSync.Flush(history);
+        }
         using (var file = new FileStream(path + ".id.tmp", FileMode.Create, FileAccess.Write, FileShare.None))
         {
             file.Write(Encoding.ASCII.GetBytes(generation.ToString("N")));
-            file.Flush(flushToDisk: true);
+            StorageSync.Flush(file);
         }
         File.Move(path + ".id.tmp", path + ".id");
+        syncDirectory(Path.GetDirectoryName(path)!);
+        syncDirectory(Path.GetDirectoryName(Path.GetDirectoryName(path)!)!);
         return generation;
     }
 
@@ -741,7 +1468,7 @@ public static class LiveStore
     {
         if (!Pending.TryGetValue(path, out var pending)) return null;
         if (pending.Generation == generation || pending.Generation == Guid.Empty) return pending;
-        Pending.Remove(path); // Another process explicitly deleted this generation, including its pending fills.
+        Pending.Remove(path); // Another process explicitly deleted this generation, including its pending events.
         return null;
     }
 
@@ -784,7 +1511,7 @@ public static class LiveStore
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
-    private static void PublishIntent(string path, AppendIntent intent, Func<string, Stream> openLedger)
+    private static void PublishIntent(string path, AppendIntent intent, Func<string, Stream> openLedger, Action<string> syncDirectory, PendingLedger pending)
     {
         using (var journal = openLedger(path + ".wal.tmp"))
         {
@@ -794,6 +1521,9 @@ public static class LiveStore
         }
         // Same-directory publication: a process exit can leave an ignored temporary, never half a published intent.
         File.Move(path + ".wal.tmp", path + ".wal");
+        // Publication owns this queue head even when the following namespace confirmation fails.
+        pending.Intent = intent;
+        syncDirectory(Path.GetDirectoryName(path)!);
     }
 
     private static AppendIntent? ReadIntent(string path, Guid generation)
@@ -812,8 +1542,50 @@ public static class LiveStore
     }
 
     private static LiveFill IntentFill(AppendIntent intent) =>
-        JsonSerializer.Deserialize<LiveFill>(Encoding.UTF8.GetString(intent.Bytes).Trim('\n'))
+        DecodeFill(Encoding.UTF8.GetString(intent.Bytes).Trim('\n'))
         ?? throw new IOException("The durable append intent has no fill.");
+
+    private static LiveFill? DecodeFill(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var row = document.RootElement;
+        if (!row.TryGetProperty("ExecutionId", out var identity) || identity.ValueKind is JsonValueKind.Null or JsonValueKind.Object)
+            return row.Deserialize<LiveFill>();
+        if (identity.ValueKind != JsonValueKind.String)
+            throw new IOException("The execution journal contains an unsupported identity representation.");
+        // Canonical KVP journals contain account-scoped financial facts, but no native ownership.
+        // Decode their actual stored fields without rewriting the source file or creating an intent.
+        try
+        {
+            foreach (string field in new[] { "Fee", "AccountFee", "ExecutionSequence" })
+                if (row.TryGetProperty(field, out var value) && value.ValueKind is not (JsonValueKind.Number or JsonValueKind.Null))
+                    throw new IOException("An imported execution contains unsupported fee or sequence metadata.");
+            if (row.TryGetProperty("FeeCurrency", out var currencyValue) && currencyValue.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+                throw new IOException("An imported execution contains an unsupported fee currency.");
+            decimal? fee = row.TryGetProperty("Fee", out var nativeFee) && nativeFee.ValueKind == JsonValueKind.Number ? nativeFee.GetDecimal() : null;
+            string? currency = row.TryGetProperty("FeeCurrency", out var nativeCurrency) && nativeCurrency.ValueKind == JsonValueKind.String
+                ? nativeCurrency.GetString() : null;
+            decimal? accountFee = row.TryGetProperty("AccountFee", out var converted) && converted.ValueKind == JsonValueKind.Number
+                ? converted.GetDecimal() : null;
+            if (accountFee.HasValue && accountFee != fee)
+                throw new IOException("An imported execution contains an unsupported account-currency conversion.");
+            return new(row.GetProperty("Time").GetDateTime(), row.GetProperty("Buy").GetBoolean(),
+                row.GetProperty("Quantity").GetDecimal(), row.GetProperty("Price").GetDecimal(),
+                row.TryGetProperty("Symbol", out var symbol) ? symbol.GetString() : null,
+                row.TryGetProperty("PointValue", out var pointValue) ? pointValue.GetDecimal() : 0)
+            {
+                Kind = LiveFillKind.ImportedExecution, ImportedExecutionId = identity.GetString(),
+                Fees = fee.HasValue ? new[] { new ExecutionFee(fee.Value, currency) } : Array.Empty<ExecutionFee>(),
+                FeesComplete = accountFee.HasValue, Currency = accountFee.HasValue ? currency : null,
+                ExecutionSequence = row.TryGetProperty("ExecutionSequence", out var sequence) && sequence.ValueKind == JsonValueKind.Number
+                    ? sequence.GetInt64() : null,
+            };
+        }
+        catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
+        {
+            throw new IOException("The imported execution row is malformed; reconcile its original journal before starting the strategy.", error);
+        }
+    }
 
     private static void ValidateHistory(Stream? file, AppendIntent? intent, Guid generation, bool newHistory)
     {
@@ -868,6 +1640,7 @@ public static class LiveStore
                 throw new IOException("The ledger no longer matches its pending intent's assigned byte range.");
             offset += count;
         }
+        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
         pending.Fills.Dequeue();
         pending.Intent = null;
     }
@@ -955,17 +1728,20 @@ public static class LiveStore
     /// else (whether it was running included); a strategy not saved yet is added. A saved file that cannot be read is left
     /// untouched. Returns the error, or null.
     /// </summary>
-    public static string? SaveProtectionOrderIds(LiveRunnerInfo info)
+    public static string? SaveProtectionOrderIds(LiveRunnerInfo info) => SaveProtectionOrderIds(Root, info);
+
+    public static string? SaveProtectionOrderIds(string root, LiveRunnerInfo info)
     {
         lock (Gate)
         {
             try
             {
-                var all = File.Exists(RunnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new() : new();
+                string runnersPath = Path.Combine(root, "estrategias.json");
+                var all = File.Exists(runnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(runnersPath)) ?? new() : new();
                 if (all.FirstOrDefault(r => r.Key == info.Key) is { } saved) saved.ProtectionOrderIds = info.ProtectionOrderIds;
                 else all.Add(info);
-                Directory.CreateDirectory(Root);
-                File.WriteAllText(RunnersPath, JsonSerializer.Serialize(all, Json));
+                Directory.CreateDirectory(root);
+                File.WriteAllText(runnersPath, JsonSerializer.Serialize(all, Json));
                 _lastRunnersJson = null;
                 return null;
             }
@@ -1095,11 +1871,20 @@ public static class LiveStore
             peak = Math.Max(peak, eq);
         }
 
+        // Saved marks are estimates, not a current valuation of this committed ledger.
+        bool flat = ledger.Position == 0 && !ledger.OpenContextConflict;
+        decimal openEstimate = flat ? 0m : info.OpenPnL;
+
         return new LiveStats
         {
             Info = info,
             Metrics = m,
-            Net = ledger.Realized + info.OpenPnL,
+            Position = ledger.Position,
+            OpenPnLEstimate = openEstimate,
+            AvailableOpenPnL = flat ? 0m : null,
+            Net = ledger.Realized + openEstimate,
+            CompleteNet = flat ? ledger.NetRealized : null,
+            FinancialQuality = ledger.FinancialQuality,
             CurrentDrawdown = peak - eq,
             RecentTrades = recent.Count,
             RecentProfitFactor = gl > 0 ? gp / gl : gp > 0 ? 999 : 0,
@@ -1120,7 +1905,7 @@ public static class LiveSizing
     public static SizingProposal SuggestByRules(IReadOnlyList<LiveStats> stats)
     {
         var p = new SizingProposal { Source = "reglas" };
-        foreach (var s in stats.Where(s => s.Info.Running))
+        foreach (var s in stats.Where(s => s.Info.Running && s.FinancialQuality != LiveFinancialQuality.Pending))
         {
             decimal size = s.Info.Size;
             string name = $"{s.Info.Strategy} · {s.Info.Symbol}";

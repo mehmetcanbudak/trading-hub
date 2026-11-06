@@ -235,20 +235,23 @@ internal sealed class LiveStrategyWindow : Window
             return;
         }
 
-        var stats = LiveStore.StatsOf(info, ledger, 25_000m);
+        var stats = ledger.HasPendingFinancials ? null : LiveStore.StatsOf(info, ledger, 25_000m);
         _kpis.Children.Clear();
         decimal pos = ledger.Position;
         var plan = _svc.Live.PlanOf(e);
         string posSymbol = ledger.OpenSymbol ?? plan.Symbol;
-        _kpis.Children.Add(Kpi("Position", pos == 0 ? "Flat" : $"{(pos > 0 ? "Long" : "Short")} {Math.Abs(pos).ToString("0.####", Es)} {posSymbol}", pos == 0 ? "" : "@ " + ledger.AveragePrice.ToString("0.#####", Inv), pos > 0 ? Ui.Up : pos < 0 ? Ui.Down : null));
+        _kpis.Children.Add(Kpi("Position", pos == 0 ? "Flat" : $"{(pos > 0 ? "Long" : "Short")} {Math.Abs(pos).ToString("0.####", Es)} {posSymbol}", pos == 0 ? "" : ledger.HasPendingPrices ? "execution price pending" : "@ " + ledger.AveragePrice.ToString("0.#####", Inv), pos > 0 ? Ui.Up : pos < 0 ? Ui.Down : null));
         // cuántos contratos y de cuál manda cada orden: que nunca haya dudas entre el mini y el micro
         _kpis.Children.Add(Kpi("Each order", plan.Text, plan.Detail.Length > 0 ? plan.Detail : MarketInfoHasMicro(info) ? "mini contract" : "", plan.Micro ? Ui.Accent : null));
-        _kpis.Children.Add(Kpi("Open", Money(e.OpenPnL), r != null ? $"today {Money(r.TodayPnL)}" : "", e.OpenPnL >= 0 ? Ui.Up : Ui.Down));
-        _kpis.Children.Add(Kpi("Net", Money(e.Net), $"{stats.Metrics.TotalTrades} trades", e.Net >= 0 ? Ui.Up : Ui.Down));
-        _kpis.Children.Add(Kpi("Profit factor", stats.Metrics.TotalTrades > 0 ? (stats.Metrics.ProfitFactor >= 999 ? "∞" : stats.Metrics.ProfitFactor.ToString("0.00", Es)) : "—", stats.Metrics.TotalTrades > 0 ? $"{stats.Metrics.WinRate:0} % winners" : ""));
-        _kpis.Children.Add(Kpi("Drawdown", (-(r?.CurrentDrawdown ?? stats.CurrentDrawdown)).ToString("#,##0.00", Es), $"worst {(-stats.Metrics.MaxDrawdown).ToString("#,##0.00", Es)}"));
+        _kpis.Children.Add(Kpi("Open", Money(e.OpenPnL), r != null ? $"today {Money(r.AvailableTodayPnL)}" : "", e.OpenPnL >= 0 ? Ui.Up : Ui.Down));
+        _kpis.Children.Add(Kpi("Net", Money(e.Net), stats != null ? $"{stats.Metrics.TotalTrades} trades · {ledger.FinancialQuality}" : "Execution prices or fees pending", e.Net >= 0 ? Ui.Up : Ui.Down));
+        _kpis.Children.Add(Kpi("Profit factor", stats is { Metrics.TotalTrades: > 0 } ? (stats.Metrics.ProfitFactor >= 999 ? "∞" : stats.Metrics.ProfitFactor.ToString("0.00", Es)) : "—",
+            stats is { Metrics.TotalTrades: > 0 } ? $"{stats.Metrics.WinRate:0} % winners" : ""));
+        decimal? drawdown = r != null ? r.AvailableCurrentDrawdown : stats?.CurrentDrawdown;
+        _kpis.Children.Add(Kpi("Drawdown", drawdown is { } knownDrawdown ? (-knownDrawdown).ToString("#,##0.00", Es) : "—",
+            stats != null ? $"worst {(-stats.Metrics.MaxDrawdown).ToString("#,##0.00", Es)}" : "Accounting pending"));
         _riskNote.Text =
-            $"Size multiplies new orders (exits always close only the open quantity). Daily loss blocks entries until the next session. Drawdown stops the strategy. Current drawdown {(r?.CurrentDrawdown ?? stats.CurrentDrawdown).ToString("#,##0.00", Es)}." +
+            $"Size multiplies new orders (exits always close only the open quantity). Daily loss blocks entries until the next session. Drawdown stops the strategy. Accounting quality: {ledger.FinancialQuality}." +
               ContractNote(info, r);
 
         RefreshActions();

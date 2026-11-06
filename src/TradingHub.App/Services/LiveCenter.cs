@@ -42,7 +42,14 @@ internal sealed class LiveEntry
 
     public string SourceLabel => Source == "chart" ? "Chart" : "Live";
 
-    public string StateLabel =>
+    public string StateLabel => OperationalState + (Ledger?.FinancialQuality switch
+    {
+        LiveFinancialQuality.Estimated => " · estimated accounting",
+        LiveFinancialQuality.Pending => " · accounting pending",
+        _ => "",
+    });
+
+    private string OperationalState =>
         AwaitingAccountIdentity ? LedgerError ?? LiveCenter.AwaitingIdentityMessage
         : Ledger == null ? "History unavailable"
         : Running ? Runner!.DailyLimitActive ? "Stopped for today" : Paused ? "Paused" : "Running"
@@ -51,8 +58,14 @@ internal sealed class LiveEntry
         : Runner?.HasWorkingOrders == true ? "Awaiting order confirmation"
         : "Stopped";
 
-    public decimal? OpenPnL => Ledger is { } ledger ? Running ? ledger.OpenPnL(Runner!.Data.LastPrice) : 0 : null;
-    public decimal? Net => Ledger?.Realized + OpenPnL;
+    public decimal? OpenPnL => Ledger switch
+    {
+        null => null,
+        { Position: 0, OpenContextConflict: false } => 0,
+        { } ledger when Running => ledger.KnownOpenPnL(Runner!.Data.LastPrice),
+        _ => null,
+    };
+    public decimal? Net => Ledger?.NetRealized + OpenPnL;
 }
 
 /// <summary>La próxima orden de una estrategia: cuántos contratos, de cuál y si es el micro (con su equivalente en el mini).</summary>
@@ -117,7 +130,10 @@ internal sealed partial class LiveCenter
     private readonly AppServices _svc;
     private readonly HashSet<LiveStrategyRunner> _watched = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, (long Length, DateTime WriteTime, LiveLedger Ledger)> _ledgers = new();
-    private readonly Dictionary<string, (decimal Mae, decimal Mfe, bool Exact)> _excursions = new();
+    private readonly record struct ExcursionBasis(bool IsLong, DateTime EntryTime, DateTime ExitTime,
+        decimal EntryPrice, decimal ExitPrice, decimal Quantity, decimal PointValue, string Feed, string Symbol);
+    private readonly record struct ExcursionCache(ExcursionBasis Basis, IbHistoryStamp? StorageStamp, decimal Mae, decimal Mfe, bool Exact);
+    private readonly Dictionary<string, ExcursionCache> _excursions = new();
     private DateTime _lastTick;
     private DateTime _proposalsStamp;
 
@@ -195,7 +211,7 @@ internal sealed partial class LiveCenter
     {
         try
         {
-            int pending = LiveStore.PendingFills(key);
+            int pending = LiveStore.PendingLedgerEvents(key);
             var file = new FileInfo(LiveStore.LedgerFile(key));
             long length = file.Exists ? file.Length : 0;
             DateTime writeTime = file.Exists ? file.LastWriteTimeUtc : DateTime.MinValue;
@@ -234,7 +250,11 @@ internal sealed partial class LiveCenter
                 {
                     if (cs.Runner is { Persist: true } r && seen.Add(r.Key))
                     {
-                        list.Add(new LiveEntry { Key = r.Key, Source = "chart", Info = r.Info(), Runner = r, Chart = chart, ChartStrategy = cs, Ledger = r.Ledger });
+                        var runnerInfo = r.Info();
+                        string? runnerLedgerError = null;
+                        var runnerLedger = r.IsRunning || r.IsClosing || r.HasWorkingOrders
+                            ? r.Ledger : LedgerOf(r.Key, runnerInfo.PointValue, out runnerLedgerError);
+                        list.Add(new LiveEntry { Key = r.Key, Source = "chart", Info = runnerInfo, Runner = r, Chart = chart, ChartStrategy = cs, Ledger = runnerLedger, LedgerError = runnerLedgerError });
                         continue;
                     }
 
@@ -305,7 +325,11 @@ internal sealed partial class LiveCenter
         {
             if (!r.IsRunning && !r.IsClosing && !r.HasWorkingOrders && !includeStopped) continue;
             if (!seen.Add(r.Key)) continue;
-            list.Add(new LiveEntry { Key = r.Key, Source = r.Source == "chart" ? "panel" : r.Source, Info = r.Info(), Runner = r, Ledger = r.Ledger });
+            var runnerInfo = r.Info();
+            string? runnerLedgerError = null;
+            var runnerLedger = r.IsRunning || r.IsClosing || r.HasWorkingOrders
+                ? r.Ledger : LedgerOf(r.Key, runnerInfo.PointValue, out runnerLedgerError);
+            list.Add(new LiveEntry { Key = r.Key, Source = r.Source == "chart" ? "panel" : r.Source, Info = runnerInfo, Runner = r, Ledger = runnerLedger, LedgerError = runnerLedgerError });
         }
 
 
@@ -984,64 +1008,116 @@ internal sealed partial class LiveCenter
     public async Task<Dictionary<string, (decimal Mae, decimal Mfe, bool Exact)>> ExcursionsAsync(IReadOnlyList<(LiveEntry Entry, ClosedTrade Trade)> items)
     {
         var result = new Dictionary<string, (decimal, decimal, bool)>();
-        var pending = new List<(string Id, string Feed, string Symbol, decimal PointValue, ClosedTrade Trade)>();
+        var pending = new List<(string Id, ExcursionBasis Basis, ClosedTrade Trade, ExcursionCache? Cached)>();
         foreach (var (e, t) in items)
         {
             string id = TradeId(e.Key, t);
-            if (_excursions.TryGetValue(id, out var cached))
+            var basis = new ExcursionBasis(t.IsLong, t.EntryTime, t.ExitTime, t.EntryPrice, t.ExitPrice, t.Quantity,
+                e.Info.PointValue, e.Info.FeedId, e.Info.Symbol);
+            bool cached = _excursions.TryGetValue(id, out var previous) && previous.Basis == basis;
+            if (basis.Feed != IbBarImport.FeedId && cached)
             {
-                result[id] = cached;
+                result[id] = (previous.Mae, previous.Mfe, previous.Exact);
                 continue;
             }
-
-            // en memoria si el instrumento está abierto (las horas de la contabilidad son de la Mac y las del mercado
-            // pueden venir unos segundos atrasadas: si la última operación del mercado no llega a la salida, no se guarda)
-            var data = _svc.Hub.Items.FirstOrDefault(d => d.Instrument.FeedId == e.Info.FeedId && d.Instrument.Symbol == e.Info.Symbol);
-            if (data is { Trades.Count: > 0 } && data.Trades.FirstTime <= t.EntryTime.AddSeconds(5) && data.Trades.LastTime >= t.ExitTime.AddSeconds(-60))
+            if (basis.Feed != IbBarImport.FeedId && MemoryExcursion(basis, t, out bool complete) is { } memory)
             {
-                var store = data.Trades;
-                int i0 = store.LowerBound(t.EntryTime.AddSeconds(-2)), i1 = store.LowerBound(t.ExitTime.AddSeconds(2));
-                var ex = TradeExcursion.Compute(t, Prices(store, i0, i1), e.Info.PointValue);
-                result[id] = (ex.Mae, ex.Mfe, true);
-                if (store.LastTime >= t.ExitTime.AddSeconds(2)) _excursions[id] = (ex.Mae, ex.Mfe, true);
+                result[id] = memory;
+                if (complete) _excursions[id] = new(basis, null, memory.Mae, memory.Mfe, true);
             }
-            else pending.Add((id, e.Info.FeedId, e.Info.Symbol, e.Info.PointValue, t));
+            else pending.Add((id, basis, t, cached ? previous : null));
         }
 
         if (pending.Count == 0) return result;
-        var root = AppPaths.Ticks;
+        string root = AppPaths.Ticks;
         var computed = await Task.Run(() =>
         {
-            var res = new List<(string Id, decimal Mae, decimal Mfe, bool Exact)>();
+            var values = new List<(string Id, ClosedTrade Trade, ExcursionCache Cache, bool MemoryFallback)>();
             foreach (var p in pending)
             {
                 try
                 {
-                    var prices = HistoricalData.Read(root, p.Feed, p.Symbol, p.Trade.EntryTime, p.Trade.ExitTime.AddSeconds(1)).Select(x => x.Price).ToList();
+                    IbHistoryStamp? stamp = null;
+                    List<decimal> prices;
+                    if (p.Basis.Feed == IbBarImport.FeedId)
+                    {
+                        using var snapshot = IbBarStore.OpenSnapshot(root, p.Basis.Symbol);
+                        DateTime to = p.Trade.ExitTime.AddSeconds(1);
+                        stamp = snapshot.GetStamp(p.Trade.EntryTime, to);
+                        if (p.Cached is { StorageStamp: { } known } existing && known == stamp)
+                        {
+                            values.Add((p.Id, p.Trade, existing, false));
+                            continue;
+                        }
+                        bool recording = snapshot.HasActiveRecorder;
+                        bool recordedMinute = false;
+                        DateTime firstRecorded = DateTime.MaxValue, lastRecorded = DateTime.MinValue;
+                        long firstMinute = p.Trade.EntryTime.Ticks / TimeSpan.TicksPerMinute;
+                        long lastMinute = (to.Ticks - 1) / TimeSpan.TicksPerMinute;
+                        prices = new List<decimal>();
+                        decimal tickSize = IbBarImport.InstrumentFor(p.Basis.Symbol).TickSize;
+                        var last = DateOnly.FromDateTime(to);
+                        for (var day = DateOnly.FromDateTime(p.Trade.EntryTime); day <= last; day = day.AddDays(1))
+                            foreach (var trade in snapshot.ReadDay(day, tickSize))
+                            {
+                                if (recording && trade.Id >= 0)
+                                {
+                                    if (trade.Time < firstRecorded) firstRecorded = trade.Time;
+                                    if (trade.Time > lastRecorded) lastRecorded = trade.Time;
+                                    long minute = trade.Time.Ticks / TimeSpan.TicksPerMinute;
+                                    recordedMinute |= minute >= firstMinute && minute <= lastMinute;
+                                }
+                                if (trade.Time >= p.Trade.EntryTime && trade.Time < to) prices.Add(trade.Price);
+                            }
+                        if (recording && recordedMinute && (firstRecorded > p.Trade.EntryTime || lastRecorded < p.Trade.ExitTime))
+                        {
+                            // Do not cache a draining recorder's prefix as complete, or substitute unstamped Hub history.
+                            values.Add((p.Id, p.Trade, new(p.Basis, null, 0, 0, false), false));
+                            continue;
+                        }
+                    }
+                    else prices = HistoricalData.Read(root, p.Basis.Feed, p.Basis.Symbol, p.Trade.EntryTime, p.Trade.ExitTime.AddSeconds(1)).Select(x => x.Price).ToList();
                     if (prices.Count == 0)
                     {
-                        res.Add((p.Id, 0, 0, false));
+                        values.Add((p.Id, p.Trade, new(p.Basis, null, 0, 0, false), p.Basis.Feed == IbBarImport.FeedId));
                         continue;
                     }
-
-                    var ex = TradeExcursion.Compute(p.Trade, prices, p.PointValue);
-                    res.Add((p.Id, ex.Mae, ex.Mfe, true));
+                    var excursion = TradeExcursion.Compute(p.Trade, prices, p.Basis.PointValue);
+                    values.Add((p.Id, p.Trade, new(p.Basis, stamp, excursion.Mae, excursion.Mfe, true), false));
                 }
                 catch
                 {
-                    res.Add((p.Id, 0, 0, false));
+                    // Failed IB recovery/validation must not fall through to potentially obsolete in-memory history.
+                    values.Add((p.Id, p.Trade, new(p.Basis, null, 0, 0, false), false));
                 }
             }
-
-            return res;
+            return values;
         });
-        foreach (var c in computed)
+        foreach (var item in computed)
         {
-            result[c.Id] = (c.Mae, c.Mfe, c.Exact);
-            if (c.Exact) _excursions[c.Id] = (c.Mae, c.Mfe, true);
+            var cache = item.Cache;
+            if (item.MemoryFallback && MemoryExcursion(cache.Basis, item.Trade, out _) is { } memory)
+            {
+                result[item.Id] = memory; // Preserve ephemeral history, but never brand it with an unproven disk stamp.
+                continue;
+            }
+            result[item.Id] = (cache.Mae, cache.Mfe, cache.Exact);
+            if (cache.Exact) _excursions[item.Id] = cache;
         }
-
         return result;
+    }
+
+    private (decimal Mae, decimal Mfe, bool Exact)? MemoryExcursion(ExcursionBasis basis, ClosedTrade trade, out bool complete)
+    {
+        complete = false;
+        var data = _svc.Hub.Items.FirstOrDefault(d => d.Instrument.FeedId == basis.Feed && d.Instrument.Symbol == basis.Symbol);
+        if (data is not { Trades.Count: > 0 } || data.Trades.FirstTime > trade.EntryTime.AddSeconds(5)
+            || data.Trades.LastTime < trade.ExitTime.AddSeconds(-60)) return null;
+        var store = data.Trades;
+        int first = store.LowerBound(trade.EntryTime.AddSeconds(-2)), last = store.LowerBound(trade.ExitTime.AddSeconds(2));
+        var excursion = TradeExcursion.Compute(trade, Prices(store, first, last), basis.PointValue);
+        complete = store.LastTime >= trade.ExitTime.AddSeconds(2);
+        return (excursion.Mae, excursion.Mfe, true);
     }
 
     private static IEnumerable<decimal> Prices(TradeStore store, int from, int to)

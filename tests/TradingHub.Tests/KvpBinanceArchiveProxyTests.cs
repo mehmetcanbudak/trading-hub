@@ -48,7 +48,7 @@ public sealed class KvpBinanceArchiveProxyTests
             FeedId = "binance-spot", Symbol = "BTCUSDT", BaseAsset = "BTC", QuoteAsset = "USDT", TickSize = 0.1m, VolumeStep = 0.001m,
         };
         using var data = new InstrumentData(instrument, new SimulatedFeed());
-        using var broker = new BinanceBroker(data, origin.Settings, "Fixture private account", Network(proxy));
+        using var broker = new BinanceBroker(data, origin.Settings, "Fixture private account", network: Network(proxy));
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void Observe()
         {

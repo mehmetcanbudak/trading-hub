@@ -67,6 +67,69 @@ public sealed class IbConsumerCorrectionsTests : IDisposable
             TickData.FromTrades(_instrument, rows).Compress().Slice(Start, Start.AddMinutes(4)) }) AssertMixed(ticks);
     }
     [Fact]
+    public async Task SnapshotWarmupKeepsTheNewestBoundedRawWindowAndUsesLabelledBarsForOmittedMinutes()
+    {
+        var start = DateTime.UtcNow.Date.AddDays(-1).AddHours(12);
+        var old = new Trade(1, start.AddSeconds(10), 100, 3, TradeSide.Buy);
+        var newest = new Trade(2, start.AddMinutes(1).AddSeconds(10), 101, 4, TradeSide.Sell);
+        foreach (var group in new[] { old, newest }.GroupBy(t => DateOnly.FromDateTime(t.Time)))
+            HistoricalData.WriteDay(_root, _instrument, group.Key, group.ToArray(), replace: true);
+        var rawBytes = new[] { old, newest }.Select(t => TickFile.DayPath(_root, "ib", "MNQ", DateOnly.FromDateTime(t.Time))).Distinct()
+            .ToDictionary(path => path, File.ReadAllBytes);
+        IbBarStore.MergeBars(_root, _instrument, new[]
+        {
+            new Kline(new DateTimeOffset(start).ToUnixTimeMilliseconds(), 100, 102, 99, 101, 12, 0, false),
+            new Kline(new DateTimeOffset(start.AddMinutes(1)).ToUnixTimeMilliseconds(), 101, 103, 100, 102, 20, 0, false),
+        }, default);
+        using var feed = new IbFeed(new("127.0.0.1", 1, 17, Offline: true), _root);
+        using var data = new InstrumentData(_instrument, feed)
+        {
+            RecordingRoot = _root, RecordLive = false, RawTradeLimit = 1, TickWindow = TimeSpan.FromDays(2),
+        };
+        data.Start(start);
+        await Until(() => { data.Pump(); return !data.IsLoadingHistory; });
+        Assert.Null(data.HistoryError);
+        Assert.NotNull(data.HistoryWarning);
+        var loaded = Enumerable.Range(0, data.Trades.Count).Select(data.Trades.Get).ToArray();
+        Assert.Equal(5, loaded.Length);
+        var observed = Assert.Single(loaded, t => t.IsObservedTrade);
+        Assert.Equal(2, observed.Id);
+        Assert.True(observed.Provenance.IsPartial);
+        Assert.Equal(newest.Time, data.RealTicksFrom);
+        var fallback = loaded.Where(t => !t.IsObservedTrade).ToArray();
+        Assert.Equal(4, fallback.Length);
+        Assert.Equal(12m, fallback.Sum(t => t.Volume));
+        Assert.All(fallback, row =>
+        {
+            Assert.True((row.Provenance.Quality & DataQuality.Synthetic) != 0);
+            Assert.True(row.HasKnownAvailability);
+            Assert.Equal(start.AddMinutes(1), row.AvailableAt);
+            Assert.Equal(0, row.Provenance.ObservedTradeCount);
+        });
+        foreach (var pair in rawBytes) Assert.Equal(pair.Value, File.ReadAllBytes(pair.Key));
+    }
+
+    [Fact]
+    public void IbCandleReplacementRetainsFinerRawEventsAndRejectsDisplayOnlyCompactRows()
+    {
+        var day = DateOnly.FromDateTime(Start);
+        var raw = new Trade(1, Start.AddSeconds(10), 100, 3, TradeSide.Buy);
+        HistoricalData.WriteDay(_root, _instrument, day, new[] { raw }, replace: true);
+        var inferred = new List<Trade>();
+        KlineHistory.Synthesize(new[] { new Kline(new DateTimeOffset(Start).ToUnixTimeMilliseconds(), 100, 102, 99, 101, 12, 0, false) },
+            _instrument, 1, new[] { (Start, Start.AddMinutes(1)) }, inferred);
+        HistoricalData.WriteDay(_root, _instrument, day, inferred, replace: true);
+        var retained = Assert.Single(HistorySources.ReadDay(_root, "ib", "MNQ", day));
+        Assert.Equal(raw.Id, retained.Id);
+        Assert.Equal(raw.Volume, retained.Volume);
+        Assert.True(retained.IsObservedTrade);
+        var compact = new Trade(CompactHistory.CompressedIdBase, Start, 100, 3, TradeSide.Buy,
+            new TradeProvenance(DataQuality.Compact, ObservedTradeCount: 1));
+        Assert.Throws<ArgumentException>(() => HistoricalData.WriteDay(_root, _instrument, day, new[] { compact }, replace: true));
+        Assert.Equal(raw.Id, Assert.Single(HistorySources.ReadDay(_root, "ib", "MNQ", day)).Id);
+    }
+
+    [Fact]
     public void CompressionNeverMergesObservedAndSyntheticTicksAtTheSamePriceSideAndSecond()
     {
         var ticks = TickData.FromTrades(_instrument, new[] { new Trade(1, Start, 100, 2, TradeSide.Buy), new Trade(-1, Start, 100, 5, TradeSide.Buy,

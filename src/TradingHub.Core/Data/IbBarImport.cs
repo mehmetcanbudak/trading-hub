@@ -2,6 +2,7 @@
 // Copyright (c) 2026 ralphtradesz and Trading Hub contributors; MIT with Commons Clause (repository LICENSE).
 using System.Globalization;
 using System.Text.RegularExpressions;
+using TradingHub.Common;
 using TradingHub.Feeds;
 using TradingHub.Market;
 
@@ -38,8 +39,13 @@ public static class IbBarImport
         return Directory.EnumerateFiles(folder).Where(f => Path.GetExtension(f).Equals(".csv", StringComparison.OrdinalIgnoreCase)).OrderBy(Path.GetFileName, StringComparer.Ordinal).ToList();
     }
     public static Preview PreviewFolder(string folder, string root, string? symbol = null, CancellationToken ct = default) =>
-        PreviewFiles(FilesIn(folder), root, symbol, ct) with { SourceFolder = Path.GetFullPath(folder) };
-    public static Preview PreviewFiles(IReadOnlyList<string> files, string root, string? symbol = null, CancellationToken ct = default)
+        PreviewFolder(folder, root, symbol, ct, StorageSync.SyncDirectory);
+    // A per-call I/O adapter exercises the same import operation without reflection or global fault switches.
+    internal static Preview PreviewFolder(string folder, string root, string? symbol, CancellationToken ct, Func<string, bool> syncDirectory) =>
+        PreviewFiles(FilesIn(folder), root, symbol, ct, syncDirectory) with { SourceFolder = Path.GetFullPath(folder) };
+    public static Preview PreviewFiles(IReadOnlyList<string> files, string root, string? symbol = null, CancellationToken ct = default) =>
+        PreviewFiles(files, root, symbol, ct, StorageSync.SyncDirectory);
+    internal static Preview PreviewFiles(IReadOnlyList<string> files, string root, string? symbol, CancellationToken ct, Func<string, bool> syncDirectory)
     {
         if (files.Count == 0) throw new InvalidDataException("No CSV files found.");
         var sorted = files.Select(Path.GetFullPath).Distinct(StringComparer.Ordinal).OrderBy(f => f, StringComparer.Ordinal).ToList();
@@ -56,15 +62,16 @@ public static class IbBarImport
             ReadFile(file, instrument, bars, ct);
         }
         if (bars.Count == 0) throw new InvalidDataException("CSV files contain no nonzero-volume bars.");
+        using var snapshot = IbBarStore.OpenSnapshot(root, symbol, ct, syncDirectory);
         var days = new List<DayPreview>();
         foreach (var group in bars.Values.GroupBy(k => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(k.OpenTimeMs).UtcDateTime)))
         {
             var day = group.Key;
             string recordedPath = TickFile.DayPath(root, FeedId, symbol, day);
             string barPath = TickFile.DayPath(root, IbBarStore.BarFolder, symbol, day);
+            var recorded = snapshot.ReadRecordedDay(day, instrument.TickSize).Where(t => t.Provenance.IsMeasured).ToList();
             fingerprints[recordedPath] = IbBarStore.Fingerprint(recordedPath);
             fingerprints[barPath] = IbBarStore.Fingerprint(barPath);
-            var recorded = IbBarStore.ReadRecordedDay(root, symbol, day, instrument.TickSize).Where(t => t.Id >= 0).ToList();
             var importedMinutes = group.Select(k => k.OpenTimeMs / 60000).ToHashSet();
             int conflicts = recorded.Select(t => new DateTimeOffset(t.Time).ToUnixTimeMilliseconds() / 60000).Where(importedMinutes.Contains).Distinct().Count();
             int storedMinutes = IbBarStore.ReadChecked(barPath, instrument.TickSize).Where(t => t.Id < 0).Select(t => t.Time.Ticks / TimeSpan.TicksPerMinute).Distinct().Count();
@@ -105,16 +112,23 @@ public static class IbBarImport
             { throw new InvalidDataException($"{Path.GetFileName(file)}:{row}: {error.Message}", error); }
         }
     }
-    public static Result Commit(Preview preview, string root, ImportPolicy policy = ImportPolicy.PreserveRecorded, IProgress<double>? progress = null, CancellationToken ct = default, Action<int>? beforePublish = null)
+    public static Result Commit(Preview preview, string root, ImportPolicy policy = ImportPolicy.PreserveRecorded, IProgress<double>? progress = null, CancellationToken ct = default, Action<int>? beforePublish = null) =>
+        Commit(preview, root, policy, progress, ct, beforePublish, StorageSync.SyncDirectory);
+    internal static Result Commit(Preview preview, string root, ImportPolicy policy, IProgress<double>? progress, CancellationToken ct, Action<int>? beforePublish, Func<string, bool> syncDirectory)
     {
         if (!Path.GetFullPath(root).Equals(preview.StorageRoot, StringComparison.Ordinal)) throw new InvalidOperationException("Import target differs from the previewed storage root.");
         if (!Enum.IsDefined(policy)) throw new ArgumentOutOfRangeException(nameof(policy));
         ct.ThrowIfCancellationRequested();
         var instrument = InstrumentFor(preview.Symbol);
         IbBarStore.PublishResult result;
-        using (var tickLease = TickFile.TryLock(root, FeedId, preview.Symbol) ?? throw new IOException("IB instrument is recording/in use; stop its live consumers before importing."))
-        using (var barLease = TickFile.TryLock(root, IbBarStore.BarFolder, preview.Symbol) ?? throw new IOException("IB bar history is in use by another writer."))
+        using (var ownership = IbHistoryCoordinator.Enter(root, preview.Symbol, ct, syncDirectory))
+        using (var writers = ownership.Writers(raw: true, bars: true))
         {
+            foreach (var day in preview.Days)
+            {
+                IbHistoryCoordinator.CheckPath(ownership.Root, TickFile.DayPath(ownership.Root, FeedId, preview.Symbol, day.Day));
+                IbHistoryCoordinator.CheckPath(ownership.Root, TickFile.DayPath(ownership.Root, IbBarStore.BarFolder, preview.Symbol, day.Day));
+            }
             if (preview.SourceFolder != null && !FilesIn(preview.SourceFolder).Select(Path.GetFullPath).OrderBy(f => f, StringComparer.Ordinal).SequenceEqual(preview.Files))
                 throw new IOException("Import preview is stale; CSV folder membership changed. Preview again before publishing.");
             foreach (var fingerprint in preview.Fingerprints)
@@ -123,10 +137,10 @@ public static class IbBarImport
             foreach (var group in preview.Bars.GroupBy(k => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(k.OpenTimeMs).UtcDateTime)))
             {
                 ct.ThrowIfCancellationRequested();
-                string ticks = TickFile.DayPath(root, FeedId, preview.Symbol, group.Key);
-                string barPath = TickFile.DayPath(root, IbBarStore.BarFolder, preview.Symbol, group.Key);
+                string ticks = TickFile.DayPath(ownership.Root, FeedId, preview.Symbol, group.Key);
+                string barPath = TickFile.DayPath(ownership.Root, IbBarStore.BarFolder, preview.Symbol, group.Key);
                 var existing = IbBarStore.ReadChecked(ticks, instrument.TickSize);
-                var realMinutes = existing.Where(t => t.Id >= 0).Select(t => t.Time.Ticks / TimeSpan.TicksPerMinute).ToHashSet();
+                var realMinutes = existing.Where(t => t.Provenance.IsMeasured).Select(t => t.Time.Ticks / TimeSpan.TicksPerMinute).ToHashSet();
                 var bars = group.Where(k => policy == ImportPolicy.ReplaceCoveredMinutes || !realMinutes.Contains(DateTimeOffset.FromUnixTimeMilliseconds(k.OpenTimeMs).UtcDateTime.Ticks / TimeSpan.TicksPerMinute)).ToList();
                 var imported = bars.Select(k => k.OpenTimeMs / 60000).ToHashSet();
                 var saved = IbBarStore.ReadChecked(barPath, instrument.TickSize);
@@ -141,12 +155,12 @@ public static class IbBarImport
                 }
                 if (policy == ImportPolicy.ReplaceCoveredMinutes && existing.Any(t => imported.Contains(new DateTimeOffset(t.Time).ToUnixTimeMilliseconds() / 60000)))
                     outputs[ticks] = existing.Where(t => !imported.Contains(new DateTimeOffset(t.Time).ToUnixTimeMilliseconds() / 60000)).OrderBy(t => t.Time).ThenBy(t => t.Id).ToList();
-                progress?.Report(0.5 * (outputs.Count + 1) / (preview.Days.Count + 1));
             }
             ct.ThrowIfCancellationRequested();
-            result = IbBarStore.Publish(root, instrument, outputs, ct, beforePublish);
+            result = IbBarStore.Publish(ownership, instrument, outputs, ct, beforePublish);
         }
         if (result.Files > 0) IbBarStore.NotifyHistoryChanged(root, preview.Symbol);
+        // Consumer progress may reenter history; report completion only after publication and all ownership has ended.
         progress?.Report(1);
         return new(preview.Symbol, preview.Bars.Count, preview.Days.Count, result.Files, result.BackupDirectory, policy);
     }

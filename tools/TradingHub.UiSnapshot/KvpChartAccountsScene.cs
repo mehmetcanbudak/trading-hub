@@ -94,7 +94,7 @@ internal static class KvpChartAccountsScene
             Until(() => chart.Model is { Series.Count: > 0 }, "actual raw history reaches first chart");
             broker = new BinanceBroker(chart.Model!.Data,
                 new BinanceAccountSettings { ApiKey = firstProfile.ApiKey, ApiSecret = "fixture-chart-secret", Testnet = true, BaseUrl = server.Http },
-                "Isolated testnet account", new ProxyHandlerFactory(new NetworkProxyPolicy { Mode = NetworkProxyMode.Direct }));
+                "Isolated testnet account", network: new ProxyHandlerFactory(new NetworkProxyPolicy { Mode = NetworkProxyMode.Direct }));
             brokerKey = firstProfile.Id + "|" + firstInstrument.Key;
             cache.Add(brokerKey, broker);
             Until(() => broker.PositionReady && broker.OrdersReady, "actual Binance account consumes confirmed fake snapshots");

@@ -1,4 +1,4 @@
-using System.Globalization;
+using System.Text.Json;
 using TradingHub.Data;
 using TradingHub.Market;
 using TradingHub.Trading;
@@ -16,63 +16,34 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
     private readonly Func<CancellationToken, Task<(string Symbol, string Exchange)>> _contract;
     private readonly string _account;
     private readonly object _gate = new();
+    private readonly CancellationTokenSource _cts = new();
+    private bool _disposed;
+    private bool _ownershipNotificationPending;
+    private readonly Queue<OwnedOrderQuantity> _quantityNotifications = new();
+    private bool _publishingQuantities;
     private readonly Dictionary<string, Order> _byTag = new();
     private readonly Dictionary<Order, string> _tagOf = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, Order> _byBasket = new();
+    private readonly Dictionary<Order, PreparedOrderIntent> _intents = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Order> _cancelRequested = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Order> _cancelInFlight = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Order> _cancelAttempted = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Order, Replacement> _replacements = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<Order, decimal> _queuedModifyPrices = new(ReferenceEqualityComparer.Instance);
-    private sealed record Replacement(int TotalQuantity, decimal Price, long WorkingRevision, long RejectionRevision);
+    private readonly Dictionary<Order, PreparedOrderIntent> _queuedReprices = new(ReferenceEqualityComparer.Instance);
+    private sealed record Replacement(PreparedOrderIntent Intent, int TotalQuantity, decimal Price, long WorkingRevision, long RejectionRevision);
     private (string Symbol, string Exchange)? _resolved;
+    private RithmicAccountInfo? _verifiedNativeAccount;
     private volatile List<Order> _active = new();
 
-    /// <summary>
-    /// The part of every order tag that identifies this process (<c>th-{SessionTag}-{order id}</c>). Order ids restart at 1
-    /// in every process, so without it a later process could reuse an earlier one's same-day tags and take that process's
-    /// orders for its own.
-    /// </summary>
-    public static string SessionTag { get; } = SessionTagFor(ProcessStartUtc());
-
-    /// <summary>Session part of the tags for a process started at <paramref name="startUtc"/>: its Unix milliseconds in base 36 (8 ASCII characters).</summary>
-    public static string SessionTagFor(DateTime startUtc)
-    {
-        const string digits = "0123456789abcdefghijklmnopqrstuvwxyz";
-        var utc = startUtc.Kind == DateTimeKind.Local ? startUtc.ToUniversalTime() : DateTime.SpecifyKind(startUtc, DateTimeKind.Utc);
-        long ms = Math.Max(0, new DateTimeOffset(utc).ToUnixTimeMilliseconds());
-        Span<char> text = stackalloc char[13];
-        int i = text.Length;
-        do
-        {
-            text[--i] = digits[(int)(ms % 36)];
-            ms /= 36;
-        }
-        while (ms > 0);
-        return new string(text[i..]);
-    }
-
-    private static DateTime ProcessStartUtc()
-    {
-        try
-        {
-            using var process = System.Diagnostics.Process.GetCurrentProcess();
-            return process.StartTime.ToUniversalTime();
-        }
-        catch (Exception)
-        {
-            return DateTime.UtcNow; // start time unavailable: the first use in this process is just as distinct
-        }
-    }
-
     public RithmicBroker(InstrumentData data, RithmicTradingSession session, string accountId, string name,
-        Func<CancellationToken, Task<(string Symbol, string Exchange)>> contract)
+        Func<CancellationToken, Task<(string Symbol, string Exchange)>> contract, OrderContext? orderContext = null)
     {
         _data = data;
         _session = session;
         _account = accountId;
         _contract = contract;
         Name = name;
+        OrderContext = orderContext ?? new OrderContext(new AccountContextDescriptor("", "Rithmic", "futures", "unconfigured", "", ""));
         Position = new Position { Security = new Security { Code = data.Instrument.Symbol, SecurityId = data.Instrument.Key } };
         _session.Changed += Sync;
         _ = ContractAsync();
@@ -85,9 +56,32 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
 
     public Instrument Instrument => _data.Instrument;
     public decimal LastPrice => _data.LastPrice;
+    // Session basket/cumulative fills are not yet an authoritative, fee-complete execution-report source.
+    public OrderContext OrderContext { get; }
+    public IExecutionSource Executions => OrderContext.Executions;
     public Position Position { get; }
-    public IEnumerable<Order> ActiveOrders => _active;
-    public string? LastError { get; private set; }
+    public IEnumerable<Order> ActiveOrders
+    {
+        get
+        {
+            lock (_gate)
+                foreach (var order in _active)
+                    if (string.IsNullOrEmpty(order.OwnerId) && order.NativeIdentity != null)
+                        order.ContextId = OrderContext.Descriptor.Id;
+            return _active;
+        }
+    }
+    private string? _lastError;
+    private string? _ownershipFault;
+    public string? LastError
+    {
+        get
+        {
+            string? fault = _ownershipFault ?? OrderContext.LastError;
+            return fault == null ? _lastError : _lastError == null ? fault : _lastError + "; " + fault;
+        }
+        private set => _lastError = value;
+    }
     public bool PositionReady => _resolved is { } c && _session.PositionReadyFor(_account, c.Symbol, c.Exchange);
     public bool OrdersReady
     {
@@ -106,7 +100,7 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
 
     public bool IsReplacementPending(Order order)
     {
-        lock (_gate) return _replacements.ContainsKey(order) || _queuedModifyPrices.ContainsKey(order);
+        lock (_gate) return _replacements.ContainsKey(order) || _queuedReprices.ContainsKey(order);
     }
 
     /// <summary>Contrato donde opera (ESZ6, CME); null hasta que Rithmic lo confirma.</summary>
@@ -159,7 +153,8 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         List<Order>? cancels = null;
         lock (_gate)
         {
-            // Concurrent order/PnL callbacks must capture, apply and publish under the same gate.
+            if (_disposed) return;
+            // Concurrent order/PnL callbacks capture and apply one snapshot under the same gate.
             var states = _session.OrdersFor(_account, c.Symbol, c.Exchange);
             var seen = new HashSet<Order>(ReferenceEqualityComparer.Instance);
             foreach (var s in states)
@@ -170,15 +165,20 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
                 if (o == null)
                 {
                     if (s.Done) continue; // ya terminada antes de abrir Trading Hub
-                    o = new Order { ExchangeOrderId = s.BasketId, Comment = "Rithmic" };
+                    o = new Order { Security = Position.Security, ExchangeOrderId = s.BasketId, Comment = "Rithmic" };
                 }
+                if (string.IsNullOrEmpty(o.OwnerId) && s.UserTag.Length > 0) o.ClientOrderId = s.UserTag;
 
                 if (s.BasketId.Length > 0)
                 {
                     o.ExchangeOrderId = s.BasketId;
                     _byBasket[s.BasketId] = o;
+                    BindNative(o, s.BasketId);
                 }
 
+                decimal previousFilled = o.Filled;
+                var previousState = o.State;
+                var previousStatus = o.Status;
                 Apply(s, o);
                 if (_replacements.TryGetValue(o, out var replacement))
                 {
@@ -189,6 +189,7 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
                         {
                             _session.RestoreRejectedReplacement(s);
                             LastError = "Rithmic rejected amendment: " + native.Reason;
+                            RecordRejected(replacement.Intent, "Rithmic rejected amendment: " + native.Reason);
                         }
                         Apply(s, o);
                         _replacements.Remove(o);
@@ -197,7 +198,10 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
                         native.Quantity == replacement.TotalQuantity && native.Price == replacement.Price)
                         _replacements.Remove(o);
                 }
-                if (o.State != OrderStates.Active) _queuedModifyPrices.Remove(o);
+                ObserveNativeQuantity(o, previousFilled, previousState, previousStatus);
+                if (o.State != OrderStates.Active) RejectQueuedReprice(o, "The order became terminal before the queued price update.");
+                if (s.Rejected && _intents.TryGetValue(o, out var rejected))
+                    RecordRejected(rejected, s.Reason);
                 if (s.Rejected && s.Reason.Length > 0) LastError = "Rithmic rejected order: " + s.Reason;
                 if (o.State == OrderStates.Active && seen.Add(o)) active.Add(o);
             }
@@ -226,42 +230,53 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
                     (cancels ??= new()).Add(order);
                 }
             }
-            // A queued trailing price is not a saved sizing request. Reuse Replace only after the
-            // previous outcome is authoritative and replay is ready, with the remaining quantity now.
-            foreach (var (order, price) in _queuedModifyPrices)
+            foreach (var (order, intent) in _queuedReprices.ToArray())
             {
                 if (order.State != OrderStates.Active || _cancelRequested.Contains(order))
-                    _queuedModifyPrices.Remove(order);
+                    RejectQueuedReprice(order, "The order became terminal or cancellation was requested before the queued price update.");
                 else if (!_replacements.ContainsKey(order) && _session.IsConnected && _session.OrdersReadyFor(_account))
                 {
-                    _queuedModifyPrices.Remove(order);
-                    Replace(order, price, order.Unfilled);
+                    _queuedReprices.Remove(order);
+                    StartReplacement(order, intent);
                 }
             }
         }
+        PublishOwnershipNotification();
+        PublishQuantityNotifications();
         Changed?.Invoke();
         if (cancels != null)
             foreach (var order in cancels) _ = CancelBoundAsync(order);
     }
 
-    private Order Send(OrderDirections dir, OrderTypes type, decimal qty, decimal price, string comment, bool reduceOnly = false)
+    public Order Submit(PreparedOrderIntent intent)
     {
-        int q = (int)Math.Round(qty);
-        var order = new Order { Direction = dir, Type = type, QuantityToFill = q, Unfilled = q, Price = price, TriggerPrice = price, Comment = comment, State = OrderStates.Active, Status = OrderStatus.Placed, ReduceOnly = reduceOnly };
-        if (q <= 0)
+        lock (_gate)
+            if (_byTag.TryGetValue(intent.ClientOrderId, out var existing)) return existing;
+        var request = intent.Request;
+        var dir = request.Direction;
+        var type = request.Type;
+        var price = request.Price;
+        int q = (int)Math.Round(request.Quantity);
+        var order = new Order { Security = Position.Security, Direction = dir, Type = type, QuantityToFill = q, Unfilled = q, Price = price, TriggerPrice = price, Comment = request.Comment, State = OrderStates.Active, Status = OrderStatus.Placed, ReduceOnly = request.ReduceOnly };
+        var bindingError = request.Instrument == Instrument.Key
+            ? BindOwnedOrder(order, intent) : "The prepared instrument does not match this broker.";
+        if (bindingError != null || q <= 0)
         {
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
-            LastError = "Futures quantity must be a whole number of contracts (1, 2, 3…).";
+            LastError = bindingError ?? "Futures quantity must be a whole number of contracts (1, 2, 3…).";
+            if (bindingError == null) RecordRejected(intent, "Futures quantity must be a whole number of contracts (1, 2, 3…).");
             Changed?.Invoke();
             return order;
         }
 
-        string tag = "th-" + SessionTag + "-" + order.Id.ToString(CultureInfo.InvariantCulture);
+        string tag = intent.ClientOrderId;
         lock (_gate)
         {
+            if (_byTag.TryGetValue(tag, out var existing)) return existing;
             _byTag[tag] = order;
             _tagOf[order] = tag;
+            _intents[order] = intent;
         }
 
         Sync();
@@ -271,16 +286,29 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
             try
             {
                 var (sym, exch) = await ContractAsync().ConfigureAwait(false);
+                await WaitForNativeReplayAsync(sym, exch).ConfigureAwait(false);
                 int priceType = type == OrderTypes.Market ? 2 : type == OrderTypes.Stop ? 4 : 1;
                 decimal px = price > 0 ? Instrument.RoundPrice(price) : 0;
-                submissionStarted = true;
-                var basket = await _session.PlaceAsync(_account, sym, exch, dir == OrderDirections.Buy, priceType, q, px, px, tag, CancellationToken.None).ConfigureAwait(false);
+                Task<string> placement;
                 lock (_gate)
                 {
+                    if (_disposed) return;
+                    var accountError = VerifyAccountEvidence();
+                    if (accountError != null) throw new InvalidOperationException(accountError);
+                    var dispatchError = StartOwnedDispatch(intent, sym, exch, q, px);
+                    if (dispatchError != null) throw new InvalidOperationException(dispatchError);
+                    submissionStarted = true;
+                    placement = _session.PlaceAsync(_account, sym, exch, dir == OrderDirections.Buy, priceType, q, px, px, tag, _cts.Token);
+                }
+                var basket = await placement.ConfigureAwait(false);
+                lock (_gate)
+                {
+                    if (_disposed) return;
                     if (basket.Length > 0)
                     {
                         order.ExchangeOrderId = basket;
                         _byBasket[basket] = order;
+                        BindNative(order, basket);
                     }
                 }
 
@@ -290,10 +318,12 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
             {
                 lock (_gate)
                 {
+                    if (_disposed) return;
                     if (!submissionStarted || ex is RithmicTradingSession.RithmicRejectedException)
                     {
                         order.State = OrderStates.Failed;
                         order.Status = OrderStatus.Rejected;
+                        RecordRejected(intent, ex.Message);
                     }
                     // A lost response is not a rejection. Keep the original tag and handle for exact replay.
                     LastError = submissionStarted && ex is not RithmicTradingSession.RithmicRejectedException
@@ -306,13 +336,6 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         return order;
     }
 
-    public Order Market(OrderDirections dir, decimal qty, string comment = "") => Send(dir, OrderTypes.Market, qty, 0, comment);
-    public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => Send(dir, OrderTypes.Limit, qty, price, comment);
-    public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => Send(dir, OrderTypes.Stop, qty, trigger, comment);
-
-    /// <summary>Stop loss / objetivo: Trading Hub los maneja en OCO (Rithmic no tiene "solo reducir" en una orden simple).</summary>
-    public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") =>
-        Send(dir, type is OrderTypes.Market or OrderTypes.Stop ? type : OrderTypes.Limit, qty, price, comment, reduceOnly: true);
 
     /// <summary>Rithmic's state of an order, found by basket id or by the tag this broker gave it (restored orders: basket id only).</summary>
     private RithmicOrderState? StateOf(Order order)
@@ -324,13 +347,30 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
             .FirstOrDefault(s => (order.ExchangeOrderId.Length > 0 && s.BasketId == order.ExchangeOrderId) || (tag != null && s.UserTag == tag));
     }
 
+    private void BindNative(Order order, string basket)
+    {
+        var native = new NativeOrderIdentity("rithmic:basket", basket);
+        if (!_intents.TryGetValue(order, out var intent))
+        {
+            if (string.IsNullOrEmpty(order.OwnerId))
+            {
+                order.ContextId = OrderContext.Descriptor.Id;
+                order.NativeIdentity = native;
+            }
+            return;
+        }
+        var error = PersistNativeBinding(intent, native);
+        order.NativeIdentity = native;
+        if (error != null) _ownershipFault = "Rithmic accepted order; ownership persistence failed: " + error;
+    }
+
     public void Cancel(Order order)
     {
         lock (_gate)
         {
             if (order.State != OrderStates.Active) return;
             _cancelRequested.Add(order);
-            _queuedModifyPrices.Remove(order);
+            RejectQueuedReprice(order, "Cancellation superseded the queued price update.");
             if (!_cancelInFlight.Contains(order)) _cancelAttempted.Remove(order);
         }
         Sync();
@@ -366,63 +406,113 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         foreach (var o in _active.ToList()) Cancel(o);
     }
 
-    public void Modify(Order order, decimal newPrice)
+    /// <summary>Rithmic modifica precio y cantidad sobre la misma orden.</summary>
+    public Order Replace(Order order, PreparedOrderIntent intent)
     {
         lock (_gate)
         {
-            if (order.State != OrderStates.Active || _cancelRequested.Contains(order)) return;
-            if (_replacements.ContainsKey(order) || _queuedModifyPrices.ContainsKey(order))
-                _queuedModifyPrices[order] = newPrice;
-            else
-                Replace(order, newPrice, order.Unfilled);
+            if (intent.Id == order.IntentId) return order;
+            var validationError = OrderContext.Validate(intent, order);
+            if (validationError == null && (intent.Request.Instrument != Instrument.Key ||
+                intent.Request.Direction != order.Direction || intent.Request.Type != order.Type || intent.Request.ReduceOnly != order.ReduceOnly))
+                validationError = "A native amendment cannot change the instrument, direction, type or reduce-only identity.";
+            if (validationError != null)
+            {
+                LastError = validationError;
+                return order;
+            }
+            if (_cancelRequested.Contains(order) || order.State != OrderStates.Active ||
+                (!intent.IsPriceOnlyReplacement && (_replacements.ContainsKey(order) || _queuedReprices.ContainsKey(order))))
+            {
+                LastError = "Cannot replace an order while its previous outcome is unresolved or cancellation is pending.";
+                RecordRejected(intent, "Cannot replace an order while its previous outcome is unresolved or cancellation is pending.");
+                return order;
+            }
+            var bindingError = BindOwnedOrder(order, intent);
+            if (bindingError != null)
+            {
+                LastError = bindingError;
+                return order;
+            }
+            if (intent.IsPriceOnlyReplacement && (_replacements.ContainsKey(order) || _queuedReprices.ContainsKey(order)))
+            {
+                RejectQueuedReprice(order, "A later prepared price update superseded this unsent price update.");
+                _queuedReprices[order] = intent;
+            }
+            else StartReplacement(order, intent);
         }
+        Changed?.Invoke();
+        return order;
     }
 
-    /// <summary>Rithmic modifica precio y cantidad sobre la misma orden.</summary>
-    public Order Replace(Order order, decimal newPrice, decimal newQuantity)
+    // A queued price update retains its prepared identity but takes sizing only from authoritative replay.
+    private void StartReplacement(Order order, PreparedOrderIntent intent)
     {
-        RithmicOrderState? state;
-        Replacement? replacement = null;
-        lock (_gate)
+        var state = StateOf(order);
+        if (order.ExchangeOrderId.Length == 0 || state == null)
         {
-            if (_replacements.ContainsKey(order) || _queuedModifyPrices.ContainsKey(order) ||
-                _cancelRequested.Contains(order) || order.State != OrderStates.Active) return order;
-            state = StateOf(order);
-            if (order.ExchangeOrderId.Length == 0 || state == null)
-            {
-                LastError = "The order is not available in Rithmic yet; no replacement was sent.";
-            }
-            else
-            {
-                var native = _session.ReplacementState(state);
-                replacement = new Replacement((int)Math.Round(state.Filled + newQuantity),
-                    Instrument.RoundPrice(newPrice), native.WorkingRevision, native.RejectionRevision);
-                _replacements.Add(order, replacement);
-            }
+            LastError = "The order is not available in Rithmic yet; no replacement was sent.";
+            RecordRejected(intent, "The order is not available in Rithmic yet; no replacement was sent.");
+            return;
         }
-        if (state != null && replacement != null) _ = ReplaceAsync(order, state, replacement);
-        else Changed?.Invoke();
-        return order;
+        var native = _session.ReplacementState(state);
+        decimal remaining = intent.IsPriceOnlyReplacement ? order.Unfilled : intent.Request.Quantity;
+        var replacement = new Replacement(intent, (int)Math.Round(state.Filled + remaining),
+            Instrument.RoundPrice(intent.Request.Price), native.WorkingRevision, native.RejectionRevision);
+        _replacements.Add(order, replacement);
+        _ = Task.Run(() => ReplaceAsync(order, state, replacement));
+    }
+
+    private void RejectQueuedReprice(Order order, string reason)
+    {
+        if (_queuedReprices.Remove(order, out var intent)) RecordRejected(intent, reason);
     }
 
     private async Task ReplaceAsync(Order order, RithmicOrderState state, Replacement replacement)
     {
+        bool submissionStarted = false;
         try
         {
-            await _session.ModifyAsync(_account, state, replacement.TotalQuantity, replacement.Price, CancellationToken.None).ConfigureAwait(false);
+            var (symbol, exchange) = await ContractAsync().ConfigureAwait(false);
+            await WaitForNativeReplayAsync(symbol, exchange).ConfigureAwait(false);
+            Task amendment;
+            lock (_gate)
+            {
+                if (_disposed) return;
+                var accountError = VerifyAccountEvidence();
+                if (accountError != null) throw new InvalidOperationException(accountError);
+                decimal remaining = Math.Max(0, replacement.TotalQuantity - state.Filled);
+                var dispatchError = StartOwnedDispatch(replacement.Intent, symbol, exchange, remaining, replacement.Price);
+                if (dispatchError != null) throw new InvalidOperationException(dispatchError);
+                _intents[order] = replacement.Intent;
+                submissionStarted = true;
+                amendment = _session.ModifyAsync(_account, state, replacement.TotalQuantity, replacement.Price, _cts.Token);
+            }
+            await amendment.ConfigureAwait(false);
+            lock (_gate)
+            {
+                if (_disposed) return;
+                BindNative(order, state.BasketId);
+            }
         }
         catch (Exception ex)
         {
             lock (_gate)
             {
+                if (_disposed) return;
                 if (_replacements.TryGetValue(order, out var pending) && ReferenceEquals(pending, replacement))
                 {
-                    if (ex is RithmicTradingSession.RithmicRejectedException)
+                    if (!submissionStarted || ex is RithmicTradingSession.RithmicRejectedException)
                     {
                         _session.RestoreRejectedReplacement(state);
+                        decimal previousFilled = order.Filled;
+                        var previousState = order.State;
+                        var previousStatus = order.Status;
                         Apply(state, order);
+                        ObserveNativeQuantity(order, previousFilled, previousState, previousStatus);
                         _replacements.Remove(order);
                         LastError = ex.Message;
+                        RecordRejected(replacement.Intent, ex.Message);
                     }
                     else LastError = "Rithmic amendment outcome is unknown: " + ex.Message;
                 }
@@ -433,20 +523,126 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         Sync();
     }
 
-    public void Flatten()
+
+    private async Task WaitForNativeReplayAsync(string symbol, string exchange)
     {
-        CancelAll();
-        var q = Position.Volume;
-        if (q > 0) Send(OrderDirections.Sell, OrderTypes.Market, q, 0, "Close");
-        else if (q < 0) Send(OrderDirections.Buy, OrderTypes.Market, -q, 0, "Close");
+        while (!_session.PositionReadyFor(_account, symbol, exchange) || !_session.OrdersReadyFor(_account))
+        {
+            await Task.Delay(100, _cts.Token).ConfigureAwait(false);
+        }
+        _cts.Token.ThrowIfCancellationRequested();
+        Sync(); // Permission must see the replayed position, not the pre-replay default.
     }
 
-    public void Reverse()
+    // Dispose shares this gate with every journal mutation, including late transport callbacks.
+    private string? BindOwnedOrder(Order order, PreparedOrderIntent intent)
     {
-        var q = Position.Volume;
-        if (q > 0) Market(OrderDirections.Sell, q * 2, "Reverse");
-        else if (q < 0) Market(OrderDirections.Buy, -q * 2, "Reverse");
+        lock (_gate) return _disposed ? "Rithmic broker has been disposed." : OrderContext.BindOrder(order, intent);
     }
 
-    public void Dispose() => _session.Changed -= Sync;
+    private string? StartOwnedDispatch(PreparedOrderIntent intent, string instrument, string exchange = "", decimal? actualQuantity = null, decimal? actualPrice = null)
+    {
+        lock (_gate) return _disposed ? "Rithmic broker has been disposed." : OrderContext.StartDispatch(intent, instrument, exchange, actualQuantity, actualPrice);
+    }
+
+    private string? PersistNativeBinding(PreparedOrderIntent intent, NativeOrderIdentity native)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return null;
+            var error = OrderContext.BindNative(intent, native, notify: false);
+            if (error == null) _ownershipNotificationPending = true;
+            return error;
+        }
+    }
+
+    private void PublishOwnershipNotification()
+    {
+        lock (_gate)
+        {
+            if (!_ownershipNotificationPending) return;
+            _ownershipNotificationPending = false;
+        }
+        OrderContext.NotifyOwnershipChanged();
+    }
+
+    private void PublishQuantityNotifications()
+    {
+        lock (_gate)
+        {
+            if (_publishingQuantities) return;
+            _publishingQuantities = true;
+        }
+        try
+        {
+            while (true)
+            {
+                OwnedOrderQuantity observation;
+                lock (_gate)
+                {
+                    if (_quantityNotifications.Count == 0)
+                    {
+                        _publishingQuantities = false;
+                        return;
+                    }
+                    observation = _quantityNotifications.Dequeue();
+                }
+                // Captures admitted before disposal remain ordered, even while a consumer is held.
+                OrderContext.NotifyQuantityChanged(observation);
+            }
+        }
+        catch
+        {
+            lock (_gate) _publishingQuantities = false;
+            throw;
+        }
+    }
+
+    private void ObserveNativeQuantity(Order order, decimal previousFilled, OrderStates previousState, OrderStatus previousStatus)
+    {
+        lock (_gate)
+        {
+            if (_disposed || (order.Filled == previousFilled && order.State == previousState && order.Status == previousStatus)) return;
+            try
+            {
+                if (OrderContext.CaptureQuantityObservation(order, Instrument.Symbol, Instrument.PointValue) is { } observation)
+                    _quantityNotifications.Enqueue(observation);
+            }
+            catch (Exception ex) { _ownershipFault = "Rithmic native quantity projection is unresolved: " + ex.Message; }
+        }
+    }
+
+    private void RecordRejected(PreparedOrderIntent intent, string reason)
+    {
+        lock (_gate)
+            if (!_disposed) OrderContext.RecordRejected(intent, reason);
+    }
+
+    // Called under the broker gate only after native replay has established the route and account.
+    private string? VerifyAccountEvidence()
+    {
+        var account = _session.Accounts.FirstOrDefault(a => a.AccountId == _account);
+        if (account == null) return "The account has not been reported by this Rithmic session.";
+        if (string.IsNullOrEmpty(account.FcmId) || string.IsNullOrEmpty(account.IbId) || string.IsNullOrEmpty(account.AccountId))
+            return null; // Incomplete native identity stays unverified; never synthesize the missing fields.
+        if (_verifiedNativeAccount is { } previous && previous.FcmId == account.FcmId &&
+            previous.IbId == account.IbId && previous.AccountId == account.AccountId) return null;
+        var error = OrderContext.VerifyNativeAccount(JsonSerializer.Serialize(new[] { account.FcmId, account.IbId, account.AccountId }));
+        if (error == null) _verifiedNativeAccount = account;
+        return error;
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _cts.Cancel();
+            _session.Changed -= Sync;
+        }
+        PublishOwnershipNotification();
+        PublishQuantityNotifications();
+    }
 }
+

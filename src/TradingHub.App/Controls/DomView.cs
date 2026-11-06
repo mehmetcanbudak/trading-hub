@@ -97,7 +97,7 @@ public sealed class DomView : SkiaView
         if (to > 0 && to != from)
         {
             if (OrderMoved != null) OrderMoved(order, to);
-            else Dom.Broker?.Modify(order, to);
+            else if (Dom.Broker is { } broker) OrderActions.Reprice(broker, order, to);
         }
 
         InvalidateVisual();

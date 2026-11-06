@@ -165,6 +165,7 @@ public sealed class ReplayFeed : IMarketDataFeed
         catch (Exception ex)
         {
             if (!_stop) sink.OnStatus(Instrument, FeedStatus.Error, "Replay history could not be read: " + ex.Message);
+            IsFinished = true;
         }
     }
 

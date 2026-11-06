@@ -7,7 +7,12 @@ public sealed record AccountExecution(string Id, decimal Quantity, decimal Price
 // Sequence is an optional authoritative account-wide tie breaker, never an order ID or guessed opaque-ID ordering.
 
 /// <summary>Confirmed facts for one owned order. Incomplete coverage never authorizes inventing missing execution prices or fees.</summary>
-public sealed record AccountExecutionSnapshot(IReadOnlyList<AccountExecution> Executions, bool CompleteCoverage);
+public sealed record AccountExecutionSnapshot(IReadOnlyList<AccountExecution> Executions, bool CompleteCoverage)
+{
+    /// <summary>Optional canonical provider facts for native adoption-prefix reconciliation, not a second publication path.
+    /// Missing facts are unsupported/unverified; their execution identities must never be reconstructed from credentials.</summary>
+    public IReadOnlyList<ExecutionReport>? ExecutionFacts { get; init; }
+}
 
 /// <summary>Optional confirmed-execution capability. Implementations raise ITradingAccount.Changed for late facts/corrections,
 /// return account-scoped stable IDs and causally sorted immutable observations, and report gaps explicitly.

@@ -34,6 +34,8 @@ public sealed class PortfolioResult
     public List<PortfolioComponent> Components { get; set; } = new();
     public DateTime From { get; set; }
     public DateTime To { get; set; }
+    /// <summary>Backtests are modeled estimates. Live aggregation sets this from its participating ledgers.</summary>
+    public LiveFinancialQuality FinancialQuality { get; set; } = LiveFinancialQuality.Estimated;
 
     /// <summary>True si los componentes no comparten fechas y se usó la unión de los rangos.</summary>
     public bool NoOverlap { get; set; }

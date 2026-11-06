@@ -13,6 +13,7 @@ using TradingHub.Strategies;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("TradingHub.UiSnapshot")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("TradingHub.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("TradingHub.IbSnapshotCrashFixture")]
 
 namespace TradingHub.App;
 

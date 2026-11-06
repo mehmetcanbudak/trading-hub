@@ -32,6 +32,7 @@ public sealed class ReplayProtectionIsolationTests
             var selection = ReplaySelection.Selected(instrument, Start, Start.AddSeconds(5), 23);
             var first = replays.Open(selection, 1000, new ReplayFees(), TimeSpan.FromMinutes(1));
             var second = replays.Open(selection, 1000, new ReplayFees(), TimeSpan.FromMinutes(1));
+            Assert.NotNull(second.Account.Position);
             using var normalFeed = new ReplayPracticeTests.ManualFeed(instrument, Tick(1, 0, 100));
             using var normalData = new InstrumentData(instrument, normalFeed);
             normalData.Start(Start.AddMinutes(-1));
@@ -39,6 +40,7 @@ public sealed class ReplayProtectionIsolationTests
                 () => { hub.PumpAll(); normalData.Pump(); });
             using var normal = new SimBroker(normalData, new Portfolio { BeginBalance = 1000, Balance = 1000 }, new TradingStatistics())
                 { Name = "Normal simulation protection fixture" };
+            Assert.NotNull(normal.Position);
             using var firstRunner = Runner(first.Data, first.Account);
             using var secondRunner = Runner(second.Data, second.Account);
             using var normalRunner = Runner(normalData, normal);
@@ -74,7 +76,7 @@ public sealed class ReplayProtectionIsolationTests
             Assert.Equal(2, normalIds.Length);
 
             using var secondResumed = Runner(second.Data, second.Account, secondIds);
-            secondResumed.SeedPosition(new LiveFill(Start.AddSeconds(1), true, 1, second.Account.Position!.AveragePrice));
+            secondResumed.RestoreLocalState(secondRunner.CaptureLocalState());
             secondResumed.Start();
             // This is the process-global cancellation consumer: the other replay's cancellation must not exclude these handles.
             Assert.Equal(2, secondResumed.ActiveOrders.Count(order => order.IsProtective));
@@ -88,7 +90,7 @@ public sealed class ReplayProtectionIsolationTests
             Assert.Equal(OrderStates.Active, normalStop.State);
             Assert.Equal(OrderStates.Active, normalTarget.State);
             using var normalResumed = Runner(normalData, normal, normalIds);
-            normalResumed.SeedPosition(new LiveFill(Start.AddSeconds(1), true, 1, normal.Position!.AveragePrice));
+            normalResumed.RestoreLocalState(normalRunner.CaptureLocalState());
             normalResumed.Start();
             Assert.Equal(2, normalResumed.ActiveOrders.Count(order => order.IsProtective));
             Assert.Equal(normalIds.Order(StringComparer.Ordinal), normalResumed.ProtectionOrderIds.Order(StringComparer.Ordinal));
@@ -126,7 +128,7 @@ public sealed class ReplayProtectionIsolationTests
             var fill = Assert.Single(runner.Ledger.Fills);
             Assert.Equal(entry, fill.Price);
             Assert.Equal(Start, fill.Time);
-            Assert.Equal(1m, fill.AccountFee);
+            Assert.Equal(1m, Assert.Single(fill.Fees!).Amount);
             Assert.True(runner.Ledger.CostsComplete);
             run.Feed.SeekForward(Start.AddSeconds(1));
             await UntilAsync(() => run.ClockUtc >= Start.AddSeconds(1), hub.PumpAll);
@@ -155,7 +157,7 @@ public sealed class ReplayProtectionIsolationTests
             var entry = Assert.Single(original.Ledger.Fills);
             Assert.Equal(110m, original.Ledger.AveragePrice);
             Assert.Equal(Start.AddSeconds(1), entry.Time);
-            Assert.Equal(2.10m, entry.AccountFee);
+            Assert.Equal(2.10m, Assert.Single(entry.Fees!).Amount);
             var stop = Assert.Single(run.Account.ActiveOrders, o => o.Type == OrderTypes.Stop);
             var target = Assert.Single(run.Account.ActiveOrders, o => o.Type == OrderTypes.Limit);
             Assert.Equal(105m, stop.TriggerPrice);
@@ -187,7 +189,7 @@ public sealed class ReplayProtectionIsolationTests
             Assert.Equal(2, resumed.Ledger.Fills.Count);
             Assert.Equal(104m, resumed.Ledger.Fills[1].Price);
             Assert.Equal(Start.AddSeconds(2), resumed.Ledger.Fills[1].Time);
-            Assert.Equal(2.04m, resumed.Ledger.Fills[1].AccountFee);
+            Assert.Equal(2.04m, Assert.Single(resumed.Ledger.Fills[1].Fees!).Amount);
             var closed = Assert.Single(resumed.Ledger.Trades);
             Assert.Equal(4.14m, closed.Commission);
             Assert.Equal(-64.14m, closed.NetPnl);
@@ -326,7 +328,8 @@ public sealed class ReplayProtectionIsolationTests
             resumed.Start();
             if (withholdTarget)
             {
-                Assert.Equal(1m, resumed.OwnPosition);
+                Assert.Equal(0m, resumed.OwnPosition); // Native quantity is known even while one execution's economics are withheld.
+                Assert.True(resumed.Ledger.HasPendingPrices);
                 Assert.Equal(2, resumed.Ledger.Fills.Count);
                 Assert.Single(run.Account.ActiveOrders);
                 facts.RevealTarget();
@@ -335,31 +338,31 @@ public sealed class ReplayProtectionIsolationTests
             Assert.Empty(run.Account.ActiveOrders);
             Assert.Equal(new[] { 100m, 120m, 90m }, resumed.Ledger.Fills.Select(fill => fill.Price));
             Assert.Equal(new[] { 1L, 2L, 3L }, resumed.Ledger.Fills.Select(fill => fill.ExecutionSequence!.Value));
-            Assert.Equal(new[] { 2m, 1m, 1m }, resumed.Ledger.Fills.Select(fill => fill.AccountFee!.Value));
+            Assert.Equal(new[] { 2m, 1m, 1m }, resumed.Ledger.Fills.Select(fill => Assert.Single(fill.Fees!).Amount));
             Assert.Equal(96m, resumed.Ledger.Realized);
-            Assert.Equal(197m, resumed.Ledger.PeakRealized);
+            Assert.Equal(197m, resumed.Ledger.Curve(0).Max(point => point.Equity));
             Assert.Equal(101m, resumed.CurrentDrawdown);
             Assert.Equal(1096m, resumed.Ledger.Curve(1000).Last().Equity);
             Assert.Equal(101m, resumed.Ledger.Curve(1000).Last().Drawdown);
 
             // Provider corrections are execution facts, not synthetic native re-matching:
             // changing UTC must reorder the existing ID and recompute peak/curve/closed trades.
-            string target = resumed.Ledger.Fills.Single(fill => fill.Price == 120).ExecutionId!;
-            facts.Correct(target, execution => execution with { TimeUtc = Start.AddSeconds(3), Sequence = null });
+            string target = resumed.Ledger.Fills.Single(fill => fill.Price == 120).ExecutionId!.Id;
+            facts.Correct(target, execution => execution with { Time = Start.AddSeconds(3), Sequence = null });
             Assert.Equal(new[] { 100m, 90m, 120m }, resumed.Ledger.Fills.Select(fill => fill.Price));
             Assert.Equal(new[] { 90m, 120m }, resumed.Ledger.Trades.Select(trade => trade.ExitPrice));
             Assert.Equal(96m, resumed.Ledger.Realized);
-            Assert.Equal(96m, resumed.Ledger.PeakRealized);
+            Assert.Equal(96m, resumed.Ledger.Curve(0).Max(point => point.Equity));
             Assert.Equal(0m, resumed.CurrentDrawdown);
             Assert.Equal(0m, resumed.Ledger.Curve(1000).Last().Drawdown);
 
-            string entry = resumed.Ledger.Fills[0].ExecutionId!;
-            facts.Correct(entry, execution => execution with { Fee = 3, AccountFee = 3 });
+            string entry = resumed.Ledger.Fills[0].ExecutionId!.Id;
+            facts.Correct(entry, execution => execution with { Fees = new[] { new ExecutionFee(3, "USD") }, FeesComplete = true });
             Assert.Equal(3, resumed.Ledger.Fills.Count);
             Assert.Equal(5m, resumed.Ledger.Fees);
             Assert.Equal(95m, resumed.Ledger.Realized);
             Assert.Equal(95m, resumed.Ledger.Trades.Sum(trade => trade.NetPnl));
-            Assert.Equal(95m, resumed.Ledger.PeakRealized);
+            Assert.Equal(95m, resumed.Ledger.Curve(0).Max(point => point.Equity));
             Assert.Equal(1095m, resumed.Ledger.Curve(1000).Last().Equity);
             Assert.Equal(0m, resumed.CurrentDrawdown);
             Assert.Equal(3, run.Account.Journal.Count);
@@ -400,33 +403,26 @@ public sealed class ReplayProtectionIsolationTests
     }
     // The real replay account performs all matching/routing. Only confirmed provider metadata is
     // withheld/corrected, exercising the actual runner's incomplete/late-fact consumer boundary.
-    private sealed class CorrectableExecutions : ITradingAccount, IAccountExecutionSource, IObservedMarketPrice, IDisposable
+    private sealed class CorrectableExecutions : ITradingAccount, IObservedMarketPrice, IDisposable
     {
         private readonly ReplayAccount _inner;
-        private readonly Dictionary<string, AccountExecution> _known = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, AccountExecution> _corrections = new(StringComparer.Ordinal);
-        private long _revision;
+        private readonly ExecutionLog _source = new();
+        private readonly Dictionary<string, ExecutionReport> _known = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ExecutionReport> _corrections = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ExecutionReport> _published = new(StringComparer.Ordinal);
         public CorrectableExecutions(ReplayAccount inner) { _inner = inner; inner.Changed += Relay; }
         public bool WithholdTarget { get; init; }
         private bool _revealed;
-        public void RevealTarget() { _revealed = true; _revision++; Relay(); }
-        public void Correct(string id, Func<AccountExecution, AccountExecution> correction)
+        public void RevealTarget() { _revealed = true; Relay(); }
+        public void Correct(string id, Func<ExecutionReport, ExecutionReport> correction)
         {
             _corrections[id] = correction(_corrections.GetValueOrDefault(id, _known[id]));
-            _revision++;
             Relay();
         }
-        public AccountExecutionSnapshot GetExecutions(Order order)
-        {
-            var snapshot = _inner.GetExecutions(order);
-            foreach (var execution in snapshot.Executions) _known[execution.Id] = execution;
-            var visible = WithholdTarget && !_revealed && order.Type == OrderTypes.Limit
-                ? Array.Empty<AccountExecution>()
-                : snapshot.Executions.Select(execution => _corrections.GetValueOrDefault(execution.Id, execution)).ToArray();
-            return new(visible, snapshot.CompleteCoverage && visible.Sum(execution => execution.Quantity) >= order.Filled);
-        }
-        public long ExecutionRevision => _inner.ExecutionRevision + _revision;
-        public string? PersistentAccountIdentity => _inner.PersistentAccountIdentity;
+        public OrderContext OrderContext => _inner.OrderContext;
+        public IExecutionSource Executions => _source;
+        public Order Submit(PreparedOrderIntent intent) => _inner.Submit(intent);
+        public Order Replace(Order order, PreparedOrderIntent intent) => _inner.Replace(order, intent);
         public bool HasObservedPrice => _inner.HasObservedPrice;
         public bool HasKnownPrice => _inner.HasKnownPrice;
         public string Name => _inner.Name;
@@ -437,12 +433,23 @@ public sealed class ReplayProtectionIsolationTests
         public string? LastError => _inner.LastError;
         public decimal LastPrice => _inner.LastPrice;
         public event Action? Changed;
-        private void Relay() => Changed?.Invoke();
-        public Order Market(OrderDirections dir, decimal qty, string comment = "") => _inner.Market(dir, qty, comment);
-        public Order Limit(OrderDirections dir, decimal qty, decimal price, string comment = "") => _inner.Limit(dir, qty, price, comment);
-        public Order Stop(OrderDirections dir, decimal qty, decimal trigger, string comment = "") => _inner.Stop(dir, qty, trigger, comment);
-        public Order Exit(OrderTypes type, OrderDirections dir, decimal qty, decimal price, string comment = "") => _inner.Exit(type, dir, qty, price, comment);
-        public Order Replace(Order order, decimal newPrice, decimal newQuantity) => _inner.Replace(order, newPrice, newQuantity);
+        private void Relay()
+        {
+            bool incomplete = false;
+            foreach (var original in _inner.Executions.Capture(ExecutionCursor.Start).Changes)
+            {
+                string id = original.Identity.Id;
+                _known[id] = original;
+                if (WithholdTarget && !_revealed && OrderContext.Find(original.IntentId)?.Request.Type == OrderTypes.Limit)
+                { incomplete = true; continue; }
+                var report = _corrections.GetValueOrDefault(id, original);
+                if (_published.TryGetValue(id, out var previous) && previous == report) continue;
+                _published[id] = report;
+                _source.Publish(report);
+            }
+            _source.SetProducerAvailability(this, incomplete ? ExecutionAvailability.Synchronizing : ExecutionAvailability.Ready);
+            Changed?.Invoke();
+        }
         public void Cancel(Order order) => _inner.Cancel(order);
         public void CancelAt(decimal price) => _inner.CancelAt(price);
         public void CancelAll() => _inner.CancelAll();

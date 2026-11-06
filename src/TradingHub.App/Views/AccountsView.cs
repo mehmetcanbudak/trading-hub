@@ -59,7 +59,7 @@ public sealed class AccountsView : UserControl
     private readonly WrapPanel _periodChips = new();
     private string _period = "all";
     private string _selected = AccountCenter.SimId;
-    private readonly record struct FinancialContentKey(string AccountId, string? CredentialContext, int FillCount, long ExecutionRevision, bool AnalysisKnown, bool CostsComplete);
+    private readonly record struct FinancialContentKey(string AccountId, string? CredentialContext, int FillCount, long HistoryRevision, long ExecutionRevision, bool AnalysisKnown, bool CostsComplete);
     private readonly record struct StatisticsContentKey(FinancialContentKey Content, string Period, DateOnly Day);
     private string _chipsKey = "";
     private FinancialContentKey? _listsKey;
@@ -589,7 +589,7 @@ public sealed class AccountsView : UserControl
 
     private void UpdateLists(AccountSnapshot s)
     {
-        var key = new FinancialContentKey(s.Account.Id, s.Account.BybitContextIdentity, s.Fills.Count, s.ExecutionRevision, s.AnalysisKnown, s.CostsComplete);
+        var key = new FinancialContentKey(s.Account.Id, s.Account.BybitContextIdentity, s.Fills.Count, s.HistoryRevision, s.ExecutionRevision, s.AnalysisKnown, s.CostsComplete);
         if (key == _listsKey) return;
         _listsKey = key;
         _fills.ItemsSource = s.Fills.Reverse().ToList();
@@ -600,9 +600,11 @@ public sealed class AccountsView : UserControl
 
     private void UpdateStats(AccountSnapshot s)
     {
+        var center = _svc.AccountCenter;
+        var today = center.ToLocal(DateTime.UtcNow).Date;
         var key = new StatisticsContentKey(
-            new FinancialContentKey(s.Account.Id, s.Account.BybitContextIdentity, s.Fills.Count, s.ExecutionRevision, s.AnalysisKnown, s.CostsComplete),
-            _period, DateOnly.FromDateTime(_svc.AccountCenter.ToLocal(DateTime.UtcNow)));
+            new FinancialContentKey(s.Account.Id, s.Account.BybitContextIdentity, s.Fills.Count, s.HistoryRevision, s.ExecutionRevision, s.AnalysisKnown, s.CostsComplete),
+            _period, DateOnly.FromDateTime(today));
         if (key == _statsKey) return;
         _statsKey = key;
         if (!s.AnalysisKnown)
@@ -617,8 +619,6 @@ public sealed class AccountsView : UserControl
         }
         _equity.EmptyText = "No closed trades in this period";
 
-        var center = _svc.AccountCenter;
-        var today = center.ToLocal(DateTime.UtcNow).Date;
         var trades = s.Analysis.Trades.Where(t => _period switch
         {
             "today" => center.ToLocal(t.CloseTime).Date == today,

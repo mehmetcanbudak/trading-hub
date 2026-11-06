@@ -13,6 +13,7 @@
     <Project Path="tests/TradingHub.LedgerCrashFixture/TradingHub.LedgerCrashFixture.csproj" />
     <Project Path="tests/TradingHub.QuantColdFixture/TradingHub.QuantColdFixture.csproj" />
     <Project Path="tests/TradingHub.AssistantCliFixture/TradingHub.AssistantCliFixture.csproj" />
+    <Project Path="tests/TradingHub.IbSnapshotCrashFixture/TradingHub.IbSnapshotCrashFixture.csproj" />
     <Project Path="tests/TradingHub.Tests/TradingHub.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">

@@ -82,11 +82,11 @@ public sealed class ReplayPracticeTests
             normalFeed.Emit(Tick(0, 100));
             normalData.Pump();
             Assert.Equal(100m, normal.LastPrice);
-            normal.Market(OrderDirections.Buy, 1);
+            OrderActions.Manual(normal, OrderTypes.Market, OrderDirections.Buy, 1);
             Assert.Equal(101m, Assert.Single(normal.MyTrades).Price);
             normalFeed.Emit(Tick(20, 120));
             normalData.Pump();
-            normal.Flatten();
+            OrderActions.Flatten(normal);
 
             first.Feed!.SeekForward(Start.AddSeconds(1));
             await UntilAsync(() => first.ClockUtc == Start.AddSeconds(1), hub.PumpAll);

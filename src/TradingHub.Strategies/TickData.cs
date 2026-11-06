@@ -19,16 +19,19 @@ public sealed class TickData
     private Summary? _summary;
     private sealed record Summary(DataQuality Quality, int ResolutionSeconds, long CorrectionRevision, string SourceIdentity, bool HasKnownAvailability);
 
-    private TickData(Instrument instrument, long[] ids, long[] times, long[] prices, decimal[] volumes, byte[] sides, ushort[] quality, TradeProvenance[] provenance, string?[]? eventIds, long eventIdTextBytes, int start, int end, bool compressed, Timeline? timeline = null)
+    private TickData(Instrument instrument, long[] ids, long[] times, long[] prices, decimal[] volumes, byte[] sides, ushort[] quality, TradeProvenance[] provenance, string?[]? eventIds, long eventIdTextBytes, int start, int end, bool compressed, Timeline? timeline = null, IbHistoryStamp? storageStamp = null)
     {
         Instrument = instrument; _ids = ids; _times = times; _prices = prices; _volumes = volumes; _sides = sides;
         _quality = quality; _provenance = provenance; Start = start; End = end; Compressed = compressed;
         _eventIds = eventIds; _eventIdTextBytes = eventIdTextBytes;
         _timeline = timeline ?? new Timeline(times, quality, provenance);
+        StorageStamp = storageStamp;
     }
 
     public Instrument Instrument { get; }
     public bool Compressed { get; }
+    /// <summary>Identity captured before the original disk-load range; slices and compression retain that scope's stamp.</summary>
+    public IbHistoryStamp? StorageStamp { get; }
     public int Start { get; }
     public int End { get; }
     public int Count => End - Start;
@@ -146,11 +149,11 @@ public sealed class TickData
         if (Compressed) return this;
         var builder = new Builder(Instrument, Math.Min(Count, 1 << 20));
         for (int i = Start; i < End; i++) builder.Add(Get(i), compress: true);
-        return builder.Finish(compressed: true);
+        return builder.Finish(compressed: true, storageStamp: StorageStamp);
     }
 
     public TickData Slice(DateTime fromUtc, DateTime toUtc) =>
-        new(Instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance, _eventIds, _eventIdTextBytes, Lower(fromUtc.Ticks), Lower(toUtc.Ticks), Compressed, _timeline);
+        new(Instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance, _eventIds, _eventIdTextBytes, Lower(fromUtc.Ticks), Lower(toUtc.Ticks), Compressed, _timeline, StorageStamp);
 
     private int Lower(long time)
     {
@@ -161,19 +164,26 @@ public sealed class TickData
 
     public static TickData Load(string root, Instrument instrument, DateTime fromUtc, DateTime toUtc, IProgress<double>? progress, CancellationToken ct, bool compress = false)
     {
+        using var ibSnapshot = instrument.FeedId == IbBarImport.FeedId ? IbBarStore.OpenSnapshot(root, instrument.Symbol, ct) : null;
+        IbHistoryStamp? storageStamp = ibSnapshot?.GetStamp(fromUtc, toUtc);
         var builder = new Builder(instrument, 1 << 20);
         int days = Math.Max(1, DateOnly.FromDateTime(toUtc).DayNumber - DateOnly.FromDateTime(fromUtc).DayNumber + 1), done = 0;
         for (var day = DateOnly.FromDateTime(fromUtc); day <= DateOnly.FromDateTime(toUtc); day = day.AddDays(1))
         {
             ct.ThrowIfCancellationRequested();
-            foreach (var trade in HistorySources.ReadDay(root, instrument.FeedId, instrument.Symbol, day))
+            var rows = ibSnapshot != null ? ibSnapshot.ReadDay(day, instrument.TickSize) : HistorySources.ReadDay(root, instrument.FeedId, instrument.Symbol, day);
+            foreach (var trade in rows)
             {
                 if (trade.Time < fromUtc || trade.Time >= toUtc) continue;
                 builder.Add(trade, compress);
             }
-            progress?.Report(++done / (double)days);
+            if (ibSnapshot == null) progress?.Report(++done / (double)days);
         }
-        return builder.Finish(compress);
+        var result = builder.Finish(compress, storageStamp);
+        // Inline consumers may reenter history; publish progress only after releasing snapshot ownership.
+        ibSnapshot?.Dispose();
+        if (ibSnapshot != null) progress?.Report(1);
+        return result;
     }
 
     public static TickData FromStore(TradeStore store)
@@ -281,12 +291,12 @@ public sealed class TickData
             index = (ushort)_provenance.Count; _provenance.Add(provenance); _indices.Add(provenance, index); return index;
         }
 
-        public TickData Finish(bool compressed)
+        public TickData Finish(bool compressed, IbHistoryStamp? storageStamp = null)
         {
             FlushProvenance();
             Array.Resize(ref _ids, _count); Array.Resize(ref _times, _count); Array.Resize(ref _prices, _count); Array.Resize(ref _volumes, _count); Array.Resize(ref _sides, _count); Array.Resize(ref _quality, _count);
             if (_eventIds != null) Array.Resize(ref _eventIds, _count);
-            return new TickData(_instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance.ToArray(), _eventIds, _eventIdTextBytes, 0, _count, compressed);
+            return new TickData(_instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance.ToArray(), _eventIds, _eventIdTextBytes, 0, _count, compressed, storageStamp: storageStamp);
         }
     }
 }

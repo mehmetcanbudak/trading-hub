@@ -455,8 +455,16 @@ internal sealed partial class StrategiesView
 
     private async Task<TickData?> LoadTicksAsync(BacktestSettings s, CancellationToken ct)
     {
-        string key = $"{s.FeedId}|{s.Symbol}|{s.FromUtc:O}|{s.ToUtc:O}";
-        if (_ticks != null && _ticksKey == key) return _ticks;
+        string root = AppPaths.Ticks;
+        string key = $"{root}|{s.FeedId}|{s.Symbol}|{s.FromUtc:O}|{s.ToUtc:O}";
+        var cached = _ticks;
+        if (cached != null && _ticksKey == key)
+        {
+            if (s.FeedId != IbBarImport.FeedId) return cached;
+            if (cached.StorageStamp is { } captured &&
+                captured == await Task.Run(() => IbBarStore.GetStamp(root, s.Symbol, s.FromUtc, s.ToUtc, ct), ct))
+                return cached;
+        }
         var inst = await ResolveInstrumentAsync(s.FeedId, s.Symbol);
         _runStatus.Text = $"Loading trades for {s.Symbol}…";
         _runProgress.IsVisible = true;
@@ -465,7 +473,7 @@ internal sealed partial class StrategiesView
             _runProgress.Value = p;
             _runStatus.Text = $"Loading trades for {s.Symbol}… {p * 100:0}%";
         });
-        var data = await Task.Run(() => TickData.Load(AppPaths.Ticks, inst, s.FromUtc, s.ToUtc, progress, ct), ct);
+        var data = await Task.Run(() => TickData.Load(root, inst, s.FromUtc, s.ToUtc, progress, ct), ct);
         if (data.Count == 0)
         {
             _runStatus.Text = "No saved trades in this range. Download the missing days in Data.";
