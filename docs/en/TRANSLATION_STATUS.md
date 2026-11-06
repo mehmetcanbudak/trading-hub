@@ -34,6 +34,9 @@ Receipts are relative to `/Volumes/TradingHub-upstream-a861ab10ae/evidence/chart
 
 ### Remaining acceptance after this Mac update
 
+**User scheduling decision:** the user selected **Defer private-account tests** and **Later** for human-present physical Mac checks. These gates remain open/deferred, not passed. Other optional assistant/OAuth/alert integrations remain unselected; no credentials, order authority, paid request, external delivery or power action is implied by the completed Mac deployment.
+
+
 1. **Authenticated Binance paper execution:** dedicated nonproduction account/environment, locally entered credentials and bounded order authorization are still required for actual orders, partial fills, cancel/replace, reconnect, recovery and late fills. Current saved Binance profiles have no API key configured; no secret was requested/read in chat.
 2. **Authenticated Bybit Demo/Testnet:** selected dedicated UID/environment, one-way UTA permissions and finite exposure limits are required for the same actual lifecycle/reconciliation cases. Fake-provider proof is not authenticated venue conformance.
 3. **Actual IB entitlement/data:** no IB profile is configured in the normal saved profiles. A user-authorized Gateway/TWS session and entitled instruments remain separate from completed fake/import/snapshot proof.
