@@ -46,6 +46,11 @@ internal sealed class ChartWindow : Window
         AddHandler(KeyDownEvent, (_, e) =>
         {
             if (e.Handled || App.Services == null) return;
+            if (e.Key == Key.Escape && Chart.View.DismissRecordingWarning())
+            {
+                e.Handled = true;
+                return;
+            }
             if (e.Key == Avalonia.Input.Key.Escape && e.KeyModifiers == Avalonia.Input.KeyModifiers.None && Chart.Model?.FocusTrade != null)
             {
                 _host.ClearFocusTrade(Chart);

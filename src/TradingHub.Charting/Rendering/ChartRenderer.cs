@@ -23,7 +23,7 @@ public sealed class ChartRenderState
     public double? LinkedPrice { get; set; }
     public ChartDrawing? Preview { get; set; }
     public string? Message { get; set; }
-    /// <summary>Full warning disclosed by the chart view when its readable overlay cannot fit.</summary>
+    /// <summary>Full data diagnostic disclosed by the chart's compact status badge.</summary>
     public string? CompactRecordingWarning { get; set; }
     public SKRect? CompactRecordingWarningBounds { get; set; }
     public SKRect? ZoomRectangle { get; set; }
@@ -109,15 +109,14 @@ public sealed class ChartRenderer
     private readonly SKPaint _fill = new() { IsAntialias = false, Style = SKPaintStyle.Fill };
     private readonly SKPaint _stroke = new() { IsAntialias = false, Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
     private readonly SKPaint _text = new() { IsAntialias = true };
-    private readonly record struct RecordingWarningLayoutKey(string Text, string CompactText, float Width, float Height, float PlotWidth, float PlotHeight,
+    private readonly record struct RecordingWarningLayoutKey(string Text, float MaxWidth,
         SKFont BaseFont, SKFont Font, SKTypeface? Typeface, float Size, float ScaleX, float SkewX,
         float Ascent, float Descent, float Leading, float CanvasScaleX, float CanvasScaleY, float CanvasSkewX, float CanvasSkewY);
     private RecordingWarningLayoutKey _recordingWarningKey;
     private string[] _recordingWarningLines = Array.Empty<string>();
     private float _recordingWarningMeasuredWidth;
     private SKFont? _recordingWarningFont;
-    private float _recordingWarningHeight, _recordingWarningPadding, _recordingWarningInset;
-    private bool _recordingWarningUsesPlot, _recordingWarningCompact;
+    private float _recordingWarningHeight;
     private (string? Recording, string? History, string? Error) _dataWarningSources;
     private string? _dataWarning;
 
@@ -1700,83 +1699,43 @@ public sealed class ChartRenderer
 
     private void DrawRecordingWarning(SKCanvas canvas, ChartModel model, ChartLayout layout, ChartRenderState state, string warning)
     {
-        var main = layout.Main.Rect;
-        string text = TranslateDataWarning(warning);
-        string compactText = UiText.Tr(model.Data.HistoryWarning != null || model.Data.HistoryError != null ? "Data warning" : "Not recording");
-        var baseFont = RenderContext.GetFont(model.Theme.FontFamily, 15, true, false);
+        const float inset = 6, padding = 6;
+        string text = UiText.Tr(model.Data.HistoryWarning != null || model.Data.HistoryError != null ? "Data warning" : "Not recording");
+        var baseFont = RenderContext.GetFont(model.Theme.FontFamily, 12, true, false);
+        var font = _recordingWarningKey.Text == text && _recordingWarningKey.BaseFont == baseFont
+            ? _recordingWarningFont ?? baseFont : UiText.FontFor(text, baseFont) ?? baseFont;
+        var region = layout.Main.Rect;
+        if (region.Height < font.Spacing + 2 * (padding + inset)) region = layout.Plot;
+        if (region.Width <= 2 * inset || region.Height <= 2 * inset) return;
+        float maxWidth = Math.Max(1, Math.Min(180, region.Width - 2 * inset) - 2 * padding);
         var matrix = canvas.TotalMatrix;
-        RecordingWarningLayoutKey Key(SKFont actual)
-        {
-            var m = actual.Metrics;
-            return new(text, compactText, main.Width, main.Height, layout.Plot.Width, layout.Plot.Height,
-                baseFont, actual, actual.Typeface, actual.Size, actual.ScaleX, actual.SkewX,
-                m.Ascent, m.Descent, m.Leading, matrix.ScaleX, matrix.ScaleY, matrix.SkewX, matrix.SkewY);
-        }
-        var font = _recordingWarningFont ?? UiText.FontFor(text, baseFont) ?? baseFont;
-        if (Key(font) != _recordingWarningKey)
-        {
-            bool fits = false;
-            _recordingWarningCompact = false;
-            // Keep the normal price-pane card. Short panes may use the complete chart
-            // plot, including indicators, before reducing font/padding at readable sizes.
-            for (int attempt = 0; attempt < 4; attempt++)
-            {
-                _recordingWarningUsesPlot = attempt > 0;
-                _recordingWarningInset = attempt == 0 ? 8 : attempt == 3 ? 2 : 4;
-                _recordingWarningPadding = attempt == 0 ? 12 : attempt == 1 ? 8 : attempt == 2 ? 6 : 4;
-                float size = attempt < 2 ? 15 : attempt == 2 ? 13 : 12;
-                var candidate = RenderContext.GetFont(model.Theme.FontFamily, size, true, false);
-                font = UiText.FontFor(text, candidate) ?? candidate;
-                var area = _recordingWarningUsesPlot ? layout.Plot : main;
-                float maxWidth = Math.Max(1, area.Width - 2 * (_recordingWarningInset + _recordingWarningPadding));
-                _recordingWarningLines = WrapRecordingWarning(text, font, maxWidth, out _recordingWarningMeasuredWidth);
-                var m = font.Metrics;
-                float spacing = Math.Max(font.Spacing, m.Descent - m.Ascent);
-                _recordingWarningHeight = Math.Max(0, _recordingWarningLines.Length - 1) * spacing +
-                    m.Descent - m.Ascent + 2 * _recordingWarningPadding;
-                if (_recordingWarningHeight <= area.Height - 2 * _recordingWarningInset &&
-                    _recordingWarningMeasuredWidth <= maxWidth)
-                {
-                    fits = true;
-                    break;
-                }
-            }
-            if (!fits)
-            {
-                // A minimum-sized cell cannot contain every clause at readable size.
-                // Keep an explicit badge; ChartView exposes the complete text on hover/focus.
-                _recordingWarningCompact = _recordingWarningUsesPlot = true;
-                _recordingWarningPadding = _recordingWarningInset = 2;
-                var candidate = RenderContext.GetFont(model.Theme.FontFamily, 12, true, false);
-                font = UiText.FontFor(compactText, candidate) ?? candidate;
-                float maxWidth = Math.Max(1, layout.Plot.Width - 8);
-                _recordingWarningLines = WrapRecordingWarning(compactText, font, maxWidth, out _recordingWarningMeasuredWidth);
-                var m = font.Metrics;
-                _recordingWarningHeight = Math.Max(0, _recordingWarningLines.Length - 1) *
-                    Math.Max(font.Spacing, m.Descent - m.Ascent) + m.Descent - m.Ascent + 4;
-            }
-            _recordingWarningFont = font;
-            _recordingWarningKey = Key(font);
-        }
-        if (_recordingWarningCompact) state.CompactRecordingWarning = warning;
         var metrics = font.Metrics;
-        float lineHeight = Math.Max(font.Spacing, metrics.Descent - metrics.Ascent);
-        var region = _recordingWarningUsesPlot ? layout.Plot : main;
-        float padding = _recordingWarningPadding;
-        float width = Math.Min(region.Width - 2 * _recordingWarningInset, _recordingWarningMeasuredWidth + 2 * padding);
-        float height = _recordingWarningHeight;
-        var rect = new SKRect(region.MidX - width / 2, region.MidY - height / 2, region.MidX + width / 2, region.MidY + height / 2);
-        if (_recordingWarningCompact) state.CompactRecordingWarningBounds = rect;
+        var key = new RecordingWarningLayoutKey(text, maxWidth, baseFont, font, font.Typeface, font.Size, font.ScaleX, font.SkewX,
+            metrics.Ascent, metrics.Descent, metrics.Leading, matrix.ScaleX, matrix.ScaleY, matrix.SkewX, matrix.SkewY);
+        if (key != _recordingWarningKey)
+        {
+            _recordingWarningLines = WrapRecordingWarning(text, font, maxWidth, out _recordingWarningMeasuredWidth);
+            _recordingWarningHeight = Math.Max(0, _recordingWarningLines.Length - 1) *
+                Math.Max(font.Spacing, metrics.Descent - metrics.Ascent) + metrics.Descent - metrics.Ascent + 2 * padding;
+            _recordingWarningFont = font;
+            _recordingWarningKey = key;
+        }
+        float width = Math.Min(region.Width - 2 * inset, _recordingWarningMeasuredWidth + 2 * padding);
+        float height = Math.Min(region.Height - 2 * inset, _recordingWarningHeight);
+        var rect = new SKRect(region.Right - inset - width, region.Top + inset, region.Right - inset, region.Top + inset + height);
+        state.CompactRecordingWarning = warning;
+        state.CompactRecordingWarningBounds = rect;
         canvas.Save();
         canvas.ClipRect(rect);
         _fill.Color = new SKColor(8, 14, 26, 235);
-        canvas.DrawRoundRect(rect, 8, 8, _fill);
+        canvas.DrawRoundRect(rect, 5, 5, _fill);
         _stroke.Color = model.Theme.PanelSeparator;
         _stroke.StrokeWidth = 1;
         _stroke.PathEffect = null;
-        canvas.DrawRoundRect(rect, 8, 8, _stroke);
+        canvas.DrawRoundRect(rect, 5, 5, _stroke);
         _text.Color = model.Theme.Text;
         float baseline = rect.Top + padding - metrics.Ascent;
+        float lineHeight = Math.Max(font.Spacing, metrics.Descent - metrics.Ascent);
         foreach (string line in _recordingWarningLines)
         {
             canvas.DrawUiText(line, rect.Left + padding, baseline, font, _text);

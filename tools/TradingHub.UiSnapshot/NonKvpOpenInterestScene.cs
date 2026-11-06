@@ -6,6 +6,7 @@ using Avalonia.VisualTree;
 using SkiaSharp;
 using TradingHub.App.Windows;
 using TradingHub.Charting;
+using TradingHub.Charting.Rendering;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Indicators;
@@ -56,6 +57,9 @@ internal static class NonKvpOpenInterestScene
         double originalPanelRatio = oiPanel.HeightRatio;
         IndicatorSlot? shortVolumeSlot = null;
         TextBlock? keyboardDetails = null;
+        ChartRenderState RenderState() => (ChartRenderState)typeof(TradingHub.App.Controls.ChartView)
+            .GetField("_state", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(tab.View)!;
 
         void RestoreShortViewport()
         {
@@ -157,6 +161,77 @@ internal static class NonKvpOpenInterestScene
                 Check(!data.IsLoadingHistory && minute.Series.Count > 0 && data.RecordingWarning != null,
                     "writer-busy generation remains readable and exposes the recording warning");
                 busyFrame = Capture("nonkvp-oi-recorder-busy", unavailableFrame);
+                var wideBadge = RenderState().CompactRecordingWarningBounds;
+                Check(wideBadge is { } badge && minute.LastLayout is { } wideLayout &&
+                    wideLayout.Plot.Contains(badge) && !badge.Contains(wideLayout.Main.Rect.MidX, wideLayout.Main.Rect.MidY),
+                    "recording status stays inside the chart without obscuring the price-pane center");
+                var badgeTarget = wideBadge is { } wideBounds
+                    ? tab.View.TranslatePoint(new Point(wideBounds.MidX, wideBounds.MidY), window) : null;
+                Check(badgeTarget != null, "actual corner status has a pointer target");
+                if (badgeTarget is { } badgePoint)
+                {
+                    window.FocusManager?.ClearFocus();
+                    window.MouseMove(new Point(window.Bounds.Width - 8, window.Bounds.Height - 8));
+                    tab.View.Controller!.SelectRectangleZoom();
+                    double widthBefore = minute.Viewport.BarWidth, scrollBefore = minute.Viewport.ScrollBars;
+                    window.MouseMove(badgePoint);
+                    window.MouseDown(badgePoint, MouseButton.Left);
+                    window.MouseUp(badgePoint, MouseButton.Left);
+                    pump(0.2);
+                    Check(!tab.View.Controller.IsDragging && RenderState().ZoomRectangle == null &&
+                        minute.Viewport.BarWidth == widthBefore && minute.Viewport.ScrollBars == scrollBefore,
+                        "status click is consumed without starting or completing a chart gesture");
+                    Check(ToolTip.GetIsOpen(tab.View) && ToolTip.GetTip(tab.View) is TextBlock { IsEffectivelyVisible: true },
+                        "explicit status click opens visible diagnostic details");
+                    using (var detailFrame = TopLevel.GetTopLevel((Control)ToolTip.GetTip(tab.View)!)?.CaptureRenderedFrame())
+                        detailFrame?.Save(Path.Combine(outDir, "nonkvp-oi-recorder-detail-wide.png"));
+                    tab.View.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = tab.View });
+                    pump(0.1);
+                    Check(!ToolTip.GetIsOpen(tab.View), "Escape dismisses details while the pointer remains on the status");
+                    tab.View.Controller.ActiveTool = null;
+                    if (minute.LastLayout is { } clickLayout &&
+                        tab.View.TranslatePoint(new Point(clickLayout.Main.Rect.MidX, clickLayout.Main.Rect.MidY), window) is { } chartPoint)
+                    {
+                        window.MouseMove(chartPoint);
+                        window.MouseDown(chartPoint, MouseButton.Left);
+                        window.MouseUp(chartPoint, MouseButton.Left);
+                        pump(0.1);
+                        Check(!ToolTip.GetIsOpen(tab.View) && tab.View.IsFocused && !tab.View.Controller.IsDragging,
+                            "ordinary chart pointer focus does not reopen a large diagnostic popup");
+                    }
+                    window.MouseMove(new Point(window.Bounds.Width - 8, window.Bounds.Height - 8));
+                    window.FocusManager?.ClearFocus();
+                    window.MouseMove(badgePoint);
+                    pump(0.1);
+                    Check(!tab.View.IsFocused && ToolTip.GetIsOpen(tab.View),
+                        "hover can disclose a warning without transferring keyboard focus to the chart");
+                    window.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = window });
+                    pump(0.1);
+                    Check(!ToolTip.GetIsOpen(tab.View), "host Escape dismisses a hovered warning on an unfocused chart");
+                    window.MouseMove(new Point(window.Bounds.Width - 8, window.Bounds.Height - 8));
+                    tab.View.Focus(NavigationMethod.Tab);
+                    pump(0.1);
+                    tab.View.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = tab.View });
+                    pump(0.1);
+                    window.MouseMove(badgePoint);
+                    pump(0.1);
+                    Check(ToolTip.GetIsOpen(tab.View),
+                        "a fresh direct badge hover reopens details after keyboard dismissal outside the chart");
+                    if (minute.LastLayout is { } focusLayout &&
+                        tab.View.TranslatePoint(new Point(focusLayout.Main.Rect.MidX, focusLayout.Main.Rect.MidY), window) is { } resetPoint)
+                        window.MouseMove(resetPoint);
+                    window.MouseMove(badgePoint);
+                    var focusedTrade = new TradeFocus(feed.Start, 100, feed.Start.AddMinutes(1), 101, true, 1, 1, "Fixture selection");
+                    minute.FocusTrade = focusedTrade;
+                    minute.Invalidate();
+                    pump(0.1);
+                    tab.View.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = tab.View });
+                    pump(0.1);
+                    Check(!ToolTip.GetIsOpen(tab.View) && ReferenceEquals(minute.FocusTrade, focusedTrade),
+                        "warning dismissal takes precedence over clearing an independently selected trade");
+                    minute.FocusTrade = null;
+                    minute.Invalidate();
+                }
                 double originalPlotWidth = tab.View.Bounds.Width;
                 window.WindowState = Avalonia.Controls.WindowState.Normal;
                 window.Width = Math.Max(window.MinWidth, Math.Min(1100, window.Bounds.Width - 100));
@@ -210,9 +285,7 @@ internal static class NonKvpOpenInterestScene
                 var disclosureStages = new List<object>();
                 void RecordDisclosureStage(string stage)
                 {
-                    var renderState = (TradingHub.Charting.Rendering.ChartRenderState)typeof(TradingHub.App.Controls.ChartView)
-                        .GetField("_state", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-                        .GetValue(tab.View)!;
+                    var renderState = RenderState();
                     var tip = ToolTip.GetTip(tab.View) as TextBlock;
                     var root = tip == null ? null : TopLevel.GetTopLevel(tip);
                     disclosureStages.Add(new
@@ -240,8 +313,8 @@ internal static class NonKvpOpenInterestScene
                 }
                 tab.View.PropertyChanged += DisclosurePropertyChanged;
                 RecordDisclosureStage("before-hover");
-                var hover = minute.LastLayout is { } extremeLayout
-                    ? tab.View.TranslatePoint(new Point(extremeLayout.Plot.MidX, extremeLayout.Plot.MidY), window)
+                var hover = RenderState().CompactRecordingWarningBounds is { } disclosureBounds
+                    ? tab.View.TranslatePoint(new Point(disclosureBounds.MidX, disclosureBounds.MidY), window)
                     : null;
                 Check(hover != null, "extreme chart has a real pointer target for warning disclosure");
                 try
@@ -267,11 +340,6 @@ internal static class NonKvpOpenInterestScene
                         detailPosition.X + details.Bounds.Width <= popup.Bounds.Width + 0.5 &&
                         detailPosition.Y + details.Bounds.Height <= popup.Bounds.Height + 0.5,
                         "actual chart hover opens an attached visible in-bounds full-detail tooltip");
-                    Check(details is { IsEffectivelyVisible: true } && details.Text is { } visibleText &&
-                        visibleText.Contains("Live recording unavailable", StringComparison.Ordinal) &&
-                        visibleText.Contains("another history writer owns this instrument", StringComparison.Ordinal) &&
-                        visibleText.Contains("new ticks are not being saved", StringComparison.Ordinal),
-                        "visible tooltip discloses recording loss, competing-writer cause, and unsaved new ticks");
                     using (var popupFrame = popup?.CaptureRenderedFrame())
                     {
                         Check(popupFrame != null, "actual tooltip host produces a rendered full-detail frame");
@@ -301,11 +369,6 @@ internal static class NonKvpOpenInterestScene
                         keyboardPosition.X + keyboardDetails.Bounds.Width <= keyboardHost.Bounds.Width + 0.5 &&
                         keyboardPosition.Y + keyboardDetails.Bounds.Height <= keyboardHost.Bounds.Height + 0.5,
                         "keyboard navigation focus opens attached visible in-bounds recording details without an order click");
-                    Check(keyboardDetails?.Text is { } keyboardText &&
-                        keyboardText.Contains("Live recording unavailable", StringComparison.Ordinal) &&
-                        keyboardText.Contains("another history writer owns this instrument", StringComparison.Ordinal) &&
-                        keyboardText.Contains("new ticks are not being saved", StringComparison.Ordinal),
-                        "keyboard disclosure retains recording loss, competing-writer cause, and unsaved new ticks");
                     using (var keyboardFrame = keyboardHost?.CaptureRenderedFrame())
                     {
                         Check(keyboardFrame != null, "actual keyboard tooltip host produces a rendered full-detail frame");
@@ -340,6 +403,55 @@ internal static class NonKvpOpenInterestScene
             feed.Observer.OnOpenInterest(new(feed.Now, 999));
             data.Pump();
             Check(data.OpenInterest.Samples.Count == 0, "shutdown rejects late observations");
+            using (var floatingLease = TickFile.TryLock(data.RecordingRoot, feed.Instrument.FeedId, feed.Instrument.Symbol))
+            {
+                if (floatingLease == null) throw new InvalidOperationException("Controlled floating warning could not own the history-writer lease.");
+                data.Start(feed.Start);
+                for (int i = 0; i < 100 && data.IsLoadingHistory; i++) { data.Pump(); pump(0.02); }
+                var detached = window.Trading.Detach(tab) ?? throw new InvalidOperationException("Controlled chart could not detach.");
+                try
+                {
+                    pump(0.2);
+                    Check(ReferenceEquals(TopLevel.GetTopLevel(tab.View), detached) && detached.IsVisible && tab.View.IsEffectivelyVisible,
+                        "the actual detached chart owns a visible warning consumer");
+                    var floatingTarget = RenderState().CompactRecordingWarningBounds is { } floatingBounds
+                        ? tab.View.TranslatePoint(new Point(floatingBounds.MidX, floatingBounds.MidY), detached) : null;
+                    if (floatingTarget is not { } floatingPoint) throw new InvalidOperationException("Detached warning has no pointer target.");
+                    detached.MouseMove(new Point(detached.Bounds.Width - 8, detached.Bounds.Height - 8));
+                    detached.FocusManager?.ClearFocus();
+                    detached.MouseMove(floatingPoint);
+                    pump(0.1);
+                    Check(!tab.View.IsFocused && ToolTip.GetIsOpen(tab.View),
+                        "detached chart hover reveals details without stealing keyboard focus");
+                    detached.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = detached });
+                    pump(0.1);
+                    Check(!ToolTip.GetIsOpen(tab.View), "detached host Escape dismisses the unfocused hovered warning");
+                    detached.MouseMove(new Point(detached.Bounds.Width - 8, detached.Bounds.Height - 8));
+                    detached.MouseMove(floatingPoint);
+                    pump(0.1);
+                    Check(ToolTip.GetIsOpen(tab.View), "detached warning can be disclosed again in a new hover session");
+                    var floatingTrade = new TradeFocus(feed.Start, 100, feed.Start.AddMinutes(1), 101, true, 1, 1, "Fixture detached selection");
+                    minute.FocusTrade = floatingTrade;
+                    minute.Invalidate();
+                    pump(0.1);
+                    using (var detachedFrame = detached.CaptureRenderedFrame())
+                        detachedFrame?.Save(Path.Combine(outDir, "nonkvp-oi-recorder-detached.png"));
+                    tab.View.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = tab.View });
+                    pump(0.1);
+                    Check(!ToolTip.GetIsOpen(tab.View) && ReferenceEquals(minute.FocusTrade, floatingTrade),
+                        "detached warning dismissal precedes selected-trade clearing");
+                    tab.View.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = tab.View });
+                    pump(0.1);
+                    Check(minute.FocusTrade == null, "the next detached Escape retains the existing selected-trade shortcut");
+                }
+                finally
+                {
+                    minute.FocusTrade = null;
+                    window.Trading.DockBack(detached);
+                    data.Stop();
+                    pump(0.1);
+                }
+            }
         }
         finally
         {

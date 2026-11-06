@@ -124,6 +124,18 @@ public sealed class MainWindow : Window
         AddHandler(KeyDownEvent, (_, e) =>
         {
             if (_current != "trading" || e.Handled) return;
+            if (e.Key == Key.Escape)
+            {
+                bool dismissed = false;
+                for (int i = 0; i < Trading.Pages.Count; i++)
+                    foreach (var chart in Trading.Pages[i].Charts)
+                        dismissed |= chart.View.DismissRecordingWarning();
+                if (dismissed)
+                {
+                    e.Handled = true;
+                    return;
+                }
+            }
             if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Trading.ActiveTab?.Model?.FocusTrade != null)
             {
                 Trading.ClearFocusTrade(Trading.ActiveTab);

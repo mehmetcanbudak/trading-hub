@@ -34,6 +34,15 @@ When the chart itself has focus, committed text opens **Chart symbol / period**.
 
 Quick-entry data navigation retains the selected account identity. If the account is incompatible with the new source, it is visibly **unavailable**, with no fallback order route, until a compatible account is explicitly selected. A composite crypto source has no executable account, including the shared simulator. Practice keeps its run-owned instrument/account; open a separate normal chart to choose another symbol. Existing order hotkeys and their confirmations are not changed by chart entry.
 
+## Data and recording status
+
+A small **Data warning** or **Not recording** badge keeps diagnostics out of the chart center. Hover or click the badge for the full current message, or navigate to the chart with the keyboard. **Escape** closes details, not the underlying condition; a new hover can open them again. Badge clicks do not start chart or order gestures. Ordinary chart clicks do not automatically open a large warning.
+
+**“The bounded raw window is full”** means the chart reached its in-memory raw-trade limit, not that macOS ran out of storage. Additional coverage uses explicitly labelled candle history **when the provider has it**. Candle-derived or compact history does not become raw ticks or acquire missing footprint/aggressor detail.
+
+**Not recording** means live data can remain readable while new ticks are not being saved. Read the complete cause—for example, another writer owns the history files or storage is unavailable—rather than deleting history or assuming recording continued. Recovery clears the obsolete disclosure automatically. The same controls work in detached chart windows.
+
+
 ## Periods
 
 The defaults are 1m, 5m, 15m, 1h, 4h and D. The selector includes:
