@@ -1,6 +1,6 @@
-[Español](README.es.md) · [English](README.md) · **中文**
+[Español](./README.es.md) · [English](./README.md) · **中文**
 
-> **KVP 候选集成：**隔离的 `feat/kvp-adoption` 源码分支集成了已批准的完整数据、指标、图表/深度、编辑、练习、提醒、行情商、存储及代理功能，并明确保留数据质量和安全边界。这不代表已安装应用或已发布二进制。请参阅[完整范围与验收记录](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04)和[完整署名及许可证](THIRD_PARTY_NOTICES.md#kvp-capability-reference)。不包含 KVP 品牌/目录迁移、KVP Windows 分发/更新器或仅限 Windows 的外部 VPFM 启动器；未经端到端测量，不宣称 Metal 加速。
+> **KVP 候选集成：**隔离的 `feat/kvp-adoption` 源码分支集成了已批准的完整数据、指标、图表/深度、编辑、练习、提醒、行情商、存储及代理功能，并明确保留数据质量和安全边界。这不代表已安装应用或已发布二进制。请参阅[完整范围与验收记录](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04)和[完整署名及许可证](./THIRD_PARTY_NOTICES.md#kvp-capability-reference)。不包含 KVP 品牌/目录迁移、KVP Windows 分发/更新器或仅限 Windows 的外部 VPFM 启动器；未经端到端测量，不宣称 Metal 加速。
 
 <div align="center">
 
@@ -98,7 +98,7 @@ AI 来自**使用你自己订阅的 Claude Code**（无需 API 密钥）：一�
 按照 CLAUDE.md 在我的 Mac 上安装 Trading Hub。
 ```
 
-它会检查你的 Mac，安装缺少的组件（无需管理员密码），编译应用并放进“应用程序”文件夹。本分支的步骤见[安装说明](docs/en/instalacion.md)。[原作者的西班牙语指南](INSTALAR_CON_CLAUDE_CODE.md)保留作历史参考，不是本分支的安装步骤。
+它会检查你的 Mac，安装缺少的组件（无需管理员密码），编译应用并放进“应用程序”文件夹。本分支的步骤见[安装说明](docs/en/instalacion.md)。[原作者的西班牙语指南](./INSTALAR_CON_CLAUDE_CODE.md)保留作历史参考，不是本分支的安装步骤。
 
 ### 手动安装
 你需要一台 Apple Silicon 的 Mac，系统为 macOS 12 或更新版本（Windows 请看[使用 Windows？](#使用-windows)）。
@@ -159,7 +159,7 @@ python3 tools/port_atas.py
 | [设置](docs/ajustes.md) | 全部选项 |
 | [隐私](docs/privacidad.md) | 哪些内容留在你的 Mac 上，哪些会连接互联网 |
 | [开发](docs/desarrollo.md) | 代码结构、测试和场景 |
-| [Windows](PORTAR_A_WINDOWS.md) | 哪些部分依赖具体的操作系统，以及 Windows 版本是怎么做出来的 |
+| [Windows](./PORTAR_A_WINDOWS.md) | 哪些部分依赖具体的操作系统，以及 Windows 版本是怎么做出来的 |
 
 ## 支持这个项目
 

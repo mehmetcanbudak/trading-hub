@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Live strategies
 
@@ -8,7 +8,7 @@
 
 - Simulated account is always available, filling against the book queue and market tape.
 - Binance testnet, Tradovate demo and Rithmic practice do not involve real money.
-- Real accounts require explicit permission in their [connection](conexiones.md#real-and-test-accounts) and are marked **REAL**.
+- Real accounts require explicit permission in their [connection](./conexiones.md#real-and-test-accounts) and are marked **REAL**.
 - Manually launching/resuming a real strategy requires one confirmation; afterward its generated orders **do not ask individually**. Startup automatic resumption does not ask, so real-account automatic resumption is disabled by default.
 
 ## Launch a strategy
@@ -35,7 +35,7 @@ The ordinary legacy `SimBroker` path remains an **estimated mark/time and unknow
 
 The robot menu lists strategies; Backtesting also offers **Add to active chart**. Initially the strategy is **visual only**: historical signals use a no-cost overlay simulation, and new visual activity uses a separate private `Visual` simulated account, not your account.
 
-In its legend/settings choose live execution, select an account and Apply. It then appears in Live with source **Chart**. Changing chart instrument pauses executing strategies; removing the overlay stops it but **does not automatically close its position**. See [Chart strategies](graficos.md#strategies-on-charts). Detailed historical statistics can separately apply backtest cost assumptions; distinguish those from the visual overlay.
+In its legend/settings choose live execution, select an account and Apply. It then appears in Live with source **Chart**. Changing chart instrument pauses executing strategies; removing the overlay stops it but **does not automatically close its position**. See [Chart strategies](./graficos.md#strategies-on-charts). Detailed historical statistics can separately apply backtest cost assumptions; distinguish those from the visual overlay.
 
 ## Size and smart contracts
 
@@ -155,7 +155,7 @@ Claude can review recent results, drawdown versus history, daily-PnL volatility 
 | Model / effort | Configured default Opus 5.5 / Extra; selectors also include Sonnet 5.5, Haiku 5.5 and Fable 5.1, with Low through Maximum effort. Availability depends on your CLI/account. |
 | Instructions | Free-form preferences, for example a maximum ×2 crypto exposure. |
 
-**Review now** requests an immediate review. Automatic reviews are capped at eight per day, twelve minutes per review and US$2 budget when the CLI supports that option. The agent has no tools: it receives supplied portfolio figures and returns bounded proposals. The card shows latest review, summary and accumulated estimated usage cost. See [Claude](asistente-claude.md).
+**Review now** requests an immediate review. Automatic reviews are capped at eight per day, twelve minutes per review and US$2 budget when the CLI supports that option. The agent has no tools: it receives supplied portfolio figures and returns bounded proposals. The card shows latest review, summary and accumulated estimated usage cost. See [Claude](./asistente-claude.md).
 
 AI proposals are not investment advice or guaranteed loss prevention. Review evidence and executable contract size.
 
@@ -175,11 +175,11 @@ For each active strategy market, show regime, 24-hour efficiency/change duration
 
 ## Closing the window and reopening
 
-- **Menu bar/system tray:** enabled by default, window closure hides the app while strategies continue. The icon/menu/live panel shows strategies and positions; Windows also supports right-click. Quit with ⌘Q on macOS, Alt+F4 on Windows, or **Quit Trading Hub**; see [First steps](primeros-pasos.md#menu-bar-icon).
+- **Menu bar/system tray:** enabled by default, window closure hides the app while strategies continue. The icon/menu/live panel shows strategies and positions; Windows also supports right-click. Quit with ⌘Q on macOS, Alt+F4 on Windows, or **Quit Trading Hub**; see [First steps](./primeros-pasos.md#menu-bar-icon).
 - **Quitting with open positions:** explicit Quit and closing the main window with background operation disabled use the same protection-aware flow. The dialog offers **Keep stops at broker and quit** (default), **Cancel stops and quit** (leaves positions open), **Close positions and quit** (requests market closure, never the default), and **Don't quit** (Esc). Retained stop loss/target orders are recorded for adoption on resume, but have no app-managed trailing/resizing or sibling-OCO management while the app is closed; the simulated account's orders end with the process. Without held live positions, cancellation of outstanding strategy orders can still require acknowledgment. Quit waits about ten seconds for requested closes/cancels and reports unresolved state before exit; acknowledging a warning is not proof the broker canceled or closed anything. Check broker positions/orders yourself. If manually closing a position before resume, also reconcile/cancel its retained exits to prevent an unintended reversing fill. Verify the broker's disconnected-order policy.
 - **Language restart:** **Restart now** in Settings follows this same quit path. **Don't quit** cancels the restart without starting a second instance; the saved language preference remains for next launch. Restart is not a shortcut around pending orders or the live-position decision.
 - **Automatic resumption:** shortly after startup, previously running strategies can restart with saved parameters, size and limits; paused strategies return paused. Real destinations wait for manual resume unless explicitly enabled for automatic resumption. A notice summarizes outcomes. A resumed strategy, on the panel or on its chart, takes over the stop loss and take profit kept at the broker instead of placing new ones.
-- **Keep awake:** can prevent idle sleep while strategies or a risk review run and optionally support closed-lid operation. See [Settings](ajustes.md). Power/thermal behavior still requires real-hardware validation.
+- **Keep awake:** can prevent idle sleep while strategies or a risk review run and optionally support closed-lid operation. See [Settings](./ajustes.md). Power/thermal behavior still requires real-hardware validation.
 
 Native Windows lifecycle/tray/power behavior, actual real/demo broker protection/reconnect/fills and physical macOS sleep/lid/logout/quit scenarios remain separate release gates; source review or headless scenes do not certify them.
 

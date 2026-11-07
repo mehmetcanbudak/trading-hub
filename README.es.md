@@ -1,8 +1,8 @@
-**Español** · [English](README.md) · [中文](README.zh-CN.md)
+**Español** · [English](./README.md) · [中文](./README.zh-CN.md)
 
 > Original de upstream 1d5a774, conservado con enlaces de idioma adaptados. Los instaladores enlazados son del autor original y no incluyen las correcciones exclusivas de este fork. Para usar este fork, compilá la rama `memoshi` siguiendo la [guía de instalación](docs/en/instalacion.md); no se publican binarios de este fork. La validación disponible y sus límites figuran en el [estado de validación](docs/en/TRANSLATION_STATUS.md). No se afirma certificación de brokers reales/demo ni de suspensión física. Licencia: código disponible bajo MIT + Commons Clause, no código abierto aprobado por OSI.
 
-> **Candidato KVP:** la rama aislada `feat/kvp-adoption` integra el alcance completo aprobado de datos, estudios, gráficos/profundidad, edición, práctica, alertas, proveedores, almacenamiento y proxy, con límites de calidad y seguridad explícitos. No equivale a una app instalada ni a un binario publicado. Consultá el [alcance y la evidencia de aceptación](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04) y la [atribución/licencia completa](THIRD_PARTY_NOTICES.md#kvp-capability-reference). Se excluyen el cambio de marca/directorios, la distribución/actualizador Windows de KVP y el lanzador externo VPFM exclusivo de Windows. No se afirma aceleración Metal sin medición integral.
+> **Candidato KVP:** la rama aislada `feat/kvp-adoption` integra el alcance completo aprobado de datos, estudios, gráficos/profundidad, edición, práctica, alertas, proveedores, almacenamiento y proxy, con límites de calidad y seguridad explícitos. No equivale a una app instalada ni a un binario publicado. Consultá el [alcance y la evidencia de aceptación](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04) y la [atribución/licencia completa](./THIRD_PARTY_NOTICES.md#kvp-capability-reference). Se excluyen el cambio de marca/directorios, la distribución/actualizador Windows de KVP y el lanzador externo VPFM exclusivo de Windows. No se afirma aceleración Metal sin medición integral.
 
 <div align="center">
 
@@ -111,7 +111,7 @@ Instalá Trading Hub en mi Mac siguiendo CLAUDE.md.
 ```
 
 Revisa tu Mac, instala lo que falte (sin contraseña de administrador), compila la app y la deja en Aplicaciones.
-La guía paso a paso está en [INSTALAR_CON_CLAUDE_CODE.md](INSTALAR_CON_CLAUDE_CODE.md).
+La guía paso a paso está en [INSTALAR_CON_CLAUDE_CODE.md](./INSTALAR_CON_CLAUDE_CODE.md).
 
 ### A mano
 Necesitás una Mac con Apple Silicon y macOS 12 o más nuevo (para Windows, mirá [¿Usás Windows?](#usás-windows)).
@@ -148,7 +148,7 @@ Trading Hub → Desinstalar**.
 Para compilarla vos en Windows: [Git](https://git-scm.com), el [SDK de .NET 10](https://dotnet.microsoft.com/download)
 y [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`), y en la carpeta del repositorio
 `.\build-windows.ps1` (deja los instaladores en `dist`). Desde una Mac: `brew install makensis` y `./build-windows.sh`.
-Qué depende de cada sistema está en [PORTAR_A_WINDOWS.md](PORTAR_A_WINDOWS.md).
+Qué depende de cada sistema está en [PORTAR_A_WINDOWS.md](./PORTAR_A_WINDOWS.md).
 
 ## Más indicadores
 
@@ -195,7 +195,7 @@ Esos indicadores son de sus autores: usalos respetando la licencia de cada fuent
 | [Ajustes](docs/ajustes.md) | Todas las opciones |
 | [Privacidad](docs/privacidad.md) | Qué queda en tu Mac y qué se conecta a internet |
 | [Desarrollo](docs/desarrollo.md) | Estructura del código, pruebas y escenas |
-| [Windows](PORTAR_A_WINDOWS.md) | Qué depende de cada sistema operativo y cómo se armó la versión de Windows |
+| [Windows](./PORTAR_A_WINDOWS.md) | Qué depende de cada sistema operativo y cómo se armó la versión de Windows |
 
 ## Apoyá el proyecto
 

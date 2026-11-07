@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Conexiones
 
@@ -25,7 +25,7 @@ Arriba del formulario también están:
   Simulador, Binance, Bybit y Rithmic solo se pueden eliminar si hay más de una del mismo tipo; si no, desactivalas.
 
 Casi todos los tipos tienen además **Historia al abrir un gráfico** (de 30 minutos a 7 días): cuánta historia se pide
-al abrir un instrumento. Lo que ya está grabado o descargado en [Datos](datos.md) carga al instante; el resto se le
+al abrir un instrumento. Lo que ya está grabado o descargado en [Datos](./datos.md) carga al instante; el resto se le
 pide a la conexión.
 
 ## Dónde quedan tus claves
@@ -182,7 +182,7 @@ operación. Es pago por uso; las cuentas nuevas traen créditos gratis.
 - Solo pide la **API key** (`db-…`). Hay enlaces para crear la cuenta y ver los precios.
 - **Probar conexión** muestra desde y hasta qué fecha hay datos y cuánto cuesta un día de NQ tick a tick. No baja nada.
 - No da datos en vivo ni aparece en el buscador de instrumentos: se usa desde **Datos → Futuros de CME con
-  Databento**. Ver [Datos](datos.md#databento).
+  Databento**. Ver [Datos](./datos.md#databento).
 
 ## Interactive Brokers
 
@@ -214,4 +214,4 @@ en **solo lectura** en la sección Cuenta: ves el saldo, las posiciones y el his
 4. Poné una **Cantidad máxima por orden**: Trading Hub bloquea las órdenes más grandes.
 5. Guardá y probá la conexión.
 
-Cómo se confirman las órdenes reales y qué límites hay está en [Operar](operar.md#seguridad).
+Cómo se confirman las órdenes reales y qué límites hay está en [Operar](./operar.md#seguridad).

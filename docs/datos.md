@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Datos
 
@@ -120,7 +120,7 @@ Databento vende la historia tick a tick de los futuros de CME desde 2010, con el
 lo que Rithmic no guarda. Es pago por uso (las cuentas nuevas traen créditos gratis), así que Trading Hub siempre
 calcula el costo antes y solo baja si confirmás.
 
-Antes, agregá la conexión **Databento** con tu API key en [Conexiones](conexiones.md#databento). El botón
+Antes, agregá la conexión **Databento** con tu API key en [Conexiones](./conexiones.md#databento). El botón
 **Conexiones** de la tarjeta te lleva ahí.
 
 1. En **Contrato continuo**, elegí el mercado: NQ, ES, MNQ, MES, YM, RTY, CL, GC, MCL, MGC, ZN o 6E. Se usa el
@@ -161,4 +161,4 @@ resumen del backtest dice cuántos días aporta cada fuente.
 
 La historia vive en `~/Library/Application Support/Trading Hub/Ticks`, en una carpeta por conexión («rithmic»,
 «databento», «importado»…) y otra por instrumento, con un archivo por día. **Abrir carpeta** la muestra en el Finder.
-Ver también [Instalación](instalacion.md#dónde-guarda-tus-datos).
+Ver también [Instalación](./instalacion.md#dónde-guarda-tus-datos).

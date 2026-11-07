@@ -1,18 +1,18 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Backtesting
 
 La sección **Backtesting** (⌘2) junta todo lo que es prueba. Arriba elegís la estrategia y abajo tenés las pestañas
 **Código**, **Backtest**, **Optimización**, **Walk-forward**, **Historial**, **Portafolio** y **Reportes**. Cómo se
-escribe una estrategia está en [Estrategias](estrategias.md); lo que corre en tiempo real, en [En vivo](en-vivo.md).
+escribe una estrategia está en [Estrategias](./estrategias.md); lo que corre en tiempo real, en [En vivo](./en-vivo.md).
 
 ## Elegir los datos
 
 El backtest recorre, una por una, las operaciones reales guardadas: lo que se grabó mientras tenías gráficos abiertos y
-lo que bajaste o importaste en [Datos](datos.md). Sin nada guardado, la lista está vacía.
+lo que bajaste o importaste en [Datos](./datos.md). Sin nada guardado, la lista está vacía.
 
 - **Instrumento (datos guardados)** muestra `SÍMBOLO · fuente · N días`, y debajo el rango y lo que ocupa.
-- Los futuros que además tienen historia de [Databento](datos.md#databento) aparecen tres veces:
+- Los futuros que además tienen historia de [Databento](./datos.md#databento) aparecen tres veces:
 
   | Entrada | Qué usa |
   |---|---|
@@ -53,7 +53,7 @@ Renko no está disponible en backtests.
 
 Las zonas disponibles son UTC, Buenos Aires, Nueva York, Chicago (CME) y Londres. La tarjeta **Parámetros** tiene los de
 la estrategia y, aparte, los de gestión de la posición. Lo que configurás queda guardado por estrategia: esos parámetros
-son los que toma después la estrategia puesta en un gráfico, y [En vivo](en-vivo.md) usa además las velas y la sesión.
+son los que toma después la estrategia puesta en un gráfico, y [En vivo](./en-vivo.md) usa además las velas y la sesión.
 
 ### Cómo se llenan las órdenes
 
@@ -223,7 +223,7 @@ más operaciones harían falta (proyectando el Sharpe deflactado con la misma ve
 
 En esta versión, la pestaña Walk-forward muestra la eficiencia, las ventanas ganadoras, el sobreajuste y los caminos (los
 dos últimos, con los umbrales de esta tabla). La validación completa, con el Sharpe deflactado, el desgaste y los
-regímenes, está en la biblioteca, cubierta por las pruebas, para usarla desde código (ver [Desarrollo](desarrollo.md)).
+regímenes, está en la biblioteca, cubierta por las pruebas, para usarla desde código (ver [Desarrollo](./desarrollo.md)).
 
 ## Portafolio
 
@@ -239,4 +239,4 @@ backtests de todas tus estrategias la combinación con correlación menor a 0,5 
 Informes en Markdown con todas las métricas, tablas y gráficos: los arma **Informe** desde el Historial o el Portafolio,
 o Claude con el laboratorio (con su veredicto y su análisis). Se guardan en `~/Documents/Trading Hub/Estrategias/Reportes`,
 se ven como una hoja y **Exportar PDF / HTML** los abre en el navegador para imprimirlos o guardarlos como PDF. Ver
-[Claude](asistente-claude.md).
+[Claude](./asistente-claude.md).

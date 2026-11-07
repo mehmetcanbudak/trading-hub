@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Estrategias en C#
 
@@ -19,7 +19,7 @@ y dos ejemplos que compilan tal cual.
   `using TradingHub.Strategies;` (`System`, `System.Linq` y `System.Collections.Generic` ya están). Usá una por archivo,
   con su mismo nombre: el historial de backtests se guarda con el nombre de la clase y, si la renombrás, empieza otro.
 - Al compilar se aplican las mismas adaptaciones que a los indicadores (namespaces de ATAS y los símbolos `TRADINGHUB`
-  y `CROSS_PLATFORM`): ver [Indicadores](indicadores.md).
+  y `CROSS_PLATFORM`): ver [Indicadores](./indicadores.md).
 
 ## Parámetros
 
@@ -84,7 +84,7 @@ de **Ajustes → Zona horaria de los gráficos** con la sesión a las 0 h (si ah
 Sin cantidad se usa `Quantity`, y los precios se redondean al tick. Cada método devuelve un `StrategyOrder` con `Id`,
 `Side`, `Type`, `Quantity`, `Price`, `Name`, `State` (`Active`, `Filled` o `Canceled`), `IsActive`, `FillPrice`,
 `FillTime` e `IsProtective` (stop u objetivo automático). El nombre de la orden que cierra aparece en «Salida por» en
-el backtest y, en vivo, va en el comentario de la orden. Cómo se simulan los llenados está en [Backtesting](backtesting.md).
+el backtest y, en vivo, va en el comentario de la orden. Cómo se simulan los llenados está en [Backtesting](./backtesting.md).
 
 ## Stop, objetivo y trailing automáticos
 
@@ -160,7 +160,7 @@ así el contexto suele existir desde la primera vela. El **filtro de contexto** 
 `RangeOrDownTrend`, `MixedOrUpTrend`, `MixedOrDownTrend`, `NoDownTrend`, `NoUpTrend` y `NoMixed`. Fuera de ese contexto
 la estrategia no abre ni agranda posiciones: de cada orden pasa solo la parte que cierra lo abierto y el resto vuelve
 cancelado («Filtro de contexto: no abre operaciones ahora» en el registro). Las salidas siempre pasan y, sin datos para
-juzgar, el filtro no bloquea. En vivo se cambia sin reiniciar: ver [En vivo](en-vivo.md).
+juzgar, el filtro no bloquea. En vivo se cambia sin reiniciar: ver [En vivo](./en-vivo.md).
 
 ## Ejemplo 1: cruce de medias con horario
 
@@ -299,4 +299,4 @@ archivo y conserva su historial. A la derecha está el panel de Claude: lo que e
 En el panel de Claude describís lo que querés, por ejemplo «una ruptura del rango de los primeros 30 minutos con stop
 por ATR». Claude Code crea o edita el archivo en la carpeta de estrategias, Trading Hub lo compila al terminar y, si
 compila, te ofrece **Probar en backtest**; si no, **Pedirle que los arregle**. Con **Laboratorio** activado, además corre
-backtests, optimizaciones y walk-forward por su cuenta y deja un reporte. El detalle está en [Claude](asistente-claude.md).
+backtests, optimizaciones y walk-forward por su cuenta y deja un reporte. El detalle está en [Claude](./asistente-claude.md).

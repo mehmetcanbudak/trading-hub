@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Privacy and security
 
@@ -13,7 +13,7 @@ Trading Hub runs locally: app, market data, scripts, backtests and connection cr
 | macOS Keychain | Passwords, secrets, tokens and Databento keys under service Trading Hub. |
 | Windows Credential Manager | Native generic credentials under stable targets `Trading Hub/<account>`, scoped to this user/computer. |
 
-See [Installation](instalacion.md#where-your-data-lives) for exact paths. AI-related local files include Chats, the compatibility-named `Capturas del laboratorio` screenshot folder (most recent 60), and claude-lab-mcp.json. Unexpected errors go to local crash.log; they are not automatically submitted.
+See [Installation](./instalacion.md#where-your-data-lives) for exact paths. AI-related local files include Chats, the compatibility-named `Capturas del laboratorio` screenshot folder (most recent 60), and claude-lab-mcp.json. Unexpected errors go to local crash.log; they are not automatically submitted.
 
 ## Credentials
 
@@ -48,7 +48,7 @@ There is no built-in updater or automatic crash-report submission in the reviewe
 
 Prompts, supplied strategy/indicator files, metrics, trades, data summaries, chart images and requested live exposure may be sent to the selected assistant provider. Strategy chat starts in the strategy folder. The application requests engine-specific file tools, directory access and MCP permissions; ordinary Claude chat does not enable terminal or web tools. These requests are not proof of an operating-system filesystem sandbox. Effective access depends on the selected CLI's enforced permissions and version. Review access before sending private content. Risk reviews have no tools and receive only supplied portfolio figures.
 
-Data handling depends on the selected CLI account and provider policies. See [Claude and optional Codex](asistente-claude.md). Local storage does **not** mean AI requests stay local. Historical conversations/reports are retained in their original language/content.
+Data handling depends on the selected CLI account and provider policies. See [Claude and optional Codex](./asistente-claude.md). Local storage does **not** mean AI requests stay local. Historical conversations/reports are retained in their original language/content.
 
 ## Real money
 
@@ -56,19 +56,19 @@ Data handling depends on the selected CLI account and provider policies. See [Cl
 - Existing manual-order confirmation rules remain; manually launching/resuming an automatic real strategy asks once. Automatic real resumption is disabled by default because it does not show that dialog.
 - Live sizing, daily-loss/drawdown limits and Stop all remain available. Automatic risk-agent changes are not allowed for portfolios containing real-account members.
 
-See [Connections](conexiones.md#real-and-test-accounts), [Trading safety](operar.md#safety) and [Live](en-vivo.md). Limits/actions cannot guarantee execution during outages. Imported C# and plugin DLLs are unsandboxed and should be trusted/reviewed before running.
+See [Connections](./conexiones.md#real-and-test-accounts), [Trading safety](./operar.md#safety) and [Live](./en-vivo.md). Limits/actions cannot guarantee execution during outages. Imported C# and plugin DLLs are unsandboxed and should be trusted/reviewed before running.
 
 ## macOS permissions
 
-- **Administrator password:** only for explicitly enabled closed-lid operation, using a privileged power helper. It restores normal sleep when the app exits; see [Settings](ajustes.md#keep-awake).
+- **Administrator password:** only for explicitly enabled closed-lid operation, using a privileged power helper. It restores normal sleep when the app exits; see [Settings](./ajustes.md#keep-awake).
 - **Control Terminal:** Claude sign-in opens Terminal with `claude /login`.
-- Locally built apps use ad-hoc signing unless a certificate is configured; see [Signing](instalacion.md#ad-hoc-signing).
+- Locally built apps use ad-hoc signing unless a certificate is configured; see [Signing](./instalacion.md#ad-hoc-signing).
 
 Localization tests do not enable privileged closed-lid operation or request broker credentials.
 
 ## Development isolation
 
-Tests/scenes use six fresh data/script/backtest/live roots and fake JSON credentials, with sleep/power integration disabled. Screenshot tooling starts from empty owned fixtures, never copies personal profiles/history/scripts, disables external/default providers and uses explicitly configured fakes. See [Development](desarrollo.md).
+Tests/scenes use six fresh data/script/backtest/live roots and fake JSON credentials, with sleep/power integration disabled. Screenshot tooling starts from empty owned fixtures, never copies personal profiles/history/scripts, disables external/default providers and uses explicitly configured fakes. See [Development](./desarrollo.md).
 
 TRADINGHUB_KEYCHAIN_FILE is a **plaintext testing override**, not encrypted production credential storage. Do not place real secrets there or include it in diagnostics.
 
@@ -79,7 +79,7 @@ This is optional irreversible removal, not an update step:
 1. Fully quit using ⌘Q on macOS, Alt+F4 on Windows, or Quit Trading Hub. Resolve protection choices and broker acknowledgment warnings first.
 2. Back up anything required; delete the platform's data directory, and Documents/Trading Hub only if you also intend to erase scripts/reports.
 3. In Keychain Access or Windows Credential Manager remove the relevant Trading Hub entries.
-4. Remove the Applications bundle or uninstall through Windows Settings → Apps; see [Uninstalling](instalacion.md#uninstalling) and [Windows](portar-a-windows.md).
+4. Remove the Applications bundle or uninstall through Windows Settings → Apps; see [Uninstalling](./instalacion.md#uninstalling) and [Windows](./portar-a-windows.md).
 
 The English upgrade itself does not delete data, rename stable folders or translate personal records in place.
 
@@ -89,7 +89,7 @@ Strategy chat defaults to Claude and optionally uses the user's own Codex CLI lo
 
 TradingView research starts off. Explicit app-owned OAuth uses dedicated native secret entries; nonsecret grant/review metadata and schema fingerprints are stored in `tradingview-research.json`. Discovery retrieves paginated metadata; approved calls send arguments to the official remote MCP endpoint and may send returned research into model context. Review/revocation is enforced before calls, but cannot retract data already sent or provider charges already incurred. Essential+ eligibility excludes trials; supported client registration and real account interoperability remain unverified.
 
-No CLI credential scraping or global CLI configuration rewrite is used. A workspace CLI network restriction is not a remote-MCP firewall or an in-process C# sandbox. Do not put secrets in prompts, sources or shared captures; see [assistant boundaries](asistente-claude.md#optional-tradingview-research). IB data requires its own Gateway/entitlements unless explicitly offline; OI uses Binance public observations. Imported bars remain synthetic, not execution records.
+No CLI credential scraping or global CLI configuration rewrite is used. A workspace CLI network restriction is not a remote-MCP firewall or an in-process C# sandbox. Do not put secrets in prompts, sources or shared captures; see [assistant boundaries](./asistente-claude.md#optional-tradingview-research). IB data requires its own Gateway/entitlements unless explicitly offline; OI uses Binance public observations. Imported bars remain synthetic, not execution records.
 
 Built-in source viewing does not execute that source. Editable copies preserve attribution and require real compilation; imported C#/DLLs remain unsandboxed. Pine originals are preserved byte-for-byte, the complete request/instructions are previewed, and explicit consent is separate from import. The selected CLI can add its own account/system context and retain content under its policies; the app's draft-only handoff is not a security/equivalence guarantee.
 

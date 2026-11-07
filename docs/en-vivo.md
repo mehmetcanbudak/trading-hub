@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # En vivo
 
@@ -12,7 +12,7 @@ simulada.
 - La **cuenta simulada** está siempre. Sus órdenes se llenan con la cola del libro y el tape real del mercado.
 - Las cuentas testnet de Binance, demo de Tradovate y de práctica de Rithmic tampoco operan dinero real.
 - Las cuentas **reales** aparecen solo si activaste «Permitir órdenes reales» en esa conexión y se ven en rojo, con
-  «— REAL» (ver [Conexiones](conexiones.md#cuentas-reales-y-cuentas-de-prueba)).
+  «— REAL» (ver [Conexiones](./conexiones.md#cuentas-reales-y-cuentas-de-prueba)).
 - Al lanzar o reanudar a mano una estrategia en una cuenta real, Trading Hub te pide confirmarlo una vez. Después manda
   sus órdenes sin confirmar cada una: la seguridad va por el tamaño y los límites de riesgo. La reanudación automática
   al abrir no pregunta; por eso, para las cuentas reales viene apagada.
@@ -48,7 +48,7 @@ gráfico (un backtest sin comisiones ni deslizamiento) y sigue en vivo con una c
 toca la tuya. En su configuración (desde el mismo menú o la leyenda del gráfico) elegís **Ejecutar en vivo con una
 cuenta**, la cuenta y **Aplicar**. Desde ahí aparece en En vivo con el origen «Gráfico» y se gestiona como las demás. Si
 cambiás el instrumento del gráfico, las que ejecutan se pausan; si la quitás del gráfico, se detiene y su posición queda
-como está. Más en [Gráficos](graficos.md#estrategias-en-el-gráfico).
+como está. Más en [Gráficos](./graficos.md#estrategias-en-el-gráfico).
 
 ## Tamaño y contrato inteligente
 
@@ -135,7 +135,7 @@ tamaño de cada una y, si hace falta, su pérdida máxima del día y su drawdown
 un tope de uso de US$ 2 (si tu Claude Code admite esa opción); no tiene herramientas, solo los números que le pasa
 Trading Hub. Lo que propone queda dentro de tus topes y aparece debajo del portafolio y en **Propuestas**. La tarjeta
 del agente muestra su última revisión, el resumen y el costo estimado acumulado. Cómo se conecta con tu cuenta de
-Claude: [Claude](asistente-claude.md).
+Claude: [Claude](./asistente-claude.md).
 
 ## Propuestas
 
@@ -162,9 +162,9 @@ condiciones opera cada estrategia, con la de ahora marcada. Se recalcula cada 30
 - **Barra de menú**: con la opción activada (lo está por defecto), cerrar la ventana deja a Trading Hub corriendo en la
   barra de menú de la Mac, con las estrategias trabajando. Su menú muestra las estrategias en vivo y las posiciones
   abiertas, y el panel tiene más detalle. Para cerrarlo del todo: ⌘Q o «Salir de Trading Hub». Ver
-  [Primeros pasos](primeros-pasos.md#el-ícono-en-la-barra-de-menú).
+  [Primeros pasos](./primeros-pasos.md#el-ícono-en-la-barra-de-menú).
 - **Reanudación automática**: unos segundos después de abrir, vuelven a arrancar solas las estrategias que corrían al
   cerrar (o al apagarse la Mac), con sus parámetros, tamaño y límites; las pausadas vuelven pausadas. Las de cuentas
   reales esperan que las reanudes, salvo que actives también esa opción. Un aviso resume qué se reanudó.
 - **Modo sin dormir**: mientras haya estrategias en vivo o el agente de riesgo trabajando, la Mac no se duerme por
-  inactividad, y si lo activás sigue con la tapa cerrada. Ver [Ajustes](ajustes.md).
+  inactividad, y si lo activás sigue con la tapa cerrada. Ver [Ajustes](./ajustes.md).

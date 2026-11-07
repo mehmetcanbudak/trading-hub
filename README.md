@@ -1,4 +1,4 @@
-**English** · [Español](README.es.md) · [中文](README.zh-CN.md)
+**English** · [Español](./README.es.md) · [中文](./README.zh-CN.md)
 
 # Trading Hub
 
@@ -12,7 +12,7 @@ Created by [@ralphtradesz](https://x.com/ralphtradesz). English work in this for
 
 **Upstream updates:** [Daily monitoring and the reviewed English sync process](docs/en/upstream-sync.md) track new original-repository commits without automatic merges or deployment.
 
-**Selected KVP capabilities:** the reviewed C# source implements the complete approved history/study/chart/depth/authoring/practice/alert/provider/storage/proxy scope, with correctness redesigns rather than a parallel trading engine. The scope is merged into local `memoshi` and the exact verified package is installed on the personal Apple Silicon Mac; this is **not a public release**. See [canonical validation and installation](docs/en/TRANSLATION_STATUS.md#canonical-kvp-promotion--2026-11-05), [historical candidate evidence](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04), [feature guides](docs/en/README.md) and [pinned attribution/full license](THIRD_PARTY_NOTICES.md#kvp-capability-reference). Branding/directory migration, KVP Windows distribution/updater and external Windows-only VPFM are excluded. The bounded CPU/cache path has measured end-to-end evidence; no Apple GPU acceleration is claimed.
+**Selected KVP capabilities:** the reviewed C# source implements the complete approved history/study/chart/depth/authoring/practice/alert/provider/storage/proxy scope, with correctness redesigns rather than a parallel trading engine. The scope is merged into local `memoshi` and the exact verified package is installed on the personal Apple Silicon Mac; this is **not a public release**. See [canonical validation and installation](docs/en/TRANSLATION_STATUS.md#canonical-kvp-promotion--2026-11-05), [historical candidate evidence](docs/en/TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04), [feature guides](docs/en/README.md) and [pinned attribution/full license](./THIRD_PARTY_NOTICES.md#kvp-capability-reference). Branding/directory migration, KVP Windows distribution/updater and external Windows-only VPFM are excluded. The bounded CPU/cache path has measured end-to-end evidence; no Apple GPU acceleration is claimed.
 
 **Using Windows?** See [Windows installation and platform integration](docs/en/portar-a-windows.md).
 
@@ -165,11 +165,11 @@ Full English guides are available below. Original Spanish sources remain under `
 | Development | [Builds, tests, and project structure](docs/en/desarrollo.md) |
 | Windows | [Windows installation and platform integration](docs/en/portar-a-windows.md) |
 
-The [latest upstream Spanish README](README.es.md) is retained for reference; a [Simplified Chinese README](README.zh-CN.md) is also available.
+The [latest upstream Spanish README](./README.es.md) is retained for reference; a [Simplified Chinese README](./README.zh-CN.md) is also available.
 
 ## Supporting the project
 
-Trading Hub is available free of charge. If you wish to support the original author's development work, refer to the original [Spanish README's donation instructions](README.es.md#apoyá-el-proyecto). Verify wallet addresses and blockchain networks independently; transfers over the wrong network may be irrecoverable.
+Trading Hub is available free of charge. If you wish to support the original author's development work, refer to the original [Spanish README's donation instructions](./README.es.md#apoyá-el-proyecto). Verify wallet addresses and blockchain networks independently; transfers over the wrong network may be irrecoverable.
 
 ## Risk notice
 
@@ -181,7 +181,7 @@ The repository contains an **MIT license with the Commons Clause**. You may use,
 
 See [LICENSE](LICENSE) for the authoritative terms.
 
-Selected community adaptations from PANASV and jjuangutierrez and the five restored library families retain their own attribution and terms in [Third-party notices](THIRD_PARTY_NOTICES.md). Apache/MIT libraries are not relicensed under the application's Commons Clause.
+Selected community adaptations from PANASV and jjuangutierrez and the five restored library families retain their own attribution and terms in [Third-party notices](./THIRD_PARTY_NOTICES.md). Apache/MIT libraries are not relicensed under the application's Commons Clause.
 
 ### Selected additional capabilities
 

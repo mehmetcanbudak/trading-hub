@@ -1,10 +1,10 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Ajustes
 
 **Ajustes** (⌘,) tiene las preferencias generales de Trading Hub. Cada cambio se guarda al momento. Lo que es de cada
-conexión está en [Conexiones](conexiones.md), lo de cada gráfico en [Gráficos](graficos.md), el stop y los objetivos de
-cada instrumento en [Operar](operar.md) y el agente de riesgo de cada portafolio en [En vivo](en-vivo.md).
+conexión está en [Conexiones](./conexiones.md), lo de cada gráfico en [Gráficos](./graficos.md), el stop y los objetivos de
+cada instrumento en [Operar](./operar.md) y el agente de riesgo de cada portafolio en [En vivo](./en-vivo.md).
 
 ## General
 
@@ -69,7 +69,7 @@ reales, los atajos de operar siguen pidiendo confirmación si «Confirmar órden
 | Indicadores propios (C#) | `~/Documents/Trading Hub/Indicadores`, con **Abrir** |
 | Estrategias (C#) | `~/Documents/Trading Hub/Estrategias`, con **Abrir** |
 
-Más sobre lo guardado en [Datos](datos.md) y [Privacidad](privacidad.md).
+Más sobre lo guardado en [Datos](./datos.md) y [Privacidad](./privacidad.md).
 
 ## Acerca de
 

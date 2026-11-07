@@ -1,9 +1,9 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Primeros pasos
 
 Un recorrido por la ventana principal para que sepas dónde está cada cosa. Si todavía no la instalaste, empezá por
-[Instalación](instalacion.md).
+[Instalación](./instalacion.md).
 
 ## La primera vez
 
@@ -12,7 +12,7 @@ modo footprint, con los indicadores Big Trades y Delta. Ese instrumento sale del
 que funciona sin internet y sirve para practicar.
 
 Todo lo que operes va a la **cuenta simulada**. Nada mueve dinero real hasta que lo habilites a mano, conexión por
-conexión, en [Conexiones](conexiones.md).
+conexión, en [Conexiones](./conexiones.md).
 
 Estas conexiones ya vienen creadas:
 
@@ -71,15 +71,15 @@ desde dd/MM HH:mm», o «Cargando historia N%» mientras carga.
 ![La sección Trading con dos gráficos, el Chart Trader de cada uno y el panel derecho con el DOM y la cinta](img/trading.png)
 
 1. **Barra del gráfico**, arriba: instrumento, historia, períodos, tipo de gráfico, indicadores, footprint, colores,
-   estrategias, plantillas, diseño, paneles, ventana aparte y pestaña nueva. Todo se explica en [Gráficos](graficos.md).
+   estrategias, plantillas, diseño, paneles, ventana aparte y pestaña nueva. Todo se explica en [Gráficos](./graficos.md).
 2. **Pestañas**: la tira aparece cuando hay más de una. Cada pestaña puede tener de 1 a 6 gráficos.
 3. **El gráfico**, con su barra de dibujos a la izquierda y su propio Chart Trader a la derecha (se pliega con la
    flechita).
 4. **Panel derecho**: Chart Trader, DOM y Cinta de operaciones, uno debajo del otro. El ancho se cambia arrastrando el
    borde y el alto de cada sección, con los divisores. Cada sección se oculta con su cruz o se saca a una ventana aparte.
-5. **Barra de replay**, abajo: aparece cuando el gráfico activo es un replay (ver [Datos](datos.md#replay)).
+5. **Barra de replay**, abajo: aparece cuando el gráfico activo es un replay (ver [Datos](./datos.md#replay)).
 
-Para operar, mirá [Operar](operar.md).
+Para operar, mirá [Operar](./operar.md).
 
 ## La cuenta simulada
 
@@ -103,7 +103,7 @@ Al abrir, se carga la historia reciente (cuánta, lo define cada conexión). Par
 historia de la barra. Una pestaña nueva se abre con ⌘T o con el botón **+**: copia el gráfico activo, salvo que hayas
 elegido una plantilla para las pestañas nuevas. ⌘W cierra el gráfico activo; siempre queda al menos una pestaña.
 
-Para ver mercados reales con tus cuentas, agregalos en [Conexiones](conexiones.md).
+Para ver mercados reales con tus cuentas, agregalos en [Conexiones](./conexiones.md).
 
 ## El menú de la Mac
 
@@ -149,7 +149,7 @@ combinación; Esc cancela y ⌫ lo deja sin asignar. «Restablecer los de fábri
 | ⌃Tab / ⌃⇧Tab | Pestaña siguiente / anterior |
 
 Los atajos para operar (comprar, vender, cerrar, revertir, cancelar, parciales, breakeven y otros) vienen sin asignar
-a propósito: cada uno elige los suyos. Ver [Operar](operar.md#atajos-para-operar).
+a propósito: cada uno elige los suyos. Ver [Operar](./operar.md#atajos-para-operar).
 
 Sobre el gráfico también funcionan:
 
@@ -164,7 +164,7 @@ Sobre el gráfico también funcionan:
 ## Ajustes que conviene mirar
 
 - **General**: apariencia (oscuro o claro), zona horaria de los gráficos y sonidos de alerta.
-- **Operar**: «Confirmar órdenes reales» (ver [Operar](operar.md#seguridad)).
+- **Operar**: «Confirmar órdenes reales» (ver [Operar](./operar.md#seguridad)).
 - **Estrategias en vivo**: seguir en la barra de menú, reanudar las estrategias al abrir y elegir el contrato solo
   (minis o micros).
 - **Modo sin dormir**: la Mac no se duerme mientras haya estrategias en vivo; opcionalmente, sigue con la tapa cerrada.
@@ -172,7 +172,7 @@ Sobre el gráfico también funcionan:
 
 ## Qué sigue
 
-- [Conexiones](conexiones.md): sumar mercados y brokers.
-- [Gráficos](graficos.md): períodos, footprint, dibujos, indicadores y plantillas.
-- [Operar](operar.md): Chart Trader, DOM, órdenes, stop y objetivos, y la sección Cuenta.
-- [Datos](datos.md): historia guardada, descargas, importación, Databento y replay.
+- [Conexiones](./conexiones.md): sumar mercados y brokers.
+- [Gráficos](./graficos.md): períodos, footprint, dibujos, indicadores y plantillas.
+- [Operar](./operar.md): Chart Trader, DOM, órdenes, stop y objetivos, y la sección Cuenta.
+- [Datos](./datos.md): historia guardada, descargas, importación, Databento y replay.

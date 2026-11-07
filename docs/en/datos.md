@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Data
 
@@ -101,7 +101,7 @@ CFDs do not have centralized exchange execution volume. Quote observations retai
 
 Databento supplies paid historical CME ticks, including aggressor side, beyond Rithmic's retained range. Signup credits, availability and prices vary. The app estimates cost and requires confirmation before downloading.
 
-Add a Databento API key in [Connections](conexiones.md#databento), or use the card's Connections button.
+Add a Databento API key in [Connections](./conexiones.md#databento), or use the card's Connections button.
 
 1. Choose a volume-based continuous contract: NQ, ES, MNQ, MES, YM, RTY, CL, GC, MCL, MGC, ZN or 6E.
 2. Choose From/To; the default is approximately three months.
@@ -129,7 +129,7 @@ The same applies to Tradovate + Databento / Only Tradovate / Databento. Combined
 
 ## File locations
 
-History is under `~/Library/Application Support/Trading Hub/Ticks`, then connection (`rithmic`, `databento`, `importado`, etc.), instrument and day. **Open folder** opens Finder. See [Storage](instalacion.md#where-your-data-lives).
+History is under `~/Library/Application Support/Trading Hub/Ticks`, then connection (`rithmic`, `databento`, `importado`, etc.), instrument and day. **Open folder** opens Finder. See [Storage](./instalacion.md#where-your-data-lives).
 
 Compatibility headers and feed IDs are intentionally retained, including recognized Spanish CSV column aliases and the historical live-trade CSV export column names. Translating identifiers would break existing consumers; new report prose and UI are English.
 
@@ -190,7 +190,7 @@ dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --import-ib /absolu
 dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --import-ib /absolute/path/to/csv-folder MNQ --replace
 ```
 
-The symbol is optional where the input supplies it. Only `--preview` and `--replace` are accepted import switches; unknown arguments and invalid input print `IB import failed: …` and exit 2. Preview exits 0 without publication. See [Development](desarrollo.md#selected-non-kvp-reproduction) before running: never point a fixture import at personal history.
+The symbol is optional where the input supplies it. Only `--preview` and `--replace` are accepted import switches; unknown arguments and invalid input print `IB import failed: …` and exit 2. Preview exits 0 without publication. See [Development](./desarrollo.md#selected-non-kvp-reproduction) before running: never point a fixture import at personal history.
 
 ## Open-interest observation fidelity
 

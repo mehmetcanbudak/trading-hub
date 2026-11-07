@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Connections
 
@@ -150,7 +150,7 @@ Historical CME ticks, including aggressor side and long history beyond Rithmic r
 
 - Enter the `db-…` API key; signup/pricing links are provided.
 - **Test connection** reports date availability and estimates a day of NQ tick data without downloading it.
-- No live feed or instrument-search entry: use **Data → CME futures with Databento**. See [Data](datos.md#databento).
+- No live feed or instrument-search entry: use **Data → CME futures with Databento**. See [Data](./datos.md#databento).
 
 ## Interactive Brokers
 
@@ -158,7 +158,7 @@ Enable the API in TWS / IB Gateway (Configure → API → Settings), then enter 
 
 Supported roots are MNQ, MES, M2K, MYM, NQ, ES, RTY and YM. Same-instrument historical tick requests are paced at 15 seconds. Live trade side is inferred, not exchange-authoritative aggression; depth requires a fresh best bid/offer and reconnect invalidates stale state. Calendar contract rollover is not volume-roll selection or back-adjustment: price discontinuities are not adjusted away.
 
-New chart defaults use the 18:00 America/New_York session; saved and custom sessions are preserved. Stable profile/data scopes keep history associated with the chosen profile and refresh after imports. Deleting a profile retires its retained transport; it does not delete history. Explicit stored/offline mode never connects to Gateway. See [Data](datos.md#interactive-brokers-bars-and-offline-history) for import policy and fidelity. This data-only capability is part of accepted canonical `memoshi`; the [dashboard](TRANSLATION_STATUS.md) separates its source/fake-fixture acceptance from real IB entitlements and native-provider checks.
+New chart defaults use the 18:00 America/New_York session; saved and custom sessions are preserved. Stable profile/data scopes keep history associated with the chosen profile and refresh after imports. Deleting a profile retires its retained transport; it does not delete history. Explicit stored/offline mode never connects to Gateway. See [Data](./datos.md#interactive-brokers-bars-and-offline-history) for import policy and fidelity. This data-only capability is part of accepted canonical `memoshi`; the [dashboard](./TRANSLATION_STATUS.md) separates its source/fake-fixture acceptance from real IB entitlements and native-provider checks.
 
 ## Real and test accounts
 
@@ -179,10 +179,10 @@ Without permission, real destinations are absent from Chart Trader, and an order
 4. Set maximum order quantity; larger requests are blocked.
 5. Save and test the connection.
 
-See [Trading safety](operar.md#safety) for confirmations and risk limits. These instructions explain the existing capability; translation validation does not authorize or test real-money orders.
+See [Trading safety](./operar.md#safety) for confirmations and risk limits. These instructions explain the existing capability; translation validation does not authorize or test real-money orders.
 
 ## Explicit network proxy policy
 
-[Settings → Network proxy](ajustes.md#network-proxy) applies captured system/direct/custom policy to app-owned ordinary HTTP and WebSocket transports, including discovery/history/private APIs, OAuth/revocation, public archives and research. Credentials are separate private-store values. New transports capture new policy; active contexts are not globally retargeted or forcibly disconnected during owned acknowledgments. Private HTTP and credential-bearing WebSocket handshakes reject redirects.
+[Settings → Network proxy](./ajustes.md#network-proxy) applies captured system/direct/custom policy to app-owned ordinary HTTP and WebSocket transports, including discovery/history/private APIs, OAuth/revocation, public archives and research. Credentials are separate private-store values. New transports capture new policy; active contexts are not globally retargeted or forcibly disconnected during owned acknowledgments. Private HTTP and credential-bearing WebSocket handshakes reject redirects.
 
 Interactive Brokers' native TCP connection and external assistant/browser processes are not app HTTP/WebSocket transports and are not represented as proxy-covered. Use the protection-aware Quit/restart path when a new connection policy must apply; a proxy error is not permission to retry an uncertain order or fall back silently to a direct route.

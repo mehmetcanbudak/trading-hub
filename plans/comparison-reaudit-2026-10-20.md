@@ -19,7 +19,7 @@ Neither project can honestly be certified as flawless or universally state of th
 - It is a critical-path and change-focused re-audit, **not a line-by-line proof of the entire repositories**, owned forks or dependencies. No independent reviewer/subagent was used.
 - No source, test, configuration or dependency changes; no installs, product-data access, credentials, live orders, paid model calls, commits or pushes. This report is the only repository artifact added by the audit.
 
-Trading Hub authority: [`TRANSLATION_STATUS.md`](../docs/en/TRANSLATION_STATUS.md), [`upstream-sync.md`](../docs/en/upstream-sync.md), and [upstream ledger](../.github/upstream-english.json). Errata authority: [`AGENTS.md`](../../Errata/AGENTS.md), `QUANT_CONTEXT.md`, ADRs, and [`plans/CURRENT_WORK.md`](../../Errata/plans/CURRENT_WORK.md). Errata's separate Agent Control platform remains planned, not implemented. Its deliberate lack of order execution is not a defect.
+Trading Hub authority: [`TRANSLATION_STATUS.md`](../docs/en/TRANSLATION_STATUS.md), [`upstream-sync.md`](../docs/en/upstream-sync.md), and [upstream ledger](../.github/upstream-english.json). Errata authority, in the separate Errata repository: `AGENTS.md`, `QUANT_CONTEXT.md`, ADRs, and `plans/CURRENT_WORK.md`. Errata's separate Agent Control platform remains planned, not implemented. Its deliberate lack of order execution is not a defect.
 
 ## Corrections to the previous report
 

@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Desarrollo
 
@@ -38,7 +38,7 @@ dotnet test tests/TradingHub.Tests    # pruebas
 `build-app.sh` publica en Release para `osx-arm64`, autocontenida, y arma el paquete fuera del Escritorio (iCloud le
 agrega atributos que rompen la firma). Un archivo `build.local.env`, que no se sube, puede definir `BUNDLE_ID` y
 `SIGN_IDENTITY`; `TH_OUT` y `TH_STAGE` cambian las carpetas de salida y de armado. Más en
-[Instalación](instalacion.md).
+[Instalación](./instalacion.md).
 
 Para correr la app desde el código sin tocar tus datos ni tu Llavero:
 
@@ -139,14 +139,14 @@ propios y `TRADINGHUB_SNAP_DEBUG=1`, el estado de la conexión.
 
 - **Indicador incluido**: una clase en `src/TradingHub.Indicators.Native` que herede de `Indicator`, con constructor sin
   parámetros, `[DisplayName]` y `[Category(IndicatorCategories.…)]`. La app escanea ese ensamblado al arrancar. Para uno
-  tuyo no hace falta tocar el código: va en la carpeta de indicadores (ver [Indicadores](indicadores.md)).
+  tuyo no hace falta tocar el código: va en la carpeta de indicadores (ver [Indicadores](./indicadores.md)).
 - **Herramienta del laboratorio**: su esquema en `LabServer.Tools()` y su caso en `LabServer.CallAsync`
   (`src/TradingHub.App/Lab/LabServer.cs`), y su nombre en `ClaudeCodeBridge.LabTools`
   (`src/TradingHub.App/Services/ClaudeCode.cs`), que es la lista de herramientas permitidas.
 
 ## La validación desde código
 
-`ValidationGate.Evaluate` (en `TradingHub.Strategies`) aplica las reglas de [Backtesting](backtesting.md) a un
+`ValidationGate.Evaluate` (en `TradingHub.Strategies`) aplica las reglas de [Backtesting](./backtesting.md) a un
 walk-forward. `tests/TradingHub.Tests/RobustnessTests.cs` tiene ejemplos.
 
 ```csharp

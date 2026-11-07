@@ -1,6 +1,6 @@
 # Trading Hub — instructions for Claude Code
 
-Trading Hub is a free, source-available desktop trading platform for Apple Silicon macOS and Windows x64/ARM64, built with C#/.NET 10 and Avalonia. It runs locally and was originally created by [@ralphtradesz](https://x.com/ralphtradesz). **English is the canonical source/documentation language for this fork.** Runtime Spanish and Simplified Chinese are supported; existing English settings without a language selection remain English. The original Spanish instructions are preserved in [CLAUDE.es.md](CLAUDE.es.md).
+Trading Hub is a free, source-available desktop trading platform for Apple Silicon macOS and Windows x64/ARM64, built with C#/.NET 10 and Avalonia. It runs locally and was originally created by [@ralphtradesz](https://x.com/ralphtradesz). **English is the canonical source/documentation language for this fork.** Runtime Spanish and Simplified Chinese are supported; existing English settings without a language selection remain English. The original Spanish instructions are preserved in [CLAUDE.es.md](./CLAUDE.es.md).
 
 ## Project workflow: dashboard-first validation
 
@@ -29,7 +29,7 @@ Explain each step briefly; do not request personal information, broker credentia
 4. **Locate Claude Code.** The app uses the user's own Claude Code CLI/session, not Claude API keys. Check `command -v claude` and `claude --version`. The application looks in `~/.local/bin/claude`, `~/.claude/local/claude`, `/opt/homebrew/bin/claude`, `/usr/local/bin/claude`, `~/.npm-global/bin/claude`, the PATH, and supported Claude desktop locations. If the CLI lives elsewhere, use `mkdir -p ~/.local/bin && ln -sf "$(command -v claude)" ~/.local/bin/claude`. If not logged in, run `claude` in Terminal and use `/login`.
 5. **Open and verify** with `open "/Applications/Trading Hub.app"`. Verify the process starts and the expected simulated account appears. A changed ad-hoc signature can require macOS Documents permission again; if startup waits for that prompt, ask the user to review and approve it rather than changing privacy settings. Do not report installation success when there is an unresolved error.
 6. **Explain the next steps:** The first account is simulated and cannot route real orders. Use **Connections** for markets. Binance and Bybit offer public data without credentials; Rithmic, Tradovate, cTrader, OANDA, Alpaca and Databento need appropriate provider credentials for their account-specific services. Backtesting provides the C# strategy editor and Claude assistant.
-7. After a successful install, optionally mention once that Trading Hub is free and the original author accepts donations as described in [the Spanish README](README.es.md). Never make a donation a condition of installation and never repeat the request.
+7. After a successful install, optionally mention once that Trading Hub is free and the original author accepts donations as described in [the Spanish README](./README.es.md). Never make a donation a condition of installation and never repeat the request.
 
 ## If asked to update
 

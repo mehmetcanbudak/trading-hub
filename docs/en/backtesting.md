@@ -1,12 +1,12 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Backtesting
 
-**Backtesting** (⌘2) contains Code, Backtest, Optimization, Walk-forward, History, Portfolio and Reports. Select the strategy above the tabs. See [Strategies](estrategias.md) for code and [Live](en-vivo.md) for execution.
+**Backtesting** (⌘2) contains Code, Backtest, Optimization, Walk-forward, History, Portfolio and Reports. Select the strategy above the tabs. See [Strategies](./estrategias.md) for code and [Live](./en-vivo.md) for execution.
 
 ## Select data
 
-Backtests iterate stored trades from recording, downloads or [imports](datos.md). Without stored data the list is empty.
+Backtests iterate stored trades from recording, downloads or [imports](./datos.md). Without stored data the list is empty.
 
 - **Instrument (stored data)** displays symbol, source, day count, range and size.
 - Futures with Databento history offer combined Rithmic + Databento (Rithmic priority; Databento fills empty minutes), Only Rithmic, or Databento. Tradovate has equivalent combined/individual choices.
@@ -159,7 +159,7 @@ Any fail produces Fail; otherwise any uncertain check produces Uncertain, else P
 
 Marked walk-forward contributions do not provide independent completed-trade confidence. Trade-only deflated-Sharpe, Monte Carlo, decay, duration and regime diagnostics remain unavailable when their assumptions are not satisfied. Actual closing fills can establish selection eligibility without turning boundary marks into trades.
 
-The Walk-forward UI shows efficiency, profitable windows, overfitting and CPCV. The full deflated-Sharpe/decay/regime gate is a tested library facility, **not a claim that every UI launch automatically enforces it**. See [Development](desarrollo.md).
+The Walk-forward UI shows efficiency, profitable windows, overfitting and CPCV. The full deflated-Sharpe/decay/regime gate is a tested library facility, **not a claim that every UI launch automatically enforces it**. See [Development](./desarrollo.md).
 
 ## Portfolio
 
@@ -171,10 +171,10 @@ Marked walk-forward components require saved available coverage. Combination use
 
 ## Reports
 
-History and Portfolio **Report** actions, or Claude's laboratory, create Markdown reports with metrics, tables and charts in the selected English, Spanish or Simplified Chinese interface language. Claude can add analysis and a verdict; generated C# remains English. Files live in the Documents known folder under `Trading Hub/Estrategias/Reportes` (`~/Documents/Trading Hub/Estrategias/Reportes` on a standard Mac). The report reader's PDF/HTML export opens a browser for printing or saving PDF. Existing reports are not rewritten. See [Claude](asistente-claude.md).
+History and Portfolio **Report** actions, or Claude's laboratory, create Markdown reports with metrics, tables and charts in the selected English, Spanish or Simplified Chinese interface language. Claude can add analysis and a verdict; generated C# remains English. Files live in the Documents known folder under `Trading Hub/Estrategias/Reportes` (`~/Documents/Trading Hub/Estrategias/Reportes` on a standard Mac). The report reader's PDF/HTML export opens a browser for printing or saving PDF. Existing reports are not rewritten. See [Claude](./asistente-claude.md).
 
 ## Additional data and assistant fidelity
 
-IB imported minute bars remain synthetic/non-observed through backtests and footprint aggregation; real recorded minutes take precedence. They cannot establish observed intrabar fills, true aggressor footprint or equivalence to tick replay. OI has finite five-minute/latest-30-day history and ten-minute freshness; unavailable cutoffs are not zero. Retrospective closed-confirmed swing anchors are not contemporaneous forecasts. See [Data](datos.md#interactive-brokers-bars-and-offline-history) and [studies](indicadores.md#selected-additional-native-studies).
+IB imported minute bars remain synthetic/non-observed through backtests and footprint aggregation; real recorded minutes take precedence. They cannot establish observed intrabar fills, true aggressor footprint or equivalence to tick replay. OI has finite five-minute/latest-30-day history and ten-minute freshness; unavailable cutoffs are not zero. Retrospective closed-confirmed swing anchors are not contemporaneous forecasts. See [Data](./datos.md#interactive-brokers-bars-and-offline-history) and [studies](./indicadores.md#selected-additional-native-studies).
 
-Optional Codex strategy chat uses a separate engine-bound history; Claude remains the default and risk-agent engine. The existing Laboratory tools produce runs/reports/proposals, not applied trades. [Research](asistente-claude.md#optional-tradingview-research) requires separate explicit metadata approval and may incur provider/model costs; fake-CLI evidence is not paid-model or real-OAuth certification.
+Optional Codex strategy chat uses a separate engine-bound history; Claude remains the default and risk-agent engine. The existing Laboratory tools produce runs/reports/proposals, not applied trades. [Research](./asistente-claude.md#optional-tradingview-research) requires separate explicit metadata approval and may incur provider/model costs; fake-CLI evidence is not paid-model or real-OAuth certification.

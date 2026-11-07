@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Development
 
@@ -34,9 +34,9 @@ dotnet test tests/TradingHub.Tests -c Release
 ./build-app.sh --install  # Replace the Applications bundle
 ```
 
-Packaging publishes self-contained osx-arm64, staging outside Desktop to avoid iCloud extended attributes interfering with signing. Git-ignored build.local.env can set BUNDLE_ID and SIGN_IDENTITY; TH_OUT and TH_STAGE override output/staging. See [Installation](instalacion.md).
+Packaging publishes self-contained osx-arm64, staging outside Desktop to avoid iCloud extended attributes interfering with signing. Git-ignored build.local.env can set BUNDLE_ID and SIGN_IDENTITY; TH_OUT and TH_STAGE override output/staging. See [Installation](./instalacion.md).
 
-Windows packaging is implemented for both `win-x64` and `win-arm64`: `.\build-windows.ps1` on Windows with .NET SDK 10/NSIS, or `./build-windows.sh` on macOS with .NET SDK 10/NSIS. It produces per-user installers under `dist`; see [Windows](portar-a-windows.md). Packaging and shared tests do not certify native installer, Credential Manager, CLI/shim, tray/DPI, power or brokerage behavior.
+Windows packaging is implemented for both `win-x64` and `win-arm64`: `.\build-windows.ps1` on Windows with .NET SDK 10/NSIS, or `./build-windows.sh` on macOS with .NET SDK 10/NSIS. It produces per-user installers under `dist`; see [Windows](./portar-a-windows.md). Packaging and shared tests do not certify native installer, Credential Manager, CLI/shim, tray/DPI, power or brokerage behavior.
 
 
 For isolated development:
@@ -129,7 +129,7 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 | kvp-performance | Warmed actual CPU calculation/raster frames and wide-book writer/selected-history/heatmap resource measurements; no real provider or claimed Metal kernel. |
 
 
-For safety/quit coverage, use a fresh fixture with all six storage overrides and the sleep guard disabled, as in [the dashboard reproduction command](TRANSLATION_STATUS.md#reproduce). The `safety` scene includes `RunQuit`; `quit` is not a separate assertion scene.
+For safety/quit coverage, use a fresh fixture with all six storage overrides and the sleep guard disabled, as in [the dashboard reproduction command](./TRANSLATION_STATUS.md#reproduce). The `safety` scene includes `RunQuit`; `quit` is not a separate assertion scene.
 
 For multilingual visual captures, use separate fresh fixtures and the seven main pages:
 
@@ -225,7 +225,7 @@ Independent native fake venues use one immutable endpoint path per server instan
 
 ## Validation from code
 
-ValidationGate.Evaluate applies the [Backtesting](backtesting.md#deflated-sharpe-and-validation) rules. RobustnessTests contains complete examples. Given existing walkForward and optimization results:
+ValidationGate.Evaluate applies the [Backtesting](./backtesting.md#deflated-sharpe-and-validation) rules. RobustnessTests contains complete examples. Given existing walkForward and optimization results:
 
 ```csharp
 var gate = ValidationGate.Evaluate(new GateInput
@@ -252,11 +252,11 @@ LiveStrategyRunner.Guard accepts ILiveOrderGuard to inspect exposure-increasing 
 - Preserve existing real-order confirmations, account permissions and risk controls. Localization must not add/remove order actions or move buttons as PnL changes. trading+jitter checks toolbar/button stability.
 - Validate provider work with fake servers and simulation first.
 - New built-in user-facing text is English. Keep persisted IDs, parser aliases, JSON/CSV contracts, filenames and generated localization keys stable. SDK English overrides belong in Strings.English.cs, not generated Strings.g.cs.
-- Review every non-text change; do not update validation baselines merely to silence a failure. Check the [localization dashboard](TRANSLATION_STATUS.md) and report untested real-broker/hardware behavior explicitly.
+- Review every non-text change; do not update validation baselines merely to silence a failure. Check the [localization dashboard](./TRANSLATION_STATUS.md) and report untested real-broker/hardware behavior explicitly.
 
 ## Selected non-KVP reproduction
 
-The selected work is now integrated into `memoshi`; the former external `feat/non-kvp-adoption` checkout is historical. Reproduce from a review branch in an isolated source worktree, never the installed app or personal data directories. The [dashboard](TRANSLATION_STATUS.md#canonical-non-kvp-integration--2026-11-04) distinguishes canonical results from earlier external receipts and remaining release gates. Before any app, headless import or fake-provider scene, choose a fresh fixture root:
+The selected work is now integrated into `memoshi`; the former external `feat/non-kvp-adoption` checkout is historical. Reproduce from a review branch in an isolated source worktree, never the installed app or personal data directories. The [dashboard](./TRANSLATION_STATUS.md#canonical-non-kvp-integration--2026-11-04) distinguishes canonical results from earlier external receipts and remaining release gates. Before any app, headless import or fake-provider scene, choose a fresh fixture root:
 
 ```bash
 export PATH="$HOME/.dotnet:$PATH"
@@ -277,13 +277,13 @@ dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll
 
 Other actual-host fake scenes are `nonkvp-studies`, `nonkvp-oi`, `nonkvp-ib`, `nonkvp-assistant` and `nonkvp-tradingview`. Give each an isolated fixture/capture root; keep real orders, recording and automatic resume disabled except scene-owned fake recording. These commands are reproduction instructions, not newly executed receipts. Do not run public providers, paid models or OAuth to satisfy localization gates.
 
-The built App's import syntax is documented in [Data](datos.md#interactive-brokers-bars-and-offline-history). Its research stdio entry is `dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --research-mcp --approval <reviewed-approval-id>`; the ID must be an existing reviewed 32-hex GUID (`N` format), not a token or arbitrary bypass. Missing/invalid approval exits 2; initialization does not grant permission to call tools. Use fake servers for verification, not a real account.
+The built App's import syntax is documented in [Data](./datos.md#interactive-brokers-bars-and-offline-history). Its research stdio entry is `dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --research-mcp --approval <reviewed-approval-id>`; the ID must be an existing reviewed 32-hex GUID (`N` format), not a token or arbitrary bypass. Missing/invalid approval exits 2; initialization does not grant permission to call tools. Use fake servers for verification, not a real account.
 
 Parent acceptance additionally requires English/source review, source/catalog candidate/template and original 3,300-entry coverage gates, English/safety/Quit and multilingual UI scenes, tracker tests, corrected visuals and research cancellation stress. Build/publish output must contain `LICENSE`, `THIRD_PARTY_NOTICES.md` and every `licenses/` text; inspect actual output and publish trees rather than treating csproj declarations as proof. Existing platform/native/provider release gates still apply.
 
 ## Selected KVP integration reproduction
 
-The complete approved capability scope comes from reviewed feature commit `5647faad561b0d7988d88cd0856bf13ad9e2f3de`, originally based at `e6fde5a065da9aa0fdcae15b69f2a94702819932`. Reproduce from a review branch of canonical `memoshi`; the former isolated feature worktree is not a required runtime or installation input. The [dashboard](TRANSLATION_STATUS.md#canonical-kvp-promotion--2026-11-05) distinguishes source acceptance from actual package/install receipts. Source pin/archive/full license are in [Third-party notices](../../THIRD_PARTY_NOTICES.md#kvp-capability-reference). Branding/directory migration, KVP Windows distribution/updater and the external Windows-only VPFM launcher are excluded; native Windows compatibility remains a separate gate.
+The complete approved capability scope comes from reviewed feature commit `5647faad561b0d7988d88cd0856bf13ad9e2f3de`, originally based at `e6fde5a065da9aa0fdcae15b69f2a94702819932`. Reproduce from a review branch of canonical `memoshi`; the former isolated feature worktree is not a required runtime or installation input. The [dashboard](./TRANSLATION_STATUS.md#canonical-kvp-promotion--2026-11-05) distinguishes source acceptance from actual package/install receipts. Source pin/archive/full license are in [Third-party notices](../../THIRD_PARTY_NOTICES.md#kvp-capability-reference). Branding/directory migration, KVP Windows distribution/updater and the external Windows-only VPFM launcher are excluded; native Windows compatibility remains a separate gate.
 
 Use the six isolated overrides above for **every** process, fake secret storage and sleep-off. One combined `dotnet build TradingHub.slnx -c Release --artifacts-path /owned/evidence/build` keeps all SDK bin/obj outputs external; fixture copy targets resolve real `GetTargetPath` rather than assuming the conventional layout. Stage the **complete** test/child-fixture, UiSnapshot and I18n runtime sets with matching SHA-256, size and modes. Keep the UI runtime's real repository ancestor context for guide/source checks. Run the **unfiltered built test DLL** and report that exact command/counts, not an unrun canonical project command. Financial-timing fixtures must not repeat the known whole-suite external-HDD timeout conditions. If shared Data capacity is unhealthy, a separately verified task-owned bounded RAM filesystem can hold disposable fixtures; use sparse-capable APFS with sufficient headroom for the unchanged 512 MiB-plus-one-byte boundary. Never format an existing user disk or create a large backing image on the full Data volume. RAM functional tests do not certify physical storage durability. Receipts/captures stay external; no local package growth or deletion of other worktrees, personal data, caches or rollback copies.
 
@@ -300,7 +300,7 @@ For that prebuilt/staged layout, `python3 tools/check_english_translation.py --u
 
 The ordinary safety scene's reused fake desktop proves the finite protection decision/ACK state machine, not actual shared-service disposal. The separate default-composition shutdown scenes prove owned pending/active drains, no late publication, rejected new work, idempotence and replacement-before-exit ordering. Hiding the main window retains source monitoring and active services.
 
-`kvp-performance` compares the same correct production CPU implementation's uncached recomputation against retained per-chart caches, including warm-ups, managed allocations and complete Skia raster frames; it does not execute an excluded reference-fork or fixed-base binary. It separately measures wide-book input through the owned writer, fresh selected reader and visible heatmap, retaining actual disk bytes/drops/time and clearly labelled rate/retention projections. For actual external-volume I/O, explicitly select a fresh owned external `TRADINGHUB_DATA_DIR` for this process while keeping all other private roots/TMPDIR isolated; do not label RAM I/O as physical disk performance. Display-only versus recording-enabled is a resource-cost comparison, not equivalent persistence. No GPU/Metal improvement is inferred from a kernel-only estimate; the bounded CPU reference remains. See [the measured workload and limits](TRANSLATION_STATUS.md#apple-silicon-cpu-and-depth-measurements).
+`kvp-performance` compares the same correct production CPU implementation's uncached recomputation against retained per-chart caches, including warm-ups, managed allocations and complete Skia raster frames; it does not execute an excluded reference-fork or fixed-base binary. It separately measures wide-book input through the owned writer, fresh selected reader and visible heatmap, retaining actual disk bytes/drops/time and clearly labelled rate/retention projections. For actual external-volume I/O, explicitly select a fresh owned external `TRADINGHUB_DATA_DIR` for this process while keeping all other private roots/TMPDIR isolated; do not label RAM I/O as physical disk performance. Display-only versus recording-enabled is a resource-cost comparison, not equivalent persistence. No GPU/Metal improvement is inferred from a kernel-only estimate; the bounded CPU reference remains. See [the measured workload and limits](./TRANSLATION_STATUS.md#apple-silicon-cpu-and-depth-measurements).
 
 Source-review export is explicit and separate from approval:
 
@@ -311,4 +311,4 @@ dotnet /absolute/staged/TradingHub.UiSnapshot.dll \
 
 The input maps each reviewed relative `src/...cs` path to its own rationale. Export calls the existing, unchanged Roslyn `Structure` algorithm, including recursive template treatment; it does not edit or auto-approve the manifest. Read/review actual source and preserve the historical audit baseline/checkpoint before merging exact hashes. Bilingual additions belong in reviewed `tools/TradingHub.I18n/overrides.json`; publish with the existing provenance/collision process, retain all original upstream aliases, and re-extract the final source before complete coverage/template checks.
 
-Results belong in [the dashboard](TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04) only after observed receipt/UI evidence. Fake providers/CLIs do not certify real entitlements, OAuth/model access, installed/native Windows, physical power/thermal behavior, signatures/notarization, distribution or exchange-atomic protection.
+Results belong in [the dashboard](./TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04) only after observed receipt/UI evidence. Fake providers/CLIs do not certify real entitlements, OAuth/model access, installed/native Windows, physical power/thermal behavior, signatures/notarization, distribution or exchange-atomic protection.

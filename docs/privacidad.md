@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Privacidad y seguridad
 
@@ -14,7 +14,7 @@ que vos configurás, y cuando lo usás.
 | `~/Documents/Trading Hub` | Tus estrategias (con sus reportes en `Estrategias/Reportes`) y tus indicadores |
 | Llavero de macOS | Contraseñas, secretos, tokens y la API key de Databento, bajo el nombre «Trading Hub» |
 
-El detalle de cada archivo está en [Instalación](instalacion.md#dónde-guarda-tus-datos). Lo que tiene que ver con Claude
+El detalle de cada archivo está en [Instalación](./instalacion.md#dónde-guarda-tus-datos). Lo que tiene que ver con Claude
 también queda en la carpeta de datos: las conversaciones (`Chats`), las imágenes del gráfico que miró el laboratorio
 (`Capturas del laboratorio`, las últimas 60) y la configuración del laboratorio (`claude-lab-mcp.json`). Los errores
 inesperados se anotan en `crash.log`, que no sale de tu Mac.
@@ -24,7 +24,7 @@ inesperados se anotan en `crash.log`, que no sale de tu Mac.
 - Las contraseñas, los secretos de las API keys, los tokens y la API key de Databento van al **Llavero de macOS**,
   nunca a archivos. Trading Hub los lee y los escribe con la herramienta `security` de macOS.
 - En `connections.json` quedan solo datos que no son secretos: nombre, usuario, servidor, la parte pública de la API key
-  (la API key de Binance o el Key ID de Alpaca) y las opciones. Ver [Conexiones](conexiones.md#dónde-quedan-tus-claves).
+  (la API key de Binance o el Key ID de Alpaca) y las opciones. Ver [Conexiones](./conexiones.md#dónde-quedan-tus-claves).
 - Al borrar una conexión se borran también sus secretos del Llavero.
 - Las claves no están en archivos que Claude pueda leer, y ninguna herramienta del laboratorio las lee.
 
@@ -52,35 +52,35 @@ si se lo pedís, el estado de tu cartera en vivo) viajan a Anthropic. Trading Hu
 estrategias, con permiso para editar solo ahí, en la de indicadores y en la de capturas, con herramientas de archivos (sin
 terminal ni web) y sin tus otros servidores MCP. El agente de riesgo ni siquiera tiene herramientas: recibe los números
 del portafolio y devuelve una propuesta. Lo que Claude Code haga con esos datos depende de tu cuenta y de las políticas de
-Anthropic. Ver [Claude](asistente-claude.md).
+Anthropic. Ver [Claude](./asistente-claude.md).
 
 ## Dinero real
 
 - Trading Hub arranca con la **cuenta simulada**. Las órdenes reales están apagadas en cada conexión hasta que actives
-  «Permitir órdenes reales» (ver [Conexiones](conexiones.md#cuentas-reales-y-cuentas-de-prueba)).
-- Las órdenes manuales a cuentas reales piden confirmación si así lo dejaste (ver [Operar](operar.md#seguridad)), y
+  «Permitir órdenes reales» (ver [Conexiones](./conexiones.md#cuentas-reales-y-cuentas-de-prueba)).
+- Las órdenes manuales a cuentas reales piden confirmación si así lo dejaste (ver [Operar](./operar.md#seguridad)), y
   lanzar o reanudar a mano una estrategia en una cuenta real se confirma una vez. La reanudación automática al abrir no
   pregunta: por eso, para las cuentas reales, viene apagada.
 - Las estrategias en vivo tienen tamaño, pérdida máxima del día y drawdown máximo, y **Frenar todo** las detiene a todas
-  (ver [En vivo](en-vivo.md)). El agente de riesgo nunca aplica cambios solo si hay una cuenta real en el portafolio.
+  (ver [En vivo](./en-vivo.md)). El agente de riesgo nunca aplica cambios solo si hay una cuenta real en el portafolio.
 
 ## Permisos que puede pedir macOS
 
 - **Contraseña de administrador**: solo si activás «Seguir con la tapa cerrada» en Ajustes, para que la Mac no se duerma
   con la tapa cerrada mientras Trading Hub esté abierto. Se deshace solo al cerrarlo.
 - **Controlar la Terminal**: si tocás «Iniciar sesión en Claude Code», Trading Hub abre la Terminal con `claude /login`.
-- La app se firma «ad hoc» al compilarla en tu Mac (ver [Instalación](instalacion.md#firma-ad-hoc)).
+- La app se firma «ad hoc» al compilarla en tu Mac (ver [Instalación](./instalacion.md#firma-ad-hoc)).
 
 ## Las herramientas de desarrollo no tocan tus datos
 
 Las pruebas y las escenas sin pantalla usan carpetas temporales (`TRADINGHUB_DATA_DIR`, `TRADINGHUB_STRATEGIES_DIR`,
 `TRADINGHUB_INDICATORS_DIR`) y un archivo de claves de mentira (`TRADINGHUB_KEYCHAIN_FILE`) en vez del Llavero. Las
 escenas copian tu configuración y tu historia a una carpeta temporal, sacan las API keys, apagan las órdenes reales y
-llevan Rithmic a un servidor falso. Ver [Desarrollo](desarrollo.md).
+llevan Rithmic a un servidor falso. Ver [Desarrollo](./desarrollo.md).
 
 ## Borrar todo
 
 1. Cerrá Trading Hub del todo (⌘Q o «Salir de Trading Hub» en la barra de menú).
 2. Borrá `~/Library/Application Support/Trading Hub` y, si querés, `~/Documents/Trading Hub`.
 3. En **Acceso a Llaveros**, buscá «Trading Hub» y borrá esas contraseñas.
-4. Borrá la app de Aplicaciones (ver [Instalación](instalacion.md#desinstalar)).
+4. Borrá la app de Aplicaciones (ver [Instalación](./instalacion.md#desinstalar)).
