@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using TradingHub.Market;
 
 namespace TradingHub.Data;
@@ -111,6 +114,110 @@ public static class HistorySources
         string source = DefaultSourceIdentity(folder, symbol);
         for (int i = 0; i < rows.Count; i++) rows[i] = AnnotateSource(rows[i], folder, source);
         return TickFile.SortAndDedupe(rows);
+    }
+
+    private static List<Trade> ReadCapturedSource(string path, string folder, string symbol, out string identity)
+    {
+        var rows = TickFile.ReadCaptured(path, out identity);
+        string source = DefaultSourceIdentity(folder, symbol);
+        for (int i = 0; i < rows.Count; i++) rows[i] = AnnotateSource(rows[i], folder, source);
+        return TickFile.SortAndDedupe(rows);
+    }
+
+    private static string Digest(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static string DayIdentity(string feedId, string symbol, DateOnly day, IReadOnlyList<string> constituents) =>
+        Digest(JsonIdentity(feedId, symbol, day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), constituents));
+
+    private static string JsonIdentity(string feedId, string symbol, string scope, IReadOnlyList<string> constituents) =>
+        System.Text.Json.JsonSerializer.Serialize(new { Feed = feedId, Symbol = symbol, Scope = scope, Constituents = constituents });
+
+    public static string RangeContentIdentity(string feedId, string symbol, DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> days) =>
+        Digest(JsonIdentity(feedId, symbol, fromUtc.ToString("O", CultureInfo.InvariantCulture) + "/" + toUtc.ToString("O", CultureInfo.InvariantCulture), days));
+
+    /// <summary>Hashes decoded physical bytes of every constituent, including sources hidden by primary-source priority.</summary>
+    public static string GetDayContentIdentity(string root, string feedId, string symbol, DateOnly day, CancellationToken ct = default)
+    {
+        if (feedId == IbBarImport.FeedId) throw new ArgumentException("IB history identity belongs to its snapshot.", nameof(feedId));
+        var constituents = new List<string>();
+        foreach (var folder in Folders(feedId))
+        {
+            ct.ThrowIfCancellationRequested();
+            string? path = TickFile.ExistingDayPath(root, folder, symbol, day);
+            constituents.Add(folder);
+            constituents.Add(path == null || new FileInfo(path).Length <= 16 ? "missing" : TickFile.ContentIdentity(path, ct));
+        }
+        return DayIdentity(feedId, symbol, day, constituents);
+    }
+
+    public static string GetRangeContentIdentity(string root, string feedId, string symbol, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+    {
+        var days = new List<string>();
+        for (var day = DateOnly.FromDateTime(fromUtc); day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) < toUtc; day = day.AddDays(1))
+            days.Add(GetDayContentIdentity(root, feedId, symbol, day, ct));
+        return RangeContentIdentity(feedId, symbol, fromUtc, toUtc, days);
+    }
+
+    /// <summary>Captures identities from the same byte buffers decoded for each source, never from a later path reread.</summary>
+    public static List<Trade> ReadDay(string root, string feedId, string symbol, DateOnly day, out string contentIdentity, CancellationToken ct = default)
+    {
+        if (feedId == IbBarImport.FeedId) throw new ArgumentException("IB history reads belong to its snapshot.", nameof(feedId));
+        var constituents = new List<string>();
+        var merged = new List<Trade>();
+        HashSet<long>? covered = Folders(feedId).Count > 1 ? [] : null;
+        bool requiresMergeOrder = false;
+        foreach (var folder in Folders(feedId))
+        {
+            ct.ThrowIfCancellationRequested();
+            constituents.Add(folder);
+            string? path = TickFile.ExistingDayPath(root, folder, symbol, day);
+            if (path == null || new FileInfo(path).Length <= 16) { constituents.Add("missing"); continue; }
+            var rows = ReadCapturedSource(path, folder, symbol, out string captured);
+            constituents.Add(captured);
+            if (covered == null) { merged = rows; continue; }
+            HashSet<long> added = [];
+            int previousCount = merged.Count;
+            foreach (var trade in rows)
+            {
+                long minute = trade.Time.Ticks / TimeSpan.TicksPerMinute;
+                if (covered.Contains(minute)) continue;
+                merged.Add(trade);
+                added.Add(minute);
+            }
+            covered.UnionWith(added);
+            requiresMergeOrder |= previousCount > 0 && merged.Count > previousCount;
+        }
+        contentIdentity = DayIdentity(feedId, symbol, day, constituents);
+        if (requiresMergeOrder) return merged.OrderBy(trade => trade.Time).ThenBy(trade => trade.Id).ToList();
+        return merged;
+    }
+
+    /// <summary>Retains hourly primary-source priority while capturing all decoded source generations.</summary>
+    public static decimal?[] ReadHourlyCloses(string root, string feedId, string symbol, DateOnly day, out string contentIdentity, CancellationToken ct = default)
+    {
+        var constituents = new List<string>();
+        var closes = new decimal?[24];
+        foreach (var folder in Folders(feedId))
+        {
+            ct.ThrowIfCancellationRequested();
+            constituents.Add(folder);
+            string? path = TickFile.ExistingDayPath(root, folder, symbol, day);
+            if (path == null || new FileInfo(path).Length <= 16) { constituents.Add("missing"); continue; }
+            var rows = TickFile.ReadCaptured(path, out string captured);
+            constituents.Add(captured);
+            var own = new decimal?[24];
+            var last = new long[24];
+            foreach (var trade in rows)
+            {
+                int hour = trade.Time.Hour;
+                if (trade.Time.Ticks < last[hour]) continue;
+                last[hour] = trade.Time.Ticks;
+                own[hour] = trade.Price;
+            }
+            for (int hour = 0; hour < 24; hour++) closes[hour] ??= own[hour];
+        }
+        contentIdentity = DayIdentity(feedId, symbol, day, constituents);
+        return closes;
     }
 
     /// <summary>Stream source days without materializing the raw day. Primary-source minute priority is retained.</summary>

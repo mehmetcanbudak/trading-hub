@@ -92,7 +92,7 @@ internal static class BacktestMarketScene
         var file = catalog.Files.First(f => f.FileName == "BtMercado");
         var sel = (Task)t.GetMethod("SelectAsync", Any)!.Invoke(view, new object[] { file })!;
         for (int i = 0; i < 200 && !sel.IsCompleted; i++) pump(0.05);
-        for (int i = 0; i < 100 && file.Type == null; i++) pump(0.1);
+        for (int i = 0; i < 100 && file.Generation == null; i++) pump(0.1);
         t.GetMethod("ShowTab", Any)!.Invoke(view, new object[] { "backtest" });
         pump(0.5);
 

@@ -1,6 +1,3 @@
-// Abre la ventana principal de Trading Hub sin pantalla (Avalonia headless + Skia) y guarda capturas PNG.
-// Uso: dotnet run --project tools/TradingHub.UiSnapshot -- carpeta [segundos] [página...] [--open conexión:SÍMBOLO] [--size 1600x950]
-// Páginas: trading, strategies, data, connections, settings (por defecto: trading).
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Threading;
@@ -16,29 +13,109 @@ if (args is ["--check-english", var sourceRoot])
 if (args is ["--source-fingerprints", var reviewRoot, var reviewInput, var reviewOutput])
     return TradingHub.UiSnapshot.SourceReviewFingerprint.Run(reviewRoot, reviewInput, reviewOutput);
 
-string outDir = args.Length > 0 ? args[0] : "ui-snapshots";
-double seconds = args.Length > 1 && double.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : 6;
-var pages = new List<string>();
-string? open = null;
-double width = 1600, height = 950;
-for (int i = 2; i < args.Length; i++)
+var scenes = new Dictionary<string, SnapshotScene>(StringComparer.Ordinal)
 {
-    if (args[i] == "--open" && i + 1 < args.Length) open = args[++i];
-    else if (args[i] == "--size" && i + 1 < args.Length)
-    {
-        var parts = args[++i].Split('x');
-        width = double.Parse(parts[0]);
-        height = double.Parse(parts[1]);
-    }
-    else pages.Add(args[i]);
+    ["nonkvp-search-zoom"] = new(static context => new(NonKvpSearchZoomScene.Run(context.Window, context.Pump, context.Output))),
+    ["nonkvp-studies"] = new(static context => new(NonKvpStudiesScene.Run(context.Window, context.Pump, context.Output))),
+    ["nonkvp-oi"] = new(static context => new(NonKvpOpenInterestScene.Run(context.Window, context.Pump, context.Output))),
+    ["nonkvp-ib"] = new(static context => new(NonKvpIbDataScene.Run(context.Window, context.Pump, context.Output))),
+    ["nonkvp-assistant"] = new(static context => new(NonKvpAssistantScene.Run(context.Window, context.Pump, context.Output)), SupportsWindows: false),
+    ["nonkvp-tradingview"] = new(static context => new(NonKvpTradingViewScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-operations"] = new(static context => new(KvpOperationsScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-proxy"] = new(static context => new(KvpProxyScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-performance"] = new(static context => new(KvpPerformanceScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-chart"] = new(static context => new(KvpChartScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-chart-accounts"] = new(static context => new(KvpChartAccountsScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-studies"] = new(static context => new(KvpStudiesScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-authoring"] = new(static context => new(KvpAuthoringScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-providers"] = new(static context => new(KvpProvidersScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-replay-alerts"] = new(static context => new(KvpReplayAlertsScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-depth-history"] = new(static context => new(KvpDepthHistoryScene.Run(context.Window, context.Pump, context.Output))),
+    ["kvp-shutdown"] = new(static context => new(KvpShutdownScene.Run(context.Window, context.Pump, context.Output)), Standalone: true, CreateServices: KvpShutdownScene.CreateServices),
+    ["kvp-shutdown-platform"] = new(static context => new(KvpShutdownScene.Run(context.Window, context.Pump, context.Output, platformRequest: true)), Standalone: true, CreateServices: KvpShutdownScene.CreateServices),
+    ["ib-recorded-prefix"] = new(static context => new(IbExcursionScene.RunRecordedPrefix(context.Pump, context.Output))),
+    ["ib-live-trades"] = new(static context => new(IbExcursionScene.RunPanel(context.Window, context.Pump, context.Output))),
+    ["ib-data-refresh"] = new(static context => new(IbRefreshScene.Run(context.Window, context.Pump, context.Output))),
+    ["ib-excursions-import"] = new(static context => new(IbExcursionScene.Run(context.Pump, context.Output, replaceHistory: true))),
+    ["ib-excursions"] = new(static context => new(IbExcursionScene.Run(context.Pump, context.Output))),
+    ["live-financial"] = new(static context => new(LiveFinancialScene.Run(context.Window, context.Pump, context.Output))),
+    ["live-stopped-correction"] = new(static context => new(LiveFinancialScene.Run(context.Window, context.Pump, context.Output, correctAfterStop: true))),
+    ["live-stopped-open"] = new(static context => new(LiveFinancialScene.Run(context.Window, context.Pump, context.Output, stoppedOpen: true))),
+    ["live-stopped-chart-revision"] = new(static context => new(LiveFinancialScene.RunStoppedChartRevision(context.Window, context.Pump, context.Output))),
+    ["account-journal-revision"] = new(static context => new(LiveFinancialScene.RunJournalRevision(context.Window, context.Pump, context.Output))),
+    ["live-excursions"] = new(static context => new(LiveFinancialScene.RunExcursions(context.Pump, context.Output))),
+    ["english"] = new(static context => new(EnglishScene.Run(context.Window, context.Pump, context.Output))),
+    ["safety"] = new(static context => new(SafetyScene.Run(context.Window, context.Pump, context.Output) + SafetyScene.RunQuit(context.Window, context.Pump, context.Output))),
+    ["conexiones"] = new(static context => new(ConnectionsScene.Run(context.Window, context.Pump, context.Output))),
+    ["panel"] = new(static context => new(PanelScene.Run(context.Window, context.Pump, context.Output))),
+    ["footprint"] = new(static context => new(FootprintScene.Run(context.Window, context.Pump, context.Output))),
+    ["esquinas"] = new(static context => new(CornersScene.Run(context.Window, context.Pump, context.Output))),
+    ["mercado"] = new(static context => new(BacktestMarketScene.Run(context.Window, context.Pump, context.Output))),
+    ["research-freshness"] = new(static context => new(ResearchFreshnessScene.Run(context.Window, context.Pump, context.Output))),
+    ["research-accounting"] = new(static context => new(ResearchAccountingScene.Run(context.Window, context.Pump, context.Output))),
+    ["marked-portfolio-report"] = new(static context => new(MarkedPortfolioReportScene.Run(context.Window, context.Pump, context.Output)), Standalone: true),
+    ["ordinary-shutdown"] = new(static context => new(OrdinaryShutdownScene.Run(context.Window, context.Pump, context.Output)), Standalone: true, SupportsWindows: false),
+    ["generation-continuation"] = new(static context => new(GenerationContinuationScene.Run(context.Window, context.Pump, context.Output)), Standalone: true),
+    ["native-reconfigure-retirement"] = new(static context => new(NativeSessionRetirementScene.Run(context.Window, context.Pump, context.Output)), Standalone: true),
+    ["native-idle-retirement"] = new(static context => new(NativeSessionRetirementScene.Run(context.Window, context.Pump, context.Output, idleRetired: true)), Standalone: true),
+    ["native-shutdown-admission"] = new(static context => new(NativeShutdownAdmissionScene.Run(context.Window, context.Pump, context.Output)), Standalone: true),
+    ["choice"] = new(RunChoice),
+    ["picker"] = new(RunPicker),
+    ["data+rithmic"] = new(RunRithmicData),
+    ["theme"] = new(RunTheme),
+    ["data+import"] = new(RunImport),
+    ["accounts+demo"] = new(RunAccountsDemo),
+};
+if (args is ["--list-ci-scenes"])
+{
+    foreach (var (name, scene) in scenes)
+        if (scene.IsSupported) Console.WriteLine(name);
+    return 0;
 }
 
-if (pages.Count == 0) pages.Add("trading");
-if (pages.Count > 1 && pages.Any(page => page is "kvp-shutdown" or "kvp-shutdown-platform"))
+string outDir = args.Length > 0 ? args[0] : "ui-snapshots";
+double seconds = 6, width = 1600, height = 950;
+string? open = null;
+var selections = new List<SnapshotSelection>();
+try
 {
-    Console.Error.WriteLine("Shutdown scenes require a standalone fixture process because they really dispose the application.");
+    if (outDir.StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException("Unknown snapshot command: " + outDir);
+    int first = 1;
+    if (args.Length > 1 && double.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var duration))
+    {
+        if (!double.IsFinite(duration) || duration < 0) throw new ArgumentException("Snapshot duration must be a finite nonnegative number.");
+        seconds = duration;
+        first = 2;
+    }
+    for (int i = first; i < args.Length; i++)
+    {
+        if (args[i] == "--open")
+        {
+            if (++i == args.Length || args[i].Split(':', 2) is not [{ Length: > 0 }, { Length: > 0 }])
+                throw new ArgumentException("The --open option requires connection:SYMBOL.");
+            open = args[i];
+        }
+        else if (args[i] == "--size")
+        {
+            if (++i == args.Length || args[i].Split('x') is not [var widthText, var heightText] ||
+                !double.TryParse(widthText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out width) ||
+                !double.TryParse(heightText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out height) ||
+                !double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
+                throw new ArgumentException("The --size option requires positive finite WIDTHxHEIGHT.");
+        }
+        else selections.Add(SnapshotSelection.Parse(args[i], scenes));
+    }
+    if (selections.Count == 0) selections.Add(new SnapshotSelection.Page("trading"));
+    if (selections.Count > 1 && selections.Any(selection => selection is SnapshotSelection.Scene { Definition.Standalone: true }))
+        throw new ArgumentException("Shutdown scenes require a standalone fixture process because they really dispose the application.");
+}
+catch (ArgumentException error)
+{
+    Console.Error.WriteLine(error.Message);
     return 2;
 }
+var servicesFactory = selections.Count == 1 && selections[0] is SnapshotSelection.Scene standalone
+    ? standalone.Definition.CreateServices : null;
 
 // Resolve parent symlinks as well: an explicit test override must never alias production storage.
 static string CanonicalPath(string path)
@@ -104,7 +181,8 @@ foreach (var (variable, relative) in new[]
 {
     if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(variable)))
         Environment.SetEnvironmentVariable(variable, Path.Combine(fixtureRoot, relative));
-    string resolved = Environment.GetEnvironmentVariable(variable)!;
+    string resolved = CanonicalPath(Environment.GetEnvironmentVariable(variable)!);
+    Environment.SetEnvironmentVariable(variable, resolved);
     Directory.CreateDirectory(variable == "TRADINGHUB_KEYCHAIN_FILE" ? Path.GetDirectoryName(resolved)! : resolved);
 }
 using var fakeRithmic = FakeMarket();
@@ -173,8 +251,7 @@ var sceneLang = TradingHub.App.Localization.Lang.Current;
 var sceneSettings = TradingHub.App.Services.AppSettings.Load();
 sceneSettings.Language = sceneLang;
 sceneSettings.Save();
-AppBuilder.Configure<App>(() => pages.Any(page => page is "kvp-shutdown" or "kvp-shutdown-platform")
-        ? new App(KvpShutdownScene.CreateServices) : new App())
+AppBuilder.Configure<App>(() => servicesFactory != null ? new App(servicesFactory) : new App())
     .UseSkia()
     .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
     .SetupWithoutStarting();
@@ -217,7 +294,7 @@ window = new MainWindow(App.Services) { Width = width, Height = height };
 window.Show();
 for (int i = 0; i < 150 && window.Trading.ActiveTab?.Model == null; i++) Pump(0.02);
 
-if (open != null && open.Split(':') is [var feedId, var symbol] && window.Trading.ActiveTab is { } tab)
+if (open != null && open.Split(':', 2) is [var feedId, var symbol] && window.Trading.ActiveTab is { } tab)
 {
     var task = window.Trading.OpenInTabAsync(tab, feedId, symbol, TradingHub.Data.ChartPeriod.M1, tab.Model?.Settings.Clone());
     while (!task.IsCompleted) Pump(0.02);
@@ -263,391 +340,73 @@ if (Environment.GetEnvironmentVariable("TRADINGHUB_SNAP_DEBUG") == "1")
 }
 
 int exitCode = 0;
-foreach (var page in pages)
+var sceneContext = new SnapshotContext(window, Pump, outDir, seconds, fakeRithmic);
+foreach (var selection in selections)
 {
-    int? sceneResult = page switch
+    var page = selection.Name;
+    if (selection is SnapshotSelection.Scene scene)
     {
-        "nonkvp-search-zoom" => NonKvpSearchZoomScene.Run(window, Pump, outDir),
-        "nonkvp-studies" => NonKvpStudiesScene.Run(window, Pump, outDir),
-        "nonkvp-oi" => NonKvpOpenInterestScene.Run(window, Pump, outDir),
-        "nonkvp-ib" => NonKvpIbDataScene.Run(window, Pump, outDir),
-        "nonkvp-assistant" => NonKvpAssistantScene.Run(window, Pump, outDir),
-        "nonkvp-tradingview" => NonKvpTradingViewScene.Run(window, Pump, outDir),
-        "kvp-operations" => KvpOperationsScene.Run(window, Pump, outDir),
-        "kvp-proxy" => KvpProxyScene.Run(window, Pump, outDir),
-        "kvp-performance" => KvpPerformanceScene.Run(window, Pump, outDir),
-        "kvp-chart" => KvpChartScene.Run(window, Pump, outDir),
-        "kvp-chart-accounts" => KvpChartAccountsScene.Run(window, Pump, outDir),
-        "kvp-studies" => KvpStudiesScene.Run(window, Pump, outDir),
-        "kvp-authoring" => KvpAuthoringScene.Run(window, Pump, outDir),
-        "kvp-providers" => KvpProvidersScene.Run(window, Pump, outDir),
-        "kvp-replay-alerts" => KvpReplayAlertsScene.Run(window, Pump, outDir),
-        "kvp-depth-history" => KvpDepthHistoryScene.Run(window, Pump, outDir),
-        "kvp-shutdown" => KvpShutdownScene.Run(window, Pump, outDir),
-        "kvp-shutdown-platform" => KvpShutdownScene.Run(window, Pump, outDir, platformRequest: true),
-        _ => null,
+        exitCode += await scene.Definition.Run(sceneContext);
+        continue;
+    }
+    string pageId = selection switch
+    {
+        SnapshotSelection.Page plain => plain.Name,
+        SnapshotSelection.Trading => "trading",
+        SnapshotSelection.StrategyAction => "strategies",
+        SnapshotSelection.ConnectionAction => "connections",
+        _ => throw new InvalidOperationException("Unrecognized parsed snapshot selector."),
     };
-    if (sceneResult is { } result)
-    {
-        exitCode += result;
-        continue;
-    }
-
-    if (page == "ib-recorded-prefix")
-    {
-        exitCode += IbExcursionScene.RunRecordedPrefix(Pump, outDir);
-        continue;
-    }
-
-    if (page == "ib-live-trades")
-    {
-        exitCode += IbExcursionScene.RunPanel(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "ib-data-refresh")
-    {
-        exitCode += IbRefreshScene.Run(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "ib-excursions-import")
-    {
-        exitCode += IbExcursionScene.Run(Pump, outDir, replaceHistory: true);
-        continue;
-    }
-
-    if (page == "ib-excursions")
-    {
-        exitCode += IbExcursionScene.Run(Pump, outDir);
-        continue;
-    }
-
-    if (page == "live-financial")
-    {
-        exitCode += LiveFinancialScene.Run(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "live-stopped-correction")
-    {
-        exitCode += LiveFinancialScene.Run(window, Pump, outDir, correctAfterStop: true);
-        continue;
-    }
-
-    if (page == "live-stopped-open")
-    {
-        exitCode += LiveFinancialScene.Run(window, Pump, outDir, stoppedOpen: true);
-        continue;
-    }
-
-    if (page == "live-stopped-chart-revision")
-    {
-        exitCode += LiveFinancialScene.RunStoppedChartRevision(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "account-journal-revision")
-    {
-        exitCode += LiveFinancialScene.RunJournalRevision(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "live-excursions")
-    {
-        exitCode += LiveFinancialScene.RunExcursions(Pump, outDir);
-        continue;
-    }
-
-    if (page == "english")
-    {
-        exitCode += EnglishScene.Run(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "safety")
-    {
-        exitCode += SafetyScene.Run(window, Pump, outDir);
-        exitCode += SafetyScene.RunQuit(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "conexiones")
-    {
-        exitCode += ConnectionsScene.Run(window, Pump, outDir);
-        continue;
-    }
-
-
-    if (page == "panel")
-    {
-        exitCode += PanelScene.Run(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "footprint")
-    {
-        exitCode += FootprintScene.Run(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "esquinas")
-    {
-        exitCode += CornersScene.Run(window, Pump, outDir);
-        continue;
-    }
-
-
-    if (page == "mercado")
-    {
-        exitCode += BacktestMarketScene.Run(window, Pump, outDir);
-        continue;
-    }
-
-    if (page == "choice")
-    {
-        // abre el botón de historia de la barra y muestra qué pasa
-        window.Navigate("trading");
-        var hb = typeof(TradingHub.App.Views.ChartToolbar).GetField(Environment.GetEnvironmentVariable("TRADINGHUB_SNAP_CHOICE") ?? "_historyBox", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(window.Trading.Toolbar)!;
-        var btn = (Avalonia.Controls.Button)hb;
-        Console.WriteLine($"Botón: visible={btn.IsVisible} habilitado={btn.IsEffectivelyEnabled} tamaño={btn.Bounds} plantilla={(btn.GetType().GetProperty("Template")?.GetValue(btn) != null)} flyout={btn.Flyout?.GetType().Name}");
-        btn.GetType().GetMethod("OnClick", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(btn, null);
-        Pump(1);
-        var mf = (Avalonia.Controls.MenuFlyout)btn.Flyout!;
-        Console.WriteLine($"Menú abierto={mf.IsOpen} ítems={mf.Items.Count}");
-        var presenter = mf.GetType().GetProperty("Popup", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(mf) as Avalonia.Controls.Primitives.Popup;
-        var child = presenter?.Child as Avalonia.Controls.Control;
-        Console.WriteLine($"Presentador: {child?.GetType().Name} tamaño={child?.Bounds}");
-        if (child is Avalonia.Controls.ItemsControl ic) Console.WriteLine($"Ítems en el presentador: {ic.ItemCount}");
-        using var shot = child != null ? Avalonia.Controls.TopLevel.GetTopLevel(child)?.CaptureRenderedFrame() : null;
-        shot?.Save(Path.Combine(outDir, "choice.png"));
-        continue;
-    }
-
-    if (page == "picker")
-    {
-        // abre el selector de instrumentos y captura su ventana emergente
-        window.Navigate("trading");
-        var picker = window.Trading.Picker;
-        picker.GetType().GetMethod("OnClick", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(picker, null);
-        Pump(4);
-        var flyout = (Avalonia.Controls.Flyout)picker.GetType().GetField("_flyout", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(picker)!;
-        var content = (Avalonia.Controls.Control)flyout.Content!;
-        var top = Avalonia.Controls.TopLevel.GetTopLevel(content);
-        using var shot = top?.CaptureRenderedFrame();
-        var pp = Path.Combine(outDir, "picker.png");
-        shot?.Save(pp);
-        Console.WriteLine(shot != null ? $"Captura: {pp}" : "No se pudo capturar el selector");
-        flyout.Hide();
-        continue;
-    }
-
-    var parts = page.Split('+');
-    if (page == "data+rithmic")
-    {
-        // Datos con un instrumento de Rithmic: 1 año (contratos de cada tramo) y una descarga corta contra el servidor falso
-        window.Navigate("data");
-        Pump(1);
-        var view = ((System.Collections.Generic.Dictionary<string, Avalonia.Controls.Control>)typeof(MainWindow).GetField("_pages", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(window)!)["data"];
-        var vt = view.GetType();
-        var fl = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
-        var es = (await App.Services.Connections.GetFeed("rithmic").GetInstrumentsAsync(CancellationToken.None)).First(i => i.Symbol == "ES");
-        vt.GetField("_dlProfile", fl)!.SetValue(view, "rithmic");
-        vt.GetField("_dlInstrument", fl)!.SetValue(view, es);
-        var chip = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "1 year");
-        chip.IsChecked = true;
-        chip.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
-        Pump(0.5);
-        var status = (Avalonia.Controls.TextBlock)vt.GetField("_dlStatus", fl)!.GetValue(view)!;
-        Console.WriteLine("1 año: " + status.Text);
-        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "data_rithmic_year.png"));
-        // descarga de ayer (el servidor falso tiene operaciones de las últimas 2 horas: hoy no se baja, ayer da vacío)
-        var y = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "Yesterday");
-        y.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
-        Console.WriteLine($"antes: perfil={vt.GetField("_dlProfile", fl)!.GetValue(view)} inst={vt.GetField("_dlInstrument", fl)!.GetValue(view)} puede={vt.GetProperty("CanDownload", fl)!.GetValue(view)}");
-        var dl = (Task)vt.GetMethod("DownloadAsync", fl)!.Invoke(view, null)!;
-        string last = "";
-        while (!dl.IsCompleted)
-        {
-            Pump(0.1);
-            if (status.Text != last) Console.WriteLine("  · " + (last = status.Text ?? ""));
-        }
-        Console.WriteLine("Descarga: " + status.Text + (dl.Exception != null ? " · ERROR " + dl.Exception.GetBaseException() : ""));
-        continue;
-    }
-
-    if (page == "theme")
-    {
-        // oscuro y claro, con dos gráficos (bordes) y la configuración del gráfico por secciones
-        window.Navigate("trading");
-        var tv = window.Trading;
-        var lay = tv.SetLayoutAsync(TradingHub.App.Views.PaneLayout.TwoColumns);
-        while (!lay.IsCompleted) Pump(0.05);
-        foreach (var c in tv.Tabs.Where(t => t.Model != null)) { c.Model!.Settings.Colors = null; c.Model.ApplyColors(); }
-        Pump(3);
-        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_dark.png"));
-        TradingHub.App.Services.AppTheme.Apply(TradingHub.App.Services.AppTheme.Light);
-        Pump(2);
-        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_light.png"));
-        tv.OpenChartSettings(tv.ActiveTab);
-        Pump(1.5);
-        var sw = (typeof(TradingHub.App.Views.TradingView).GetField("_settingsWindows", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(tv) as System.Collections.IDictionary)?.Values.Cast<Avalonia.Controls.Window>().FirstOrDefault();
-        if (sw != null)
-        {
-            var tabsCtl = sw.GetVisualDescendants().OfType<Avalonia.Controls.TabControl>().First();
-            tabsCtl.SelectedIndex = tabsCtl.ItemCount - 1;
-            Pump(1);
-            using (var capturedFrame = sw.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_chart_settings_light.png"));
-            sw.Close();
-        }
-
-        window.Navigate("settings");
-        Pump(1.5);
-        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_settings_light.png"));
-        TradingHub.App.Services.AppTheme.Apply(TradingHub.App.Services.AppTheme.Dark);
-        window.Navigate("accounts");
-        Pump(1.5);
-        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_accounts_dark.png"));
-        Console.WriteLine("Capturas del tema listas");
-        continue;
-    }
-
-    if (page == "data+import")
-    {
-        // importar un CSV de US100 (como el de Dukascopy) y ver que aparece en Datos y en los backtests
-        var csv = Path.Combine(Path.GetTempPath(), "USATECHIDXUSD_Ticks_muestra.csv");
-        var sb = new System.Text.StringBuilder("Gmt time,Ask,Bid,AskVolume,BidVolume\n");
-        var t = new DateTime(2025, 9, 1, 13, 30, 0, DateTimeKind.Utc);
-        var rnd = new Random(3);
-        double px = 23450;
-        for (int i = 0; i < 20000; i++)
-        {
-            px += (rnd.NextDouble() - 0.5) * 2;
-            t = t.AddMilliseconds(250 + rnd.Next(1500));
-            sb.Append(t.ToString("dd.MM.yyyy HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
-              .Append((px + 1.2).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
-              .Append(px.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)).Append(",0.0015,0.0012\n");
-        }
-
-        File.WriteAllText(csv, sb.ToString());
-        var r = TradingHub.Data.CsvImport.Import(csv, "US100", TradingHub.App.Services.AppPaths.Ticks, TimeSpan.Zero, null, null, CancellationToken.None);
-        Console.WriteLine($"Importado: {r.Kind}, {r.Trades} operaciones, {r.Days} días, paso {r.TickSize}");
-        window.Navigate("data");
-        Pump(1.5);
-        var found = TradingHub.Data.HistoricalData.Scan(TradingHub.App.Services.AppPaths.Ticks).FirstOrDefault(x => x.FeedId == "importado" && x.Symbol == "US100");
-        Console.WriteLine($"En Datos: {(found == null ? "no" : $"US100 · importado, {found.Days.Count} día(s)")}");
-        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "data_import.png"));
-        continue;
-    }
-
-    if (page == "accounts+demo")
-    {
-        // sección Cuenta con movimiento: órdenes en la simulada (SIM-BTC) y en Rithmic (servidor falso, cuenta ACC1)
-        var tv = window.Trading;
-        var simOpen = tv.OpenInTabAsync(tv.ActiveTab!, "sim", "SIM-BTC", TradingHub.Data.ChartPeriod.M1, tv.ActiveTab!.Model?.Settings.Clone());
-        while (!simOpen.IsCompleted) Pump(0.05);
-        Pump(2);
-        var simData = tv.ActiveTab!.Model!.Data;
-        var sim = App.Services.SimBrokerFor(simData);
-        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Buy, 0.5m);
-        Pump(1.5);
-        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Buy, 0.5m);
-        Pump(1.5);
-        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Sell, 1m);
-        Pump(1.5);
-        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Sell, 0.3m);
-        Pump(1.5);
-        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Limit, TradingHub.Trading.OrderDirections.Buy, 0.2m, Math.Round(simData.LastPrice * 0.98m, 1));
-        Pump(1);
-        Console.WriteLine($"Simulada: posición {sim.Position!.Volume} · órdenes {sim.Orders.Count} · ejecuciones guardadas {App.Services.Journal.FillsOf("sim").Count}");
-
-        var rp = App.Services.Connections.Find("rithmic")!;
-        var session = App.Services.RithmicSessionFor(rp);
-        for (int i = 0; i < 100 && !session.IsConnected; i++) Pump(0.1);
-        fakeRithmic!.MarketPrice = 5000;
-        var o1 = session.PlaceAsync("ACC1", "ESZ6", "CME", true, 2, 2, 0, 0, "demo1", CancellationToken.None);
-        while (!o1.IsCompleted) Pump(0.05);
-        fakeRithmic.MarketPrice = 5006.25;
-        var o2 = session.PlaceAsync("ACC1", "ESZ6", "CME", false, 2, 1, 0, 0, "demo2", CancellationToken.None);
-        while (!o2.IsCompleted) Pump(0.05);
-        var o3 = session.PlaceAsync("ACC1", "ESZ6", "CME", true, 1, 1, 4990, 4990, "demo3", CancellationToken.None);
-        while (!o3.IsCompleted) Pump(0.05);
-        Pump(1);
-        Console.WriteLine($"Rithmic: saldo {session.SummaryFor("ACC1")?.Balance} · ejecuciones {session.FillsOf("ACC1").Count} · guardadas {App.Services.Journal.FillsOf("rithmic|rithmic|ACC1").Count}");
-
-        window.Navigate("accounts");
-        Pump(1.5);
-        var view = ((System.Collections.Generic.Dictionary<string, Avalonia.Controls.Control>)typeof(MainWindow).GetField("_pages", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(window)!)["accounts"];
-        var vt = view.GetType();
-        var tabs = (Avalonia.Controls.TabControl)vt.GetField("_tabs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view)!;
-        foreach (var acc in new[] { "rithmic|rithmic|ACC1", "sim" })
-        {
-            vt.GetField("_selected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(view, acc);
-            for (int t = 0; t < 5; t++)
-            {
-                tabs.SelectedIndex = t;
-                Pump(1.3);
-                string name = $"accounts_{(acc == "sim" ? "sim" : "rithmic")}_{t}";
-                using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, name + ".png"));
-                Console.WriteLine($"Captura: {name}");
-            }
-        }
-
-        continue;
-    }
-
-    window.Navigate(parts[0]);
+    window.Navigate(pageId);
     Pump(1.2);
 
-    if (parts.Length > 1 && parts[0] == "connections")
+    if (selection is SnapshotSelection.ConnectionAction connection)
     {
-        // elige el perfil de Rithmic y espera la lista de servidores
         var cv = ((System.Collections.Generic.Dictionary<string, Avalonia.Controls.Control>)typeof(MainWindow).GetField("_pages", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(window)!)["connections"];
-        var prof = App.Services.Connections.Profiles.FirstOrDefault(p => p.IsRithmic && (parts[1] != "amp" || p.Kind == TradingHub.App.Services.ConnectionKind.AmpFutures));
+        var prof = App.Services.Connections.Profiles.FirstOrDefault(p => p.IsRithmic && (connection.Action != ConnectionSnapshotAction.Amp || p.Kind == TradingHub.App.Services.ConnectionKind.AmpFutures));
         if (prof != null) cv.GetType().GetMethod("Select", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(cv, new object[] { prof });
         Pump(9);
-        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, $"connections_{parts[1]}.png"));
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, page.Replace('+', '_') + ".png"));
         Console.WriteLine($"Perfil: {prof?.Name} ({prof?.Kind}) · {prof?.RithmicSystem} · {prof?.RithmicUri}");
         continue;
     }
 
-    // acciones de trading: trading+layout4, trading+float, trading+brackets, trading+domsettings, trading+narrow
-    if (parts.Length > 1 && parts[0] == "trading")
+    if (selection is SnapshotSelection.Trading trading)
     {
         var tv = window.Trading;
-        string action = parts[1];
+        TradingSnapshotAction? action = (trading as SnapshotSelection.TradingAction)?.Action;
         string shotName = page.Replace('+', '_') + ".png";
-        if (action.StartsWith("layout"))
+        if (action is TradingSnapshotAction.Layout2 or TradingSnapshotAction.Layout2r or TradingSnapshotAction.Layout3 or TradingSnapshotAction.Layout4 or TradingSnapshotAction.Layout6)
         {
             var layout = action switch
             {
-                "layout2" => TradingHub.App.Views.PaneLayout.TwoColumns,
-                "layout2r" => TradingHub.App.Views.PaneLayout.TwoRows,
-                "layout3" => TradingHub.App.Views.PaneLayout.OneLeftTwoRight,
-                "layout6" => TradingHub.App.Views.PaneLayout.Six,
-                _ => TradingHub.App.Views.PaneLayout.Four,
+                TradingSnapshotAction.Layout2 => TradingHub.App.Views.PaneLayout.TwoColumns,
+                TradingSnapshotAction.Layout2r => TradingHub.App.Views.PaneLayout.TwoRows,
+                TradingSnapshotAction.Layout3 => TradingHub.App.Views.PaneLayout.OneLeftTwoRight,
+                TradingSnapshotAction.Layout4 => TradingHub.App.Views.PaneLayout.Four,
+                TradingSnapshotAction.Layout6 => TradingHub.App.Views.PaneLayout.Six,
+                _ => throw new InvalidOperationException("Unrecognized parsed layout."),
             };
             var t1 = tv.SetLayoutAsync(layout);
             while (!t1.IsCompleted) Pump(0.05);
             Pump(seconds);
             Console.WriteLine($"Diseño {layout}: {tv.ActivePage?.Charts.Count} gráficos en la pestaña, activo {tv.ActiveTab?.Caption}");
         }
-        else if (action.StartsWith("history"))
+        else if (trading is SnapshotSelection.TradingHistory history)
         {
-            // trading+history8760[+H4]: carga esa cantidad de horas (o "historyall") y cambia el período
-            double hours = action == "historyall" ? -1 : double.Parse(action["history".Length..], System.Globalization.CultureInfo.InvariantCulture);
+            double hours = history.Hours;
             var hc = tv.ActiveTab!;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var load = tv.LoadHistoryAsync(hc, hours);
             while (!load.IsCompleted) Pump(0.1);
             Console.WriteLine($"Historia {hours} h cargada en {sw.Elapsed.TotalSeconds:0.0} s · {hc.Model?.Data.Trades.Count:N0} operaciones desde {hc.Model?.Data.Trades.FirstTime:yyyy-MM-dd HH:mm} · ticks reales desde {hc.Model?.Data.RealTicksFrom:yyyy-MM-dd HH:mm}");
-            if (parts.Length > 2) tv.Toolbar.SetPeriod(TradingHub.Data.ChartPeriod.Parse(parts[2]));
+            if (history.Period is { } selectedPeriod) tv.Toolbar.SetPeriod(selectedPeriod);
             Pump(seconds);
             Console.WriteLine($"Velas: {hc.Model?.Series.Count:N0} · sintéticas: {hc.Model?.Series.Candles.Count(c => c.IsSynthetic):N0}");
         }
-        else if (action is "jitter" or "jitterold")
+        else if (action is TradingSnapshotAction.Jitter or TradingSnapshotAction.Jitterold)
         {
-            if (action == "jitterold")
+            if (action == TradingSnapshotAction.Jitterold)
             {
                 // como estaba antes: sin anchos fijos en el precio y la variación
                 foreach (var f in new[] { "_price", "_change" })
@@ -694,7 +453,7 @@ foreach (var page in pages)
 
             continue;
         }
-        else if (action == "float")
+        else if (action == TradingSnapshotAction.Float)
         {
             var w = tv.Detach(tv.ActiveTab!);
             Pump(seconds);
@@ -708,7 +467,7 @@ foreach (var page in pages)
             Console.WriteLine($"De vuelta: ventanas={tv.FloatingWindows.Count} · gráficos en la pestaña={tv.ActivePage?.Charts.Count}");
             continue;
         }
-        else if (action == "brackets" && tv.ActiveTab?.Model is { } m && m.Account is { } acc && m.Brackets is { } br)
+        else if (action == TradingSnapshotAction.Brackets && tv.ActiveTab?.Model is { } m && m.Account is { } acc && m.Brackets is { } br)
         {
             for (int i = 0; i < 200 && m.Data.LastPrice == 0; i++) Pump(0.05);
             decimal last = m.Data.LastPrice;
@@ -741,7 +500,7 @@ foreach (var page in pages)
             m.Viewport.AutoScale = true;
             continue;
         }
-        else if (action is "drawings" or "drawsettings")
+        else if (action is TradingSnapshotAction.Drawings or TradingSnapshotAction.Drawsettings)
         {
             // dibujos nuevos: posición larga y corta, Fibonacci, zona con texto, tendencia extendida y alerta
             var cm = tv.ActiveTab!.Model!;
@@ -763,7 +522,7 @@ foreach (var page in pages)
             cm.Drawings.Add(new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.HorizontalLine, Points = { new(T(5), last + r * 1.5) }, Alert = true, ColorArgb = 0xFFF2B53A });
             cm.Invalidate();
             Pump(0.6);
-            if (action == "drawsettings")
+            if (action == TradingSnapshotAction.Drawsettings)
             {
                 var win = new TradingHub.App.Windows.DrawingSettingsWindow(App.Services, dl, cm.Instrument, cm.Period, () => cm.Invalidate(), () => { }, () => { });
                 win.Show(window);
@@ -803,7 +562,7 @@ foreach (var page in pages)
             using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_drawings_scrolled.png"));
             continue;
         }
-        else if (action == "links")
+        else if (action == TradingSnapshotAction.Links)
         {
             // dos gráficos vinculados en rojo: el segundo toma el instrumento del primero
             var setLayout = tv.SetLayoutAsync(TradingHub.App.Views.PaneLayout.TwoColumns);
@@ -828,7 +587,7 @@ foreach (var page in pages)
             using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "trading_links.png"));
             continue;
         }
-        else if (action == "toolbar")
+        else if (action == TradingSnapshotAction.Toolbar)
         {
             // mide la barra: alto (una o dos líneas) y ancho de cada parte
             Pump(1);
@@ -851,7 +610,7 @@ foreach (var page in pages)
             Console.WriteLine($"Barra alto={bar.Bounds.Height:0} ventana={window.Bounds.Width:0}");
             continue;
         }
-        else if (action == "trader")
+        else if (action == TradingSnapshotAction.Trader)
         {
             // Chart Trader propio y cross trading: desde BTCUSDT se compra BTCUSDC
             var trChart = tv.ActiveTab!;
@@ -878,7 +637,7 @@ foreach (var page in pages)
             while (!off.IsCompleted) Pump(0.05);
             continue;
         }
-        else if (action == "accounts")
+        else if (action == TradingSnapshotAction.Accounts)
         {
             // selector de cuentas del Chart Trader con una cuenta de Rithmic (servidor falso): se ven todas y se cambia ida y vuelta
             var ch = tv.ActiveTab!;
@@ -941,7 +700,7 @@ foreach (var page in pages)
             Shot("trading_accounts_back");
             continue;
         }
-        else if (action == "crossdemo")
+        else if (action == TradingSnapshotAction.Crossdemo)
         {
             // mirás ES y ejecutás MES (cross trading): la posición de MES se ve en el gráfico de ES; panel de la derecha y colores
             var ch = tv.ActiveTab!;
@@ -1047,7 +806,7 @@ foreach (var page in pages)
             App.Services.Settings.DefaultIndicatorTemplates.Clear();
             continue;
         }
-        else if (action == "strategy")
+        else if (action == TradingSnapshotAction.Strategy)
         {
             // estrategia en el gráfico: historia + vivo (visual), configuración, pasar a ejecutar con la simulada y quitar
             var ch = tv.ActiveTab!;
@@ -1128,7 +887,7 @@ foreach (var page in pages)
             Console.WriteLine($"Quitada: runner corriendo={runner.IsRunning} · en la lista={App.Services.Runners.Contains(runner)} · leyenda {ch.Model.Strategies.Count}");
             continue;
         }
-        else if (action == "domfloat")
+        else if (action == TradingSnapshotAction.Domfloat)
         {
             tv.DetachDom();
             Pump(1.5);
@@ -1141,7 +900,7 @@ foreach (var page in pages)
             Console.WriteLine($"DOM de vuelta: flotante={tv.DomIsFloating}");
             continue;
         }
-        else if (action == "domsettings")
+        else if (action == TradingSnapshotAction.Domsettings)
         {
             var settingsWin = tv.ShowDomSettings();
             Pump(1.5);
@@ -1159,31 +918,30 @@ foreach (var page in pages)
         continue;
     }
 
-    // acciones opcionales: strategies+backtest, strategies+optimize, strategies+code…
-    if (parts.Length > 1 && parts[0] == "strategies")
+    if (selection is SnapshotSelection.StrategyAction strategySelection)
     {
         var pagesField = typeof(MainWindow).GetField("_pages", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         var view = ((System.Collections.Generic.Dictionary<string, Avalonia.Controls.Control>)pagesField.GetValue(window)!)["strategies"];
         var t = view.GetType();
-        for (int i = 0; i < 200 && t.GetField("_current", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view) is { } cur && cur.GetType().GetProperty("Type")!.GetValue(cur) == null; i++) Pump(0.05);
-        if (parts.Length > 2)
+        var tabs = (TradingHub.App.Ui.Segmented<string>)t.GetField("_tabs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view)!;
+        for (int i = 0; i < 200 && t.GetField("_current", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view) is { } cur && cur.GetType().GetProperty("Generation")!.GetValue(cur) == null; i++) Pump(0.05);
+        if (strategySelection.FileName is { } fileName)
         {
-            // elige la estrategia por nombre de archivo
             var catalog = t.GetField("_catalog", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view)!;
             var files = (System.Collections.IEnumerable)catalog.GetType().GetProperty("Files")!.GetValue(catalog)!;
-            var file = files.Cast<object>().First(f => (string)f.GetType().GetProperty("FileName")!.GetValue(f)! == parts[2]);
+            var file = files.Cast<object>().First(f => (string)f.GetType().GetProperty("FileName")!.GetValue(f)! == fileName);
             var sel = (Task)t.GetMethod("SelectAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new[] { file })!;
             while (!sel.IsCompleted) Pump(0.05);
         }
 
-        if (parts[1] == "claudefloat")
+        if (strategySelection.Action == StrategySnapshotAction.Claudefloat)
         {
             // conversación de ejemplo en el historial (carpeta de datos aparte) y chat en una ventana
             var conv = new TradingHub.App.Services.ChatConversation { Title = "Create a 30-minute opening-range breakout strategy", SessionId = "prueba", Strategy = "Ruptura.cs" };
             conv.Messages.Add(new TradingHub.App.Services.ChatMessage { Role = "user", Text = conv.Title });
             conv.Messages.Add(new TradingHub.App.Services.ChatMessage { Role = "assistant", Text = "Created Ruptura.cs with a 30-minute opening-range breakout, ATR stop and session-end exit." });
             TradingHub.App.Services.ChatHistory.Save(conv);
-            t.GetMethod("ShowTab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { "code" });
+            tabs.Choose("code");
             Pump(0.5);
             t.GetMethod("LoadConversation", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { conv });
             t.GetMethod("DetachClaude", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, null);
@@ -1198,32 +956,38 @@ foreach (var page in pages)
             continue;
         }
 
-        if (parts[1] is "claude" or "claudelab")
+        if (strategySelection.Action is StrategySnapshotAction.Claude or StrategySnapshotAction.Claudelab)
         {
-            t.GetMethod("ShowTab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { "code" });
-            if (parts[1] == "claudelab")
+            tabs.Choose("code");
+            if (strategySelection.Action == StrategySnapshotAction.Claudelab)
                 ((Avalonia.Controls.Primitives.ToggleButton)t.GetField("_labToggle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view)!).IsChecked = true;
-            string ask = parts[1] == "claudelab" ? "Research and optimize the current strategy" : "Create a strategy trading the first 30-minute range breakout";
+            string ask = strategySelection.Action == StrategySnapshotAction.Claudelab ? "Research and optimize the current strategy" : "Create a strategy trading the first 30-minute range breakout";
             var send = (Task)t.GetMethod("SendToClaudeAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { ask })!;
             var until = DateTime.UtcNow.AddSeconds(40);
             while (!send.IsCompleted && DateTime.UtcNow < until) Pump(0.05);
             Pump(2.5);
             using var frame2 = window.CaptureRenderedFrame();
-            var path2 = Path.Combine(outDir, $"strategies_{parts[1]}.png");
+            var path2 = Path.Combine(outDir, page.Replace('+', '_') + ".png");
             frame2?.Save(path2);
             Console.WriteLine($"Captura: {path2}");
             continue;
         }
 
-        string method = parts[1] switch { "optimize" => "RunOptimizationAsync", "wfo" => "RunWalkForwardAsync", _ => "RunBacktestAsync" };
-        if (parts[1] is "code" or "history" or "reports" or "portfolio" or "cartera")
+        if (strategySelection.Action is StrategySnapshotAction.Code or StrategySnapshotAction.History or StrategySnapshotAction.Reports or StrategySnapshotAction.Portfolio or StrategySnapshotAction.Cartera)
         {
-            t.GetMethod("ShowTab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { parts[1] });
+            tabs.Choose(strategySelection.Action == StrategySnapshotAction.Cartera ? "portfolio" : strategySelection.Action.ToString().ToLowerInvariant());
         }
         else
         {
-            var tabId = parts[1] switch { "optimize" => "optimize", "wfo" => "wfo", _ => "backtest" };
-            t.GetMethod("ShowTab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, new object[] { tabId });
+            string method = strategySelection.Action switch
+            {
+                StrategySnapshotAction.Backtest => "RunBacktestAsync",
+                StrategySnapshotAction.Optimize => "RunOptimizationAsync",
+                StrategySnapshotAction.Wfo => "RunWalkForwardAsync",
+                _ => throw new InvalidOperationException("Unrecognized parsed strategy operation."),
+            };
+            string tabId = strategySelection.Action.ToString().ToLowerInvariant();
+            tabs.Choose(tabId);
             var task = (Task)t.GetMethod(method, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(view, null)!;
             var limit = DateTime.UtcNow.AddMinutes(4);
             while (!task.IsCompleted && DateTime.UtcNow < limit) Pump(0.05);
@@ -1247,3 +1011,200 @@ while (!privateStoreShutdown.IsCompleted) Pump(0.02);
 privateStoreShutdown.GetAwaiter().GetResult();
 GC.KeepAlive(snapLock); // el candado vale hasta el final
 return exitCode;
+static ValueTask<int> RunChoice(SnapshotContext context)
+{
+        var window = context.Window;
+        var Pump = context.Pump;
+        var outDir = context.Output;
+        window.Navigate("trading");
+        var hb = typeof(TradingHub.App.Views.ChartToolbar).GetField(Environment.GetEnvironmentVariable("TRADINGHUB_SNAP_CHOICE") ?? "_historyBox", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(window.Trading.Toolbar)!;
+        var btn = (Avalonia.Controls.Button)hb;
+        Console.WriteLine($"Botón: visible={btn.IsVisible} habilitado={btn.IsEffectivelyEnabled} tamaño={btn.Bounds} plantilla={(btn.GetType().GetProperty("Template")?.GetValue(btn) != null)} flyout={btn.Flyout?.GetType().Name}");
+        btn.GetType().GetMethod("OnClick", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(btn, null);
+        Pump(1);
+        var mf = (Avalonia.Controls.MenuFlyout)btn.Flyout!;
+        Console.WriteLine($"Menú abierto={mf.IsOpen} ítems={mf.Items.Count}");
+        var presenter = mf.GetType().GetProperty("Popup", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(mf) as Avalonia.Controls.Primitives.Popup;
+        var child = presenter?.Child as Avalonia.Controls.Control;
+        Console.WriteLine($"Presentador: {child?.GetType().Name} tamaño={child?.Bounds}");
+        if (child is Avalonia.Controls.ItemsControl ic) Console.WriteLine($"Ítems en el presentador: {ic.ItemCount}");
+        using var shot = child != null ? Avalonia.Controls.TopLevel.GetTopLevel(child)?.CaptureRenderedFrame() : null;
+        shot?.Save(Path.Combine(outDir, "choice.png"));
+        return new(0);
+    }
+static ValueTask<int> RunPicker(SnapshotContext context)
+{
+        var window = context.Window;
+        var Pump = context.Pump;
+        var outDir = context.Output;
+        window.Navigate("trading");
+        var picker = window.Trading.Picker;
+        picker.GetType().GetMethod("OnClick", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(picker, null);
+        Pump(4);
+        var flyout = (Avalonia.Controls.Flyout)picker.GetType().GetField("_flyout", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(picker)!;
+        var content = (Avalonia.Controls.Control)flyout.Content!;
+        var top = Avalonia.Controls.TopLevel.GetTopLevel(content);
+        using var shot = top?.CaptureRenderedFrame();
+        var pp = Path.Combine(outDir, "picker.png");
+        shot?.Save(pp);
+        Console.WriteLine(shot != null ? $"Captura: {pp}" : "No se pudo capturar el selector");
+        flyout.Hide();
+        return new(0);
+    }
+static async ValueTask<int> RunRithmicData(SnapshotContext context)
+{
+        var window = context.Window;
+        var Pump = context.Pump;
+        var outDir = context.Output;
+        window.Navigate("data");
+        Pump(1);
+        var view = ((System.Collections.Generic.Dictionary<string, Avalonia.Controls.Control>)typeof(MainWindow).GetField("_pages", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(window)!)["data"];
+        var vt = view.GetType();
+        var fl = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var es = (await App.Services.Connections.GetFeed("rithmic").GetInstrumentsAsync(CancellationToken.None)).First(i => i.Symbol == "ES");
+        vt.GetField("_dlProfile", fl)!.SetValue(view, "rithmic");
+        vt.GetField("_dlInstrument", fl)!.SetValue(view, es);
+        var chip = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "1 year");
+        chip.IsChecked = true;
+        chip.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+        Pump(0.5);
+        var status = (Avalonia.Controls.TextBlock)vt.GetField("_dlStatus", fl)!.GetValue(view)!;
+        Console.WriteLine("1 año: " + status.Text);
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "data_rithmic_year.png"));
+        var y = view.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => (b.Content as string) == "Yesterday");
+        y.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+        Console.WriteLine($"antes: perfil={vt.GetField("_dlProfile", fl)!.GetValue(view)} inst={vt.GetField("_dlInstrument", fl)!.GetValue(view)} puede={vt.GetProperty("CanDownload", fl)!.GetValue(view)}");
+        var dl = (Task)vt.GetMethod("DownloadAsync", fl)!.Invoke(view, null)!;
+        string last = "";
+        while (!dl.IsCompleted)
+        {
+            Pump(0.1);
+            if (status.Text != last) Console.WriteLine("  · " + (last = status.Text ?? ""));
+        }
+        Console.WriteLine("Descarga: " + status.Text + (dl.Exception != null ? " · ERROR " + dl.Exception.GetBaseException() : ""));
+        return 0;
+    }
+static ValueTask<int> RunTheme(SnapshotContext context)
+{
+        var window = context.Window;
+        var Pump = context.Pump;
+        var outDir = context.Output;
+        window.Navigate("trading");
+        var tv = window.Trading;
+        var lay = tv.SetLayoutAsync(TradingHub.App.Views.PaneLayout.TwoColumns);
+        while (!lay.IsCompleted) Pump(0.05);
+        foreach (var c in tv.Tabs.Where(t => t.Model != null)) { c.Model!.Settings.Colors = null; c.Model.ApplyColors(); }
+        Pump(3);
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_dark.png"));
+        TradingHub.App.Services.AppTheme.Apply(TradingHub.App.Services.AppTheme.Light);
+        Pump(2);
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_light.png"));
+        tv.OpenChartSettings(tv.ActiveTab);
+        Pump(1.5);
+        var sw = (typeof(TradingHub.App.Views.TradingView).GetField("_settingsWindows", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(tv) as System.Collections.IDictionary)?.Values.Cast<Avalonia.Controls.Window>().FirstOrDefault();
+        if (sw != null)
+        {
+            var tabsCtl = sw.GetVisualDescendants().OfType<Avalonia.Controls.TabControl>().First();
+            tabsCtl.SelectedIndex = tabsCtl.ItemCount - 1;
+            Pump(1);
+            using (var capturedFrame = sw.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_chart_settings_light.png"));
+            sw.Close();
+        }
+
+        window.Navigate("settings");
+        Pump(1.5);
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_settings_light.png"));
+        TradingHub.App.Services.AppTheme.Apply(TradingHub.App.Services.AppTheme.Dark);
+        window.Navigate("accounts");
+        Pump(1.5);
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "theme_accounts_dark.png"));
+        Console.WriteLine("Capturas del tema listas");
+        return new(0);
+    }
+static ValueTask<int> RunImport(SnapshotContext context)
+{
+        var window = context.Window;
+        var Pump = context.Pump;
+        var outDir = context.Output;
+        var csv = Path.Combine(Path.GetTempPath(), "USATECHIDXUSD_Ticks_muestra.csv");
+        var sb = new System.Text.StringBuilder("Gmt time,Ask,Bid,AskVolume,BidVolume\n");
+        var t = new DateTime(2025, 9, 1, 13, 30, 0, DateTimeKind.Utc);
+        var rnd = new Random(3);
+        double px = 23450;
+        for (int i = 0; i < 20000; i++)
+        {
+            px += (rnd.NextDouble() - 0.5) * 2;
+            t = t.AddMilliseconds(250 + rnd.Next(1500));
+            sb.Append(t.ToString("dd.MM.yyyy HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
+              .Append((px + 1.2).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
+              .Append(px.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)).Append(",0.0015,0.0012\n");
+        }
+
+        File.WriteAllText(csv, sb.ToString());
+        var r = TradingHub.Data.CsvImport.Import(csv, "US100", TradingHub.App.Services.AppPaths.Ticks, TimeSpan.Zero, null, null, CancellationToken.None);
+        Console.WriteLine($"Importado: {r.Kind}, {r.Trades} operaciones, {r.Days} días, paso {r.TickSize}");
+        window.Navigate("data");
+        Pump(1.5);
+        var found = TradingHub.Data.HistoricalData.Scan(TradingHub.App.Services.AppPaths.Ticks).FirstOrDefault(x => x.FeedId == "importado" && x.Symbol == "US100");
+        Console.WriteLine($"En Datos: {(found == null ? "no" : $"US100 · importado, {found.Days.Count} día(s)")}");
+        using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, "data_import.png"));
+        return new(0);
+    }
+static ValueTask<int> RunAccountsDemo(SnapshotContext context)
+{
+        var window = context.Window;
+        var Pump = context.Pump;
+        var outDir = context.Output;
+        var fakeRithmic = context.Rithmic;
+        var tv = window.Trading;
+        var simOpen = tv.OpenInTabAsync(tv.ActiveTab!, "sim", "SIM-BTC", TradingHub.Data.ChartPeriod.M1, tv.ActiveTab!.Model?.Settings.Clone());
+        while (!simOpen.IsCompleted) Pump(0.05);
+        Pump(2);
+        var simData = tv.ActiveTab!.Model!.Data;
+        var sim = App.Services.SimBrokerFor(simData);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Buy, 0.5m);
+        Pump(1.5);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Buy, 0.5m);
+        Pump(1.5);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Sell, 1m);
+        Pump(1.5);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Market, TradingHub.Trading.OrderDirections.Sell, 0.3m);
+        Pump(1.5);
+        TradingHub.Trading.OrderActions.Manual(sim, TradingHub.Trading.OrderTypes.Limit, TradingHub.Trading.OrderDirections.Buy, 0.2m, Math.Round(simData.LastPrice * 0.98m, 1));
+        Pump(1);
+        Console.WriteLine($"Simulada: posición {sim.Position!.Volume} · órdenes {sim.Orders.Count} · ejecuciones guardadas {App.Services.Journal.FillsOf("sim").Count}");
+
+        var rp = App.Services.Connections.Find("rithmic")!;
+        var session = App.Services.RithmicSessionFor(rp);
+        for (int i = 0; i < 100 && !session.IsConnected; i++) Pump(0.1);
+        fakeRithmic!.MarketPrice = 5000;
+        var o1 = session.PlaceAsync("ACC1", "ESZ6", "CME", true, 2, 2, 0, 0, "demo1", CancellationToken.None);
+        while (!o1.IsCompleted) Pump(0.05);
+        fakeRithmic.MarketPrice = 5006.25;
+        var o2 = session.PlaceAsync("ACC1", "ESZ6", "CME", false, 2, 1, 0, 0, "demo2", CancellationToken.None);
+        while (!o2.IsCompleted) Pump(0.05);
+        var o3 = session.PlaceAsync("ACC1", "ESZ6", "CME", true, 1, 1, 4990, 4990, "demo3", CancellationToken.None);
+        while (!o3.IsCompleted) Pump(0.05);
+        Pump(1);
+        Console.WriteLine($"Rithmic: saldo {session.SummaryFor("ACC1")?.Balance} · ejecuciones {session.FillsOf("ACC1").Count} · guardadas {App.Services.Journal.FillsOf("rithmic|rithmic|ACC1").Count}");
+
+        window.Navigate("accounts");
+        Pump(1.5);
+        var view = ((System.Collections.Generic.Dictionary<string, Avalonia.Controls.Control>)typeof(MainWindow).GetField("_pages", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(window)!)["accounts"];
+        var vt = view.GetType();
+        var tabs = (Avalonia.Controls.TabControl)vt.GetField("_tabs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(view)!;
+        foreach (var acc in new[] { "rithmic|rithmic|ACC1", "sim" })
+        {
+            vt.GetField("_selected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(view, acc);
+            for (int t = 0; t < 5; t++)
+            {
+                tabs.SelectedIndex = t;
+                Pump(1.3);
+                string name = $"accounts_{(acc == "sim" ? "sim" : "rithmic")}_{t}";
+                using (var capturedFrame = window.CaptureRenderedFrame()) capturedFrame?.Save(Path.Combine(outDir, name + ".png"));
+                Console.WriteLine($"Captura: {name}");
+            }
+        }
+
+        return new(0);
+    }

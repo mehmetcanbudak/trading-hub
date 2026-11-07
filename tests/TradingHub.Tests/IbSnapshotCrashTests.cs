@@ -164,7 +164,7 @@ public sealed class IbSnapshotCrashTests : IDisposable
         Task<string> stderr = lab.StandardError.ReadToEndAsync();
         try
         {
-            Assert.Equal("lab-started", await lab.StandardOutput.ReadLineAsync().WaitAsync(Watchdog));
+            await AssertChildStartup(lab, stderr, "lab-started");
             await LabRequest(lab, 1, "initialize", new
             {
                 protocolVersion = "2025-06-18", capabilities = new { },
@@ -291,9 +291,7 @@ public sealed class IbSnapshotCrashTests : IDisposable
         Task<string> stderr = writer.StandardError.ReadToEndAsync();
         try
         {
-            string? checkpoint = await writer.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
-            Assert.True(checkpoint == "before-publish:1", $"Writer checkpoint: {checkpoint ?? "<none>"}; " +
-                (writer.HasExited ? await stderr.WaitAsync(Watchdog) : "child still running"));
+            await AssertChildStartup(writer, stderr, "before-publish:1");
             // Kill only the Process returned by our own launch, while Commit is blocked inside its public callback.
             writer.Kill();
             await writer.WaitForExitAsync().WaitAsync(Watchdog);
@@ -311,7 +309,7 @@ public sealed class IbSnapshotCrashTests : IDisposable
         Task<string> stderr = reader.StandardError.ReadToEndAsync();
         try
         {
-            Assert.Equal("reader-started", await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog));
+            await AssertChildStartup(reader, stderr, "reader-started");
             string? json = await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
             await reader.WaitForExitAsync().WaitAsync(Watchdog);
             string error = await stderr.WaitAsync(Watchdog);
@@ -332,7 +330,7 @@ public sealed class IbSnapshotCrashTests : IDisposable
         Task<string> stderr = reader.StandardError.ReadToEndAsync();
         try
         {
-            Assert.Equal("context-reader-started", await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog));
+            await AssertChildStartup(reader, stderr, "context-reader-started");
             string? json = await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
             await reader.WaitForExitAsync().WaitAsync(Watchdog);
             string error = await stderr.WaitAsync(Watchdog);
@@ -360,6 +358,46 @@ public sealed class IbSnapshotCrashTests : IDisposable
         start.Environment["TRADINGHUB_KEYCHAIN_FILE"] = Path.Combine(_root, "fake-keychain.json");
         start.Environment["TRADINGHUB_SLEEP_GUARD"] = "off";
         return Process.Start(start)!;
+    }
+
+    private static async Task AssertChildStartup(Process child, Task<string> stderr, string expected)
+    {
+        string? actual = null;
+        Exception? failure = null;
+        try
+        {
+            actual = await child.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
+            if (actual == expected) return;
+            if (actual == null) await child.WaitForExitAsync().WaitAsync(Watchdog);
+        }
+        catch (Exception error) { failure = error; }
+
+        string state = child.HasExited ? $"exited with code {child.ExitCode}" : "still running before cleanup";
+        try { await StopOwnedChild(child); }
+        catch (Exception error) { failure = failure == null ? error : new AggregateException(failure, error); }
+        string errorText;
+        try { errorText = await stderr.WaitAsync(Watchdog); }
+        catch (Exception error)
+        {
+            failure = failure == null ? error : new AggregateException(failure, error);
+            errorText = "The fixture stderr pipe did not finish draining.";
+        }
+
+        var start = child.StartInfo;
+        string[] environmentNames =
+        {
+            "PATH", "DOTNET_HOST_PATH", "DOTNET_ROOT", "DOTNET_ROOT_ARM64", "TMPDIR", "TMP", "TEMP",
+            "TRADINGHUB_DATA_DIR", "TRADINGHUB_STRATEGIES_DIR", "TRADINGHUB_INDICATORS_DIR",
+            "TRADINGHUB_BACKTESTS_DIR", "TRADINGHUB_LIVE_DIR", "TRADINGHUB_KEYCHAIN_FILE", "TRADINGHUB_SLEEP_GUARD",
+        };
+        string launch = JsonSerializer.Serialize(new
+        {
+            executable = start.FileName, arguments = start.ArgumentList.ToArray(), workingDirectory = start.WorkingDirectory,
+            environment = environmentNames.ToDictionary(name => name, name => start.Environment.TryGetValue(name, out var value) ? value : null),
+        });
+        throw new InvalidOperationException(
+            $"IB snapshot fixture PID {child.Id} {state}. Expected startup line '{expected}', received '{actual ?? "<none>"}'.\n" +
+            $"Launch {launch}\nstderr\n{errorText}", failure);
     }
 
     private static async Task StopOwnedChild(Process child)

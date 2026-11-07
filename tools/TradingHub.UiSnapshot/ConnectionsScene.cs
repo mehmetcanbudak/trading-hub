@@ -64,7 +64,7 @@ internal static class ConnectionsScene
 
         var svc = App.Services;
         var conns = svc.Connections;
-        Check(!AppPaths.Root.StartsWith(TradingHub.Common.Product.AppData, StringComparison.Ordinal), "datos en una carpeta temporal (nunca los reales)");
+        Check(!AppPaths.Root.StartsWith(TradingHub.Common.Product.DefaultAppData, StringComparison.Ordinal), "datos en una carpeta temporal (nunca los reales)");
         conns.Profiles.RemoveAll(p => p.Kind is ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento);
         var pOanda = new ConnectionProfile { Id = "oanda", Kind = ConnectionKind.Oanda, Name = "OANDA", Testnet = true };
         var pDb = new ConnectionProfile { Id = "databento", Kind = ConnectionKind.Databento, Name = "Databento" };

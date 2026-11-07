@@ -46,16 +46,27 @@ def anchors(content: str) -> set[str]:
 
 
 def validate_documentation() -> int:
-    files = [ROOT / "README.md", ROOT / "CLAUDE.md", ROOT / "docs/README.md", *sorted((ROOT / "docs/en").glob("*.md"))]
+    files = [
+        ROOT / name for name in (
+            "README.md", "README.es.md", "README.zh-CN.md", "CLAUDE.md",
+            "THIRD_PARTY_NOTICES.md", "INSTALAR_CON_CLAUDE_CODE.md", "PORTAR_A_WINDOWS.md",
+        )
+    ]
+    files += sorted(path for directory in ("docs", "plans", "advisor-plans")
+                    for path in (ROOT / directory).rglob("*.md"))
     errors = []
     links = 0
+    outside = []
     for file in files:
         for raw in LINK_RE.findall(without_fences(file.read_text(encoding="utf-8"))):
             href = raw.strip().split(" ", 1)[0].strip("<>")
             parsed = urlsplit(href)
             if parsed.scheme or parsed.netloc:
                 continue
-            target = file.parent / unquote(parsed.path) if parsed.path else file
+            target = (file.parent / unquote(parsed.path) if parsed.path else file).resolve()
+            if not target.is_relative_to(ROOT):
+                outside.append(f"{file.relative_to(ROOT)} -> {href}")
+                continue
             links += 1
             if not target.exists():
                 errors.append(f"{file.relative_to(ROOT)} -> {href}: missing target")
@@ -69,7 +80,9 @@ def validate_documentation() -> int:
             errors.append(f"Missing English guide: {english.relative_to(ROOT)}")
         elif len(headings(english.read_text(encoding="utf-8"))) < len(headings(original.read_text(encoding="utf-8"))):
             errors.append(f"{english.relative_to(ROOT)}: fewer sections than its source guide")
-    print(f"English documentation: {len(files)} files, {links} local links/anchors, {len(pairs)} guide section checks.", flush=True)
+    print(f"Maintained documentation: {len(files)} files, {links} local links/anchors, {len(pairs)} English guide section checks.", flush=True)
+    for reference in outside:
+        print("SKIP outside-repository historical reference", reference, flush=True)
     for error in errors:
         print("FAIL", error, flush=True)
     return len(errors)

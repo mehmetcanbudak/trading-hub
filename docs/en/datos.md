@@ -22,6 +22,10 @@ An instrument shows connection, day count and disk usage. Selecting it lists day
 The **Lossless archive** action accepts up to 31 selected closed UTC days. It captures their stored metadata locally, provides progress/cancellation and creates lossless archives without deleting/replacing the original raw files. Copy/read/codec failures remain visible. Day/replay/delete selection is frozen while that owned operation settles; true Quit cancels/drains it before shared history resources leave.
 Each archived day has a bounded **512 MiB** input limit. An oversized/changed/unreadable day is a visible failure with the original still authoritative, not a partial success or permission to remove raw history.
 
+Non-IB downloads, replacements, deletion and archival coordinate physical-day ownership with recording. A conflict refuses before changing the affected files. An already-owned CSV publication reuses its ownership rather than trying to acquire it again. This does not forbid legitimate closed-day downloads or replace IB's publication coordinator.
+
+True Quit closes recording admission and awaits the actual writer, accepted queue tail, flush and physical lease release. It retains that completion even if an instrument stopped, reconnected or left an ordinarily disposed hub. Ordinary view/feed disposal remains bounded. Cancellation cannot force a blocked filesystem write to finish, and a recording failure is not a successful saved-tail claim.
+
 ### Delete days
 
 Select an instrument and days, choose **Delete** and confirm. Only those days are removed, but **deletion cannot be undone**. Do not delete data being recorded or needed by running strategies.

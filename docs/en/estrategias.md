@@ -12,6 +12,8 @@ A Trading Hub strategy is a C# class derived from `Strategy`. The same class run
 - Use a public, nonabstract `Strategy` subclass with a parameterless constructor and `using TradingHub.Strategies;`. System, System.Linq and System.Collections.Generic are implicit. Prefer one class per same-named file. History is keyed by class name: renaming creates a different history identity.
 - Compilation applies the same ATAS namespace adaptations and `TRADINGHUB` / `CROSS_PLATFORM` symbols as [Indicators](indicadores.md).
 
+Each execution captures one immutable successful compilation before data preparation. That generation owns its exact source, full source digest, type and factory. Editing the file or publishing another compilation cannot change an already admitted run. Chart continuation and same-process live restart retain their captured generation unless the user explicitly chooses another one. Saved source lookup verifies the new exact digest while retaining the older normalized 12-character lookup for historical runs.
+
 ## Parameters
 
 - `[Strategy("Display name", Description = "…")]` supplies class metadata.

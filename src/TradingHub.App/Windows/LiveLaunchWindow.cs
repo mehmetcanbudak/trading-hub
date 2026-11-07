@@ -41,8 +41,11 @@ internal sealed class LiveLaunchWindow : Window
     private Dictionary<string, object?> _values = new();
     private string? _timeZoneId;
     private TimeSpan _sessionStart;
+    private CompiledStrategyGeneration? _generation;
+    private long _selectionRequest;
 
-    public LiveLaunchWindow(AppServices svc, Action<string> status, string? strategyId = null, IReadOnlyDictionary<string, object?>? parameters = null, string? portfolioId = null)
+    public LiveLaunchWindow(AppServices svc, Action<string> status, string? strategyId = null, IReadOnlyDictionary<string, object?>? parameters = null,
+        string? portfolioId = null, CompiledStrategyGeneration? generation = null)
     {
         _svc = svc;
         _status = status;
@@ -73,7 +76,6 @@ internal sealed class LiveLaunchWindow : Window
             UpdateWarning();
         };
         _account.SelectionChanged += (_, _) => UpdateWarning();
-        _strategy.SelectionChanged += (_, _) => _ = LoadStrategyAsync(null);
 
         _portfolio.Items.Add(new ComboBoxItem { Content = "None (use automatic portfolio)", Tag = null });
         foreach (var d in LiveStore.LoadPortfolios().Where(d => !d.Auto)) _portfolio.Items.Add(new ComboBoxItem { Content = d.Name, Tag = d.Id });
@@ -121,14 +123,16 @@ internal sealed class LiveLaunchWindow : Window
 
         if (strategyId != null)
         {
-            var item = _strategy.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Tag is StrategyFile f && f.Id == strategyId);
+            var item = _strategy.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Tag is StrategyFile f &&
+                (f.Id == strategyId || generation?.Source.Path == f.Path));
             if (item != null)
             {
                 _strategy.SelectedItem = item;
-                _ = LoadStrategyAsync(parameters);
+                _ = LoadStrategyAsync(parameters, generation);
             }
         }
         else _params.Load(null, new Dictionary<string, object?>());
+        _strategy.SelectionChanged += (_, _) => _ = LoadStrategyAsync(null);
     }
 
     private static NumericUpDown Num(decimal increment, decimal min, decimal max, string format, decimal value) => new()
@@ -160,20 +164,27 @@ internal sealed class LiveLaunchWindow : Window
     }
 
     /// <summary>Carga parámetros, velas y sesión de su último backtest (o los de la clase).</summary>
-    private async Task LoadStrategyAsync(IReadOnlyDictionary<string, object?>? overrides)
+    private async Task LoadStrategyAsync(IReadOnlyDictionary<string, object?>? overrides, CompiledStrategyGeneration? generation = null)
     {
+        long request = ++_selectionRequest;
+        _generation = null;
+        _start.IsEnabled = false;
         if (_strategy.SelectedItem is not ComboBoxItem { Tag: StrategyFile file }) return;
-        if (file.Type == null) await Task.Run(() => _svc.Strategies.Compile(file));
-        if (file.Type == null)
+        var parameters = overrides == null ? null : new Dictionary<string, object?>(overrides);
+        string? defaultTimeZone = _svc.Settings.TimeZoneId;
+        generation ??= file.Generation ?? (await Task.Run(() => _svc.Strategies.Compile(file))).Generation;
+        if (request != _selectionRequest || _strategy.SelectedItem is not ComboBoxItem selected || !ReferenceEquals(selected.Tag, file)) return;
+        if (generation == null)
         {
             _params.Load(null, new Dictionary<string, object?>());
             _status($"«{file.FileName}» has errors: fix them in Backtesting.");
             return;
         }
 
-        if (_strategy.SelectedItem is ComboBoxItem selected && ReferenceEquals(selected.Tag, file))
-            selected.Content = file.DisplayName;
-        var saved = LiveCenter.SavedBacktest(file, _svc.Settings.TimeZoneId);
+        _generation = generation;
+        _start.IsEnabled = true;
+        selected.Content = generation.DisplayName;
+        var saved = LiveCenter.SavedBacktest(generation, defaultTimeZone);
         var values = saved.Parameters;
         _timeZoneId = saved.TimeZoneId;
         _sessionStart = saved.SessionStart;
@@ -183,14 +194,14 @@ internal sealed class LiveLaunchWindow : Window
             _period.SelectedItem = sp;
         }
 
-        if (overrides != null)
-            foreach (var (k, v) in overrides)
+        if (parameters != null)
+            foreach (var (k, v) in parameters)
                 if (values.ContainsKey(k)) values[k] = v;
         _values = values;
-        _params.Load(file.Type, values, hidden: LiveStrategyWindow.ContextParameters);
-        var probe = file.Type != null ? (Strategy)Activator.CreateInstance(file.Type)! : null;
-        probe?.SetParameters(values);
-        _conditions.Load(probe?.RegimeFilter ?? RegimeFilter.All, probe?.MinVolatilityRank ?? 0, probe?.MaxVolatilityRank ?? 100);
+        _params.Load(generation.Type, values, hidden: LiveStrategyWindow.ContextParameters);
+        var probe = generation.Create();
+        probe.SetParameters(values);
+        _conditions.Load(probe.RegimeFilter, probe.MinVolatilityRank, probe.MaxVolatilityRank);
         _session.Text = $"Session: {(_timeZoneId ?? "UTC")} starting at {_sessionStart:hh\\:mm} (from the backtest; defines the day for daily loss limits).";
     }
 
@@ -236,30 +247,34 @@ internal sealed class LiveLaunchWindow : Window
             return;
         }
 
+        if (_generation is not { } generation) return;
+        var spec = new LiveLaunch
+        {
+            File = file,
+            Generation = generation,
+            ProfileId = _profile,
+            Instrument = _instrument,
+            AccountId = acc.Id,
+            Period = period,
+            Parameters = WithConditions(_params.Read(new Dictionary<string, object?>(_values))),
+            TimeZoneId = _timeZoneId,
+            SessionStart = _sessionStart,
+            Size = _size.Value ?? 1,
+            MaxDailyLoss = _dailyLoss.Value ?? 0,
+            MaxDrawdown = _maxDd.Value ?? 0,
+            CloseOnLimit = _closeOnLimit.IsChecked == true,
+            PortfolioId = (_portfolio.SelectedItem as ComboBoxItem)?.Tag as string,
+        };
+
         if (acc.IsReal && !await ConfirmDialog.ShowAsync(this, "Execute on REAL account",
-                $"«{file.DisplayName}» will trade {_instrument.Symbol} on {acc.Name} with real orders and no individual confirmation. Stop it from Live.",
+                $"«{generation.DisplayName}» will trade {spec.Instrument.Symbol} on {acc.Name} with real orders and no individual confirmation. Stop it from Live.",
                 "Execute with real money", danger: true))
             return;
 
         _start.IsEnabled = false;
         try
         {
-            var (runner, message) = await _svc.Live.LaunchAsync(new LiveLaunch
-            {
-                File = file,
-                ProfileId = _profile,
-                Instrument = _instrument,
-                AccountId = acc.Id,
-                Period = period,
-                Parameters = WithConditions(_params.Read(_values)),
-                TimeZoneId = _timeZoneId,
-                SessionStart = _sessionStart,
-                Size = _size.Value ?? 1,
-                MaxDailyLoss = _dailyLoss.Value ?? 0,
-                MaxDrawdown = _maxDd.Value ?? 0,
-                CloseOnLimit = _closeOnLimit.IsChecked == true,
-                PortfolioId = (_portfolio.SelectedItem as ComboBoxItem)?.Tag as string,
-            });
+            var (runner, message) = await _svc.Live.LaunchAsync(spec);
             _status(message);
             if (runner == null) return;
             if (runner.PortfolioId != null) _svc.Live.Assign(runner.Key, runner.PortfolioId);

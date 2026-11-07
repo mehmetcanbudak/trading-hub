@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using TradingHub.App.Lab;
 using TradingHub.App.Services;
+using TradingHub.Common;
 using TradingHub.Data;
 using TradingHub.Market;
 
@@ -12,16 +13,28 @@ internal static class Program
     private static int Main(string[] args)
     {
         // This executable never accepts an implicit store or an unmarked/user-owned root.
-        if (args.Length < 3 || !Path.IsPathFullyQualified(args[0]) || !Guid.TryParseExact(args[1], "N", out _)) return 64;
+        if (args.Length < 3 || !Path.IsPathFullyQualified(args[0]) || !Guid.TryParseExact(args[1], "N", out _))
+        {
+            Console.Error.WriteLine("The fixture requires an absolute root, its owner token and an operation.");
+            return 64;
+        }
         string root = Path.GetFullPath(args[0]);
         string relative = Path.GetRelativePath(Path.GetTempPath(), root);
         if (relative is "." or ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
-            Path.IsPathFullyQualified(relative) || !Path.GetFileName(root).StartsWith("TradingHub-ib-snapshot-crash-", StringComparison.Ordinal)) return 64;
+            Path.IsPathFullyQualified(relative) || !Path.GetFileName(root).StartsWith("TradingHub-ib-snapshot-crash-", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine($"The fixture root '{root}' is not an owned child of temporary directory '{Path.GetTempPath()}'.");
+            return 64;
+        }
         try
         {
             string marker = Path.Combine(root, ".ib-snapshot-fixture-root");
             if (!File.Exists(marker) || File.ReadAllText(marker) != args[1] ||
-                (File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0) return 64;
+                (File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
+            {
+                Console.Error.WriteLine($"The fixture root '{root}' has no matching ownership marker or is a linked directory.");
+                return 64;
+            }
             string data = Path.Combine(root, "data");
             if ((args[2] is "write" or "write-context") && args.Length == 3)
             {
@@ -50,11 +63,16 @@ internal static class Program
                 Console.Out.Flush();
                 return 0;
             }
+            // AppPaths resolves existing ancestor links, so expected store paths must use the same normalization.
+            string expectedRoot = new StorageLocationStore(root, root).BootstrapRoot;
+            string expectedData = Path.Combine(expectedRoot, "data");
             if (args[2] == "context-read" && args.Length == 4)
             {
                 // Environment overrides are supplied before this process starts, never after AppPaths initialization.
-                if (AppPaths.Root != Path.Combine(root, "data") || AppPaths.Ticks != Path.Combine(root, "data", "Ticks"))
-                    throw new InvalidOperationException("The context reader's app stores are not its explicit owned fixture.");
+                if (AppPaths.Root != expectedData || AppPaths.Ticks != Path.Combine(expectedData, "Ticks"))
+                    throw new InvalidOperationException(
+                        $"The context reader's app stores are not its explicit owned fixture. Expected root '{expectedData}' and ticks '{Path.Combine(expectedData, "Ticks")}'. " +
+                        $"Actual root '{AppPaths.Root}' and ticks '{AppPaths.Ticks}'.");
                 var until = DateTime.ParseExact(args[3], "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
                 Console.WriteLine("context-reader-started");
                 Console.Out.Flush();
@@ -65,14 +83,17 @@ internal static class Program
             }
             if (args[2] == "lab" && args.Length == 3)
             {
-                if (AppPaths.Root != Path.Combine(root, "data") || AppPaths.Ticks != Path.Combine(root, "data", "Ticks") ||
-                    AppPaths.Strategies != Path.Combine(root, "strategies") ||
+                if (AppPaths.Root != expectedData || AppPaths.Ticks != Path.Combine(expectedData, "Ticks") ||
+                    AppPaths.Strategies != Path.Combine(expectedRoot, "strategies") ||
                     Environment.GetEnvironmentVariable("TRADINGHUB_BACKTESTS_DIR") != Path.Combine(root, "backtests"))
-                    throw new InvalidOperationException("The laboratory's stores are not its explicit owned fixture.");
+                    throw new InvalidOperationException(
+                        $"The laboratory's stores are not its explicit owned fixture. Expected root '{expectedData}', ticks '{Path.Combine(expectedData, "Ticks")}', strategies '{Path.Combine(expectedRoot, "strategies")}' and backtests override '{Path.Combine(root, "backtests")}'. " +
+                        $"Actual root '{AppPaths.Root}', ticks '{AppPaths.Ticks}', strategies '{AppPaths.Strategies}' and backtests override '{Environment.GetEnvironmentVariable("TRADINGHUB_BACKTESTS_DIR")}'.");
                 Console.WriteLine("lab-started");
                 Console.Out.Flush();
                 return LabServer.RunAsync().GetAwaiter().GetResult();
             }
+            Console.Error.WriteLine($"The fixture operation '{args[2]}' does not accept {args.Length - 3} extra arguments.");
             return 64;
         }
         catch (Exception error)

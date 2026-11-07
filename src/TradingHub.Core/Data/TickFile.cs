@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using TradingHub.Common;
 using TradingHub.Market;
@@ -55,6 +56,8 @@ public static partial class TickFile
         private readonly FileStream _fs;
         private readonly BufferedStream _bs;
         private readonly Instrument _instrument;
+        private readonly HistoryWriteOwnership? _ownership;
+        private bool _disposed;
         private bool _hasPrev;
         private long _prevId, _prevMs, _prevPrice;
         private int _sinceKey;
@@ -63,25 +66,44 @@ public static partial class TickFile
         private readonly Dictionary<TradeProvenance, int> _provenance = new();
 
         public Writer(string path, Instrument instrument, bool? includeProvenance = null)
+            : this(path, instrument, includeProvenance, null) { }
+
+        internal Writer(string path, Instrument instrument, HistoryWriteOwnership ownership, bool? includeProvenance = null)
+            : this(path, instrument, includeProvenance, ownership) { }
+
+        private Writer(string path, Instrument instrument, bool? includeProvenance, HistoryWriteOwnership? ownership)
         {
             _instrument = instrument;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            bool exists = File.Exists(path) && new FileInfo(path).Length > 0;
-            if (exists)
+            ownership?.RequirePath(path);
+            if (ownership == null && instrument.FeedId is not (IbBarImport.FeedId or IbBarStore.BarFolder))
+                _ownership = HistoryWriteOwnership.AcquirePath(path);
+            FileStream? opened = null;
+            try
             {
-                using var existing = File.OpenRead(path);
-                Span<byte> header = stackalloc byte[4];
-                existing.ReadExactly(header);
-                _withProvenance = header.SequenceEqual(ProvenanceMagic);
-                if (!header.SequenceEqual(Magic) && !_withProvenance) throw new InvalidDataException("Invalid tick file header: " + path);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                bool exists = File.Exists(path) && new FileInfo(path).Length > 0;
+                if (exists)
+                {
+                    using var existing = File.OpenRead(path);
+                    Span<byte> header = stackalloc byte[4];
+                    existing.ReadExactly(header);
+                    _withProvenance = header.SequenceEqual(ProvenanceMagic);
+                    if (!header.SequenceEqual(Magic) && !_withProvenance) throw new InvalidDataException("Invalid tick file header: " + path);
+                }
+                else _withProvenance = includeProvenance ?? false;
+                if (exists && includeProvenance == true && !_withProvenance)
+                    throw new InvalidOperationException("Upgrade the legacy day before appending provenance-aware records.");
+                _fs = opened = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+                _bs = new BufferedStream(_fs, 1 << 16);
+                _headerWritten = exists;
+                if (!exists && includeProvenance.HasValue) WriteHeader(_withProvenance);
             }
-            else _withProvenance = includeProvenance ?? false;
-            if (exists && includeProvenance == true && !_withProvenance)
-                throw new InvalidOperationException("Upgrade the legacy day before appending provenance-aware records.");
-            _fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
-            _bs = new BufferedStream(_fs, 1 << 16);
-            _headerWritten = exists;
-            if (!exists && includeProvenance.HasValue) WriteHeader(_withProvenance);
+            catch
+            {
+                opened?.Dispose();
+                _ownership?.Dispose();
+                throw;
+            }
         }
 
         private void WriteHeader(bool withProvenance)
@@ -227,11 +249,17 @@ public static partial class TickFile
 
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
             try { WriteHeader(withProvenance: false); _bs.Flush(); }
             finally
             {
                 try { _bs.Dispose(); }
-                finally { _fs.Dispose(); }
+                finally
+                {
+                    try { _fs.Dispose(); }
+                    finally { _ownership?.Dispose(); }
+                }
             }
         }
     }
@@ -320,12 +348,62 @@ public static partial class TickFile
     public static List<Trade> Read(string path, out int dropped, bool requireComplete = false) =>
         ReadCore(path, out dropped, requireComplete, allowIncompleteHeader: false);
 
+    internal static List<Trade> ReadCaptured(string path, out string contentIdentity)
+    {
+        string captured = "missing";
+        var rows = ReadCore(path, out _, requireComplete: false, allowIncompleteHeader: false,
+            captureIdentity: identity => captured = identity);
+        contentIdentity = captured;
+        return rows;
+    }
+
+    internal static string ContentIdentity(string path, CancellationToken ct)
+    {
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        bool archive = path.EndsWith(".br", StringComparison.Ordinal);
+        long remaining = archive ? long.MaxValue : file.Length;
+        if (!archive && remaining > TickArchive.MaximumExpandedBytes)
+            throw new InvalidDataException("Tick day exceeds the bounded read size: " + path);
+        using var input = OpenInput(file, archive);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        try
+        {
+            while (remaining > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                int count = input.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+                if (count == 0)
+                {
+                    if (!archive && remaining > 0) throw new EndOfStreamException("Tick prefix changed while being read: " + path);
+                    break;
+                }
+                hash.AppendData(buffer, 0, count);
+                remaining -= count;
+            }
+            return Convert.ToHexString(hash.GetHashAndReset());
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
+    }
+
     /// <summary>Read an append snapshot only while the caller has established another writer owns the instrument lease.</summary>
     internal static List<Trade> ReadAppendPrefix(string path, out int dropped, decimal? expectedTickSize = null) =>
         ReadCore(path, out dropped, requireComplete: false, allowIncompleteHeader: true, expectedTickSize);
 
-    /// <summary>Upgrade only while holding the instrument writer lease; legacy raw payloads remain readable.</summary>
     internal static void EnsureProvenanceFormat(string path, Instrument instrument)
+    {
+        using var ownership = instrument.FeedId is IbBarImport.FeedId or IbBarStore.BarFolder
+            ? null : HistoryWriteOwnership.AcquirePath(path);
+        EnsureProvenanceFormatCore(path, instrument, ownership);
+    }
+
+    internal static void EnsureProvenanceFormat(string path, Instrument instrument, HistoryWriteOwnership ownership)
+    {
+        ownership.RequirePath(path);
+        EnsureProvenanceFormatCore(path, instrument, ownership);
+    }
+
+    private static void EnsureProvenanceFormatCore(string path, Instrument instrument, HistoryWriteOwnership? ownership)
     {
         if (!File.Exists(path)) return;
         string? temporary = null;
@@ -342,7 +420,8 @@ public static partial class TickFile
                 temporary = path + "." + Guid.NewGuid().ToString("N") + ".upgrade";
                 source.Position = 0;
                 using var input = new BufferedStream(new NonOwningStream(source), 64 * 1024);
-                using var writer = new Writer(temporary, instrument, includeProvenance: true);
+                using var writer = ownership == null ? new Writer(temporary, instrument, includeProvenance: true)
+                    : new Writer(temporary, instrument, ownership, includeProvenance: true);
                 foreach (var trade in EnumerateCore(input, path, allowIncompleteTail: false, requireOrdered: false, expectedTickSize: instrument.TickSize))
                     writer.Write(trade);
             }
@@ -353,7 +432,7 @@ public static partial class TickFile
         finally { if (temporary != null && File.Exists(temporary)) File.Delete(temporary); }
     }
 
-    private static List<Trade> ReadCore(string path, out int dropped, bool requireComplete, bool allowIncompleteHeader, decimal? expectedTickSize = null)
+    private static List<Trade> ReadCore(string path, out int dropped, bool requireComplete, bool allowIncompleteHeader, decimal? expectedTickSize = null, Action<string>? captureIdentity = null)
     {
         dropped = 0;
         var result = new List<Trade>();
@@ -367,6 +446,7 @@ public static partial class TickFile
             data = new byte[(int)fs.Length];
             fs.ReadExactly(data);
         }
+        captureIdentity?.Invoke(Convert.ToHexString(SHA256.HashData(data)));
         bool withProvenance = data.Length >= 4 && data.AsSpan(0, 4).SequenceEqual(ProvenanceMagic);
         if (allowIncompleteHeader)
         {
@@ -632,8 +712,7 @@ public static partial class TickFile
     }
 
     /// <summary>
-    /// Reescribe un archivo sin los tramos dañados (se guarda aparte y se reemplaza de una).
-    /// Solo llamar sin nadie grabando ese instrumento. Devuelve cuántos registros se sacaron.
+    /// Rewrites damaged history under physical day ownership and returns the number of removed records.
     /// </summary>
     public static int Repair(string path, Instrument instrument)
     {
@@ -646,12 +725,19 @@ public static partial class TickFile
                 throw new InvalidDataException("IB repair requires its standard owned day path.");
             return IbBarStore.RepairDay(root, instrument, day);
         }
+        using var ownership = HistoryWriteOwnership.AcquirePath(path);
+        return Repair(path, instrument, ownership);
+    }
+
+    internal static int Repair(string path, Instrument instrument, HistoryWriteOwnership ownership)
+    {
+        ownership.RequirePath(path);
         var trades = Read(path, out int dropped);
         if (dropped == 0) return 0;
         var tmp = path + "." + Guid.NewGuid().ToString("N") + ".repair";
         try
         {
-            using (var w = new Writer(tmp, instrument, includeProvenance: true))
+            using (var w = new Writer(tmp, instrument, ownership, includeProvenance: true))
                 foreach (var t in trades) w.Write(t);
             File.Move(tmp, path, overwrite: true);
             return dropped;
@@ -660,8 +746,8 @@ public static partial class TickFile
     }
 
     /// <summary>
-    /// Permiso exclusivo para grabar un instrumento: un solo proceso escribe sus archivos (dos escritores
-    /// mezclan los registros y dañan el archivo). Devuelve null si otro ya lo tiene; se libera al cerrar.
+    /// Exclusive recorder identity, also retained by whole-symbol imports. Non-IB physical mutations
+    /// additionally own their affected days through HistoryWriteOwnership.
     /// </summary>
     public static FileStream? TryLock(string root, string feedId, string symbol, bool failOnNonSharingError = false, bool recordingWriter = false)
     {
@@ -684,7 +770,7 @@ public static partial class TickFile
     }
 
     // Win32 sharing/lock violations; POSIX EAGAIN/EWOULDBLOCK on Linux and Darwin.
-    private static bool IsSharingViolation(IOException error) => (error.HResult & 0xFFFF) is 11 or 35 or 32 or 33;
+    internal static bool IsSharingViolation(IOException error) => (error.HResult & 0xFFFF) is 11 or 35 or 32 or 33;
 
     /// <summary>Cross-process proof of an actual append recorder, not merely an import/replacement lease.</summary>
     internal static bool HasActiveRecordingWriter(string root, string feedId, string symbol)

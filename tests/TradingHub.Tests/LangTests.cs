@@ -271,10 +271,8 @@ public sealed class LangTests : IDisposable
     [Fact]
     public void Real_catalogs_preserve_all_upstream_aliases_and_checkpoint_fork_correspondence_and_holes()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "TradingHub.slnx"))) directory = directory.Parent;
-        Assert.NotNull(directory);
-        using var provenance = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory!.FullName, "tools", "TradingHub.I18n", "provenance.json")));
+        using var provenance = JsonDocument.Parse(File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "i18n-provenance.json")));
         foreach (var code in new[] { Lang.Spanish, Lang.Chinese })
         {
             using var stream = typeof(Lang).Assembly.GetManifestResourceStream($"TradingHub.App.Localization.{code}.json");

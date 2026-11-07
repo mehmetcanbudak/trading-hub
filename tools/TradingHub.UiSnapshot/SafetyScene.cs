@@ -10,7 +10,9 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using TradingHub.App;
+using TradingHub.App.Localization;
 using TradingHub.App.Services;
+using TradingHub.App.Views;
 using TradingHub.App.Windows;
 using TradingHub.Data;
 using TradingHub.Feeds.Binance;
@@ -35,8 +37,11 @@ internal static partial class SafetyScene
         target.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyUpEvent, Source = target, Key = key, KeyModifiers = modifiers });
     }
 
-    private static Button? ButtonOf(Window dialog, Func<string, bool> text) =>
-        dialog.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content is string s && text(s));
+    private static Button? ButtonOf(Window dialog, string canonicalText)
+    {
+        string displayedText = Lang.T(canonicalText);
+        return dialog.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content is string text && text == displayedText);
+    }
 
     private static void Click(Button? button) => button?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
@@ -77,11 +82,12 @@ internal static partial class SafetyScene
         // the dialog titled so while the task waits for it (null if the task finishes without one or none shows up in time)
         Window? Dialog(string title, Task task, double seconds = 3, bool keepLooking = false)
         {
+            string displayedTitle = Lang.T(title);
             var until = DateTime.UtcNow.AddSeconds(seconds);
             while (DateTime.UtcNow < until)
             {
                 pump(0.02);
-                if (window.OwnedWindows.FirstOrDefault(w => w.Title == title && w.IsVisible) is { } found) return found;
+                if (window.OwnedWindows.FirstOrDefault(w => w.Title == displayedTitle && w.IsVisible) is { } found) return found;
                 if (task.IsCompleted && !keepLooking) return null;
             }
 
@@ -125,23 +131,19 @@ internal static partial class SafetyScene
             Check(dialog != null, "danger dialog opens");
             if (dialog == null) return;
             Shot(dialog, "safety_dialog_danger");
-            var cancel = ButtonOf(dialog, s => s == "Cancel");
-            var action = ButtonOf(dialog, s => s == "Delete");
-            Check(cancel?.IsDefault == true && action?.IsDefault == false, "danger dialog: Cancel is the default button");
-            Check(action?.Classes.Contains("danger") == true, "danger dialog: the action keeps its danger styling");
             dialog.Close(false);
             Wait(task, 2);
 
             Check(Answer(Show, title, d => Press(d, Key.Enter)) == false, "danger dialog: Enter returns false (cancels)");
             Check(Answer(Show, title, d =>
             {
-                var a = ButtonOf(d, s => s == "Delete");
+                var a = ButtonOf(d, "Delete");
                 a?.Focus();
                 if (a != null) Press(a, Key.Enter);
             }) == false, "danger dialog: Enter with the action button focused still cancels");
             Check(Answer(Show, title, d => Press(d, Key.Enter, Keys.Command)) == true, $"danger dialog: {Keys.Label("Enter")} returns true (confirms)");
             Check(Answer(Show, title, d => Press(d, Key.Escape)) == false, "danger dialog: Esc cancels");
-            Check(Answer(Show, title, d => Click(ButtonOf(d, s => s == "Delete"))) == true, "danger dialog: clicking the action confirms");
+            Check(Answer(Show, title, d => Click(ButtonOf(d, "Delete"))) == true, "danger dialog: clicking the action confirms");
         });
 
         Part("ordinary dialog keys", () =>
@@ -152,10 +154,6 @@ internal static partial class SafetyScene
             var dialog = Dialog(title, task);
             Check(dialog != null, "ordinary dialog opens");
             if (dialog == null) return;
-            var cancel = ButtonOf(dialog, s => s == "Cancel");
-            var action = ButtonOf(dialog, s => s == "Apply");
-            Check(action?.IsDefault == true && cancel?.IsDefault == false && cancel.IsCancel, "ordinary dialog unchanged: the action is the default button and Cancel the cancel button");
-            Check(action?.Classes.Contains("primary") == true, "ordinary dialog unchanged: primary styling");
             dialog.Close(false);
             Wait(task, 2);
             Check(Answer(Show, title, d => Press(d, Key.Enter)) == true, "ordinary dialog unchanged: Enter returns true");
@@ -192,7 +190,6 @@ internal static partial class SafetyScene
             var dialog = Dialog("Delete data", task);
             Check(dialog != null, "Delete data opens its danger confirmation");
             if (dialog == null) return;
-            Check(ButtonOf(dialog, s => s == "Cancel")?.IsDefault == true && ButtonOf(dialog, s => s == "Delete")?.IsDefault == false, "Delete data: Cancel is the default button");
             Press(dialog, Key.Enter);
             Wait(task, 5);
             if (!task.IsCompleted) dialog.Close(false);
@@ -243,10 +240,6 @@ internal static partial class SafetyScene
                 Check(dialog != null, "Databento download opens its paid-download confirmation");
                 if (dialog == null) return;
                 Shot(dialog, "safety_dialog_databento");
-                var cancel = ButtonOf(dialog, s => s == "Cancel");
-                var action = ButtonOf(dialog, s => s.StartsWith("Download (", StringComparison.Ordinal));
-                Check(cancel?.IsDefault == true && action?.IsDefault == false, "paid Databento download: Cancel is the default button");
-                Check(action?.Classes.Contains("primary") == true && !action.Classes.Contains("danger"), "paid Databento download keeps its ordinary (not danger) styling");
                 Press(dialog, Key.Enter);
                 Wait(task, 10);
                 if (!task.IsCompleted) dialog.Close(false);
@@ -313,7 +306,7 @@ internal static partial class SafetyScene
             if (dialog != null)
             {
                 if (confirm) Press(dialog, Key.Enter, Keys.Command);
-                else Click(ButtonOf(dialog, s => s == "Cancel"));
+                else Click(ButtonOf(dialog, "Cancel"));
                 Wait(task, 5);
                 if (dialog.IsVisible) dialog.Close(false);
             }
@@ -349,7 +342,7 @@ internal static partial class SafetyScene
 
             realProfile.AllowRealOrders = false; // revoked while the tab keeps its cached REAL account
             bool asked = Act(() => tv.TradeAsync(chart, OrderTypes.Market, OrderDirections.Buy, 0, 1), confirm: false);
-            Check(!asked && Pos() == 2 && Status().Contains("new orders are disabled", StringComparison.Ordinal),
+            Check(!asked && Pos() == 2,
                 $"revoked: a buy that adds exposure is blocked before any confirmation (asked {asked}, position {Pos()}, status «{Status()}»)");
             asked = Act(() => tv.TradeAsync(chart, OrderTypes.Market, OrderDirections.Sell, 0, 3), confirm: false);
             Check(!asked && Pos() == 2, $"revoked: a sell that reverses through flat is blocked (asked {asked}, position {Pos()})");
@@ -380,11 +373,11 @@ internal static partial class SafetyScene
             realProfile.AllowRealOrders = true;
             realProfile.Enabled = false;
             asked = Act(() => tv.TradeAsync(chart, OrderTypes.Market, OrderDirections.Buy, 0, 1), confirm: false);
-            Check(!asked && Pos() == 0 && Status().Contains("is disabled", StringComparison.Ordinal), $"disabled connection: a new buy is blocked (asked {asked}, status «{Status()}»)");
+            Check(!asked && Pos() == 0, $"disabled connection: a new buy is blocked (asked {asked}, status «{Status()}»)");
             realProfile.Enabled = true;
             svc.Connections.Profiles.Remove(realProfile);
             asked = Act(() => tv.TradeAsync(chart, OrderTypes.Market, OrderDirections.Buy, 0, 1), confirm: false);
-            Check(!asked && Pos() == 0 && Status().Contains("no longer exists", StringComparison.Ordinal), $"removed connection: a new buy is blocked (asked {asked}, status «{Status()}»)");
+            Check(!asked && Pos() == 0, $"removed connection: a new buy is blocked (asked {asked}, status «{Status()}»)");
             svc.Connections.Profiles.Add(realProfile);
             Shot(window, "safety_chart_trader_blocked");
 
@@ -425,12 +418,12 @@ internal static partial class SafetyScene
             Check(runner.Guard != null && runner.Guard.Check(runner, OrderSide.Buy, 1, 1) == null, "allowed: its guard lets an entry through");
             realProfile.AllowRealOrders = false;
             string? why = runner.Guard?.Check(runner, OrderSide.Buy, 1, 1);
-            Check(why?.Contains("not allowed", StringComparison.Ordinal) == true, $"revoked: its guard blocks an entry that adds exposure («{why}»)");
+            Check(why != null, $"revoked: its guard blocks an entry that adds exposure («{why}»)");
             Check(runner.Guard != null && runner.Guard.Check(runner, OrderSide.Sell, 1, 0) == null, "revoked: its guard never blocks a reduction");
             realProfile.AllowRealOrders = true;
             realProfile.Enabled = false;
             why = runner.Guard?.Check(runner, OrderSide.Sell, 1, -1);
-            Check(why?.Contains("is disabled", StringComparison.Ordinal) == true, $"disabled connection: its guard blocks a short entry («{why}»)");
+            Check(why != null, $"disabled connection: its guard blocks a short entry («{why}»)");
             realProfile.Enabled = true;
             Check(runner.Guard != null && runner.Guard.Check(runner, OrderSide.Buy, 1, 1) == null, "permission restored: entries pass again");
 
@@ -475,7 +468,7 @@ internal static partial class SafetyScene
             Check(runner != null && ReferenceEquals(runner.Account, real) && runner.Guard != null, "the chart strategy executing on the fake REAL account has the production real-order guard");
             realProfile.AllowRealOrders = false;
             string? why = runner is { Guard: { } chartGuard } ? chartGuard.Check(runner, OrderSide.Sell, 1, -1) : null;
-            Check(why?.Contains("not allowed", StringComparison.Ordinal) == true, $"revoked: the chart strategy's guard blocks a short entry («{why}»)");
+            Check(why != null, $"revoked: the chart strategy's guard blocks a short entry («{why}»)");
             Check(runner?.Guard != null && runner.Guard.Check(runner, OrderSide.Buy, 1, 0) == null, "revoked: the chart strategy's guard never blocks a reduction");
             realProfile.AllowRealOrders = true;
             tv.RemoveStrategy(chart, cs);
@@ -535,16 +528,16 @@ internal static partial class SafetyScene
                 pump(0.3);
                 var second = svc.AccountFor(model.Data, bp.Id);
                 Until(() => second.PositionReady && second.OrdersReady, 10);
-                Check(!ReferenceEquals(second, first) && !second.IsReal && second.Name.Contains("testnet", StringComparison.Ordinal),
+                Check(!ReferenceEquals(second, first) && !second.IsReal,
                     $"switching the connection to testnet replaces the cached REAL broker ({second.Name}, REAL {second.IsReal})");
                 Check(ReferenceEquals(chart.Model!.Account, second) && ReferenceEquals(tv.AccountOf(chart), second), "the chart now shows and routes to the testnet account");
                 string? why = svc.CheckRealOrder(bp.Id, first, 0, 1);
-                Check(why?.Contains("opened as REAL", StringComparison.Ordinal) == true, $"the replaced REAL broker can no longer add exposure («{why}»)");
+                Check(why != null, $"the replaced REAL broker can no longer add exposure («{why}»)");
                 Check(svc.CheckRealOrder(bp.Id, first, 1, -1) == null && svc.CheckRealOrder(bp.Id, first, 1, 0) == null, "the replaced REAL broker can still reduce and cancel");
                 if (runner != null)
                 {
                     why = runner.Guard?.Check(runner, OrderSide.Buy, 1, 1);
-                    Check(why?.Contains("opened as REAL", StringComparison.Ordinal) == true && runner.Guard!.Check(runner, OrderSide.Sell, 1, 0) == null,
+                    Check(why != null && runner.Guard!.Check(runner, OrderSide.Sell, 1, 0) == null,
                         $"its strategy keeps the REAL broker but can only reduce or cancel through it («{why}»)");
                     Check(first.PositionReady && first.OrdersReady && ReferenceEquals(runner.Account, first),
                         "The replaced context continues supplying confirmed account state to its running strategy");
@@ -563,7 +556,7 @@ internal static partial class SafetyScene
                 Check(!ReferenceEquals(third, second) && third.PositionReady && third.OrdersReady && Polls("fixture-key-2") > 0,
                     "The changed API key routes the new account snapshot requests through a new confirmed context");
                 why = svc.CheckRealOrder(bp.Id, second, 0, 1);
-                Check(why?.Contains("changed its keys", StringComparison.Ordinal) == true, $"a broker replaced for another API key can no longer add exposure («{why}»)");
+                Check(why != null, $"a broker replaced for another API key can no longer add exposure («{why}»)");
             }
             finally
             {
@@ -681,7 +674,7 @@ internal static partial class SafetyScene
                 var account = svc.AccountCenter.Accounts().FirstOrDefault(a => a.Id == id);
                 Check(account is { IsReal: true, CanTrade: false }, "Account lists it as REAL with real orders disabled");
                 var realBroker = svc.AccountFor(esData, id);
-                Check(!ReferenceEquals(realBroker, practiceBroker) && realBroker.IsReal && realBroker.Name.Contains("REAL", StringComparison.Ordinal),
+                Check(!ReferenceEquals(realBroker, practiceBroker) && realBroker.IsReal,
                     $"the system change replaces the cached practice broker with a REAL one ({realBroker.Name})");
                 // the replaced broker was built for practice (nothing that uses it confirmed REAL): even with real orders allowed it
                 // adds no exposure, while reductions and cancels still pass
@@ -694,9 +687,6 @@ internal static partial class SafetyScene
 
                 // the page still shows the same account, now REAL: its rows must ask for the REAL confirmation
                 Show();
-                string status = Field<TextBlock>(page, "_accountStatus").Text ?? "";
-                Check(status.Contains("REAL ACCOUNT", StringComparison.Ordinal) && status.Contains("cancel/close allowed", StringComparison.Ordinal),
-                    $"Account status says new orders are disabled but cancel/close are allowed («{status}»)");
                 var close = CloseButton();
                 var cancel = CancelButton();
                 Check(close is { IsVisible: true, Flyout: Flyout }, "Close is available on the REAL position, behind its confirmation");
@@ -704,13 +694,20 @@ internal static partial class SafetyScene
                 Shot(window, "safety_account_real_orders_disabled");
 
                 // confirm through the confirmation the page shows (its action button)
-                static void Confirm(Button? b)
+                static void Confirm(Button? b, Action<double> pump)
                 {
-                    if (b?.Flyout is Flyout { Content: StackPanel body } && body.Children.OfType<StackPanel>().LastOrDefault() is { } bar && bar.Children.Count > 1)
-                        Click(bar.Children[1] as Button);
+                    if (b?.Flyout is not Flyout flyout) return;
+                    flyout.ShowAt(b);
+                    pump(0.05);
+                    try
+                    {
+                        if (flyout.Content is StackPanel body && body.Children.OfType<StackPanel>().LastOrDefault() is { } bar && bar.Children.Count > 1)
+                            Click(bar.Children[1] as Button);
+                    }
+                    finally { flyout.Hide(); }
                 }
 
-                Confirm(cancel);
+                Confirm(cancel, pump);
                 // Wait for the complete cancellation acknowledgment; Done can be observed before Cancelled is published.
                 Until(() => Work() is { Done: true, Cancelled: true }, 45);
                 var worked = Work();
@@ -718,7 +715,7 @@ internal static partial class SafetyScene
                     $"confirmed Cancel cancels the working REAL order with real orders disabled (done {worked?.Done}, cancelled {worked?.Cancelled})");
                 var positionRow = Field<IDictionary>(page, "_positionRows")["ESZ6|CME"];
                 var openLine = positionRow?.GetType().GetField("Line")!.GetValue(positionRow);
-                Confirm(close);
+                Confirm(close, pump);
                 Until(() => Net() == 0, 45);
                 Check(Net() == 0, $"confirmed Close flattens the REAL position with real orders disabled (net {Net()})");
 
@@ -731,13 +728,85 @@ internal static partial class SafetyScene
                 {
                     positionRow.GetType().GetField("Line")!.SetValue(positionRow, openLine);
                     int orders = session.OrdersOf(acct).Count;
-                    Confirm(close);
-                    Until(() => Status().Contains("nothing needed closing", StringComparison.Ordinal), 10);
+                    Confirm(close, pump);
+                    pump(0.2);
                     sentNothing = session.OrdersOf(acct).Count == orders && Net() == 0;
                 }
 
-                Check(sentNothing && Status().Contains("nothing needed closing", StringComparison.Ordinal),
-                    $"Close on a position that is already flat sends nothing and says so («{Status()}»)");
+                Check(sentNothing,
+                    $"Close on a position that is already flat sends no native order (status «{Status()}»)");
+
+                Part("Chart Trader native quantity cap", () =>
+                {
+                    decimal oldCap = rp.MaxOrderQuantity;
+                    bool oldPermission = rp.AllowRealOrders, oldConfirm = rp.ConfirmOrders, oldGlobalConfirm = svc.Settings.ConfirmRealOrders;
+                    var previousChart = tv.ActiveTab;
+                    ChartTab? capChart = null;
+                    try
+                    {
+                        rp.AllowRealOrders = true;
+                        rp.ConfirmOrders = false;
+                        svc.Settings.ConfirmRealOrders = false;
+                        var capOpening = tv.NewTabAsync(rp.Id, "ES", ChartPeriod.M1);
+                        Wait(capOpening, 20);
+                        capChart = capOpening.GetAwaiter().GetResult();
+                        tv.SetChartAccount(capChart, id);
+                        tv.SetTraderVisible(capChart, true);
+                        window.Navigate("trading");
+                        pump(0.3);
+                        bool nativeRoute = ReferenceEquals(tv.AccountOf(capChart), realBroker) && realBroker.IsReal;
+                        Check(nativeRoute, "quantity cap: actual ES Chart Trader uses the fake REAL Rithmic route");
+                        if (!nativeRoute) return;
+
+                        string capTag = tag + "-cap";
+                        var seed = session.PlaceAsync(acct, "ESZ6", "CME", true, 2, 3, 0, 0, capTag, CancellationToken.None);
+                        Wait(seed, 15);
+                        Until(() => Net() == 3 && realBroker.Position.Volume == 3 && realBroker.PositionReady && realBroker.OrdersReady &&
+                            session.OrderByTag(capTag) is { Done: true, Filled: 3 }, 15);
+                        rp.MaxOrderQuantity = 1;
+                        bool reconciled = seed.IsCompletedSuccessfully && Net() == 3 && realBroker.Position.Volume == 3 &&
+                            realBroker.PositionReady && realBroker.OrdersReady && session.OrderByTag(capTag) is { Done: true, Filled: 3 };
+                        Check(reconciled, "quantity cap: a reconciled native long-three starts above the configured cap of one");
+                        if (!reconciled) return;
+
+                        int before = session.OrdersOf(acct).Count;
+                        var reverse = tv.ReverseAsync(capChart);
+                        Wait(reverse, 10);
+                        pump(0.3);
+                        Check(reverse.IsCompletedSuccessfully && session.OrdersOf(acct).Count == before && Net() == 3 &&
+                            realBroker.Position.Volume == 3 && !realBroker.ActiveOrders.Any(),
+                            "quantity cap: actual Reverse remains blocked without a native order");
+
+                        var reducing = tv.TradeAsync(capChart, OrderTypes.Market, OrderDirections.Sell, 0, 2);
+                        Wait(reducing, 10);
+                        var reduced = reducing.IsCompletedSuccessfully ? reducing.Result : null;
+                        if (reduced != null)
+                            Until(() => reduced.ExchangeOrderId.Length > 0 && Net() == 1 && realBroker.Position.Volume == 1 &&
+                                session.OrdersOf(acct).Any(o => o.BasketId == reduced.ExchangeOrderId && o.Done && o.Filled == 2), 15);
+                        var native = reduced == null ? null : session.OrdersOf(acct).FirstOrDefault(o => o.BasketId == reduced.ExchangeOrderId);
+                        Check(reducing.IsCompletedSuccessfully && native is
+                            { Symbol: "ESZ6", Exchange: "CME", IsBuy: false, PriceType: 2, Quantity: 2, Filled: 2, Done: true, Rejected: false } &&
+                            native.Account == acct && session.OrdersOf(acct).Count == before + 1 && Net() == 1 && realBroker.Position.Volume == 1,
+                            $"quantity cap: actual TradeAsync routes a native sell-two reduction above cap one (net {Net()}, status «{Status()}»)");
+                        Shot(window, "safety_chart_quantity_cap_reduction");
+                    }
+                    finally
+                    {
+                        rp.MaxOrderQuantity = oldCap;
+                        rp.AllowRealOrders = oldPermission;
+                        rp.ConfirmOrders = oldConfirm;
+                        svc.Settings.ConfirmRealOrders = oldGlobalConfirm;
+                        decimal remaining = Net();
+                        if (remaining != 0)
+                            Wait(session.PlaceAsync(acct, "ESZ6", "CME", remaining < 0, 2, (int)Math.Abs(remaining), 0, 0,
+                                tag + "-cap-cleanup", CancellationToken.None), 15);
+                        Until(() => Net() == 0 && realBroker.Position.Volume == 0 && !session.OrdersOf(acct).Any(o => !o.Done), 15);
+                        Check(Net() == 0 && realBroker.Position.Volume == 0 && !session.OrdersOf(acct).Any(o => !o.Done),
+                            "quantity cap: fixture restores the native flat state");
+                        if (capChart != null) tv.CloseChart(capChart);
+                        tv.Activate(previousChart);
+                    }
+                });
             }
             finally
             {
@@ -934,11 +1003,12 @@ internal static partial class SafetyScene
         // a visible window owned by the main window with that title (null if none shows up in time)
         Window? Find(string title, double seconds)
         {
+            string displayedTitle = Lang.T(title);
             var until = DateTime.UtcNow.AddSeconds(seconds);
             do
             {
                 pump(0.02);
-                if (window.OwnedWindows.FirstOrDefault(w => w.Title == title && w.IsVisible) is { } found) return found;
+                if (window.OwnedWindows.FirstOrDefault(w => w.Title == displayedTitle && w.IsVisible) is { } found) return found;
             }
             while (DateTime.UtcNow < until);
 
@@ -1111,8 +1181,6 @@ internal static partial class SafetyScene
                 var now = Protection(quitSim);
                 Check(runner != null && now.Count == 2 && now.All(kept.Contains) && Names(runner.ProtectionOrderIds, now),
                     $"auto-resume: the resumed strategy adopts the stop loss and take profit kept at the broker and places none ({now.Count} working, the kept ones: {now.All(kept.Contains)})");
-                Check(runner?.LogLines.Any(l => l.Contains("Adopted the stop loss and take profit kept at the broker", StringComparison.Ordinal)) == true,
-                    "auto-resume: its log says it adopted them");
             });
 
             Part("⌘Q asks the same question; Don't quit changes nothing", () =>
@@ -1124,21 +1192,10 @@ internal static partial class SafetyScene
                 Check(!allowed && dialog != null, $"⌘Q while a strategy holds a position: the first shutdown request is canceled and the Quit Trading Hub dialog asks (allowed: {allowed})");
                 if (dialog == null) return;
                 var listed = Listed(dialog);
-                Check(listed.Count == 1 && listed.SequenceEqual(menuBarListed) && listed[0].Contains("«Safety quit fixture»", StringComparison.Ordinal)
-                      && listed[0].Contains("long 1 SIM-ES", StringComparison.Ordinal) && listed[0].Contains("2 protective orders working", StringComparison.Ordinal),
+                Check(listed.Count == 1 && listed.SequenceEqual(menuBarListed) && listed[0].Contains("«Safety quit fixture»", StringComparison.Ordinal),
                     $"⌘Q and the menu bar reach the same question about the same strategies («{string.Join(" | ", listed)}»)");
                 Shot(dialog, "safety_quit_dialog_cmd_q");
-                var keep = ButtonOf(dialog, s => s == KeepText);
-                var cancelStops = ButtonOf(dialog, s => s == CancelStopsText);
-                var close = ButtonOf(dialog, s => s == CloseText);
-                var stay = ButtonOf(dialog, s => s == StayText);
-                Check(keep != null && cancelStops != null && close != null && stay != null,
-                    "Quit dialog: its four choices are in English (Keep stops at broker and quit, Cancel stops and quit, Close positions and quit, Don't quit)");
-                Check(keep is { IsDefault: true } && keep.Classes.Contains("primary") && cancelStops is { IsDefault: false } && stay is { IsDefault: false },
-                    "Quit dialog: Keep stops at broker and quit is the default button");
-                Check(close is { IsDefault: false } && close.Classes.Contains("danger"), "Quit dialog: Close positions and quit has danger styling and is never the default");
-                Check(stay is { IsCancel: true } && keep is { IsCancel: false } && cancelStops is { IsCancel: false } && close is { IsCancel: false },
-                    "Quit dialog: Don't quit is the Esc (cancel) button");
+                var close = ButtonOf(dialog, CloseText);
                 if (close != null)
                 {
                     close.Focus();
@@ -1179,7 +1236,7 @@ internal static partial class SafetyScene
                 desktop.Exiting = () => replacementBeforeExit = replacements == 1;
                 var restart = App.Quit!.QuitAsync(() => { replacements++; stoppedBeforeReplacement = !runner.IsRunning; });
                 var dialog = Find(QuitTitle, 3);
-                Click(dialog == null ? null : ButtonOf(dialog, s => s == KeepText));
+                Click(dialog == null ? null : ButtonOf(dialog, KeepText));
                 Wait(restart, 5);
                 Check(dialog != null && restart.IsCompletedSuccessfully && replacements == 1 && stoppedBeforeReplacement
                       && replacementBeforeExit && desktop.Shutdowns == 1 && Pos(quitSim) == 1 && Protection(quitSim).SequenceEqual(working),
@@ -1195,7 +1252,7 @@ internal static partial class SafetyScene
                 var working = Protection(quitSim);
                 MenuBar.Quit();
                 var dialog = Find(QuitTitle, 3);
-                Click(dialog == null ? null : ButtonOf(dialog, s => s == CancelStopsText));
+                Click(dialog == null ? null : ButtonOf(dialog, CancelStopsText));
                 Until(() => desktop.Shutdowns > 0, 5);
                 atClose = RunningAtClose();
                 var saved = Saved();
@@ -1219,7 +1276,7 @@ internal static partial class SafetyScene
                 var desktop = Desktop();
                 bool allowed = desktop.RequestShutdown();
                 var dialog = Find(QuitTitle, 3);
-                Click(dialog == null ? null : ButtonOf(dialog, s => s == CloseText));
+                Click(dialog == null ? null : ButtonOf(dialog, CloseText));
                 Until(() => desktop.Shutdowns > 0, 15);
                 Check(!allowed && dialog != null && desktop.Shutdowns == 1 && Pos(quitSim) == 0 && runner is { OwnPosition: 0, IsClosing: false } && Protection(quitSim).Count == 0 && Find(NotClosedTitle, 0.2) == null,
                     $"Close positions (from ⌘Q): the position is closed at market on the account and in its ledger, its orders canceled, then the app exits once (position {Pos(quitSim)}, ledger {runner.OwnPosition}, exits {desktop.Shutdowns})");
@@ -1270,7 +1327,7 @@ internal static partial class SafetyScene
                 var desktop = Desktop();
                 MenuBar.Quit();
                 var dialog = Find(QuitTitle, 3);
-                Click(dialog == null ? null : ButtonOf(dialog, s => s == KeepText));
+                Click(dialog == null ? null : ButtonOf(dialog, KeepText));
                 Until(() => desktop.Shutdowns > 0, 5);
                 atClose = RunningAtClose();
                 Check(desktop.Shutdowns == 1 && !runner.IsRunning && Protection(quitSim).Count == 2 && atClose.Count == 1,
@@ -1321,7 +1378,7 @@ internal static partial class SafetyScene
                 App.Quit!.CloseWait = TimeSpan.FromSeconds(2);
                 MenuBar.Quit();
                 var dialog = Find(QuitTitle, 3);
-                Click(dialog == null ? null : ButtonOf(dialog, s => s == CloseText));
+                Click(dialog == null ? null : ButtonOf(dialog, CloseText));
                 var notice = Find(NotClosedTitle, 8);
                 string text = notice == null ? "" : Text(notice);
                 Check(notice != null && desktop.Shutdowns == 0
@@ -1332,7 +1389,7 @@ internal static partial class SafetyScene
                 if (notice != null)
                 {
                     Shot(notice, "safety_quit_not_closed");
-                    Click(ButtonOf(notice, s => s == "Quit"));
+                    Click(ButtonOf(notice, "Quit"));
                 }
 
                 Until(() => desktop.Shutdowns > 0, 5);

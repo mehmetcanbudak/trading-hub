@@ -58,6 +58,8 @@ public static class Robustness
     /// <summary>Sharpe por operación (media / desvío del resultado neto), asimetría, curtosis (normal = 3) y cantidad.</summary>
     public static (double Sharpe, double Skew, double Kurtosis, int Count) TradeSharpe(IReadOnlyList<ClosedTrade> trades)
     {
+        if (trades.Any(t => !t.HasCompleteTradeEvidence))
+            trades = trades.Where(t => t.HasCompleteTradeEvidence).ToArray();
         int n = trades.Count;
         if (n < 2) return (0, 0, 3, n);
         double mean = trades.Average(t => (double)t.NetPnl);
@@ -111,7 +113,7 @@ public static class Robustness
     /// </summary>
     public static (decimal Early, decimal Late, double T, int Count) EdgeDecay(IReadOnlyList<ClosedTrade> trades)
     {
-        var list = trades.OrderBy(t => t.ExitTime).ToList();
+        var list = trades.Where(t => t.HasCompleteTradeEvidence).OrderBy(t => t.ExitTime).ToList();
         int n = list.Count;
         if (n < 6) return (0, 0, 0, n);
         int third = n / 3;
@@ -149,7 +151,7 @@ public static class Robustness
     /// </summary>
     public static List<RegimeStats> Regimes(IReadOnlyList<ClosedTrade> trades)
     {
-        var known = trades.Where(t => t.EntryTrend != null).ToList();
+        var known = trades.Where(t => t.HasCompleteTradeEvidence && t.EntryTrend != null).ToList();
         var list = new List<RegimeStats>();
         if (known.Count == 0) return list;
         static RegimeStats Of(string name, IEnumerable<ClosedTrade> group, bool detail = false)
@@ -198,7 +200,7 @@ public static class Robustness
     /// </summary>
     public static ContextFilterSuggestion? SuggestContextFilter(IReadOnlyList<ClosedTrade> trades)
     {
-        var known = trades.Where(t => t.EntryTrend != null).ToList();
+        var known = trades.Where(t => t.HasCompleteTradeEvidence && t.EntryTrend != null).ToList();
         if (known.Count < 30) return null;
         bool ranks = known.Count(t => t.EntryVolatilityRank != null) >= known.Count * 0.8;
         bool directions = known.Count(t => t.EntryMarketDirection != null) >= known.Count * 0.8;
@@ -304,6 +306,8 @@ public static class Robustness
     /// </summary>
     public static double? ParameterInstability(IReadOnlyList<WalkForwardWindow> windows, IReadOnlyList<ParameterRange>? ranges)
     {
+        if (windows.Any(w => !w.InSampleAvailable))
+            windows = windows.Where(w => w.InSampleAvailable).ToArray();
         if (windows.Count < 2) return null;
         var names = ranges is { Count: > 0 }
             ? ranges.Where(r => r.Enabled && r.Max > r.Min).Select(r => r.Name).ToList()
@@ -402,8 +406,10 @@ public sealed class GateResult
 {
     public GateStatus Status { get; init; }
     public List<GateCheck> Checks { get; init; } = new();
-    public double TradeSharpe { get; init; }
-    public double Deflated { get; init; }
+    public double? TradeSharpe { get; init; } = 0;
+    public double? Deflated { get; init; } = 0;
+    public bool TradeEvidenceAvailable { get; init; } = true;
+    public string? TradeEvidenceUnavailableReason { get; init; }
     public double? Instability { get; init; }
     public (double ProfitableShare, int Neighbors)? Plateau { get; init; }
     public double? ProfitableCombos { get; init; }
@@ -422,9 +428,9 @@ public sealed class GateResult
     public List<RegimeStats> Regimes { get; init; } = new();
 
     /// <summary>Desgaste: ganancia media por operación del primer y último tercio, y la t de la pendiente en el tiempo.</summary>
-    public decimal DecayEarly { get; init; }
-    public decimal DecayLate { get; init; }
-    public double DecayT { get; init; }
+    public decimal? DecayEarly { get; init; } = 0;
+    public decimal? DecayLate { get; init; } = 0;
+    public double? DecayT { get; init; } = 0;
 
     public string StatusText => Status switch
     {
@@ -481,11 +487,19 @@ public static class ValidationGate
         void Add(string name, GateStatus st, string text) => checks.Add(new GateCheck(name, st, text));
         var es = TradingHub.Common.UiCulture.Current;
 
+        bool tradeEvidence = wf.AccountingPolicy == null && wf.OutSampleTrades.All(t => t.HasCompleteTradeEvidence);
+        const string unavailableTradeEvidence = "Trade-only confidence, decay and regime diagnostics are unavailable for marked window contributions.";
+        var completeWindows = wf.Windows.Where(w => w.InSampleAvailable && w.OutSampleAvailable).ToList();
+        if (!wf.IsComplete) Add("Coverage", GateStatus.Fail, "The out-of-sample research splice is incomplete.");
+        if (wf.AccountingPolicy != null)
+            Add("Attribution", GateStatus.Warn, "Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Sample eligibility counts only actual closing fills. The warm mark-to-market splice is not an executable portfolio.");
         int trades = m.TotalTrades;
         Add("Sample", trades >= input.MinTrades ? GateStatus.Pass : GateStatus.Fail,
-            trades >= input.MinTrades ? $"{trades} out-of-sample trades"
-            : trades == 0 ? "No out-of-sample trades (0 trades): entry conditions did not occur during the test period"
-            : $"Only {trades} out-of-sample trades (minimum {input.MinTrades}): insufficient evidence for a conclusion");
+            wf.AccountingPolicy != null
+                ? $"{trades} actual out-of-sample closing fills (minimum {input.MinTrades}); boundary valuations are not trades"
+                : trades >= input.MinTrades ? $"{trades} out-of-sample trades"
+                : trades == 0 ? "No out-of-sample trades (0 trades): entry conditions did not occur during the test period"
+                : $"Only {trades} out-of-sample trades (minimum {input.MinTrades}): insufficient evidence for a conclusion");
         Add("PnL", m.NetProfit > 0 ? GateStatus.Pass : GateStatus.Fail,
             m.NetProfit > 0 ? $"Earns {m.NetProfit.ToString("N2", es)} out of sample" : $"Loses out of sample ({m.NetProfit.ToString("N2", es)})");
         decimal pf = m.ProfitFactor;
@@ -499,8 +513,8 @@ public static class ValidationGate
         double win = wf.ProfitableWindowsPercent;
         Add("Consistency", win >= MinWindowsPercent ? GateStatus.Pass : win >= FailWindowsPercent ? GateStatus.Warn : GateStatus.Fail,
             $"{win.ToString("0", es)}% of out-of-sample windows are profitable (requires ≥ {MinWindowsPercent}%)");
-        Add("Windows", wf.Windows.Count >= MinWindows ? GateStatus.Pass : GateStatus.Warn,
-            wf.Windows.Count >= MinWindows ? $"{wf.Windows.Count} walk-forward windows" : $"Only {wf.Windows.Count} windows: little evidence of repeatability over time");
+        Add("Windows", completeWindows.Count >= MinWindows ? GateStatus.Pass : GateStatus.Warn,
+            completeWindows.Count >= MinWindows ? $"{completeWindows.Count} walk-forward windows" : $"Only {completeWindows.Count} windows: little evidence of repeatability over time");
 
         double? instability = Robustness.ParameterInstability(wf.Windows, wf.Ranges);
         if (instability is { } inst)
@@ -536,11 +550,14 @@ public static class ValidationGate
                 $" (among the {wf.Evaluated} tested combinations, it ranked in the bottom half in {pbo * 100:0}%: PBO)");
 
         // caminos fuera de muestra de la validación cruzada combinatoria purgada: no un solo camino como el walk-forward
-        if (wf.CpcvPaths.Count >= 3)
+        var availablePaths = wf.CpcvPaths.Where(p => p.Available && p.Net.HasValue && p.Sharpe.HasValue && p.MaxDrawdown.HasValue).ToList();
+        if (availablePaths.Count != wf.CpcvPaths.Count)
+            Add("Paths", GateStatus.Warn, "Some retrospective CPCV paths are unavailable because selection or test coverage is incomplete.");
+        if (availablePaths.Count >= 3)
         {
-            var paths = wf.CpcvPaths.OrderBy(p => p.Net).ToList();
+            var paths = availablePaths.OrderBy(p => p.Net).ToList();
             int good = paths.Count(p => p.Net > 0);
-            decimal median = paths[paths.Count / 2].Net, worst = paths[0].Net;
+            decimal median = paths[paths.Count / 2].Net!.Value, worst = paths[0].Net!.Value;
             double share = (double)good / paths.Count;
             Add("Paths", median <= 0 ? GateStatus.Fail : share >= MinProfitablePaths ? GateStatus.Pass : GateStatus.Warn,
                 $"{good} of {paths.Count} out-of-sample paths are profitable (cross-validation with {wf.CpcvGroups} groups and {wf.EmbargoDays} embargo day(s)): " +
@@ -553,22 +570,22 @@ public static class ValidationGate
         double bar = Robustness.DeflatedBenchmark(n, input.Trials, input.TrialVariance);
         // en plata, para que se entienda: cuánto gana por operación, cuánto varía cada una y cuánto mostraría por pura
         // suerte la mejor de las estrategias sin ventaja que se probaron, con esa misma variación
-        var pnls = wf.OutSampleTrades.Select(t => (double)t.NetPnl).ToList();
+        var pnls = wf.OutSampleTrades.Where(t => t.HasCompleteTradeEvidence).Select(t => (double)t.NetPnl).ToList();
         double mean = pnls.Count > 0 ? pnls.Average() : 0;
         double sd = pnls.Count > 1 ? Math.Sqrt(pnls.Sum(x => (x - mean) * (x - mean)) / (pnls.Count - 1)) : 0;
         string money = n >= 2 && sd > 0
             ? $". Average profit {mean.ToString("N0", es)} per trade, but individual trades vary by about ±{sd.ToString("N0", es)}: among {input.Trials} strategies with no edge " +
               $"(the number tested), the luckiest typically shows ~{(bar * sd).ToString("N0", es)} per trade with that variability"
             : "";
-        Add("Deflated Sharpe", dsr >= MinDeflated ? GateStatus.Pass : dsr >= FailDeflated ? GateStatus.Warn : GateStatus.Fail,
-            dsr >= MinDeflated
+        Add("Deflated Sharpe", !tradeEvidence ? GateStatus.Warn : dsr >= MinDeflated ? GateStatus.Pass : dsr >= FailDeflated ? GateStatus.Warn : GateStatus.Fail,
+            !tradeEvidence ? unavailableTradeEvidence : dsr >= MinDeflated
                 ? $"{LuckPassPrefix} {dsr * 100:0}% (requires ≥ {MinDeflated * 100:0}%, accounting for the {input.Trials} tested strategies){money}"
                 : $"{LuckFailPrefix} only {dsr * 100:0}% probability that the edge is real (requires ≥ {MinDeflated * 100:0}%){money}" +
                   (dsr < FailDeflated ? ". This is indistinguishable from chance" : ""));
 
         // desgaste de la ventaja: con 30 operaciones o más, ¿el último tercio rinde como el primero?
         var (early, late, tDecay, _) = Robustness.EdgeDecay(wf.OutSampleTrades);
-        if (trades >= 30)
+        if (tradeEvidence && trades >= 30)
         {
             bool dying = early > 0 && late < 0 && tDecay <= -2;
             bool fading = (early > 0 && late < early * 0.5m) || tDecay <= -1.5;
@@ -594,23 +611,25 @@ public static class ValidationGate
         }
 
         var status = checks.Any(c => c.Status == GateStatus.Fail) ? GateStatus.Fail : checks.Any(c => c.Status == GateStatus.Warn) ? GateStatus.Warn : GateStatus.Pass;
-        var (needs, factor) = status == GateStatus.Pass ? (false, 1.0)
+        var (needs, factor) = !tradeEvidence || status == GateStatus.Pass ? (false, 1.0)
             : SampleNeed(checks.Select(c => (c.Name, c.Status)), m.NetProfit, trades, input.MinTrades, sr, skew, kurt, input.Trials, input.TrialVariance, dsr);
         return new GateResult
         {
             Status = status,
             Checks = checks,
-            TradeSharpe = sr,
-            Deflated = dsr,
+            TradeSharpe = tradeEvidence ? sr : null,
+            Deflated = tradeEvidence ? dsr : null,
+            TradeEvidenceAvailable = tradeEvidence,
+            TradeEvidenceUnavailableReason = tradeEvidence ? null : unavailableTradeEvidence,
             Instability = instability,
             Plateau = plateau,
             ProfitableCombos = profitableCombos,
             NeedsMoreSample = needs,
             SampleFactor = factor,
             Regimes = regimes,
-            DecayEarly = early,
-            DecayLate = late,
-            DecayT = tDecay,
+            DecayEarly = tradeEvidence ? early : null,
+            DecayLate = tradeEvidence ? late : null,
+            DecayT = tradeEvidence ? tDecay : null,
         };
     }
 

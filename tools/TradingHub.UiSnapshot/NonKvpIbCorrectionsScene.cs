@@ -138,7 +138,7 @@ internal static class NonKvpIbCorrectionsScene
             Check(result.Settings.FeedId == feedId && result.Settings.TimeZoneId == zoneId && result.Settings.SessionStart == TimeSpan.FromHours(hour),
                 label + ": actual engine receives the intended session after compilation refresh");
             var current = Field<StrategyFile>(view, "_current");
-            Check((DateTime)current.Type!.GetField("LastBarTime", BindingFlags.Public | BindingFlags.Static)!.GetValue(null)! == lastBarTime,
+            Check((DateTime)current.Generation!.Type.GetField("LastBarTime", BindingFlags.Public | BindingFlags.Static)!.GetValue(null)! == lastBarTime,
                 label + ": compiled OnBar observes the intended session boundary");
             Check(StrategyStore.List(current.Id).Select(run => StrategyStore.Load(current.Id, run.Id)).Any(run =>
                     run != null && run.Bars == bars && run.Settings.FeedId == feedId && run.Settings.TimeZoneId == zoneId && run.Settings.SessionStart == TimeSpan.FromHours(hour)),
@@ -149,7 +149,7 @@ internal static class NonKvpIbCorrectionsScene
             string path = ProbeFile("NonKvpSession" + (feedId == IbBarImport.FeedId ? "Ib" : "Other") + nonce);
             Wait((Task)Call(view, "OpenFileAsync", path)!, 60);
             var current = Field<StrategyFile>(view, "_current");
-            if (current.Type == null) throw new InvalidDataException("Session consumer compilation failed: " +
+            if (current.Generation == null) throw new InvalidDataException("Session consumer compilation failed: " +
                 string.Join("\n", current.LastCompile!.Diagnostics.Select(diagnostic => diagnostic.ToString())));
             ChooseSource(feedId);
             string statePath = (string)view.GetType().GetProperty("StatePath", Private)!.GetValue(view)!;

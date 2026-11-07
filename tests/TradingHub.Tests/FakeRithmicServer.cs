@@ -18,6 +18,7 @@ internal sealed class FakeRithmicServer : IDisposable
     private int _basket;
     private readonly Dictionary<string, int> _filled = new();
     private readonly Dictionary<string, (bool Buy, int Qty, double Price, int Type, string Tag)> _canceledOrders = new();
+    private readonly Dictionary<string, (string Symbol, string Exchange)> _orderContracts = new();
 
     public TaskCompletionSource? OrderReplayRelease { get; set; }
     public TaskCompletionSource? PositionSnapshotRelease { get; set; }
@@ -36,6 +37,30 @@ internal sealed class FakeRithmicServer : IDisposable
     public bool RejectModifyByNotification { get; set; }
     private int _modifyRequests;
     public int ModifyRequests => Volatile.Read(ref _modifyRequests);
+    public TaskCompletionSource? CancelNotificationRelease { get; set; }
+    public TaskCompletionSource CancelResponseSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public bool FillMarketBeforeLostReply { get; set; }
+    public bool ReplayTerminalOrders { get; set; }
+    public int? ReportedPositionOverride { get; set; }
+    private readonly Dictionary<string, (bool Buy, int Qty, double Price, int Type, string Tag)> _terminalOrders = new();
+    public bool AllowConcurrentTradingSessions { get; set; }
+    public TaskCompletionSource? NewOrderResponseRelease { get; set; }
+    public TaskCompletionSource<string> NewOrderResponseRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource? MarketFillRelease { get; set; }
+    private readonly Dictionary<WebSocket, int> _tradingSessions = new();
+    private readonly List<WebSocket> _orderSessions = new();
+    public HashSet<string> OrderReplayExclusions { get; } = new(StringComparer.Ordinal);
+
+    public void SeedCompletedOrder(string basket, string tag, bool buy, int quantity, double price)
+    {
+        lock (_gate)
+        {
+            _terminalOrders[basket] = (buy, quantity, price, 1, tag);
+            _filled[basket] = quantity;
+            _orderContracts[basket] = ("ESZ6", "CME");
+            ApplyFill(buy, quantity, price);
+        }
+    }
 
     public void SeedPosition(bool buy, int quantity, double price) => ApplyFill(buy, quantity, price);
 
@@ -80,7 +105,8 @@ internal sealed class FakeRithmicServer : IDisposable
                 _listener.Prefixes.Clear();
                 _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
                 _listener.Start();
-                Uri = $"ws://127.0.0.1:{port}";
+                // Retained native evidence belongs to one fake venue, not to a reused listener port.
+                Uri = $"ws://127.0.0.1:{port}/{Guid.NewGuid():N}";
                 break;
             }
             catch (HttpListenerException) when (i < 20)
@@ -170,13 +196,15 @@ internal sealed class FakeRithmicServer : IDisposable
                             lock (_gate)
                             {
                                 Logins[infra] = Logins.GetValueOrDefault(infra) + 1;
-                                if (_sessions.TryGetValue(infra, out var old) && !ReferenceEquals(old, ws) && old.State == WebSocketState.Open)
+                                if (!AllowConcurrentTradingSessions && _sessions.TryGetValue(infra, out var old) && !ReferenceEquals(old, ws) && old.State == WebSocketState.Open)
                                 {
                                     kicked = old;
                                     Kicks++;
                                 }
 
                                 _sessions[infra] = ws;
+                                if (infra is 2 or 4) _tradingSessions[ws] = infra;
+                                if (infra == 2) _orderSessions.Add(ws);
                             }
                         }
 
@@ -249,9 +277,17 @@ internal sealed class FakeRithmicServer : IDisposable
                         OrderReplayRequested.TrySetResult();
                         if (OrderReplayRelease != null) await OrderReplayRelease.Task.WaitAsync(_cts.Token);
                         (string Basket, (bool Buy, int Qty, double Price, int Type, string Tag) Order, int Filled)[] replay;
-                        lock (_gate) replay = Open.Select(kv => (kv.Key, kv.Value, _filled.GetValueOrDefault(kv.Key))).ToArray();
+                        lock (_gate) replay = Open.Where(kv => !OrderReplayExclusions.Contains(kv.Key))
+                            .Select(kv => (kv.Key, kv.Value, _filled.GetValueOrDefault(kv.Key))).ToArray();
                         foreach (var (basket, order, filled) in replay)
                             await Send(ws, Notify(351, 13, basket, order).Int(110121, 1).Int(154112, order.Qty - filled).Int(154111, filled));
+                        if (ReplayTerminalOrders)
+                        {
+                            (string Basket, (bool Buy, int Qty, double Price, int Type, string Tag) Order, int Filled)[] terminal;
+                            lock (_gate) terminal = _terminalOrders.Select(kv => (kv.Key, kv.Value, _filled.GetValueOrDefault(kv.Key))).ToArray();
+                            foreach (var (basket, order, filled) in terminal)
+                                await Send(ws, Notify(351, 15, basket, order).String(149273, "Fill").Int(154111, filled).Int(154112, 0));
+                        }
                         await Send(ws, Msg(321, m).String(132766, "0"));
                         break;
                     case 400:
@@ -260,7 +296,7 @@ internal sealed class FakeRithmicServer : IDisposable
                     case 402:
                         if (PositionSnapshotRelease != null) await PositionSnapshotRelease.Task.WaitAsync(_cts.Token);
                         await Send(ws, Msg(403, m).String(132766, "0"));
-                        await SendPnl(snapshot: true);
+                        await SendPnl(snapshot: true, target: ws);
                         break;
                     case 312:
                         await NewOrder(ws, m);
@@ -317,15 +353,23 @@ internal sealed class FakeRithmicServer : IDisposable
         await Send(ws, Msg(203, m).String(132766, "0"));
     }
 
-    private ProtoWriter Notify(int template, int notify, string basket, (bool Buy, int Qty, double Price, int Type, string Tag) o) =>
-        new ProtoWriter().Int(154467, template).Int(153625, notify).String(110300, basket).String(154119, o.Tag)
-            .String(154008, "ACC1").String(110100, "ESZ6").String(110101, "CME").Int(112003, o.Buy ? 1 : 2)
-            .Int(112004, o.Qty).Double(110306, o.Price).Double(149247, o.Price).Int(112008, o.Type);
+    private ProtoWriter Notify(int template, int notify, string basket, (bool Buy, int Qty, double Price, int Type, string Tag) o,
+        bool includeQuantity = true)
+    {
+        (string Symbol, string Exchange) contract;
+        lock (_gate) contract = _orderContracts.GetValueOrDefault(basket, ("ESZ6", "CME"));
+        var message = new ProtoWriter().Int(154467, template).Int(153625, notify).String(110300, basket).String(154119, o.Tag)
+            .String(154008, "ACC1").String(110100, contract.Symbol).String(110101, contract.Exchange).Int(112003, o.Buy ? 1 : 2)
+            .Double(110306, o.Price).Double(149247, o.Price).Int(112008, o.Type);
+        if (includeQuantity) message.Int(112004, o.Qty);
+        return message;
+    }
 
     private async Task NewOrder(WebSocket ws, ProtoMessage m)
     {
         string basket = "B" + Interlocked.Increment(ref _basket);
         var o = (Buy: m.Int(112003) == 1, Qty: (int)m.Int(112004), Price: m.Has(110306) ? m.Double(110306) : m.Double(149247), Type: (int)m.Int(112008), Tag: m.String(154119) ?? "");
+        lock (_gate) _orderContracts[basket] = (m.String(110100) ?? "ESZ6", m.String(110101) ?? "CME");
         lock (Tags) Tags.Add(o.Tag);
         if (NewOrderRejection is { } rejection)
         {
@@ -339,28 +383,56 @@ internal sealed class FakeRithmicServer : IDisposable
         }
         if (LoseNewOrderResponse)
         {
-            lock (_gate) Open[basket] = o;
+            lock (_gate)
+            {
+                if (FillMarketBeforeLostReply && o.Type == 2)
+                {
+                    ApplyFill(o.Buy, o.Qty, MarketPrice);
+                    _filled[basket] = o.Qty;
+                    _terminalOrders[basket] = o;
+                }
+                else Open[basket] = o;
+            }
             UnacknowledgedOrderAccepted.TrySetResult(basket);
             await ws.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture lost order response", _cts.Token);
             return;
         }
 
+        if (NewOrderResponseRelease is { } responseRelease && NewOrderResponseRequested.TrySetResult(basket))
+        {
+            lock (_gate) Open[basket] = o;
+            await responseRelease.Task.WaitAsync(_cts.Token);
+        }
         await Send(ws, Msg(313, m).String(132766, "0").String(110300, basket));
         await Send(ws, Notify(351, 13, basket, o).Int(154112, o.Qty).Int(154111, 0));
         if (o.Type == 2)
         {
-            // mercado: se llena al toque
-            double px = MarketPrice;
-            await Send(ws, Notify(352, 5, basket, o).Double(110307, px).Int(110308, o.Qty).Int(154111, o.Qty).Int(154112, 0).Double(110322, px)
-                .Int(150100, DateTimeOffset.UtcNow.ToUnixTimeSeconds()).Int(150101, 250000));
-            await Send(ws, Notify(351, 15, basket, o).String(149273, "Fill").Int(154111, o.Qty).Int(154112, 0));
-            ApplyFill(o.Buy, o.Qty, px);
-            await SendPnl(snapshot: false);
+            if (MarketFillRelease is { } fillRelease) _ = FinishMarketAsync(ws, basket, o, fillRelease.Task);
+            else await FinishMarketAsync(ws, basket, o, Task.CompletedTask);
         }
         else
         {
             lock (_gate) Open[basket] = o;
         }
+    }
+
+    private async Task FinishMarketAsync(WebSocket ws, string basket,
+        (bool Buy, int Qty, double Price, int Type, string Tag) order, Task release)
+    {
+        await release.WaitAsync(_cts.Token);
+        double price = MarketPrice;
+        await Send(ws, Notify(352, 5, basket, order).Double(110307, price).Int(110308, order.Qty)
+            .Int(154111, order.Qty).Int(154112, 0).Double(110322, price)
+            .Int(150100, DateTimeOffset.UtcNow.ToUnixTimeSeconds()).Int(150101, 250000));
+        await Send(ws, Notify(351, 15, basket, order).String(149273, "Fill").Int(154111, order.Qty).Int(154112, 0));
+        lock (_gate)
+        {
+            Open.Remove(basket);
+            ApplyFill(order.Buy, order.Qty, price);
+            _filled[basket] = order.Qty;
+            _terminalOrders[basket] = order;
+        }
+        await SendPnl(snapshot: false);
     }
 
     private async Task Cancel(WebSocket ws, ProtoMessage m)
@@ -378,8 +450,18 @@ internal sealed class FakeRithmicServer : IDisposable
         }
 
         await Send(ws, Msg(317, m).String(132766, "0"));
-        await Send(ws, Notify(352, 3, basket, o).Int(110318, o.Item2));
-        await Send(ws, Notify(351, 15, basket, o).String(149273, "Cancel"));
+        CancelResponseSent.TrySetResult();
+        if (CancelNotificationRelease is { } release)
+            _ = FinishCancellationAsync(ws, basket, o, release.Task);
+        else await FinishCancellationAsync(ws, basket, o, Task.CompletedTask);
+    }
+
+    private async Task FinishCancellationAsync(WebSocket ws, string basket,
+        (bool Buy, int Qty, double Price, int Type, string Tag) order, Task release)
+    {
+        await release.WaitAsync(_cts.Token);
+        await Send(ws, Notify(352, 3, basket, order).Int(110318, order.Qty));
+        await Send(ws, Notify(351, 15, basket, order).String(149273, "Cancel"));
     }
 
     private async Task Modify(WebSocket ws, ProtoMessage m)
@@ -439,11 +521,13 @@ internal sealed class FakeRithmicServer : IDisposable
         if (Position == 0) AvgPrice = 0;
     }
 
-    private async Task SendPnl(bool snapshot)
+    private async Task SendPnl(bool snapshot, WebSocket? target = null)
     {
-        WebSocket? ws;
-        lock (_gate) ws = _pnlSocket;
-        if (ws == null) return;
+        WebSocket[] targets;
+        lock (_gate) targets = target != null ? new[] { target } : AllowConcurrentTradingSessions
+            ? _tradingSessions.Where(pair => pair.Value == 4 && pair.Key.State == WebSocketState.Open).Select(pair => pair.Key).ToArray()
+            : _pnlSocket == null ? Array.Empty<WebSocket>() : new[] { _pnlSocket };
+        if (targets.Length == 0) return;
         if (!snapshot && PositionUpdateRelease is { } release)
         {
             PositionUpdateRequested.TrySetResult();
@@ -451,13 +535,28 @@ internal sealed class FakeRithmicServer : IDisposable
         }
         double open = (MarketPrice - AvgPrice) * Position * 50;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        await Send(ws, new ProtoWriter().Int(154467, 450).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1").String(110100, "ESZ6").String(110101, "CME")
-            .Int(156967, Position).Double(154434, AvgPrice).String(156961, open.ToString(inv)).Double(157955, ClosedPnl));
-        // saldo de la cuenta: como el real, unos campos en texto y otros en double
-        await Send(ws, new ProtoWriter().Int(154467, 451).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1")
-            .String(156970, (StartBalance + ClosedPnl).ToString("0.00", inv)).String(156971, (StartBalance + ClosedPnl).ToString("0.00", inv))
-            .String(157015, (StartBalance + ClosedPnl - Math.Abs(Position) * 500).ToString("0.00", inv)).String(156961, open.ToString("0.00", inv))
-            .Double(157955, ClosedPnl).Double(157956, ClosedPnl + open));
+        foreach (var ws in targets)
+        {
+            await Send(ws, new ProtoWriter().Int(154467, 450).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1").String(110100, "ESZ6").String(110101, "CME")
+                .Int(156967, ReportedPositionOverride ?? Position).Double(154434, AvgPrice).String(156961, open.ToString(inv)).Double(157955, ClosedPnl));
+            await Send(ws, new ProtoWriter().Int(154467, 451).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1")
+                .String(156970, (StartBalance + ClosedPnl).ToString("0.00", inv)).String(156971, (StartBalance + ClosedPnl).ToString("0.00", inv))
+                .String(157015, (StartBalance + ClosedPnl - Math.Abs(Position) * 500).ToString("0.00", inv)).String(156961, open.ToString("0.00", inv))
+                .Double(157955, ClosedPnl).Double(157956, ClosedPnl + open));
+        }
+    }
+
+    public Task PublishPosition() => SendPnl(snapshot: false);
+
+    public async Task PublishPosition(string symbol, int net, string exchange = "CME")
+    {
+        WebSocket[] targets;
+        lock (_gate) targets = AllowConcurrentTradingSessions
+            ? _tradingSessions.Where(pair => pair.Value == 4 && pair.Key.State == WebSocketState.Open).Select(pair => pair.Key).ToArray()
+            : new[] { _pnlSocket! };
+        foreach (var ws in targets)
+            await Send(ws, new ProtoWriter().Int(154467, 450).String(154008, "ACC1")
+                .String(110100, symbol).String(110101, exchange).Int(156967, net));
     }
 
     /// <summary>Manda una operación en vivo a las sesiones de cotizaciones suscriptas a ese contrato.</summary>
@@ -500,17 +599,25 @@ internal sealed class FakeRithmicServer : IDisposable
     /// Reports a working order that this Trading Hub process did not send (another session's, for example) on the order
     /// plant, as Rithmic reports the account's orders. It can then be modified or canceled by basket id.
     /// </summary>
-    public async Task PushOrder(string basket, string tag, bool buy, int qty, double price, int type = 1)
+    public async Task PushOrder(string basket, string tag, bool buy, int qty, double price, int type = 1,
+        string symbol = "ESZ6", string exchange = "CME", bool cumulativeKnown = true, int? orderSession = null)
     {
         var o = (Buy: buy, Qty: qty, Price: price, Type: type, Tag: tag);
         WebSocket? ws;
         lock (_gate)
         {
             Open[basket] = o;
-            _sessions.TryGetValue(2, out ws);
+            _orderContracts[basket] = (symbol, exchange);
+            if (orderSession is { } index) ws = _orderSessions[index];
+            else _sessions.TryGetValue(2, out ws);
         }
 
-        if (ws is { State: WebSocketState.Open }) await Send(ws, Notify(351, 13, basket, o).Int(154112, qty).Int(154111, 0));
+        if (ws is { State: WebSocketState.Open })
+        {
+            var notification = Notify(351, 13, basket, o).Int(154112, qty);
+            if (cumulativeKnown) notification.Int(154111, 0);
+            await Send(ws, notification);
+        }
     }
 
     /// <summary>A real late execution report for a canceled basket; never reopens or resubmits it.</summary>
@@ -534,10 +641,11 @@ internal sealed class FakeRithmicServer : IDisposable
         await SendPnl(snapshot: false);
     }
 
-    public async Task FillOrder(string basket, int quantity, double price)
+    public async Task FillOrder(string basket, int quantity, double price, bool includeQuantity = true,
+        bool allOrderSessions = false)
     {
         (bool Buy, int Qty, double Price, int Type, string Tag) order;
-        WebSocket ws;
+        WebSocket[] sockets;
         int filled;
         lock (_gate)
         {
@@ -546,11 +654,13 @@ internal sealed class FakeRithmicServer : IDisposable
             if (quantity <= 0 || filled > order.Qty) throw new ArgumentOutOfRangeException(nameof(quantity));
             _filled[basket] = filled;
             if (filled == order.Qty) Open.Remove(basket);
-            ws = _sessions[2];
+            sockets = allOrderSessions ? _tradingSessions.Where(pair => pair.Value == 2 && pair.Key.State == WebSocketState.Open)
+                .Select(pair => pair.Key).ToArray() : new[] { _sessions[2] };
             ApplyFill(order.Buy, quantity, price);
         }
-        await Send(ws, Notify(352, 5, basket, order).Double(110307, price).Int(110308, quantity)
-            .Int(154111, filled).Int(154112, order.Qty - filled));
+        foreach (var ws in sockets)
+            await Send(ws, Notify(352, 5, basket, order, includeQuantity).Double(110307, price).Int(110308, quantity)
+                .Int(154111, filled).Int(154112, order.Qty - filled));
         await SendPnl(snapshot: false);
     }
 
@@ -577,6 +687,13 @@ internal sealed class FakeRithmicServer : IDisposable
         }
         await Send(ws, Notify(352, 5, basket, order).Double(110307, price).Int(110308, quantity)
             .Int(154111, cumulative).Int(154112, order.Qty - cumulative));
+    }
+
+    public async Task DisconnectOrderSession(int index)
+    {
+        WebSocket socket;
+        lock (_gate) socket = _orderSessions[index];
+        await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture reconnect", _cts.Token);
     }
 
     public async Task RemoveOrderWhileDisconnected(string basket)

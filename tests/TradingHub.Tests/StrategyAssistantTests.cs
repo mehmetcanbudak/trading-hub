@@ -296,7 +296,7 @@ public sealed class StrategyAssistantTests
         using var fixture = new CliFixture("codex");
         File.WriteAllText(Path.Combine(fixture.Root, "hold-stderr"), "owned fixture");
         File.WriteAllText(Path.Combine(fixture.Root, "turn-delay"), "hold active CLI");
-        var owner = new PineHandoffRegistry();
+        var owner = new OwnedOperationRegistry();
         var source = new PineImportSource(Path.Combine(fixture.Root, "source.pine"), "source.pine", "plot(close)", "fixture");
         File.WriteAllText(source.Path, source.Text);
         Task<StrategyChatResult?> pending = owner.RunAsync(cancellation => PineAssistantHandoff.SendAsync(

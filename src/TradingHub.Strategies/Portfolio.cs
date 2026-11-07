@@ -1,5 +1,8 @@
 namespace TradingHub.Strategies;
 
+public sealed record PortfolioResearchCoverage(DateTime From, DateTime To, bool IsComplete, int CompletedWindows, int TotalWindows,
+    string? AccountingPolicy, string? AttributionPolicy, string? CpcvPolicy, IReadOnlyList<(DateTime From, DateTime To)> AvailableIntervals);
+
 /// <summary>Una estrategia dentro de un portafolio: una corrida guardada y su peso.</summary>
 public sealed class PortfolioComponent
 {
@@ -14,6 +17,10 @@ public sealed class PortfolioComponent
     public BacktestSettings Settings { get; set; } = new();
     public PerformanceMetrics Metrics { get; set; } = new();
     public List<ClosedTrade> Trades { get; set; } = new();
+    public PortfolioResearchCoverage? ResearchCoverage { get; set; }
+    public RunKind? Kind { get; set; }
+    public string? CodeHash { get; set; }
+    public RunInputEvidence? InputEvidence { get; set; }
 
     public static PortfolioComponent FromRun(StrategyRun run, decimal weight = 1) => new()
     {
@@ -25,7 +32,40 @@ public sealed class PortfolioComponent
         Settings = run.Settings,
         Metrics = run.Metrics ?? new PerformanceMetrics(),
         Trades = run.Trades ?? new List<ClosedTrade>(),
+        ResearchCoverage = Coverage(run),
+        Kind = run.Kind,
+        CodeHash = run.CodeHash,
+        InputEvidence = run.InputEvidence,
     };
+
+    private static PortfolioResearchCoverage? Coverage(StrategyRun run)
+    {
+        bool attributed = run.WalkForward?.AccountingPolicy != null ||
+                          run.Metrics?.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation ||
+                          run.Trades?.Any(t => !t.HasCompleteTradeEvidence) == true;
+        if (!attributed) return null;
+        var wf = run.WalkForward ?? throw new InvalidOperationException("Marked research components require saved walk-forward coverage.");
+        WalkForwardWindow? first = null, previous = null;
+        int previousIndex = -1;
+        var intervals = new List<(DateTime From, DateTime To)>(wf.Windows.Count);
+        for (int index = 0; index < wf.Windows.Count; index++)
+        {
+            var window = wf.Windows[index];
+            if (!window.InSampleAvailable || window.InSample == null || !window.OutSampleAvailable || window.OutSample == null) continue;
+            if (window.OutSampleTo <= window.OutSampleFrom)
+                throw new InvalidOperationException("A marked research component has an invalid out-of-sample interval.");
+            if (previous != null && (index != previousIndex + 1 || window.OutSampleFrom != previous.OutSampleTo))
+                throw new InvalidOperationException("A marked research component has an internal unavailable gap. The portfolio cannot represent that coverage without inventing returns.");
+            first ??= window;
+            previous = window;
+            previousIndex = index;
+            intervals.Add((window.OutSampleFrom, window.OutSampleTo));
+        }
+        if (first == null || previous == null)
+            throw new InvalidOperationException("No complete out-of-sample interval is available for this research component.");
+        return new PortfolioResearchCoverage(first.OutSampleFrom, previous.OutSampleTo, wf.IsComplete && intervals.Count == wf.Windows.Count,
+            intervals.Count, wf.Windows.Count, wf.AccountingPolicy, wf.AttributionPolicy, wf.CpcvPolicy, intervals);
+    }
 }
 
 /// <summary>Resultado de combinar varias estrategias.</summary>
@@ -68,16 +108,39 @@ public sealed class PortfolioResult
 /// </summary>
 public static class PortfolioAnalyzer
 {
-    private static DateTime Start(PortfolioComponent c) => c.Settings.FromUtc != default ? c.Settings.FromUtc : c.Trades.Count > 0 ? c.Trades.Min(t => t.EntryTime) : DateTime.MinValue;
-    private static DateTime End(PortfolioComponent c) => c.Settings.ToUtc != default ? c.Settings.ToUtc : c.Trades.Count > 0 ? c.Trades.Max(t => t.ExitTime) : DateTime.MinValue;
+    private static DateTime Start(PortfolioComponent c) => c.ResearchCoverage?.From ??
+        (c.Settings.FromUtc != default ? c.Settings.FromUtc : c.Trades.Count > 0 ? c.Trades.Min(t => t.EntryTime) : DateTime.MinValue);
+    private static DateTime End(PortfolioComponent c) => c.ResearchCoverage?.To ??
+        (c.Settings.ToUtc != default ? c.Settings.ToUtc : c.Trades.Count > 0 ? c.Trades.Max(t => t.ExitTime) : DateTime.MinValue);
 
-    private static Dictionary<DateOnly, decimal> Daily(PortfolioComponent c, DateTime from, DateTime to)
+    private static bool ClosingBoundary(ClosedTrade trade) =>
+        trade.Attribution == TradeAttribution.WindowBoundaryValuation && trade.WindowTo == trade.ExitTime;
+
+    private static bool InRange(ClosedTrade trade, DateTime from, DateTime to, bool halfOpen) =>
+        !halfOpen ? trade.ExitTime >= from && trade.ExitTime <= to
+            : ClosingBoundary(trade) ? trade.ExitTime > from && trade.ExitTime <= to
+            : trade.ExitTime >= from && trade.ExitTime < to;
+
+    private static ClosedTrade Scale(ClosedTrade trade, decimal weight, bool scaleQuantity) => trade with
+    {
+        Pnl = trade.Pnl * weight,
+        Commission = trade.Commission * weight,
+        Quantity = scaleQuantity || !trade.HasCompleteTradeEvidence ? trade.Quantity * weight : trade.Quantity,
+        AttributionNet = trade.AttributionNet * weight,
+        CarryNetCredit = trade.CarryNetCredit * weight,
+        CarryCommissionCredit = trade.CarryCommissionCredit * weight,
+        Mae = trade.HasCompleteTradeEvidence ? trade.Mae : trade.Mae * weight,
+        Mfe = trade.HasCompleteTradeEvidence ? trade.Mfe : trade.Mfe * weight,
+    };
+
+    private static Dictionary<DateOnly, decimal> Daily(PortfolioComponent c, DateTime from, DateTime to, bool halfOpen)
     {
         var d = new Dictionary<DateOnly, decimal>();
         foreach (var t in c.Trades)
         {
-            if (t.ExitTime < from || t.ExitTime > to) continue;
-            var day = DateOnly.FromDateTime(t.ExitTime);
+            if (!InRange(t, from, to, halfOpen)) continue;
+            var time = halfOpen && ClosingBoundary(t) ? t.ExitTime.AddTicks(-1) : t.ExitTime;
+            var day = DateOnly.FromDateTime(time);
             d[day] = d.GetValueOrDefault(day) + t.NetPnl * c.Weight;
         }
 
@@ -115,19 +178,37 @@ public static class PortfolioAnalyzer
     {
         var res = new PortfolioResult { Components = components.ToList() };
         if (components.Count == 0) return res;
+        bool halfOpen = components.Any(c => c.ResearchCoverage != null);
         var from = components.Max(Start);
         var to = components.Min(End);
         if (to <= from)
         {
+            if (halfOpen)
+                throw new InvalidOperationException("Research components have no common available out-of-sample interval. The portfolio cannot fill unavailable coverage with zero returns.");
             res.NoOverlap = true;
             from = components.Min(Start);
             to = components.Max(End);
         }
+        if (halfOpen)
+        {
+            for (int i = 0; i < components.Count; i++)
+            {
+                var coverage = components[i].ResearchCoverage;
+                if (coverage == null) continue;
+                for (int j = 0; j < coverage.AvailableIntervals.Count; j++)
+                {
+                    var interval = coverage.AvailableIntervals[j];
+                    if ((interval.From < from && from < interval.To) || (interval.From < to && to < interval.To))
+                        throw new InvalidOperationException("The common portfolio interval cuts through a marked out-of-sample window. Whole measured windows are required because their contributions cannot be rebased.");
+                }
+            }
+        }
 
         res.From = from;
         res.To = to;
-        var dailies = components.Select(c => Daily(c, from, to)).ToList();
-        for (var d = DateOnly.FromDateTime(from); d <= DateOnly.FromDateTime(to); d = d.AddDays(1)) res.Days.Add(d);
+        var dailies = components.Select(c => Daily(c, from, to, halfOpen)).ToList();
+        var lastDay = DateOnly.FromDateTime(halfOpen ? to.AddTicks(-1) : to);
+        for (var d = DateOnly.FromDateTime(from); d <= lastDay; d = d.AddDays(1)) res.Days.Add(d);
         foreach (var daily in dailies) res.DailyPnl.Add(res.Days.Select(d => daily.GetValueOrDefault(d)).ToArray());
 
         int n = components.Count;
@@ -152,8 +233,8 @@ public static class PortfolioAnalyzer
 
         // operaciones del portafolio (con su peso) y curva diaria
         res.Trades = components
-            .SelectMany(c => c.Trades.Where(t => t.ExitTime >= from && t.ExitTime <= to)
-                .Select(t => t with { Pnl = t.Pnl * c.Weight, Commission = t.Commission * c.Weight, Quantity = t.Quantity * c.Weight }))
+            .SelectMany(c => c.Trades.Where(t => InRange(t, from, to, halfOpen))
+                .Select(t => Scale(t, c.Weight, scaleQuantity: true)))
             .OrderBy(t => t.ExitTime).ToList();
         decimal eq = capital, peak = capital;
         res.Equity.Add(new EquityPoint(from, capital, 0));
@@ -172,8 +253,8 @@ public static class PortfolioAnalyzer
         for (int i = 0; i < components.Count; i++)
         {
             var c = components[i];
-            var trades = c.Trades.Where(t => t.ExitTime >= from && t.ExitTime <= to)
-                .Select(t => t with { Pnl = t.Pnl * c.Weight, Commission = t.Commission * c.Weight }).OrderBy(t => t.ExitTime).ToList();
+            var trades = c.Trades.Where(t => InRange(t, from, to, halfOpen))
+                .Select(t => Scale(t, c.Weight, scaleQuantity: false)).OrderBy(t => t.ExitTime).ToList();
             var curve = new List<EquityPoint> { new(from, capital, 0) };
             decimal e = capital, pk = capital;
             for (int k = 0; k < res.Days.Count; k++)
@@ -194,7 +275,7 @@ public static class PortfolioAnalyzer
     /// <summary>Pesos por riesgo parejo: cada estrategia pesa la inversa de la volatilidad de su resultado diario.</summary>
     public static decimal[] InverseVolatilityWeights(IReadOnlyList<PortfolioComponent> components, decimal capital)
     {
-        var unit = components.Select(c => new PortfolioComponent { Settings = c.Settings, Trades = c.Trades, Metrics = c.Metrics, Weight = 1 }).ToList();
+        var unit = components.Select(c => new PortfolioComponent { Settings = c.Settings, Trades = c.Trades, Metrics = c.Metrics, ResearchCoverage = c.ResearchCoverage, Weight = 1 }).ToList();
         var r = Analyze(unit, capital);
         var vols = r.DailyPnl.Select(p =>
         {
@@ -213,7 +294,7 @@ public static class PortfolioAnalyzer
     public static List<int> SuggestUncorrelated(IReadOnlyList<PortfolioComponent> candidates, decimal capital, int maxComponents = 5, double maxCorrelation = 0.5)
     {
         var chosen = new List<int>();
-        var usable = Enumerable.Range(0, candidates.Count).Where(i => candidates[i].Trades.Count >= 5 && candidates[i].Metrics.NetProfit > 0).ToList();
+        var usable = Enumerable.Range(0, candidates.Count).Where(i => candidates[i].Trades.Count(t => t.IsActualClosingFill) >= 5 && candidates[i].Metrics.NetProfit > 0).ToList();
         if (usable.Count == 0) return chosen;
         chosen.Add(usable.OrderByDescending(i => candidates[i].Metrics.SharpeRatio).First());
         double current = Analyze(new[] { candidates[chosen[0]] }, capital).Metrics.SharpeRatio;

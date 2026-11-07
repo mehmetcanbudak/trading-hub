@@ -27,6 +27,14 @@ internal sealed partial class StrategiesView : UserControl, IPage
     private readonly Action<string> _status;
     private readonly StrategyCatalog _catalog;
     private StrategyFile? _current;
+    private CompiledStrategyGeneration? _generation;
+    private long _selectionRequest;
+    private long _compileRequest;
+    private PendingCompilation? _pendingCompilation;
+    private sealed record PendingCompilation(StrategyFile File, long Selection, long Request, string Text, bool Silent, StrategyCompilation? Previous, CancellationToken Stopping)
+    {
+        public StrategyCompilation? Applied { get; set; }
+    }
     private UiState _state = new();
 
     // encabezado
@@ -73,7 +81,10 @@ internal sealed partial class StrategiesView : UserControl, IPage
         _editor.SaveRequested += () => Save();
         _editor.CompileRequested += () => _ = CompileAsync();
         _editor.Changed += UpdateFileInfo;
-        _catalog.Changed += () => Dispatcher.UIThread.Post(BuildStrategyMenu);
+        _catalog.Changed += () =>
+        {
+            if (!_svc.Work.IsStopping) Dispatcher.UIThread.Post(CatalogChanged);
+        };
         BuildStrategyMenu();
         var first = _catalog.Files.FirstOrDefault();
         if (first != null) _ = SelectAsync(first);
@@ -126,8 +137,18 @@ internal sealed partial class StrategiesView : UserControl, IPage
     /// </summary>
     private void BuildStrategyMenu()
     {
+        if (_svc.Work.IsStopping) return;
         _strategyMenu = new Flyout { Placement = PlacementMode.BottomEdgeAlignedLeft, Content = StrategyList() };
         if (_strategyPicker != null) _strategyPicker.Flyout = _strategyMenu;
+    }
+
+    private void CatalogChanged()
+    {
+        if (_svc.Work.IsStopping) return;
+        BuildStrategyMenu();
+        if (_pendingCompilation is { } pending && pending.File.LastCompile is { } publication &&
+            !ReferenceEquals(publication, pending.Previous))
+            ApplyCompilation(pending, publication);
     }
 
     private bool IsFavorite(StrategyFile f) => _svc.Settings.FavoriteStrategies.Contains(f.FileName, StringComparer.OrdinalIgnoreCase);
@@ -244,26 +265,62 @@ internal sealed partial class StrategiesView : UserControl, IPage
 
     // ===================================================================== selección y compilación
 
-    /// <summary>Abre en el editor la estrategia de ese archivo (por ejemplo, una de otra carpeta).</summary>
-    internal async Task OpenFileAsync(string path)
+    private Task RunViewOperationAsync(Func<CancellationToken, Task> operation) =>
+        RunViewOperationAsync(async stopping =>
+        {
+            await operation(stopping);
+            return true;
+        }, false);
+
+    private async Task<T> RunViewOperationAsync<T>(Func<CancellationToken, Task<T>> operation, T stoppedResult)
     {
+        bool admitted = false;
+        try
+        {
+            return await _svc.Work.RunAsync(async stopping =>
+            {
+                admitted = true;
+                try { return await operation(stopping); }
+                catch (OperationCanceledException) when (stopping.IsCancellationRequested) { return stoppedResult; }
+                finally { await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background); }
+            });
+        }
+        catch (OperationCanceledException) when (!admitted && _svc.Work.IsStopping) { return stoppedResult; }
+        catch (ObjectDisposedException) when (!admitted && _svc.Work.IsStopping) { return stoppedResult; }
+    }
+
+    /// <summary>Abre en el editor la estrategia de ese archivo (por ejemplo, una de otra carpeta).</summary>
+    internal Task OpenFileAsync(string path) => RunViewOperationAsync(stopping => OpenFileOwnedAsync(path, stopping));
+
+    private async Task OpenFileOwnedAsync(string path, CancellationToken stopping)
+    {
+        stopping.ThrowIfCancellationRequested();
         _catalog.Refresh();
         var full = Path.GetFullPath(path);
         var file = _catalog.Files.FirstOrDefault(f => string.Equals(Path.GetFullPath(f.Path), full, StringComparison.OrdinalIgnoreCase));
-        if (file != null) await SelectAsync(file);
+        if (file != null) await SelectOwnedAsync(file, stopping);
         else _status($"Could not find {Path.GetFileName(path)} in strategies");
     }
 
-    private async Task SelectAsync(StrategyFile file)
+    private Task SelectAsync(StrategyFile file) => RunViewOperationAsync(stopping => SelectOwnedAsync(file, stopping));
+
+    private async Task SelectOwnedAsync(StrategyFile file, CancellationToken stopping)
     {
+        stopping.ThrowIfCancellationRequested();
+        long request = ++_selectionRequest;
         if (_current != null && _editor.IsDirty) Save();
         _current = file;
+        _generation = null;
         _strategyName.Text = file.DisplayName;
-        _editor.Text = File.Exists(file.Path) ? await File.ReadAllTextAsync(file.Path) : "";
+        var text = File.Exists(file.Path) ? await File.ReadAllTextAsync(file.Path, stopping) : "";
+        stopping.ThrowIfCancellationRequested();
+        if (request != _selectionRequest) return;
+        _editor.Text = text;
         _editor.ClearDiagnostics();
         UpdateFileInfo();
-        await CompileAsync(silent: true);
-        BuildStrategyMenu();
+        await CompileOwnedAsync(stopping, silent: true);
+        stopping.ThrowIfCancellationRequested();
+        if (request == _selectionRequest) BuildStrategyMenu();
     }
 
     private void Save()
@@ -281,31 +338,56 @@ internal sealed partial class StrategiesView : UserControl, IPage
         _fileInfo.Text = $"{Path.GetFileName(_current.Path)}{(_editor.IsDirty ? " · unsaved" : "")}";
     }
 
-    private async Task<bool> CompileAsync(bool silent = false)
+    private Task<bool> CompileAsync(bool silent = false) =>
+        RunViewOperationAsync(stopping => CompileOwnedAsync(stopping, silent), false);
+
+    private async Task<bool> CompileOwnedAsync(CancellationToken stopping, bool silent = false)
     {
+        stopping.ThrowIfCancellationRequested();
         if (_current == null) return false;
+        long request = ++_compileRequest, selection = _selectionRequest;
         if (_editor.IsDirty) Save();
-        SetCompileState(null, "Compiling…");
         var file = _current;
+        var pending = new PendingCompilation(file, selection, request, _editor.Text, silent, file.LastCompile, stopping);
+        _pendingCompilation = pending;
+        SetCompileState(null, "Compiling…");
         var res = await Task.Run(() => _catalog.Compile(file, force: !silent));
-        if (!ReferenceEquals(file, _current)) return false;
-        _editor.ShowDiagnostics(res.Diagnostics, file.Path);
-        if (res.Success && file.Type != null)
+        if (!IsCurrentCompilation(pending)) return false;
+        if (pending.Applied is { } applied) return applied.Success;
+        ApplyCompilation(pending, res);
+        if (pending.Applied == null && file.LastCompile is { } publication) ApplyCompilation(pending, publication);
+        return pending.Applied?.Success == true;
+    }
+
+    private bool IsCurrentCompilation(PendingCompilation pending) =>
+        pending.Request == _compileRequest && pending.Selection == _selectionRequest &&
+        !pending.Stopping.IsCancellationRequested && !_svc.Work.IsStopping &&
+        ReferenceEquals(pending.File, _current) && !_editor.IsDirty && _editor.Text == pending.Text;
+
+    private void ApplyCompilation(PendingCompilation pending, StrategyCompilation res)
+    {
+        if (!ReferenceEquals(_pendingCompilation, pending) || !IsCurrentCompilation(pending) ||
+            !ReferenceEquals(res, pending.File.LastCompile) ||
+            (res.Source.Text != pending.Text && !res.Diagnostics.Any(diagnostic => diagnostic.Id == StrategyCatalog.SourceReadFailureId))) return;
+        _pendingCompilation = null;
+        pending.Applied = res;
+        _editor.ShowDiagnostics(res.Diagnostics, pending.File.Path);
+        _generation = res.Generation;
+        if (_generation != null)
         {
-            _compiledSource = File.ReadAllText(file.Path);
             SetCompileState(true, $"Compiled · {res.Elapsed.TotalMilliseconds:0} ms");
-            _strategyName.Text = file.DisplayName;
+            _strategyName.Text = _generation.DisplayName;
             LoadState();
             BuildParameterForm();
             RefreshRanges();
-            if (!silent) _status($"{file.DisplayName} compiled without errors");
-            return true;
+            if (_pageControls["history"].IsVisible) RefreshHistory();
+            if (!pending.Silent) _status($"{_generation.DisplayName} compiled without errors");
+            return;
         }
 
         int errors = res.Diagnostics.Count(d => d.Severity == "error");
         SetCompileState(false, $"{errors} error{(errors == 1 ? "" : "s")}");
-        if (!silent) _status($"Strategy has {errors} error(s): review them in Code");
-        return false;
+        if (!pending.Silent) _status($"Strategy has {errors} error(s): review them in Code");
     }
 
     private void SetCompileState(bool? ok, string text)
@@ -314,17 +396,49 @@ internal sealed partial class StrategiesView : UserControl, IPage
         _compileText.Text = text;
     }
 
-    private async Task NewStrategyAsync()
+    private Task NewStrategyAsync() => RunViewOperationAsync(NewStrategyOwnedAsync);
+
+    private async Task NewStrategyOwnedAsync(CancellationToken stopping)
     {
+        stopping.ThrowIfCancellationRequested();
         if (TopLevel.GetTopLevel(this) is not Window w) return;
         var dlg = new NewStrategyDialog();
+        using var registration = stopping.Register(() => Dispatcher.UIThread.Post(() =>
+        {
+            if (dlg.IsVisible) dlg.Close(null);
+        }));
         var result = await dlg.ShowDialog<(string Name, StrategyTemplate Template)?>(w);
+        stopping.ThrowIfCancellationRequested();
         if (result is not { } r) return;
         var file = _catalog.Create(r.Name, r.Template);
-        await SelectAsync(file);
+        await SelectOwnedAsync(file, stopping);
+        stopping.ThrowIfCancellationRequested();
         _tabs.Select("code");
         ShowTab("code");
     }
+
+    private Task CompileAndTestAsync() => RunViewOperationAsync(async stopping =>
+    {
+        if (!await CompileOwnedAsync(stopping)) return;
+        stopping.ThrowIfCancellationRequested();
+        _tabs.Select("backtest");
+        ShowTab("backtest");
+        await RunBacktestOwnedAsync(stopping);
+    });
+
+    private Task DeleteStrategyAsync() => RunViewOperationAsync(async stopping =>
+    {
+        stopping.ThrowIfCancellationRequested();
+        if (_current is not { } file || TopLevel.GetTopLevel(this) is not Window w) return;
+        if (!await ConfirmDialog.ShowAsync(w, "Delete strategy", $"Deletes file {Path.GetFileName(file.Path)}. Backtest history is retained.", "Delete", danger: true, cancellationToken: stopping)) return;
+        stopping.ThrowIfCancellationRequested();
+        if (!ReferenceEquals(file, _current)) return;
+        _catalog.Delete(file);
+        _current = null;
+        _generation = null;
+        var next = _catalog.Files.FirstOrDefault();
+        if (next != null) await SelectOwnedAsync(next, stopping);
+    });
 
     // ===================================================================== página: código
 
@@ -334,23 +448,9 @@ internal sealed partial class StrategiesView : UserControl, IPage
         ToolTip.SetTip(save, Keys.Label("S"));
         var compile = Ui.Button("Compile", MaterialIconKind.Hammer, () => _ = CompileAsync(), "primary");
         ToolTip.SetTip(compile, Keys.Label("B"));
-        var test = Ui.Button("Compile and test", MaterialIconKind.PlayOutline, async () =>
-        {
-            if (!await CompileAsync()) return;
-            _tabs.Select("backtest");
-            ShowTab("backtest");
-            await RunBacktestAsync();
-        });
+        var test = Ui.Button("Compile and test", MaterialIconKind.PlayOutline, () => _ = CompileAndTestAsync());
         var help = new Button { Content = Ui.H(6, Ui.Icon(MaterialIconKind.BookOpenPageVariantOutline, 16), new TextBlock { Text = "Reference" }), Flyout = new Flyout { Content = ApiHelp() } };
-        var delete = Ui.IconButton(MaterialIconKind.DeleteOutline, "Delete this strategy", async () =>
-        {
-            if (_current == null || TopLevel.GetTopLevel(this) is not Window w) return;
-            if (!await ConfirmDialog.ShowAsync(w, "Delete strategy", $"Deletes file {Path.GetFileName(_current.Path)}. Backtest history is retained.", "Delete", danger: true)) return;
-            _catalog.Delete(_current);
-            _current = null;
-            var next = _catalog.Files.FirstOrDefault();
-            if (next != null) await SelectAsync(next);
-        });
+        var delete = Ui.IconButton(MaterialIconKind.DeleteOutline, "Delete this strategy", () => _ = DeleteStrategyAsync());
 
         var bar = new DockPanel { Margin = new Thickness(16, 10) };
         var right = Ui.H(8, delete, help, save, test, compile);
@@ -418,7 +518,7 @@ internal sealed partial class StrategiesView : UserControl, IPage
 
     private static readonly JsonSerializerOptions StateJson = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
 
-    private string StatePath => Path.Combine(AppPaths.Backtests, string.Concat((_current?.Id ?? "x").Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)), "ui.json");
+    private string StatePath => Path.Combine(AppPaths.Backtests, string.Concat((_generation?.Id ?? "x").Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)), "ui.json");
 
     private void LoadState()
     {
@@ -433,12 +533,12 @@ internal sealed partial class StrategiesView : UserControl, IPage
         }
 
         // valores tipados: instancia nueva + lo guardado
-        if (_current?.Type != null)
+        if (_generation is { } generation)
         {
-            var s = _current.Create();
+            var s = generation.Create();
             s.SetParameters(_state.Parameters);
             _state.Parameters = s.GetParameters();
-            var defaults = ParameterRange.FromStrategy(_current.Type, s);
+            var defaults = ParameterRange.FromStrategy(generation.Type, s);
             foreach (var d in defaults)
             {
                 var saved = _state.Ranges.FirstOrDefault(r => r.Name == d.Name);
@@ -461,7 +561,7 @@ internal sealed partial class StrategiesView : UserControl, IPage
 
     private void SaveState()
     {
-        if (_current?.Type == null) return;
+        if (_generation == null) return;
         try
         {
             _state.Settings = ReadSettingsFromForm(validate: false);

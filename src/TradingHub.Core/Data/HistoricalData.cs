@@ -69,6 +69,14 @@ public static class HistoricalData
             IbBarStore.DeleteDays(root, symbol, days);
             return;
         }
+        var selected = days.Distinct().ToArray();
+        using var ownership = HistoryWriteOwnership.AcquireDays(root, feedId, symbol, selected);
+        DeleteDays(root, feedId, symbol, selected, ownership);
+    }
+
+    internal static void DeleteDays(string root, string feedId, string symbol, IReadOnlyList<DateOnly> days, HistoryWriteOwnership ownership)
+    {
+        foreach (var day in days) ownership.RequirePath(TickFile.DayPath(root, feedId, symbol, day));
         foreach (var d in days)
         {
             var p = TickFile.DayPath(root, feedId, symbol, d);
@@ -76,9 +84,6 @@ public static class HistoricalData
             var archive = TickArchive.PathFor(p);
             if (File.Exists(archive)) File.Delete(archive);
         }
-
-        var dir = Path.GetDirectoryName(TickFile.DayPath(root, feedId, symbol, DateOnly.MinValue))!;
-        if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
     }
 
     /// <summary>Operaciones entre dos instantes (UTC), ordenadas, leyendo día por día (de las fuentes de <see cref="HistorySources"/>).</summary>
@@ -151,6 +156,14 @@ public static class HistoricalData
             IbBarStore.WriteDay(root, instrument, day, trades, replace);
             return;
         }
+        using var ownership = HistoryWriteOwnership.AcquireDays(root, instrument.FeedId, instrument.Symbol, [day]);
+        WriteDay(root, instrument, day, trades, ownership, replace);
+    }
+
+    internal static void WriteDay(string root, Instrument instrument, DateOnly day, IReadOnlyList<Trade> trades,
+        HistoryWriteOwnership ownership, bool replace = false)
+    {
+        ownership.RequirePath(TickFile.DayPath(root, instrument.FeedId, instrument.Symbol, day));
         var path = TickFile.DayPath(root, instrument.FeedId, instrument.Symbol, day);
         var all = new List<Trade>(trades.Count);
         var existing = TickArchive.Resolve(path);
@@ -171,7 +184,7 @@ public static class HistoricalData
         string tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            using (var w = new TickFile.Writer(tmp, instrument, includeProvenance: true))
+            using (var w = new TickFile.Writer(tmp, instrument, ownership, includeProvenance: true))
                 foreach (var t in all)
                     if (DateOnly.FromDateTime(t.Time) == day) w.Write(t);
             File.Move(tmp, path, overwrite: true);

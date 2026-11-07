@@ -1154,7 +1154,7 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                     if (order.State == OrderStates.Active && order.Unfilled <= 0) continue;
                     _queuedReprices.Remove(order);
                     if (order.State == OrderStates.Active && !_cancelPending.Contains(order))
-                        StartReplacement(order, intent);
+                        StartReplacement(order, intent, null);
                     else
                     {
                         RecordRejected(intent, "The order became terminal or cancellation was requested before the queued price update.");
@@ -1191,16 +1191,16 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         var type = request.Type;
         var price = request.Price;
         var comment = request.Comment;
-        int q = (int)Math.Round(request.Quantity);
-        var order = new Order { Security = Position.Security, Direction = dir, Type = type, QuantityToFill = q, Unfilled = q, Price = price, TriggerPrice = price, Comment = comment, State = OrderStates.Active, Status = OrderStatus.Placed, ReduceOnly = request.ReduceOnly };
+        bool validQuantity = NativeFuturesQuantity.TryConvert(request.Quantity, out int q);
+        var order = new Order { Security = Position.Security, Direction = dir, Type = type, QuantityToFill = request.Quantity, Unfilled = request.Quantity, Price = price, TriggerPrice = price, Comment = comment, State = OrderStates.Active, Status = OrderStatus.Placed, ReduceOnly = request.ReduceOnly };
         var bindingError = request.Instrument == Instrument.Key
             ? BindOwnedOrder(order, intent) : "The prepared instrument does not match this broker.";
-        if (bindingError != null || q <= 0)
+        if (bindingError != null || !validQuantity)
         {
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
-            LastError = bindingError ?? "Futures quantity must be a whole number of contracts (1, 2, 3…).";
-            if (bindingError == null) RecordRejected(intent, "Futures quantity must be a whole number of contracts (1, 2, 3…).");
+            LastError = bindingError ?? NativeFuturesQuantity.Error;
+            if (bindingError == null) RecordRejected(intent, NativeFuturesQuantity.Error);
             Changed?.Invoke();
             return order;
         }
@@ -1368,6 +1368,13 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                 RecordRejected(intent, "Cannot replace an order while its previous outcome is unresolved or cancellation is pending.");
                 return order;
             }
+            decimal remaining = intent.IsPriceOnlyReplacement ? order.Unfilled : intent.Request.Quantity;
+            if (!NativeFuturesQuantity.TryConvertReplacement(order.Filled, remaining, out int totalQuantity))
+            {
+                LastError = NativeFuturesQuantity.Error;
+                RecordRejected(intent, NativeFuturesQuantity.Error);
+                return order;
+            }
             var bindingError = BindOwnedOrder(order, intent);
             if (bindingError != null)
             {
@@ -1381,7 +1388,7 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                 _queuedReprices[order] = intent;
                 _session.TrackReplacement(order);
             }
-            else StartReplacement(order, intent);
+            else StartReplacement(order, intent, totalQuantity);
         }
         Changed?.Invoke();
         return order;
@@ -1393,10 +1400,18 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
     }
 
     // Called under the broker gate after the replacement identity has been bound to the handle.
-    private void StartReplacement(Order order, PreparedOrderIntent intent)
+    private void StartReplacement(Order order, PreparedOrderIntent intent, int? preparedTotal)
     {
-        decimal remaining = intent.IsPriceOnlyReplacement ? order.Unfilled : intent.Request.Quantity;
-        var replacement = new Replacement(intent, Instrument.RoundPrice(intent.Request.Price), (int)Math.Round(order.Filled + remaining));
+        int totalQuantity;
+        if (preparedTotal is { } total) totalQuantity = total;
+        else if (!NativeFuturesQuantity.TryConvertReplacement(order.Filled, order.Unfilled, out totalQuantity))
+        {
+            LastError = NativeFuturesQuantity.Error;
+            RecordRejected(intent, NativeFuturesQuantity.Error);
+            _session.ResolveReplacement(order);
+            return;
+        }
+        var replacement = new Replacement(intent, Instrument.RoundPrice(intent.Request.Price), totalQuantity);
         _replacements.Add(order, replacement);
         _session.TrackReplacement(order);
         _ = Task.Run(async () =>

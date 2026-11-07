@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -22,14 +23,15 @@ switch (args.FirstOrDefault())
     case "merge" when args.Length >= 3:
         Merge(args[1], args.Skip(2).ToArray());
         break;
-    case "check" when args.Length is 3 or 4:
-        Environment.ExitCode = Check(args[1], args[2], args.Length == 4 && args[3] == "--require-complete");
+    case "check" when args is [_, _, _] or [_, _, _, "--require-complete"] or
+        [_, _, _, "--require-complete", "--reviewed-exclusions", _]:
+        Environment.ExitCode = Check(args[1], args[2], args.Length > 3, args.Length == 6 ? args[5] : null);
         break;
     case "coverage" when args.Length == 3:
         Environment.ExitCode = Coverage(args[1], args[2]);
         break;
     default:
-        Console.WriteLine("Usage: extract <src> <catalog.json> | pending <catalog.json> <language.json> <folder> [size] | merge <language.json> <chunks...> | check <catalog.json> <language.json> [--require-complete] | coverage <provenance.json> <language.json>");
+        Console.WriteLine("Usage: extract <src> <catalog.json> | pending <catalog.json> <language.json> <folder> [size] | merge <language.json> <chunks...> | check <catalog.json> <language.json> [--require-complete [--reviewed-exclusions <exclusions.json>]] | coverage <provenance.json> <language.json>");
         Environment.ExitCode = 1;
         break;
 }
@@ -56,7 +58,7 @@ void Extract(string src, string output)
             foreach (var key in keys.Where(IsText))
             {
                 if (!found.TryGetValue(key, out var where)) found[key] = where = new SortedSet<string>(StringComparer.Ordinal);
-                if (where.Count < 3) where.Add($"{rel}:{node.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
+                where.Add($"{rel}:{node.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
             }
         }
     }
@@ -199,14 +201,32 @@ static int CheckHoles(Dictionary<string, string> language)
     return bad;
 }
 
-static int Check(string catalogPath, string langPath, bool requireComplete)
+static int Check(string catalogPath, string langPath, bool requireComplete, string? reviewedExclusions)
 {
     var catalog = ReadMap(catalogPath);
     var language = ReadMap(langPath);
     int bad = CheckHoles(language);
-    int missing = catalog.Keys.Count(key => !language.ContainsKey(key));
-    Console.WriteLine($"{language.Count} translations, {missing} untranslated candidates, {bad} mismatched templates");
-    return bad > 0 || requireComplete && missing > 0 ? 1 : 0;
+    Dictionary<string, NonDisplayExclusion>? exclusions = reviewedExclusions == null ? null :
+        JsonSerializer.Deserialize<Dictionary<string, NonDisplayExclusion>>(File.ReadAllText(reviewedExclusions)) ??
+        throw new InvalidDataException("The reviewed non-display exclusion contract is empty.");
+    int invalid = 0;
+    if (exclusions != null)
+        foreach (var (key, exclusion) in exclusions)
+            if (string.IsNullOrWhiteSpace(exclusion.Reason) || !catalog.TryGetValue(key, out string? locations) ||
+                exclusion.Locations != locations)
+            {
+                Console.WriteLine($"Stale or unreviewed non-display exclusion: «{key}»");
+                invalid++;
+            }
+    int missing = 0;
+    foreach (string key in catalog.Keys)
+        if (!language.ContainsKey(key) && exclusions?.ContainsKey(key) != true)
+        {
+            missing++;
+            if (requireComplete) Console.WriteLine($"Untranslated display candidate: «{key}»");
+        }
+    Console.WriteLine($"{language.Count} translations, {missing} untranslated candidates, {bad} mismatched templates, {invalid} invalid non-display exclusions");
+    return bad > 0 || invalid > 0 || requireComplete && missing > 0 ? 1 : 0;
 }
 
 static int Coverage(string provenancePath, string langPath)
@@ -231,3 +251,7 @@ static int Coverage(string provenancePath, string langPath)
     Console.WriteLine($"{entries} upstream provenance entries, {missing} missing translations, {bad} mismatched templates");
     return missing > 0 || bad > 0 ? 1 : 0;
 }
+
+sealed record NonDisplayExclusion(
+    [property: JsonPropertyName("locations")] string Locations,
+    [property: JsonPropertyName("reason")] string Reason);

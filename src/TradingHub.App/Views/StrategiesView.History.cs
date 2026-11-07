@@ -24,6 +24,13 @@ internal sealed partial class StrategiesView
     private readonly StackPanel _historyDetail = new() { Spacing = 14 };
     private readonly EquityChart _historyChart = new() { Height = 240, EmptyText = "No equity curve" };
     private string _historyKind = "all";
+    private (string Id, string FileName)? _historySource;
+
+    internal static string InputEvidenceText(RunInputEvidence? evidence) => evidence == null
+        ? "Input evidence is unknown for this legacy run."
+        : $"Input quality {evidence.DataQuality}. Resolution {evidence.ResolutionSeconds} s. Source {evidence.SourceIdentity ?? "Unknown"}. " +
+          $"Correction revision {evidence.CorrectionRevision}. Known availability {(evidence.HasKnownAvailability ? "Yes" : "No")}. Content identity {evidence.ContentIdentity ?? "Unknown"}." +
+          (evidence.DataWarning == null ? "" : "\n" + evidence.DataWarning);
 
     private Control BuildHistoryPage()
     {
@@ -42,15 +49,15 @@ internal sealed partial class StrategiesView
                 RunKind.WalkForward => MaterialIconKind.ChartTimelineVariantShimmer,
                 _ => MaterialIconKind.ChartLine,
             };
-            var kind = s.Kind switch { RunKind.Optimization => $"Optimization · {s.Combinations:N0} comb.", RunKind.WalkForward => $"Walk-forward · efficiency {s.Efficiency * 100:0}%", _ => "Backtest" };
+            var kind = s.Kind switch { RunKind.Optimization => $"Optimization · {s.Combinations:N0} comb.", RunKind.WalkForward => "Walk-forward", _ => "Backtest" };
             var title = Ui.H(6, new TextBlock { Text = $"{s.Symbol} · {s.Period}", FontWeight = FontWeight.SemiBold }, new TextBlock { Text = s.Starred ? "★" : "", Foreground = Ui.Accent });
             var text = Ui.V(2,
                 title,
                 new TextBlock { Text = $"{kind} · {s.FromUtc:dd/MM} → {s.ToUtc.AddDays(-1):dd/MM}", Classes = { "muted", "small" } },
                 new TextBlock { Text = s.CreatedUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm", Es) + (string.IsNullOrWhiteSpace(s.Notes) ? "" : " · " + s.Notes), Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis });
             var result = Ui.V(2,
-                new TextBlock { Text = Money(s.NetProfit), FontWeight = FontWeight.SemiBold, Foreground = s.NetProfit >= 0 ? Ui.Up : Ui.Down, HorizontalAlignment = HorizontalAlignment.Right },
-                new TextBlock { Text = $"PF {s.ProfitFactor:0.00} · {s.Trades} op.", Classes = { "faint", "small" }, HorizontalAlignment = HorizontalAlignment.Right });
+                new TextBlock { Text = s.Kind == RunKind.WalkForward ? "Open details for completed results" : Money(s.NetProfit), FontWeight = FontWeight.SemiBold, Foreground = s.Kind == RunKind.WalkForward ? Ui.Text1 : s.NetProfit >= 0 ? Ui.Up : Ui.Down, HorizontalAlignment = HorizontalAlignment.Right },
+                new TextBlock { Text = s.Kind == RunKind.WalkForward ? "Coverage and attribution in details" : $"PF {s.ProfitFactor:0.00} · {s.Trades} op.", Classes = { "faint", "small" }, HorizontalAlignment = HorizontalAlignment.Right });
             var row = new DockPanel { Margin = new Thickness(2, 4) };
             var ic = Ui.Icon(icon, 18, Ui.Accent);
             ic.Margin = new Thickness(0, 2, 12, 0);
@@ -82,13 +89,15 @@ internal sealed partial class StrategiesView
 
     private void RefreshHistory()
     {
-        if (_current == null)
+        _historySource = _generation is { } generation ? (generation.Id, generation.FileName)
+            : _current is { } file ? (file.Id, file.FileName) : null;
+        if (_historySource is not { } source)
         {
             _historyList.ItemsSource = null;
             return;
         }
 
-        var list = StrategyStore.List(_current.Id).Where(s => _historyKind switch
+        var list = StrategyStore.List(source.Id).Where(s => _historyKind switch
         {
             "bt" => s.Kind == RunKind.Backtest,
             "opt" => s.Kind == RunKind.Optimization,
@@ -101,17 +110,15 @@ internal sealed partial class StrategiesView
     }
 
     /// <summary>Arma el informe profesional de una corrida (sin análisis escrito) y lo abre.</summary>
-    private void MakeReport(StrategyRun run)
+    private void MakeReport(StrategyRun run, string strategyFile)
     {
-        if (_current == null) return;
         try
         {
             var input = new Lab.ReportInput
             {
-                Title = $"{_current.DisplayName} · {run.Settings.Symbol} {run.Settings.Period}",
-                StrategyFile = _current.FileName,
-                StrategyName = _current.DisplayName,
-                Description = _current.Type != null ? Strategy.Description(_current.Type) : null,
+                Title = $"{run.StrategyName} · {run.Settings.Symbol} {run.Settings.Period}",
+                StrategyFile = strategyFile,
+                StrategyName = run.StrategyName,
                 Analysis = string.IsNullOrWhiteSpace(run.Notes) ? "" : run.Notes,
             };
             switch (run.Kind)
@@ -122,7 +129,7 @@ internal sealed partial class StrategiesView
             }
 
             var (markdown, images) = Lab.ReportBuilder.Build(input);
-            var saved = Lab.ReportStore.Save(input.Title, markdown, _current.FileName, "", images);
+            var saved = Lab.ReportStore.Save(input.Title, markdown, strategyFile, "", images);
             RefreshReports();
             OpenReport(saved.Path);
             _status($"Report ready: {System.IO.Path.GetFileName(saved.Path)}");
@@ -137,7 +144,7 @@ internal sealed partial class StrategiesView
     private void ShowHistoryDetail(StrategyRunSummary? summary)
     {
         _historyDetail.Children.Clear();
-        if (summary == null || _current == null)
+        if (summary == null || _historySource is not { } source)
         {
             var empty = Ui.V(10,
                 Ui.Icon(MaterialIconKind.History, 40, Ui.Text2),
@@ -149,7 +156,7 @@ internal sealed partial class StrategiesView
             return;
         }
 
-        var run = StrategyStore.Load(_current.Id, summary.Id);
+        var run = StrategyStore.Load(source.Id, summary.Id);
         if (run == null)
         {
             _historyDetail.Children.Add(new TextBlock { Text = "Could not read run (was the file deleted?).", Classes = { "muted" } });
@@ -159,61 +166,99 @@ internal sealed partial class StrategiesView
         // encabezado + acciones
         var star = Ui.IconButton(run.Starred ? MaterialIconKind.Star : MaterialIconKind.StarOutline, "Mark as favorite", () =>
         {
-            StrategyStore.Annotate(_current.Id, run.Id, null, !run.Starred);
+            StrategyStore.Annotate(run.StrategyId, run.Id, null, !run.Starred);
             RefreshHistory();
         });
         var use = Ui.Button("Use parameters", MaterialIconKind.ArrowRightBoldBoxOutline, () => ApplyParameters(run.Parameters));
         var code = Ui.Button("View code", MaterialIconKind.CodeBraces, () =>
         {
-            var src = StrategyStore.LoadCode(_current.Id, run.CodeHash);
+            var src = StrategyStore.LoadCode(run);
             if (src == null || TopLevel.GetTopLevel(this) is not Window w) return;
             new CodeViewerWindow($"{run.StrategyName} · version {run.CodeHash}", src).Show(w);
         });
         code.IsEnabled = !string.IsNullOrEmpty(run.CodeHash);
-        var delete = Ui.IconButton(MaterialIconKind.DeleteOutline, "Delete run", async () =>
+        var delete = Ui.IconButton(MaterialIconKind.DeleteOutline, "Delete run", () => _ = RunViewOperationAsync(async stopping =>
         {
             if (TopLevel.GetTopLevel(this) is not Window w) return;
-            if (!await ConfirmDialog.ShowAsync(w, "Delete run", "This run will be deleted from history.", "Delete", danger: true)) return;
-            StrategyStore.Delete(_current.Id, run.Id);
+            if (!await ConfirmDialog.ShowAsync(w, "Delete run", "This run will be deleted from history.", "Delete", danger: true, cancellationToken: stopping)) return;
+            stopping.ThrowIfCancellationRequested();
+            StrategyStore.Delete(run.StrategyId, run.Id);
             RefreshHistory();
-        });
+        }));
         string kind = run.Kind switch { RunKind.Optimization => "Optimization", RunKind.WalkForward => "Walk-forward", _ => "Backtest" };
         var title = Ui.V(3,
             new TextBlock { Text = $"{kind} · {run.Settings.Symbol} · {run.Settings.Period}", Classes = { "h2" } },
             new TextBlock { Text = $"{run.Settings.FromUtc:dd/MM/yyyy} → {run.Settings.ToUtc.AddDays(-1):dd/MM/yyyy} · {run.Ticks:N0} ticks · {run.Seconds:0.#} s · {run.CreatedUtc.ToLocalTime():dd/MM/yyyy HH:mm}", Classes = { "muted", "small" } });
         var header = new DockPanel();
-        var report = Ui.Button("Report", MaterialIconKind.FileChartOutline, () => MakeReport(run));
+        var report = Ui.Button("Report", MaterialIconKind.FileChartOutline, () => MakeReport(run, source.FileName));
         ToolTip.SetTip(report, "Detailed report for this run with all metrics, tables and charts (opens in Reports)");
         var actions = Ui.H(6, star, delete, code, report, use);
         DockPanel.SetDock(actions, Dock.Right);
         header.Children.Add(actions);
         header.Children.Add(title);
         _historyDetail.Children.Add(header);
+        _historyDetail.Children.Add(new TextBlock { Text = InputEvidenceText(run.InputEvidence), Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap });
 
         // notas
         var notes = new TextBox { Text = run.Notes, Watermark = "Notes (changes, conclusions…)", AcceptsReturn = false };
         notes.LostFocus += (_, _) =>
         {
             if (notes.Text == run.Notes) return;
-            StrategyStore.Annotate(_current.Id, run.Id, notes.Text ?? "", null);
+            StrategyStore.Annotate(run.StrategyId, run.Id, notes.Text ?? "", null);
             run.Notes = notes.Text ?? "";
         };
         _historyDetail.Children.Add(notes);
 
+        var walk = run.WalkForward;
+        var completedWindows = walk?.Windows.Where(w => w.InSampleAvailable && w.InSample != null && w.OutSampleAvailable && w.OutSample != null).ToList();
+        bool available = walk == null || completedWindows is { Count: > 0 };
         if (run.Metrics is { } m)
         {
+            bool attributed = walk?.AccountingPolicy != null || m.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation;
             var kpis = new WrapPanel { ItemSpacing = 10, LineSpacing = 10 };
-            kpis.Children.Add(Kpi(run.Kind == RunKind.WalkForward ? "Out of sample" : "Net PnL", Money(m.NetProfit), $"{m.ReturnPercent:0.##}% of capital", m.NetProfit >= 0 ? Ui.Up : Ui.Down));
-            kpis.Children.Add(Kpi("Profit factor", m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es), $"{m.TotalTrades} trades", null));
-            kpis.Children.Add(Kpi("Max drawdown", Money(-m.MaxDrawdown), $"{m.MaxDrawdownPercent:0.##}%", Ui.Down));
-            kpis.Children.Add(Kpi("Sharpe", m.SharpeRatio.ToString("0.00", Es), $"{m.WinRate:0.#}% winners", null));
-            if (run.WalkForward is { } wf) kpis.Children.Add(Kpi("WF efficiency", $"{wf.WalkForwardEfficiency * 100:0}%", $"{wf.ProfitableWindowsPercent:0}% profitable windows", wf.WalkForwardEfficiency >= 0.5 ? Ui.Up : Ui.Warn));
+            kpis.Children.Add(Kpi(walk is { IsComplete: false } ? "Completed prefix net PnL" : run.Kind == RunKind.WalkForward ? "Out of sample" : "Net PnL",
+                available ? Money(m.NetProfit) : "Unavailable", available ? $"{m.ReturnPercent:0.##}% of capital" : "No complete out-of-sample window is available.", !available ? Ui.Warn : m.NetProfit >= 0 ? Ui.Up : Ui.Down));
+            kpis.Children.Add(Kpi(attributed ? "Profit factor per contribution" : "Profit factor",
+                !available ? "Unavailable" : m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es),
+                attributed ? $"{m.TotalTrades} actual closing fills · {m.AttributionSamples} contributions" : $"{m.TotalTrades} trades", null));
+            kpis.Children.Add(Kpi("Max drawdown", available ? Money(-m.MaxDrawdown) : "Unavailable", available ? $"{m.MaxDrawdownPercent:0.##}%" : "Unavailable", Ui.Down));
+            kpis.Children.Add(Kpi("Sharpe", available ? m.SharpeRatio.ToString("0.00", Es) : "Unavailable", attributed ? "Closing-fill contributions and final boundary valuations" : $"{m.WinRate:0.#}% winners", null));
+            if (attributed)
+            {
+                kpis.Children.Add(Kpi("Win rate per contribution", available ? $"{m.WinRate:0.#}%" : "Unavailable", $"{m.Winners} of {m.AttributionSamples} contributions", null));
+                kpis.Children.Add(Kpi("Expectancy per contribution", available ? Money(m.Expectancy) : "Unavailable", "Not an independent completed-trade estimate", null));
+            }
+            if (walk is { } wf)
+                kpis.Children.Add(Kpi("WF efficiency", available ? $"{wf.WalkForwardEfficiency * 100:0}%" : "Unavailable", available ? $"{wf.ProfitableWindowsPercent:0}% profitable completed windows" : "Unavailable", wf.WalkForwardEfficiency >= 0.5 && available ? Ui.Up : Ui.Warn));
             _historyDetail.Children.Add(kpis);
         }
+        if (walk != null)
+        {
+            var details = new List<string>
+            {
+                $"{completedWindows!.Count} of {walk.Windows.Count} windows complete.",
+                walk.IsComplete ? "All out-of-sample windows are complete." : "Only the completed out-of-sample prefix is reported.",
+                $"Accounting policy {walk.AccountingPolicy ?? "Unknown"}. Attribution policy {walk.AttributionPolicy ?? "Unknown"}. CPCV policy {walk.CpcvPolicy ?? "Unknown"}.",
+            };
+            if (walk.AccountingPolicy != null)
+                details.Add("Warm mark-to-market research splice, not an executable portfolio. Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Only actual closing fills count for eligibility. Trade-only confidence is unavailable.");
+            foreach (var window in walk.Windows)
+                details.Add($"Window {window.Number}. Training {(window.InSampleAvailable ? Money(window.InSample?.NetProfit) : "Unavailable")}. Test {(window.OutSampleAvailable ? Money(window.OutSample?.NetProfit) : "Unavailable")}. " +
+                            $"Actual closing fills {(window.OutSampleAvailable ? window.OutSample?.TotalTrades.ToString() ?? "Unavailable" : "Unavailable")}. {window.UnavailableReason}");
+            var paths = walk.CpcvPaths.Where(p => p.Available && p.Net.HasValue && p.Sharpe.HasValue && p.MaxDrawdown.HasValue).OrderBy(p => p.Net).ToList();
+            details.Add($"Retrospective CPCV has {paths.Count} of {walk.CpcvPaths.Count} paths available. Shares and medians use only available paths.");
+            details.Add(paths.Count > 0
+                ? $"{paths.Count(p => p.Net > 0)} of {paths.Count} available paths are profitable. Median {Money(paths[paths.Count / 2].Net)}."
+                : "No eligible retrospective CPCV path is available.");
+            details.AddRange(walk.CpcvPaths.Where(p => !p.Available && p.UnavailableReason != null).Select(p => p.UnavailableReason!));
+            _historyDetail.Children.Add(Ui.Card(new TextBlock { Text = string.Join('\n', details), Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap }));
+        }
+        if (run.MonteCarlo is { Available: false } mc)
+            _historyDetail.Children.Add(Ui.Card(new TextBlock { Text = mc.UnavailableReason ?? "Monte Carlo is unavailable.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap }));
 
         if (run.Equity is { Count: > 1 } eq)
         {
-            _historyChart.SetData(eq, run.Settings.InitialCapital, marks: run.WalkForward?.Windows.Select(w => (w.OutSampleFrom, $"V{w.Number}")).ToList());
+            _historyChart.SetData(eq, run.Settings.InitialCapital, marks: completedWindows?.Select(w => (w.OutSampleFrom, $"V{w.Number}")).ToList());
             _historyDetail.Children.Add(Ui.Card(_historyChart, 6));
         }
 
@@ -225,6 +270,28 @@ internal sealed partial class StrategiesView
 
         if (run.Optimization is { } opt)
         {
+            var population = opt.GetPopulation();
+            var recommended = opt.Recommended;
+            _historyDetail.Children.Add(Ui.Card(Ui.V(8,
+                Ui.H3("Complete measured population"),
+                new TextBlock
+                {
+                    Text = population == null ? "Complete-population statistics are unavailable for this truncated legacy run."
+                        : $"{population.MeasuredCombinations:N0} measured combinations. " +
+                          (population.ProfitablePercent is { } share ? $"{share:0.00}% profitable." : "Profitable share is unavailable because no combination was measured.") +
+                          $" {opt.Rows.Count:N0} rows retained.",
+                    Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap,
+                },
+                Ui.H3("Recommended parameters"),
+                new TextBlock
+                {
+                    Text = recommended == null ? "The exact recommended combination is unavailable."
+                        : string.Join(", ", recommended.Parameters.Select(pair => $"{ParamName(pair.Key)}={FormatValue(pair.Value)}")) +
+                          $" · net {Money(recommended.Metrics.NetProfit)} · PF {recommended.Metrics.ProfitFactor:0.00}",
+                    Classes = { "mono", "small" }, TextWrapping = TextWrapping.Wrap,
+                })));
+            if (recommended != null)
+                _historyDetail.Children.Add(Ui.Button("Use recommended parameters", MaterialIconKind.ArrowRightBoldBoxOutline, () => ApplyParameters(recommended.Parameters)));
             var top = opt.Rows.Take(15).Select((r, i) => $"{i + 1,2}. {Money(r.Metrics.NetProfit),12}  PF {r.Metrics.ProfitFactor,5:0.00}  DD {Money(-r.Metrics.MaxDrawdown),11}  {string.Join(", ", r.Parameters.Select(kv => $"{ParamName(kv.Key)}={FormatValue(kv.Value)}"))}");
             _historyDetail.Children.Add(Ui.Card(Ui.V(8, Ui.H3($"Top 15 of {opt.Combinations:N0} combinations"), new TextBlock { Text = string.Join('\n', top), Classes = { "mono", "small" } })));
         }

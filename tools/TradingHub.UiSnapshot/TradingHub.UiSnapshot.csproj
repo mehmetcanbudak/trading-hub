@@ -18,6 +18,9 @@
     <Compile Include="..\..\tests\TradingHub.Tests\DepthRecordingSizingFixture.cs" Link="DepthRecordingSizingFixture.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="../../docs/en/estrategias.md;../../docs/en/indicadores.md" Link="docs/en/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Avalonia.Headless" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Avalonia.Skia" Version="$(AvaloniaVersion)" />
   </ItemGroup>

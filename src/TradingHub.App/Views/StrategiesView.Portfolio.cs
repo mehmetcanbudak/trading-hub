@@ -36,6 +36,8 @@ internal sealed partial class StrategiesView
 
     private PortfolioState _pf = new();
     private readonly List<PortfolioComponent> _pfComponents = new();
+    private readonly List<(PortfolioItem Item, string Reason)> _pfRejectedComponents = new();
+    private string? _pfProjectionError;
     private readonly StackPanel _pfList = new() { Spacing = 8 };
     private readonly WrapPanel _pfKpis = new() { ItemSpacing = 10, LineSpacing = 10 };
     private readonly EquityChart _pfChart = new() { Height = 300, EmptyText = "Add at least two strategies to view combined equity" };
@@ -116,7 +118,7 @@ internal sealed partial class StrategiesView
         var res = new List<(StrategyFile, StrategyRunSummary)>();
         foreach (var f in _catalog.Files)
         {
-            if (f.Type == null && _catalog.Compile(f).Success == false) continue;
+            if (f.Generation == null && !_catalog.Compile(f).Success) continue;
             foreach (var r in StrategyStore.List(f.Id).Where(r => r.Kind == RunKind.Backtest && r.Trades > 0).Take(30)) res.Add((f, r));
         }
 
@@ -192,6 +194,8 @@ internal sealed partial class StrategiesView
     private void LoadPortfolioComponents()
     {
         _pfComponents.Clear();
+        _pfRejectedComponents.Clear();
+        _pfProjectionError = null;
         foreach (var item in _pf.Items.ToList())
         {
             var run = StrategyStore.Load(item.StrategyId, item.RunId);
@@ -201,7 +205,14 @@ internal sealed partial class StrategiesView
                 continue;
             }
 
-            _pfComponents.Add(PortfolioComponent.FromRun(run, item.Weight));
+            try
+            {
+                _pfComponents.Add(PortfolioComponent.FromRun(run, item.Weight));
+            }
+            catch (InvalidOperationException ex)
+            {
+                _pfRejectedComponents.Add((item, ex.Message));
+            }
         }
 
         ApplyPortfolioMode();
@@ -210,12 +221,22 @@ internal sealed partial class StrategiesView
 
     private void ApplyPortfolioMode()
     {
-        if (_pfComponents.Count == 0) return;
+        if (_pfComponents.Count == 0 || _pfRejectedComponents.Count > 0) return;
+        _pfProjectionError = null;
         if (_pf.Mode == "equal")
             foreach (var c in _pfComponents) c.Weight = 1;
         else if (_pf.Mode == "risk")
         {
-            var w = PortfolioAnalyzer.InverseVolatilityWeights(_pfComponents, _pf.Capital);
+            decimal[] w;
+            try
+            {
+                w = PortfolioAnalyzer.InverseVolatilityWeights(_pfComponents, _pf.Capital);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _pfProjectionError = ex.Message;
+                return;
+            }
             for (int i = 0; i < _pfComponents.Count; i++) _pfComponents[i].Weight = w[i];
         }
 
@@ -230,7 +251,35 @@ internal sealed partial class StrategiesView
         _pfMatrix.Children.Clear();
         _pfMatrix.RowDefinitions.Clear();
         _pfMatrix.ColumnDefinitions.Clear();
-        _pfResult = _pfComponents.Count > 0 ? PortfolioAnalyzer.Analyze(_pfComponents, _pf.Capital) : null;
+        _pfResult = null;
+        if (_pfRejectedComponents.Count == 0)
+        {
+            try
+            {
+                _pfResult = _pfComponents.Count > 0 ? PortfolioAnalyzer.Analyze(_pfComponents, _pf.Capital) : null;
+                _pfProjectionError = null;
+            }
+            catch (InvalidOperationException ex)
+            {
+                _pfProjectionError = ex.Message;
+            }
+        }
+        if (_pfRejectedComponents.Count > 0 || _pfProjectionError != null)
+        {
+            _pfList.Children.Add(Ui.H3("Portfolio unavailable"));
+            _pfNote.Text = _pfProjectionError ?? string.Join('\n', _pfRejectedComponents.Select(c => c.Reason).Distinct());
+            foreach (var item in _pf.Items)
+            {
+                var remove = Ui.IconButton(MaterialIconKind.Close, "Remove from portfolio", () =>
+                {
+                    _pf.Items.Remove(item);
+                    LoadPortfolioComponents();
+                }, 15);
+                _pfList.Children.Add(Ui.H(8, remove, new TextBlock { Text = $"{item.StrategyId} · {item.RunId}", TextWrapping = TextWrapping.Wrap }));
+            }
+            _pfChart.SetData(Array.Empty<EquityPoint>(), _pf.Capital);
+            return;
+        }
 
         for (int i = 0; i < _pfComponents.Count; i++)
         {
@@ -258,10 +307,18 @@ internal sealed partial class StrategiesView
             head.Children.Add(new TextBlock { Text = $"{i + 1}. {c.StrategyName}", FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
             var info = new TextBlock
             {
-                Text = $"{c.Settings.Symbol} {c.Settings.Period} · {c.Settings.FromUtc:dd/MM/yy}–{c.Settings.ToUtc:dd/MM/yy}\nNet {m.NetProfit.ToString("N0", EsAr)} · Sharpe {m.SharpeRatio:0.00} · DD {m.MaxDrawdown.ToString("N0", EsAr)} · {m.TotalTrades} trades",
+                Text = $"{c.Settings.Symbol} {c.Settings.Period} · {c.Settings.FromUtc:dd/MM/yy}–{c.Settings.ToUtc:dd/MM/yy}\nNet {m.NetProfit.ToString("N0", EsAr)} · Sharpe {m.SharpeRatio:0.00} · DD {m.MaxDrawdown.ToString("N0", EsAr)} · " +
+                       (m.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation
+                           ? $"{m.TotalTrades} actual closing fills · {m.AttributionSamples} contributions" : $"{m.TotalTrades} trades"),
                 Classes = { "faint", "small" },
                 TextWrapping = TextWrapping.Wrap,
             };
+            info.Text += "\n" + InputEvidenceText(c.InputEvidence);
+            ToolTip.SetTip(head, c.CodeHash);
+            if (c.ResearchCoverage is { } coverage)
+                info.Text += $"\nAvailable OOS {coverage.From:dd/MM/yyyy} to {coverage.To:dd/MM/yyyy}. {coverage.CompletedWindows} of {coverage.TotalWindows} windows complete. " +
+                             (coverage.IsComplete ? "Complete research coverage." : "Only the completed out-of-sample prefix is reported.") +
+                             $"\nAccounting policy {coverage.AccountingPolicy ?? "Unknown"}. Attribution policy {coverage.AttributionPolicy ?? "Unknown"}. CPCV policy {coverage.CpcvPolicy ?? "Unknown"}.";
             var wrow = Ui.H(8, new TextBlock { Text = "Weight", Classes = { "muted", "small" }, VerticalAlignment = VerticalAlignment.Center }, weight);
             _pfList.Children.Add(Ui.Card(Ui.V(6, head, info, wrow), 12));
         }
@@ -282,7 +339,9 @@ internal sealed partial class StrategiesView
             new TextBlock { Text = value, FontSize = 20, FontWeight = FontWeight.Bold, Foreground = color ?? Ui.Text0 },
             new TextBlock { Text = sub, Classes = { "faint", "small" } }), 12).Also(b => b.MinWidth = 170);
         var pm = r.Metrics;
-        _pfKpis.Children.Add(Kpi("Portfolio net PnL", pm.NetProfit.ToString("N2", EsAr), $"{pm.ReturnPercent:0.0} % · {pm.TotalTrades} trades", pm.NetProfit >= 0 ? Ui.Up : Ui.Down));
+        _pfKpis.Children.Add(Kpi("Portfolio net PnL", pm.NetProfit.ToString("N2", EsAr),
+            pm.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation
+                ? $"{pm.ReturnPercent:0.0} % · {pm.TotalTrades} actual closing fills · {pm.AttributionSamples} contributions" : $"{pm.ReturnPercent:0.0} % · {pm.TotalTrades} trades", pm.NetProfit >= 0 ? Ui.Up : Ui.Down));
         _pfKpis.Children.Add(Kpi("Sharpe", pm.SharpeRatio.ToString("0.00", EsAr), $"individual average {r.AverageComponentSharpe:0.00}"));
         _pfKpis.Children.Add(Kpi("Maximum drawdown", pm.MaxDrawdown.ToString("N0", EsAr), $"sum of individuals {r.SumOfComponentDrawdowns.ToString("N0", EsAr)}"));
         _pfKpis.Children.Add(Kpi("Drawdown reduction", $"{r.DrawdownReductionPercent:0} %", "from diversification", r.DrawdownReductionPercent > 0 ? Ui.Up : Ui.Text1));
@@ -344,6 +403,8 @@ internal sealed partial class StrategiesView
         _pfNote.Text = r.NoOverlap
             ? "⚠ These runs have no common dates: periods were combined and correlation is unreliable. Run backtests over the same date range."
             : $"Common period: {r.From:dd/MM/yyyy} – {r.To:dd/MM/yyyy} ({r.Days.Count} days). Daily results are combined using each strategy's weight.";
+        if (pm.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation)
+            _pfNote.Text += "\nIncludes closing-fill contributions and final boundary valuations from a warm mark-to-market research splice. This combination is not an executable portfolio.";
     }
 
     private void SuggestPortfolio()
@@ -352,12 +413,12 @@ internal sealed partial class StrategiesView
         var ids = new List<(string StrategyId, string RunId)>();
         foreach (var f in _catalog.Files)
         {
-            if (f.Type == null && _catalog.Compile(f).Success == false) continue;
+            if (f.Generation == null && !_catalog.Compile(f).Success) continue;
             foreach (var g in StrategyStore.List(f.Id).Where(r => r.Kind == RunKind.Backtest).GroupBy(r => (r.Symbol, r.Period)))
             {
                 var latest = g.OrderByDescending(r => r.CreatedUtc).First();
                 var run = StrategyStore.Load(f.Id, latest.Id);
-                if (run?.Trades is not { Count: >= 5 }) continue;
+                if (run?.Trades == null || run.Trades.Count(t => t.IsActualClosingFill) < 5) continue;
                 candidates.Add(PortfolioComponent.FromRun(run));
                 ids.Add((f.Id, run.Id));
             }
@@ -387,7 +448,7 @@ internal sealed partial class StrategiesView
     {
         if (_pfResult == null || _pfComponents.Count == 0)
         {
-            _status("Add strategies to the portfolio first.");
+            _status(_pfProjectionError ?? _pfRejectedComponents.FirstOrDefault().Reason ?? "Add strategies to the portfolio first.");
             return;
         }
 

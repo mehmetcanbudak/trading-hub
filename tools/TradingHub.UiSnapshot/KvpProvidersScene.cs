@@ -501,22 +501,88 @@ internal static class KvpProvidersScene
         }
         private void ExerciseExecutions(ConnectionProfile profile, KvpProvidersExchange.Context wire, BybitTradingSession session, BybitBroker broker)
         {
+            var account = Account(profile); var view = SelectAccount(account); Tab(view, 1);
+            var orderRows = Field<System.Collections.IDictionary>(view, "_orderRows");
+            var held = new KvpProvidersExchange.CreatePlan(hold: true); wire.NextCreate = held;
             var order = broker.Limit(OrderDirections.Buy, 1, 100, "UI fake execution fixture");
-            Until(() => order.ExchangeOrderId.Length > 0, "actual broker opening request receives its exchange identity");
+            string id, pendingKey;
+            double pendingRowY;
+            try
+            {
+                id = Await(held.Received.Task, "the original signed create reaches its held fake acknowledgment");
+                var pending = Services.AccountCenter.Snapshot(account);
+                var pendingLine = pending.Orders.Single(line => line.Ref is (BybitTradingSession rowSession, Order rowOrder) &&
+                    ReferenceEquals(rowSession, session) && ReferenceEquals(rowOrder, order));
+                pendingKey = pendingLine.Key;
+                Until(() => orderRows.Contains(pendingKey) &&
+                    TextIs(((TextBlock)orderRows[pendingKey]!.GetType().GetField("Status")!.GetValue(orderRows[pendingKey])!).Text, "Last known: Submission unknown"),
+                    "actual Account timer renders the held pre-ACK order while its snapshot is unknown");
+                var pendingRow = orderRows[pendingKey]!;
+                var pendingCancel = Button((Border)pendingRow.GetType().GetField("Root")!.GetValue(pendingRow)!, "Cancel");
+                Check(order.ExchangeOrderId.Length == 0 && !pending.OrdersKnown && pending.Orders.Count == 1 && orderRows.Count == 1 &&
+                    pendingLine.Active && pendingCancel.IsEffectivelyVisible && Card(view, 5) == "—" &&
+                    Texts(view).Any(text => TextIs(text, "Order snapshot unavailable")) &&
+                    wire.Count("/v5/order/create") == 1 && wire.Count("/v5/order/amend") == 0 && wire.Count("/v5/order/cancel") == 0,
+                    "one held logical order retains its real pending Cancel and unknown snapshot labels without another provider mutation",
+                    new { pendingKey, pending.OrdersKnown, renderedRows = orderRows.Count });
+                Snapshot("Bybit original order with held create acknowledgment", pending); Shot("kvp_providers_bybit_pending_order_row");
+                pendingRowY = ((Border)pendingRow.GetType().GetField("Root")!.GetValue(pendingRow)!).Bounds.Y;
+                wire.FailPositions = true;
+            }
+            finally { held.Release.TrySetResult(); }
+            try
+            {
+                Until(() => order.ExchangeOrderId == id, "actual broker opening request receives its exchange identity");
+                Rejects<BybitUnknownException>(session.RefreshAsync(), "a native acknowledgment does not turn a failed account snapshot into readiness");
+                var unknown = Services.AccountCenter.Snapshot(account);
+                var unknownLine = unknown.Orders.Single(line => line.Ref is (BybitTradingSession rowSession, Order rowOrder) &&
+                    ReferenceEquals(rowSession, session) && ReferenceEquals(rowOrder, order));
+                Until(() => orderRows.Contains(unknownLine.Key), "actual Account timer renders the native key while its account snapshot remains unknown");
+                var unknownRows = orderRows.Values.Cast<object>().Select(row => (OrderLine)row.GetType().GetField("Line")!.GetValue(row)!).ToArray();
+                var unknownRoot = (Border)orderRows[unknownLine.Key]!.GetType().GetField("Root")!.GetValue(orderRows[unknownLine.Key])!;
+                int unknownCancels = Field<StackPanel>(view, "_orders").GetVisualDescendants().OfType<Button>()
+                    .Count(button => button.IsEffectivelyVisible && TextIs(Label(button), "Cancel"));
+                Check(!unknown.OrdersKnown && unknown.Orders.Count == 1 && unknownRows.Length == 1 &&
+                    unknownRows[0].Key == unknownLine.Key && unknownLine.Key == id && unknownRows[0].Active &&
+                    unknownRows[0].Ref is (BybitTradingSession unknownSession, Order unknownOrder) &&
+                    ReferenceEquals(unknownSession, session) && ReferenceEquals(unknownOrder, order) &&
+                    unknownRoot.Bounds.Y == pendingRowY && unknownCancels == 1 && Card(view, 5) == "—" &&
+                    wire.Count("/v5/order/create") == 1 && wire.Count("/v5/order/amend") == 0 && wire.Count("/v5/order/cancel") == 0,
+                    "an unknown native acknowledgment keeps one stationary owned Cancel without a stale pending alias or extra mutation",
+                    new { pendingKey, currentKey = unknownLine.Key, unknown.OrdersKnown, renderedKeys = unknownRows.Select(line => line.Key), pendingRowY, currentRowY = unknownRoot.Bounds.Y, visibleCancels = unknownCancels });
+                Snapshot("Bybit native order while account snapshot remains unknown", unknown); Shot("kvp_providers_bybit_unknown_acknowledged_order_row");
+            }
+            finally { wire.FailPositions = false; }
             Await(session.RefreshAsync(), "authoritative order report confirms the initial handle");
-            string id = order.ExchangeOrderId;
+            var acknowledged = Services.AccountCenter.Snapshot(account);
+            var acknowledgedLine = acknowledged.Orders.Single(line => line.Ref is (BybitTradingSession rowSession, Order rowOrder) &&
+                ReferenceEquals(rowSession, session) && ReferenceEquals(rowOrder, order));
+            Until(() => orderRows.Contains(acknowledgedLine.Key) &&
+                TextIs(((TextBlock)orderRows[acknowledgedLine.Key]!.GetType().GetField("Status")!.GetValue(orderRows[acknowledgedLine.Key])!).Text, "Active"),
+                "actual Account timer renders the original order after its authoritative native acknowledgment");
+            var acknowledgedRows = orderRows.Values.Cast<object>().Select(row => (OrderLine)row.GetType().GetField("Line")!.GetValue(row)!).ToArray();
+            int acknowledgedCancels = Field<StackPanel>(view, "_orders").GetVisualDescendants().OfType<Button>()
+                .Count(button => button.IsEffectivelyVisible && TextIs(Label(button), "Cancel"));
+            Check(acknowledged.OrdersKnown && acknowledged.Orders.Count == 1 && acknowledgedRows.Length == 1 &&
+                acknowledgedRows[0].Key == acknowledgedLine.Key && acknowledgedRows[0].Active &&
+                acknowledgedRows[0].Ref is (BybitTradingSession acknowledgedSession, Order acknowledgedOrder) &&
+                ReferenceEquals(acknowledgedSession, session) && ReferenceEquals(acknowledgedOrder, order) && acknowledgedCancels == 1 &&
+                wire.Count("/v5/order/create") == 1 && wire.Count("/v5/order/amend") == 0 && wire.Count("/v5/order/cancel") == 0,
+                "the acknowledged logical order has one current native row and Cancel with no stale active pending row",
+                new { pendingKey, currentKey = acknowledgedLine.Key, renderedKeys = acknowledgedRows.Select(line => line.Key), visibleCancels = acknowledgedCancels });
+            Snapshot("Bybit original order after native acknowledgment", acknowledged); Shot("kvp_providers_bybit_acknowledged_order_row");
             string clientIdentity = wire.Report(id)["orderLinkId"]!.GetValue<string>();
             Check(session.StableOrderIdentityOf(order) is { } stable && stable.StartsWith("bybit:", StringComparison.Ordinal) && stable.EndsWith(":" + clientIdentity, StringComparison.Ordinal) &&
                 ReferenceEquals(session.Orders.Single(o => o.ExchangeOrderId == id), order),
                 "actual broker/session preserve stable account-client identity and the same order handle");
             wire.Fill(id, "ui-partial", .3m, 101, .12m, "USDT");
             Await(session.RefreshAsync(), "actual partial execution and fee reach session and durable journal");
-            var account = Account(profile); var snapshot = Services.AccountCenter.Snapshot(account);
+            var snapshot = Services.AccountCenter.Snapshot(account);
             var partial = snapshot.Fills.Single(fill => fill.Id.EndsWith("ui-partial", StringComparison.Ordinal));
             Check(order.Filled == .3m && snapshot.Fills.Count == 2 && partial.Price == 101 && partial.Quantity == .3m && partial.Commission == .12m && snapshot.CostsComplete &&
                 snapshot.Positions.Single().Net == 1.05m && snapshot.RealizedToday == 12.50m && !snapshot.AnalysisKnown,
                 "actual execution rows use fill101/fee0.12, keep prior0.75 holdings separate from new0.3, and retain provider-reported realized12.50");
-            var view = SelectAccount(account); Tab(view, 2);
+            view = SelectAccount(account); Tab(view, 2);
             Check(Field<ListBox>(view, "_fills").Items.OfType<AccountFill>().Single(fill => fill.Id.EndsWith("ui-partial", StringComparison.Ordinal)).Commission == .12m && Texts(view).Any(text => text.Contains(.12m.ToString("0.00", TradingHub.Common.UiCulture.Current), StringComparison.Ordinal)),
                 "actual Fills tab renders the nonzero provider commission rather than a guessed zero");
             Snapshot("Bybit partial execution", snapshot); Shot("kvp_providers_bybit_partial_fill_fee");
@@ -559,13 +625,38 @@ internal static class KvpProvidersScene
                 "matching total0.9/unfilled0.6 amendment keeps one handle and causes no second create");
             wire.ConfirmCancelImmediately = false; view = SelectAccount(account); Tab(view, 1);
             int cancels = wire.Count("/v5/order/cancel");
-            Click(Button(Field<StackPanel>(view, "_orders"), "Cancel"));
+            var cancelRow = Field<System.Collections.IDictionary>(view, "_orderRows").Values.Cast<object>().Single(row =>
+                row.GetType().GetField("Line")!.GetValue(row) is OrderLine { Active: true } line && line.Key == id &&
+                line.Ref is (BybitTradingSession rowSession, Order rowOrder) && ReferenceEquals(rowSession, session) && ReferenceEquals(rowOrder, order));
+            Click(Button((Border)cancelRow.GetType().GetField("Root")!.GetValue(cancelRow)!, "Cancel"));
             Until(() => wire.Count("/v5/order/cancel") == cancels + 1, "actual Account Orders cancel button sends a signed cancellation");
             Await(session.RefreshAsync(), "cancel acceptance is reconciled against a still-working provider report");
+            var cancelRequest = wire.Requests.Where(request => request.Route == "/v5/order/cancel").Skip(cancels).Single();
+            using (var payload = JsonDocument.Parse(cancelRequest.Body))
+                Check(payload.RootElement.GetProperty("orderId").GetString() == id && cancelRequest.Headers["X-BAPI-API-KEY"] == wire.Key &&
+                    wire.Count("/v5/order/create") == 1 && wire.Count("/v5/order/amend") == 1,
+                    "actual Account Orders cancellation targets only the original order and credential context without another create or amendment");
             Check(order.State == OrderStates.Active && order.Status != OrderStatus.Canceled, "actual account cancellation remains active until authoritative terminal ACK");
             RefreshUi(); Shot("kvp_providers_bybit_cancel_awaiting_ack");
             wire.ConfirmCancel(id); Await(session.RefreshAsync(), "provider terminal report acknowledges cancellation");
             Check(order.Status == OrderStatus.Canceled, "actual order terminal state follows the provider cancellation report");
+            var terminal = Services.AccountCenter.Snapshot(account);
+            var terminalLine = terminal.Orders.Single(line => line.Ref is (BybitTradingSession rowSession, Order rowOrder) &&
+                ReferenceEquals(rowSession, session) && ReferenceEquals(rowOrder, order));
+            Until(() => orderRows.Contains(terminalLine.Key) &&
+                TextIs(((TextBlock)orderRows[terminalLine.Key]!.GetType().GetField("Status")!.GetValue(orderRows[terminalLine.Key])!).Text, "Canceled (partial)"),
+                "actual Account timer renders the original order's terminal cancellation report");
+            var terminalRows = orderRows.Values.Cast<object>().Select(row => (OrderLine)row.GetType().GetField("Line")!.GetValue(row)!).ToArray();
+            int terminalCancels = Field<StackPanel>(view, "_orders").GetVisualDescendants().OfType<Button>()
+                .Count(button => button.IsEffectivelyVisible && TextIs(Label(button), "Cancel"));
+            Check(terminal.OrdersKnown && terminal.Orders.Count == 1 && terminalRows.Length == 1 &&
+                terminalRows[0].Key == terminalLine.Key && !terminalRows[0].Active &&
+                terminalRows[0].Ref is (BybitTradingSession terminalSession, Order terminalOrder) &&
+                ReferenceEquals(terminalSession, session) && ReferenceEquals(terminalOrder, order) && terminalCancels == 0 &&
+                wire.Count("/v5/order/create") == 1 && wire.Count("/v5/order/amend") == 1 && wire.Count("/v5/order/cancel") == cancels + 1,
+                "the terminal logical order retains one current row and no stale pending Cancel or extra provider mutation",
+                new { pendingKey, currentKey = terminalLine.Key, renderedKeys = terminalRows.Select(line => line.Key), visibleCancels = terminalCancels });
+            Snapshot("Bybit original terminal order row", terminal); Shot("kvp_providers_bybit_terminal_order_row");
             wire.Fill(id, "ui-late", .2m, 102, .08m, "USDT", preserveCanceled: true);
             Await(session.RefreshAsync(), "late execution arrives after cancellation"); Await(session.RefreshAsync(), "repeated late execution report is reconciled idempotently");
             snapshot = Services.AccountCenter.Snapshot(account);
@@ -613,19 +704,38 @@ internal static class KvpProvidersScene
         private void ExerciseAmbiguity(ConnectionProfile profile, KvpProvidersExchange.Context wire, BybitTradingSession session, BybitBroker broker)
         {
             Await(session.RefreshAsync(), "account is reconciled before a second independent order");
+            var account = Account(profile); var view = SelectAccount(account); Tab(view, 1);
+            var rows = Field<System.Collections.IDictionary>(view, "_orderRows");
+            var previousLine = Services.AccountCenter.Snapshot(account).Orders.Single();
+            var previousNative = ((BybitTradingSession Session, Order Order))previousLine.Ref!;
+            var previousRoot = (Border)rows[previousLine.Key]!.GetType().GetField("Root")!.GetValue(rows[previousLine.Key])!;
+            double previousRowY = previousRoot.Bounds.Y;
             var plan = new KvpProvidersExchange.CreatePlan(ambiguous: true); wire.NextCreate = plan;
             int creates = wire.Count("/v5/order/create"), cancels = wire.Count("/v5/order/cancel");
             var order = broker.Limit(OrderDirections.Buy, .2m, 98, "UI fake ambiguous outcome");
             string id = Await(plan.Received.Task, "fake exchange receives exactly one ambiguous placement");
-            Until(() => session.LastError?.Contains("unknown", StringComparison.OrdinalIgnoreCase) == true, "actual session exposes the ambiguous create outcome");
+            Until(() => session.LastError != null && session.IsSubmissionUnknown(order), "actual session exposes the ambiguous create outcome");
             for (int pass = 0; pass < 3; pass++) Await(session.RefreshAsync(), "exact order lookup retains the unresolved outcome, pass " + (pass + 1));
             Check(order.State == OrderStates.Active && session.IsSubmissionUnknown(order) && !session.OrdersReady && order.ExchangeOrderId.Length == 0 && wire.Count("/v5/order/create") == creates + 1,
                 "absent open/history lookups leave the same submission unknown and never invent cancellation or resubmit");
-            var account = Account(profile); var view = SelectAccount(account); Tab(view, 1);
+            view = SelectAccount(account); Tab(view, 1);
             Check(Texts(view).Any(text => text.Contains("Submission unknown", StringComparison.Ordinal)), "actual Account Orders table exposes the unresolved submission");
             Snapshot("Bybit ambiguous placement with absent final lookup", Services.AccountCenter.Snapshot(account)); Shot("kvp_providers_bybit_ambiguous_placement");
-            var activeRow = Field<StackPanel>(view, "_orders").Children.OfType<Border>().Single(row => row.GetVisualDescendants().OfType<Button>().Any(button => TextIs(Label(button), "Cancel") && button.IsVisible));
-            Click(Button(activeRow, "Cancel")); pump(.08);
+            var distinctRows = rows.Values.Cast<object>().Select(row => (OrderLine)row.GetType().GetField("Line")!.GetValue(row)!).ToArray();
+            Check(distinctRows.Length == 2 && distinctRows.Any(line => line.Key == previousLine.Key && !line.Active &&
+                    line.Ref is (BybitTradingSession priorSession, Order priorOrder) &&
+                    ReferenceEquals(priorSession, previousNative.Session) && ReferenceEquals(priorOrder, previousNative.Order)) &&
+                distinctRows.Any(line => line.Active && line.Ref is (BybitTradingSession currentSession, Order currentOrder) &&
+                    ReferenceEquals(currentSession, session) && ReferenceEquals(currentOrder, order)) &&
+                previousRoot.Bounds.Y == previousRowY,
+                "two distinct native orders retain separate terminal and uncertain rows without shifting the earlier row",
+                new { renderedKeys = distinctRows.Select(line => line.Key), previousRowY, currentPreviousRowY = previousRoot.Bounds.Y });
+            var activeRow = Field<System.Collections.IDictionary>(view, "_orderRows").Values.Cast<object>().Single(row =>
+                row.GetType().GetField("Line")!.GetValue(row) is OrderLine { Active: true } line && line.Key == "bybit-pending-" + order.Id &&
+                line.Ref is (BybitTradingSession rowSession, Order rowOrder) && ReferenceEquals(rowSession, session) && ReferenceEquals(rowOrder, order));
+            var activeRoot = (Border)activeRow.GetType().GetField("Root")!.GetValue(activeRow)!;
+            double activeRowY = activeRoot.Bounds.Y;
+            Click(Button(activeRoot, "Cancel")); pump(.08);
             Check(wire.Count("/v5/order/cancel") == cancels, "canceling an unknown pre-ACK order queues intent without guessing an exchange identity");
             wire.ConfirmCancelImmediately = true; wire.Reveal(id);
             Await(session.RefreshAsync(), "exact identity reconciliation finds the previously hidden exchange order");
@@ -633,6 +743,14 @@ internal static class KvpProvidersScene
             Await(session.RefreshAsync(), "recovered order receives its terminal cancellation report");
             Check(order.Status == OrderStatus.Canceled && ReferenceEquals(session.Orders.Single(candidate => candidate.ExchangeOrderId == id), order) && wire.Count("/v5/order/create") == creates + 1,
                 "ambiguous reconciliation/cancel preserves the original handle and creates no duplicate order");
+            Until(() => rows.Contains(id) && rows[id]!.GetType().GetField("Line")!.GetValue(rows[id]) is OrderLine { Active: false },
+                "actual Account timer renders the second order's recovered terminal identity");
+            var terminalRoot = (Border)rows[id]!.GetType().GetField("Root")!.GetValue(rows[id])!;
+            Check(rows.Count == 2 && terminalRoot.Bounds.Y == activeRowY && previousRoot.Bounds.Y == previousRowY &&
+                !Field<StackPanel>(view, "_orders").GetVisualDescendants().OfType<Button>().Any(button =>
+                    button.IsEffectivelyVisible && TextIs(Label(button), "Cancel")),
+                "recovering the second native identity preserves both row positions and removes only its completed Cancel",
+                new { previousRowY, currentPreviousRowY = previousRoot.Bounds.Y, activeRowY, currentTerminalRowY = terminalRoot.Bounds.Y, renderedRows = rows.Count });
         }
         private void ExerciseRetirement(ConnectionProfile profile, KvpProvidersExchange.Context wire, KvpProvidersExchange.Context replacementWire, BybitTradingSession session, BybitBroker broker, InstrumentData data)
         {
@@ -709,8 +827,8 @@ internal static class KvpProvidersScene
             try
             {
                 var compilation = Services.Strategies.Compile(file);
-                Check(compilation.Success && file.Type != null, "actual strategy catalog compiles the owned passive provider-identity fixture");
-                if (file.Type == null) throw new InvalidOperationException("Provider identity fixture did not compile.");
+                Check(compilation.Success, "actual strategy catalog compiles the owned passive provider-identity fixture");
+                var generation = compilation.Generation ?? throw new InvalidOperationException("Provider identity fixture did not compile.");
                 var original = exchange.Add("kvp-private-held-uid-key", "kvp-private-held-uid-secret", 900011, .25m);
                 _secrets.Add(original.Key); _secrets.Add(original.Secret);
                 var firstGate = new KvpProvidersExchange.UidGate(); original.HoldUid = firstGate; gates.Add(firstGate);
@@ -729,7 +847,7 @@ internal static class KvpProvidersScene
                 Check(LedgerFiles().Length == 0, "owned panel strategy has no ledger before verified account identity");
                 initialLaunch = Services.Live.LaunchAsync(new LiveLaunch
                 {
-                    File = file, ProfileId = profile.Id, Instrument = instrument, AccountId = profile.Id, Period = ChartPeriod.M1,
+                    File = file, Generation = generation, ProfileId = profile.Id, Instrument = instrument, AccountId = profile.Id, Period = ChartPeriod.M1,
                     Parameters = new() { ["StopLossTicks"] = 0, ["TakeProfitTicks"] = 0 }, Paused = true,
                 });
                 try
@@ -896,7 +1014,7 @@ internal static class KvpProvidersScene
             {
                 foreach (var gate in gates) gate.Release.TrySetResult();
                 if (initialLaunch is { IsCompleted: false }) Await(initialLaunch, "scene cleanup drains its released initial panel launch");
-                foreach (var runner in Services.Runners.Where(runner => runner.StrategyInstance.GetType() == file.Type).ToArray())
+                foreach (var runner in Services.Runners.Where(runner => runner.StrategyInstance.GetType() == file.Generation?.Type).ToArray())
                     runner.Stop(flatten: false, keepProtection: false);
                 Services.SaveLiveState();
                 Services.Strategies.Delete(file);
@@ -919,8 +1037,8 @@ internal static class KvpProvidersScene
             try
             {
                 var compilation = Services.Strategies.Compile(file);
-                Check(compilation.Success && file.Type != null, "actual strategy catalog compiles the owned workspace/UID fixture");
-                if (file.Type == null) throw new InvalidOperationException("Restored chart fixture did not compile.");
+                Check(compilation.Success, "actual strategy catalog compiles the owned workspace/UID fixture");
+                var generation = compilation.Generation ?? throw new InvalidOperationException("Restored chart fixture did not compile.");
                 var original = exchange.Add("kvp-private-chart-owner-key", "kvp-private-chart-owner-secret", 900041, .25m);
                 _secrets.Add(original.Key); _secrets.Add(original.Secret);
                 var profile = new ConnectionProfile
@@ -940,11 +1058,11 @@ internal static class KvpProvidersScene
                 var chart = Await(trading.NewTabAsync(profile.Id, instrument.Symbol, ChartPeriod.M1, accountId: profile.Id),
                     "actual TradingView opens the explicitly scoped deterministic Bybit chart");
                 Until(() => chart.Model is { Data.IsLoadingHistory: false }, "actual chart history finishes through the injected venue transport");
-                Await(trading.AddStrategyAsync(chart, file, new Dictionary<string, object?> { ["StopLossTicks"] = 50, ["TakeProfitTicks"] = 0 }, openSettings: false),
+                Await(trading.AddStrategyAsync(chart, file, new Dictionary<string, object?> { ["StopLossTicks"] = 50, ["TakeProfitTicks"] = 0 }, openSettings: false, generation: generation),
                     "actual chart adds and runs the passive strategy in visual mode before live admission");
                 var cs = chart.Strategies.Single(strategy => strategy.StrategyId == file.Id);
                 var account = Services.AccountFor(chart.Model!.Data, profile.Id);
-                using (var seed = new LiveStrategyRunner(file.Create(), chart.Model.Data, account, ChartPeriod.M1)
+                using (var seed = new LiveStrategyRunner(generation.Create(), chart.Model.Data, account, ChartPeriod.M1)
                     { Persist = true, Source = "chart", AccountId = profile.Id, ProfileId = profile.Id })
                 {
                     PrepareIdentity(seed, "owned restored-chart ledger is seeded only after actual native UID verification");
@@ -1035,7 +1153,7 @@ internal static class KvpProvidersScene
                     restored.Overlay.Error?.Contains("another verified account", StringComparison.Ordinal) == true &&
                     ReferenceEquals(refused.ChartStrategy, restored) && refused.Ledger == null && refused.AwaitingAccountIdentity &&
                     LedgerFiles().Length == 1 && ledgerBefore.SequenceEqual(File.ReadAllBytes(LiveStore.LedgerFile(originalKey))) &&
-                    !Services.Runners.Any(runner => runner.StrategyInstance.GetType() == file.Type && runner.IsRunning) &&
+                    !Services.Runners.Any(runner => runner.StrategyInstance.GetType() == generation.Type && runner.IsRunning) &&
                     changed.Count("/v5/order/create") == 0 && changed.Count("/v5/order/cancel") == 0 &&
                     original.Count("/v5/order/create") == 1 && original.Count("/v5/order/cancel") == 0 && stop.State == OrderStates.Active,
                     "different verified UID refuses the saved chart before Start/adoption, keeps its original native protection and ledger unchanged, and creates no alternate run/account orders");
@@ -1206,7 +1324,10 @@ internal static class KvpProvidersScene
                 Until(() => newOrder.ExchangeOrderId.Length > 0, "current UID creates its own independently tracked working order");
                 Await(newSession.RefreshAsync(), "current UID confirms the new working order for its real UI row");
                 RefreshUi();
-                Click(Button(Field<StackPanel>(view, "_orders"), "Cancel"));
+                var cancelRow = Field<System.Collections.IDictionary>(view, "_orderRows").Values.Cast<object>().Single(row =>
+                    row.GetType().GetField("Line")!.GetValue(row) is OrderLine { Active: true } line && line.Key == newOrder.ExchangeOrderId &&
+                    line.Ref is (BybitTradingSession rowSession, Order rowOrder) && ReferenceEquals(rowSession, newSession) && ReferenceEquals(rowOrder, newOrder));
+                Click(Button((Border)cancelRow.GetType().GetField("Root")!.GetValue(cancelRow)!, "Cancel"));
                 Until(() => newWire.Count("/v5/order/cancel") == 1, "actual current-account Cancel control signs with the new credential context");
                 Await(newSession.RefreshAsync(), "new-context UI cancellation receives an authoritative terminal report");
                 Until(() => newOrder.Status == OrderStatus.Canceled, "new owning session confirms the UI-requested cancellation before terminal state is asserted");

@@ -1708,18 +1708,11 @@ public static class LiveStore
         lock (Gate)
         {
             if (deleteFills) DeleteFills(key);
-            try
-            {
-                var all = File.Exists(RunnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new() : new();
-                all.RemoveAll(r => r.Key == key);
-                Directory.CreateDirectory(Root);
-                File.WriteAllText(RunnersPath, JsonSerializer.Serialize(all, Json));
-                _lastRunnersJson = null;
-            }
-            catch
-            {
-                // se reintenta
-            }
+            var all = File.Exists(RunnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new() : new();
+            all.RemoveAll(r => r.Key == key);
+            Directory.CreateDirectory(Root);
+            File.WriteAllText(RunnersPath, JsonSerializer.Serialize(all, Json));
+            _lastRunnersJson = null;
         }
     }
 

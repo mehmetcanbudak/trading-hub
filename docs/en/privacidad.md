@@ -30,13 +30,13 @@ See [Installation](instalacion.md#where-your-data-lives) for exact paths. AI-rel
 
 | Feature | When | Destination |
 |---|---|---|
-| Market data | Opening/using an instrument on an enabled connection. | Configured Binance, Bybit, Longbridge, aggregate constituents, Rithmic, Tradovate, OANDA, Alpaca or cTrader provider. |
+| Market data | Opening/using an instrument on an enabled connection. | Configured Binance, Bybit, Longbridge, aggregate constituents, Rithmic, Tradovate, Interactive Brokers, OANDA, Alpaca or cTrader provider. |
 | History | User download or laboratory download_data request. | Public archives or configured provider APIs. |
 | Long-history/context bars | Loading older charts or context without stored ticks. | Relevant market provider; crypto can use public Binance/Bybit bars without account login. |
 | Orders | Manual or strategy submission to a broker account. | That broker; simulated orders are internal. |
 | Databento | Connection tests, availability/cost estimates and confirmed paid downloads. | Databento using the stored key. |
-| Claude Code | Assistant, laboratory or risk-agent invocation. | Anthropic through the user's CLI/account. |
-| Interactive Brokers probe | Test connection only. | TWS/IB Gateway, local by default. |
+| Strategy assistants | Assistant or laboratory invocation; the risk agent uses Claude Code. | Anthropic through the user's Claude Code account, or the selected optional Codex provider for strategy chat. |
+| Interactive Brokers data | Connection test, enabled live feed, or an explicit historical-data request. Stored/offline mode does not connect. | Configured TWS/IB Gateway, local by default. No IB orders. |
 | Links / cTrader authorization | Clicking external links or authorizing access. | System browser and the selected provider/author site. |
 | Candle maintenance | Only after explicit enable/selected instruments, or an explicit Run. | The configured provider, with bounded nonoverlapping work and visible partial/failure status. |
 | External alerts | Only while an explicitly consented destination remains authorized. | The privately stored webhook or Telegram endpoint; persistent at-least-once retry may duplicate after uncertain remote acceptance. Practice events remain local. |
@@ -46,9 +46,9 @@ There is no built-in updater or automatic crash-report submission in the reviewe
 
 ## Claude
 
-Prompts, read strategy/indicator files, metrics/trades/data summaries, chart images and requested live exposure may be sent to Anthropic. The assistant's working directory is the strategy folder, with file tools limited to strategy/indicator/screenshot roots and without terminal/web or unrelated MCP tools. Risk reviews have no tools, only supplied portfolio figures.
+Prompts, supplied strategy/indicator files, metrics, trades, data summaries, chart images and requested live exposure may be sent to the selected assistant provider. Strategy chat starts in the strategy folder. The application requests engine-specific file tools, directory access and MCP permissions; ordinary Claude chat does not enable terminal or web tools. These requests are not proof of an operating-system filesystem sandbox. Effective access depends on the selected CLI's enforced permissions and version. Review access before sending private content. Risk reviews have no tools and receive only supplied portfolio figures.
 
-Data handling depends on your Claude account and Anthropic policies. See [Claude](asistente-claude.md). Local storage does **not** mean AI requests stay local. Historical conversations/reports are retained in their original language/content.
+Data handling depends on the selected CLI account and provider policies. See [Claude and optional Codex](asistente-claude.md). Local storage does **not** mean AI requests stay local. Historical conversations/reports are retained in their original language/content.
 
 ## Real money
 
