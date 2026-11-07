@@ -80,6 +80,8 @@ dotnet run --project tools/TradingHub.UiSnapshot -- <output> 4 <scene> [<scene>.
 
 The number is initial loading seconds. With no scenes, Trading is captured. Assertion scenes return nonzero on failure. Existing diagnostic scenes may retain Spanish console wording; scene names are stable test identifiers.
 
+Unknown scene names, actions and extra selector components return a nonzero exit before fixture creation. `--list-ci-scenes` prints applicable handlers from the same registry used for dispatch. CI runs each listed functional consumer in its own process, retains images/receipts and excludes unsupported platform fixtures. Handlers marked standalone in the registry must run alone. Core page captures and multilingual captures remain separate.
+
 `--check-script-monitor` is a separate early entry with its own real dispatcher and fresh six-root fixture, preserved unchanged from reviewed startup commit `85c43954ebd4cf6acccda850cc86f356c2bdf9f5`. Its eight compiler/monitor/disposal cases and both workflow steps remain; the reported pass belongs to that commit, not an automatically repeated KVP result. The normal KVP authoring/shutdown scenes additionally exercise owned Pine/CLI/private-store drains.
 
 | Scene | Coverage |
@@ -117,6 +119,13 @@ The number is initial loading seconds. With no scenes, Trading is captured. Asse
 | kvp-providers | Actual Longbridge/aggregate/Bybit configured consumers against loopback/injected fakes, truthful account fields, owned ACKs and credential retirement. |
 | kvp-replay-alerts | Actual practice/reveal/end/result and compiled-strategy consumers, isolated run journals, causal availability, notification consent/persistence/retry/revocation. |
 | kvp-shutdown, kvp-shutdown-platform | **Standalone processes only:** real default terminal drains held Bybit, cached Longbridge requests/PKCE loopback/browser callbacks, Pine/compiler/pending-start and global private-store work; new requests/second red-close cannot force replacement/desktop exit early. |
+| ordinary-shutdown | **Standalone, macOS/POSIX fixture:** actual ordinary assistant, held fake CLI and redirected stream. Protected Quit cannot replace or exit before its final save and callback. |
+| research-freshness | Actual strategy view and market-context consumers after same-metadata price corrections, middle-day deletion and combined-source changes. |
+| research-accounting | Real compiled strategy and local history through walk-forward, saved history, reports and MCP standard IO. Exact commissions, complete/partial/unavailable money and captured input evidence. |
+| generation-continuation | **Standalone:** chart continuation, pruned panel restart, failed saved-entry removal, state/history identity and superseded view compilation keep the admitted source generation. True Quit waits for the actual manual compiler. |
+| native-reconfigure-retirement, native-idle-retirement | **Standalone:** an actual registered native fill stays held across profile replacement or later idle retirement. True Quit must join the original reader and durable append before terminal completion. |
+| native-shutdown-admission | **Standalone:** the real visible Accounts timer cannot create a native session after the shutdown drain snapshot. Every admitted native reader and registered fill consumer must finish before terminal handoff. |
+| marked-portfolio-report | **Standalone:** compiled marked WFO and ordinary saved runs through the MCP report handler, Markdown storage and self-contained HTML. Measured equity/drawdown remains available without independent-trade analytics; no-OOS composite summaries remain unavailable. |
 | kvp-performance | Warmed actual CPU calculation/raster frames and wide-book writer/selected-history/heatmap resource measurements; no real provider or claimed Metal kernel. |
 
 
@@ -198,6 +207,22 @@ dotnet tools/TradingHub.UiSnapshot/bin/Release/net10.0/TradingHub.UiSnapshot.dll
 
 It creates six fresh temporary storage overrides before app-path initialization, uses no providers, personal scripts or model CLI, and prints its retained fixture directory. Both platform CI jobs run it. This fixture does not replace native packaged startup/quit verification.
 
+Ordinary research, chat, import and download consumers register with `AppServices.Work` before their first await. The owner includes execution, process/stream drains, persistence and final UI callbacks. True Quit closes admission and requests cancellation, then waits for actual return before disposing those dependencies. Arbitrary in-process user C# and blocked filesystem writes cannot be safely forced to stop. Closing to the menu bar is not terminal shutdown. Recorder completion includes detached generations and writer/lease release, not the bounded ordinary `Dispose` return.
+
+## Native execution ownership
+
+Native session creation and the terminal shutdown snapshot share one admission gate. True Quit also joins readers retired by reconfiguration or idle cleanup. An Accounts refresh cannot create a replacement session after terminal admission closes.
+
+Accounts' bounded Rithmic Close retains its captured route, native account, confirmation ceiling and durable identity. Both send admission and failure settlement consume the latest close under its journal lease. An unseen reducing-order target remains unresolved even when its saved cumulative quantity is zero. Historical terminal flags and unrelated permission refusals cannot establish current native finality or release that identity. A business refusal is not a storage fault; actual journal I/O failures remain visible.
+
+A native amendment captures the requested total and current cumulative fill together under the order-state gate. That one observation supplies both remaining dispatch quantity and persisted predecessor fill. The wire still carries the requested total. Partial-fill allocation, accepted amendment lineage and restart recovery use the same total rather than a separately reread public order.
+
+A prepared amendment is not an accepted amendment. Normal in-process acceptance requires complete matching native working evidence whose raw publication revision is newer than that amendment's successful durable-commit baseline. A command receipt or a delayed precommit report cannot satisfy it.
+
+These are fake-provider and durable-consumer guarantees. They do not establish exchange-atomic position/fill inclusion, venue-command acknowledgment correlation, server-enforced reduce-only, native OCO or exactly-once delivery.
+
+Independent native fake venues use one immutable endpoint path per server instance. Main, equivalent peer and reconnect sessions of that instance reuse its full URI. Native uncertainty can outlive a listener and fixture root, so a reused port is not a new authority. Keep the production identity rules and retained evidence intact rather than clearing registries to isolate tests.
+
 ## Validation from code
 
 ValidationGate.Evaluate applies the [Backtesting](backtesting.md#deflated-sharpe-and-validation) rules. RobustnessTests contains complete examples. Given existing walkForward and optimization results:
@@ -211,12 +236,14 @@ var gate = ValidationGate.Evaluate(new GateInput
     TrialVariance = 0.01,
     MinTrades = 30,
 });
-Console.WriteLine($"{gate.StatusText} · Deflated Sharpe {gate.Deflated:P0}");
+Console.WriteLine(gate.TradeEvidenceAvailable
+    ? $"{gate.StatusText} · Deflated Sharpe {gate.Deflated:P0}"
+    : $"{gate.StatusText} · {gate.TradeEvidenceUnavailableReason}");
 foreach (var check in gate.Checks)
     Console.WriteLine($"{check.Status} · {check.Name}: {check.Text}");
 ```
 
-LiveStrategyRunner.Guard accepts ILiveOrderGuard to inspect exposure-increasing orders; reducing orders still pass. The app does not install a universal custom guard by default; tests demonstrate integration.
+LiveStrategyRunner.Guard accepts ILiveOrderGuard to inspect exposure-increasing orders. The app supplies its current connection permission and configured quantity-cap policy through that guard and final native admission. Genuine reductions and cancellations remain available. Native futures quantities must be positive whole contracts within the provider integer range before create/amend transport. Fractional virtual strategy sizing still converts through the intended contract-step rules.
 
 ## Rules
 

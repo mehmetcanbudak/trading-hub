@@ -107,10 +107,11 @@ internal static class NonKvpAssistantScene
             Send("Fixture only: edit the owned strategy file; no network or model call.");
             File.Delete(Path.Combine(fixture, "edit"));
             var current = Field<StrategyFile>(view, "_current");
-            Check(current.FileName == "AssistantFixture" && current.LastCompile?.Success == true && current.Type != null, "fake Codex edit reaches actual editor and compiler");
-            if (current.LastCompile?.Success != true || current.Type == null)
+            var generation = current.Generation;
+            Check(current.FileName == "AssistantFixture" && current.LastCompile?.Success == true && generation != null, "fake Codex edit reaches actual editor and compiler");
+            if (generation == null)
                 throw new SceneAbortedException("The actual edited-strategy compilation did not succeed.");
-            var compiledStrategy = current.Create();
+            var compiledStrategy = generation.Create();
             var instrument = new Instrument { FeedId = "fixture", Symbol = "ASSISTANT", TickSize = 1m, VolumeStep = 1m, PointValue = 1m };
             var start = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
             decimal[] prices = [10m, 11m, 12m, 20m, 21m, 22m, 30m, 31m, 32m];
@@ -121,8 +122,8 @@ internal static class NonKvpAssistantScene
                 InitialCapital = 1000m, CommissionPercent = 0, SlippageTicks = 0,
             }).Run();
             Check(replay.Error == null && replay.Trades.Count == 0
-                && (int)current.Type.GetProperty("ObservedBars")!.GetValue(compiledStrategy)! == 3
-                && (decimal)current.Type.GetProperty("ObservedCloseSum")!.GetValue(compiledStrategy)! == 132m,
+                && (int)generation.Type.GetProperty("ObservedBars")!.GetValue(compiledStrategy)! == 3
+                && (decimal)generation.Type.GetProperty("ObservedCloseSum")!.GetValue(compiledStrategy)! == 132m,
                 "the actual CLI-edited and compiled strategy consumes three controlled closed bars (12, 22, 32), doubles their sum and places no orders");
             var codexConversation = Field<ChatConversation>(view, "_conv");
             Check(codexConversation.Engine == "codex" && codexConversation.SessionId == "codex-fixture", "engine and exact Codex session are persisted");

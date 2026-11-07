@@ -2,7 +2,7 @@
 
 Prepared2026-11-03 at base `17dec28f0edbe4f1204b9c9a5d99ea1a6840342c`. Parent maintains status. Implement only user-selected scope in the isolated feature worktree; no commits, merges, pushes, installs or KVP work.
 
-**Current status — 2026-11-06:** the selected nine-plan implementation, selected KVP features, immutable startup compilation and reviewed execution/IB hardening are consolidated and published on `memoshi`; the latest tested C# runtime is `804e940ec774a0668968c6bdb952c6e7d9cbb671`. The last accepted personal installation is separately `bd880f89b9ad600bd5ef43db72f7fbac802c013b`; this source consolidation did not reinstall or restart it. See the [current validation dashboard](../docs/en/TRANSLATION_STATUS.md). Earlier execution-only restrictions, deferred-KVP wording and checkpoints below are historical, not current authorization or pending-merge status. Rust/Swift branches, worktrees and pins remain untouched.
+**Current status.** The selected nine-plan implementation, selected KVP features, immutable startup compilation and reviewed execution/IB hardening are consolidated on canonical `memoshi`. The [current validation dashboard](../docs/en/TRANSLATION_STATUS.md) owns the accepted source, package and personal-installation checkpoints. A later source review or correctness branch does not replace that installation. Earlier execution-only restrictions, deferred-KVP wording and checkpoints below are historical, not current authorization or pending-merge status. Rust/Swift branches, worktrees and pins remain untouched.
 
 |Plan|Deliverable|Dependencies|Status|
 |---|---|---|---|

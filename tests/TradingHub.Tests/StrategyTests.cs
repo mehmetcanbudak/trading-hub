@@ -189,6 +189,9 @@ public class StrategyTests
         Assert.True(res.Rows[0].Fitness >= res.Rows[1].Fitness);
 
         var mc = Optimizer.MonteCarlo(new BacktestEngine(new SmaCross(), data, Settings()).Run().Trades, 1000, 200);
+        Assert.True(mc.Available);
+        Assert.NotNull(mc.DrawdownP50);
+        Assert.NotNull(mc.DrawdownP95);
         Assert.True(mc.DrawdownP95 >= mc.DrawdownP50);
     }
 

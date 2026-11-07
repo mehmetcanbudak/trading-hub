@@ -193,7 +193,7 @@ internal static class EnglishScene
                 Environment.SetEnvironmentVariable("TRADINGHUB_CLAUDE_CLI", previousCli);
             }
         }
-        string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        string root = AppContext.BaseDirectory;
         foreach (string guide in new[] { "estrategias.md", "indicadores.md" })
         {
             var source = File.ReadAllText(Path.Combine(root, "docs/en", guide));
@@ -239,9 +239,9 @@ internal static class EnglishScene
         var fileToLaunch = svc.Strategies.Files.First();
         var launch = new LiveLaunchWindow(svc, _ => { }, fileToLaunch.Id);
         launch.Show(window);
-        for (int i = 0; i < 200 && fileToLaunch.Type == null; i++) pump(0.05);
+        for (int i = 0; i < 200 && fileToLaunch.Generation == null; i++) pump(0.05);
         pump(0.1);
-        Check(Field<ComboBox>(launch, "_strategy").SelectedItem is ComboBoxItem selected && selected.Content as string == fileToLaunch.DisplayName && fileToLaunch.Type != null,
+        Check(Field<ComboBox>(launch, "_strategy").SelectedItem is ComboBoxItem selected && selected.Content as string == fileToLaunch.DisplayName && fileToLaunch.Generation != null,
             "live-launch strategy label refreshes to compiled English metadata, not a stale filename");
         Set(launch, "_profile", "sim");
         Set(launch, "_instrument", model.Instrument);

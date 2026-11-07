@@ -98,7 +98,7 @@ AI 来自**使用你自己订阅的 Claude Code**（无需 API 密钥）：一�
 按照 CLAUDE.md 在我的 Mac 上安装 Trading Hub。
 ```
 
-它会检查你的 Mac，安装缺少的组件（无需管理员密码），编译应用并放进“应用程序”文件夹。分步指南见 [INSTALAR_CON_CLAUDE_CODE.md](INSTALAR_CON_CLAUDE_CODE.md)。
+它会检查你的 Mac，安装缺少的组件（无需管理员密码），编译应用并放进“应用程序”文件夹。本分支的步骤见[安装说明](docs/en/instalacion.md)。[原作者的西班牙语指南](INSTALAR_CON_CLAUDE_CODE.md)保留作历史参考，不是本分支的安装步骤。
 
 ### 手动安装
 你需要一台 Apple Silicon 的 Mac，系统为 macOS 12 或更新版本（Windows 请看[使用 Windows？](#使用-windows)）。
@@ -106,24 +106,20 @@ AI 来自**使用你自己订阅的 Claude Code**（无需 API 密钥）：一�
 ```bash
 curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
 bash /tmp/dotnet-install.sh --channel 10.0
-git clone https://github.com/ralphtradesz/trading-hub.git
+git clone --branch memoshi https://github.com/mehmetcanbudak/trading-hub.git
 cd trading-hub
 ./build-app.sh --install
 ```
 
-第一次编译需要几分钟。应用会安装在 `/Applications/Trading Hub.app`，启动时使用模拟账户：在你于“连接”中开启之前，不会动用真实资金交易。详见 [docs/instalacion.md](docs/instalacion.md)。
+第一次编译需要几分钟。应用会安装在 `/Applications/Trading Hub.app`，启动时使用模拟账户：在你于“连接”中开启之前，不会动用真实资金交易。详见[本分支安装说明](docs/en/instalacion.md)。
 
 ## 使用 Windows？
 
-Trading Hub 可在 Windows 10 和 11 上运行，提供一键安装程序：无需编译，也无需安装 .NET。
+本分支支持从源码构建 Windows x64/ARM64 和每用户安装程序，但尚未发布本分支安装包，也未完成原生 Windows 验证。请按 [Windows 安装说明](docs/en/portar-a-windows.md)构建、安装和更新。
 
-1. 下载安装程序：
-   - **[Intel 或 AMD 处理器的电脑（大多数）](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)**
-   - [Windows on ARM 电脑（骁龙、Surface Pro X）](https://github.com/ralphtradesz/trading-hub/releases/latest/download/TradingHub-Setup-arm64.exe)
-2. 打开前核对下载来源和签名。未签名的安装程序可能触发 Windows 安全警告；不要为来源不明的文件绕过保护。
-3. 点击**安装**。不需要管理员权限：只为你的用户账户安装，并在开始菜单和桌面创建快捷方式。完成后，点击**打开 Trading Hub**。
+[原作者的 Windows 安装包](https://github.com/ralphtradesz/trading-hub/releases/latest)属于上游版本，不代表包含本分支的功能或安全修复。不要将其当作 `memoshi` 的发行版。
 
-和 Mac 上一样，启动时使用模拟账户。你的数据保存在 `%APPDATA%\Trading Hub`，策略和指标在 `文档\Trading Hub`，密钥在 **Windows 凭据管理器**中。更新时，直接覆盖安装新版本即可（你的数据不受影响）；卸载请到**设置 → 应用 → Trading Hub → 卸载**。
+数据保存在 `%APPDATA%\Trading Hub`，策略和指标在 `文档\Trading Hub`，密钥在 **Windows 凭据管理器**中。更新和卸载应保留这些用户数据。
 
 如果想编译本 fork：需要 [Git](https://git-scm.com)、[.NET 10 SDK](https://dotnet.microsoft.com/download) 和 [NSIS](https://nsis.sourceforge.io)（`winget install NSIS.NSIS`），然后在本 fork 仓库运行 `.\build-windows.ps1`（安装程序生成在 `dist` 中）。在 Mac 上：`brew install makensis`，再运行 `./build-windows.sh`。详见[英文 Windows 指南](docs/en/portar-a-windows.md)。安装位置默认为 `%LOCALAPPDATA%\Programs\Trading Hub`；数据目录和 `Estrategias`、`Indicadores`、`Reportes` 等持久化名称不随语言变化。
 

@@ -40,4 +40,4 @@ Guía completa de la plataforma, sección por sección. Si recién llegás, empe
 
 Trading Hub es gratis y su código es público (licencia MIT con Commons Clause: se puede usar y modificar, no vender) y
 lo creó [@ralphtradesz](https://x.com/ralphtradesz). Si te sirve, podés
-[apoyar el proyecto](../README.md#apoyá-el-proyecto).
+[apoyar el proyecto](../README.md#supporting-the-project).

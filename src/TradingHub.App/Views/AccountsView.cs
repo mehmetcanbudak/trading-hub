@@ -10,6 +10,7 @@ using Material.Icons;
 using TradingHub.App.Controls;
 using TradingHub.App.Services;
 using TradingHub.App.Windows;
+using TradingHub.Feeds.Bybit;
 using TradingHub.Strategies;
 using TradingHub.Trading;
 
@@ -316,7 +317,7 @@ public sealed class AccountsView : UserControl
             var entry = accounts.FirstOrDefault(a => a.Id == _selected) ?? accounts[0];
             UpdateChips(accounts, entry.Id);
             if (_entry is not { } shown || shown.Id != entry.Id || shown.IsReal != entry.IsReal ||
-                shown.BybitContextIdentity != entry.BybitContextIdentity)
+                shown.BybitContextIdentity != entry.BybitContextIdentity || shown.RithmicContextIdentity != entry.RithmicContextIdentity)
             {
                 // Rebuild captured action rows when the native credential context changes, even
                 // when the current profile ID/name and financial content counters stay identical.
@@ -495,6 +496,7 @@ public sealed class AccountsView : UserControl
         public required TextBlock Symbol, Side, Qty, Avg, Open, Closed;
         public required Button Close;
         public PositionLine? Line;
+        public PositionLine? Confirmation;
     }
 
     private void UpdatePositions(AccountSnapshot s)
@@ -509,10 +511,16 @@ public sealed class AccountsView : UserControl
                 // nothing sent (the position was already flat, or turned around): the status says why instead of «Closing…»
                 var close = ActionButton("Close position", "", "Close at market", async () =>
                 {
-                    if (await _svc.AccountCenter.CloseAsync(entry, self!.Line!) is { } nothingSent) _status(nothingSent);
+                    var captured = entry.IsReal ? self!.Confirmation : self!.Line;
+                    if (captured != null && await _svc.AccountCenter.CloseAsync(entry, captured) is { } nothingSent) _status(nothingSent);
                 }, "Closing position at market…", entry.IsReal);
                 if (entry.IsReal && close.Flyout is Flyout f)
-                    f.Opening += (_, _) => ((TextBlock)((StackPanel)f.Content!).Children[0]).Text = $"Close {Qty(Math.Abs(self!.Line!.Net))} {self.Line.Symbol} at market in the REAL account?";
+                    f.Opening += (_, _) =>
+                    {
+                        self!.Confirmation = self.Line;
+                        var captured = self.Confirmation!;
+                        ((TextBlock)((StackPanel)f.Content!).Children[0]).Text = $"Close {Qty(Math.Abs(captured.Net))} {captured.Symbol} at market in the REAL account?";
+                    };
                 Grid.SetColumn(close, 6);
                 g.Children.Add(close);
                 row = self = new PositionRow { Root = RowBorder(g), Symbol = Cell(g, 0), Side = Cell(g, 1), Qty = Cell(g, 2, true), Avg = Cell(g, 3, true), Open = Cell(g, 4, true), Closed = Cell(g, 5, true), Close = close };
@@ -550,7 +558,23 @@ public sealed class AccountsView : UserControl
         var entry = s.Account;
         foreach (var o in s.Orders)
         {
-            if (!_orderRows.TryGetValue(o.Key, out var row))
+            if (!_orderRows.TryGetValue(o.Key, out var row) && o.Ref is (BybitTradingSession session, Order nativeOrder))
+            {
+                // An ACK changes the projection key, not the native order or the control's click target.
+                foreach (var cached in _orderRows.Values)
+                {
+                    if (cached.Line?.Ref is not (BybitTradingSession priorSession, Order priorOrder) ||
+                        !ReferenceEquals(session, priorSession) || !ReferenceEquals(nativeOrder, priorOrder)) continue;
+                    row = cached;
+                    break;
+                }
+                if (row != null)
+                {
+                    _orderRows.Remove(row.Line!.Key);
+                    _orderRows.Add(o.Key, row);
+                }
+            }
+            if (row == null)
             {
                 var g = new Grid { ColumnDefinitions = new ColumnDefinitions(OrderColumns) };
                 OrderRow? self = null;

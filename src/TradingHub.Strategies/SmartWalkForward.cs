@@ -21,10 +21,13 @@ public enum SearchMode
 public sealed class CpcvPath
 {
     public int Number { get; set; }
-    public decimal Net { get; set; }
-    public double Sharpe { get; set; }
-    public decimal MaxDrawdown { get; set; }
+    public decimal? Net { get; set; }
+    public double? Sharpe { get; set; }
+    public decimal? MaxDrawdown { get; set; }
     public int Days { get; set; }
+    public bool Available { get; set; } = true;
+    public string? UnavailableReason { get; set; }
+    public int? ActualClosingFills { get; set; }
 }
 
 /// <summary>Los valores posibles de cada parámetro que se optimiza (por índice) y cómo se arma cada combinación.</summary>
@@ -101,31 +104,14 @@ public sealed class ParameterSpace
     }
 }
 
-/// <summary>Una combinación corrida una sola vez sobre toda la historia.</summary>
 internal sealed class ConfigRun
 {
     public required int[] Index { get; init; }
     public required Dictionary<string, object?> Parameters { get; init; }
-
-    /// <summary>Operaciones ordenadas por hora de entrada.</summary>
-    public ClosedTrade[] Trades { get; init; } = Array.Empty<ClosedTrade>();
-
-    /// <summary>Capital por hora: la hora del último punto, el último valor y el mínimo de esa hora.</summary>
-    public long[] HourTimes { get; init; } = Array.Empty<long>();
-    public float[] HourLast { get; init; } = Array.Empty<float>();
-    public float[] HourMin { get; init; } = Array.Empty<float>();
-    public string? Error { get; init; }
-    public bool Ok => Error == null;
-
-    /// <summary>Lo medido en cada ventana (desde, hasta).</summary>
-    public ConcurrentDictionary<(long, long), PerformanceMetrics> Windows { get; } = new();
+    public required AccountingTrace Accounting { get; init; }
+    public ConcurrentDictionary<(long, long), Lazy<WindowStatistics?>> Windows { get; } = new();
 }
 
-/// <summary>
-/// Cada combinación se corre una sola vez sobre toda la historia, con los indicadores calientes y el contexto de mercado
-/// como en vivo, y las ventanas se miden recortando ese resultado: el walk-forward y la validación cruzada no repiten
-/// backtests. Una ventana solo usa lo que pasó dentro de ella (el motor nunca mira hacia adelante).
-/// </summary>
 internal sealed class ConfigCache
 {
     private readonly ConcurrentDictionary<string, Lazy<ConfigRun>> _runs = new();
@@ -135,10 +121,12 @@ internal sealed class ConfigCache
     private readonly BacktestSettings _settings;
     private readonly IReadOnlyList<(DateTime Time, decimal Close)>? _context;
     private readonly ParameterSpace _space;
+    private readonly DateTime[] _cutoffs;
     private readonly CancellationToken _ct;
 
     public ConfigCache(Func<Strategy> factory, Dictionary<string, object?> baseParameters, TickData data, BacktestSettings settings,
-        IReadOnlyList<(DateTime Time, decimal Close)>? context, ParameterSpace space, CancellationToken ct)
+        IReadOnlyList<(DateTime Time, decimal Close)>? context, ParameterSpace space,
+        IReadOnlyList<DateTime> cutoffs, IReadOnlyList<(DateTime From, DateTime To)> calendar, CancellationToken ct)
     {
         _factory = factory;
         _base = baseParameters;
@@ -146,24 +134,23 @@ internal sealed class ConfigCache
         _settings = settings;
         _context = context;
         _space = space;
+        _cutoffs = cutoffs.Distinct().OrderBy(t => t).ToArray();
+        Calendar = calendar;
         _ct = ct;
         Crypto = data.Instrument.FeedId.StartsWith("binance", StringComparison.Ordinal) || data.Instrument.FeedId.StartsWith("bybit", StringComparison.Ordinal);
     }
 
     public bool Crypto { get; }
     public decimal Capital => _settings.InitialCapital;
-
-    /// <summary>Combinaciones distintas que se corrieron.</summary>
+    public IReadOnlyList<(DateTime From, DateTime To)> Calendar { get; }
     public int Count => _runs.Count;
-
     public IEnumerable<ConfigRun> Done => _runs.Values.Where(l => l.IsValueCreated).Select(l => l.Value);
 
     public ConfigRun Get(int[] idx) =>
         _runs.GetOrAdd(ParameterSpace.Key(idx), _ => new Lazy<ConfigRun>(() => Run(idx), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
-    public bool Has(int[] idx) => _runs.TryGetValue(ParameterSpace.Key(idx), out var l) && l.IsValueCreated;
+    private bool Has(int[] idx) => _runs.TryGetValue(ParameterSpace.Key(idx), out var l) && l.IsValueCreated;
 
-    /// <summary>Corre en paralelo las que falten.</summary>
     public void Ensure(IReadOnlyList<int[]> list, int maxParallel, Action? done)
     {
         var options = new ParallelOptions { CancellationToken = _ct, MaxDegreeOfParallelism = maxParallel };
@@ -178,138 +165,23 @@ internal sealed class ConfigCache
     private ConfigRun Run(int[] idx)
     {
         var pars = _space.Config(idx);
-        var s = _factory();
-        s.SetParameters(_base);
-        s.SetParameters(pars);
+        var strategy = _factory();
+        strategy.SetParameters(_base);
+        strategy.SetParameters(pars);
         var settings = Optimizer.SettingsFor(_settings, pars).Clone();
-        settings.CloseAtEnd = true;
-        var r = new BacktestEngine(s, _data, settings) { ContextHistory = _context }.Run(_ct);
-        if (!r.Ok) return new ConfigRun { Index = idx, Parameters = pars, Error = r.Error };
-
-        // capital por hora (último y mínimo): alcanza para el drawdown y los retornos diarios de cualquier ventana
-        var times = new List<long>();
-        var last = new List<float>();
-        var min = new List<float>();
-        long hour = long.MinValue;
-        foreach (var e in r.Equity)
-        {
-            long h = e.Time.Ticks / TimeSpan.TicksPerHour;
-            float v = (float)e.Equity;
-            if (h != hour)
-            {
-                hour = h;
-                times.Add(e.Time.Ticks);
-                last.Add(v);
-                min.Add(v);
-                continue;
-            }
-
-            times[^1] = e.Time.Ticks;
-            last[^1] = v;
-            if (v < min[^1]) min[^1] = v;
-        }
-
-        return new ConfigRun
-        {
-            Index = idx,
-            Parameters = pars,
-            Trades = r.Trades.OrderBy(t => t.EntryTime).ToArray(),
-            HourTimes = times.ToArray(),
-            HourLast = last.ToArray(),
-            HourMin = min.ToArray(),
-        };
+        var accounting = new BacktestEngine(strategy, _data, settings) { ContextHistory = _context }.RunWindows(_cutoffs, _ct);
+        return new ConfigRun { Index = idx, Parameters = pars, Accounting = accounting };
     }
 
-    /// <summary>
-    /// Cómo le fue a una combinación en [desde, hasta): las operaciones que entraron en ese rango y el capital de esas
-    /// horas (llevado al capital inicial al empezar el rango).
-    /// </summary>
-    public PerformanceMetrics Measure(ConfigRun run, DateTime from, DateTime to) =>
-        run.Windows.GetOrAdd((from.Ticks, to.Ticks), _ =>
+    public WindowStatistics? Measure(ConfigRun run, DateTime from, DateTime to) =>
+        run.Windows.GetOrAdd((from.Ticks, to.Ticks), _ => new Lazy<WindowStatistics?>(() =>
         {
-            var (trades, equity) = Slice(run, from, to, Capital);
-            return PerformanceMetrics.Compute(trades, equity, Capital, Crypto, 0, 0);
-        });
+            var measured = run.Accounting.Measure(from, to, Capital, Crypto);
+            return measured == null ? null : new(measured.Metrics, measured.OpeningEquity, measured.ClosingEquity);
+        }, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
-    /// <summary>Las operaciones y el capital de un rango, empezando en <paramref name="capital"/>.</summary>
-    public (List<ClosedTrade> Trades, List<EquityPoint> Equity) Slice(ConfigRun run, DateTime from, DateTime to, decimal capital)
-    {
-        var trades = new List<ClosedTrade>();
-        int i = LowerEntry(run.Trades, from);
-        for (; i < run.Trades.Length && run.Trades[i].EntryTime < to; i++) trades.Add(run.Trades[i]);
-        int a = Lower(run.HourTimes, from.Ticks), b = Lower(run.HourTimes, to.Ticks);
-        double start = a > 0 ? run.HourLast[a - 1] : (double)_settings.InitialCapital;
-        var equity = new List<EquityPoint>(Math.Max(0, (b - a) * 2));
-        for (int k = a; k < b; k++)
-        {
-            var t = new DateTime(run.HourTimes[k], DateTimeKind.Utc);
-            equity.Add(new EquityPoint(t, capital + (decimal)(run.HourMin[k] - start), 0));
-            equity.Add(new EquityPoint(t, capital + (decimal)(run.HourLast[k] - start), 0));
-        }
-
-        return (trades, equity);
-    }
-
-    /// <summary>Resultado de cada día de <paramref name="days"/> (cambio del capital de punta a punta del día).</summary>
-    public static double[] Daily(ConfigRun run, IReadOnlyList<DateOnly> days, double capital)
-    {
-        var pnl = new double[days.Count];
-        double prev = capital;
-        int h = 0;
-        for (int d = 0; d < days.Count; d++)
-        {
-            long end = days[d].AddDays(1).ToDateTime(TimeOnly.MinValue).Ticks;
-            double last = prev;
-            while (h < run.HourTimes.Length && run.HourTimes[h] < end)
-            {
-                last = run.HourLast[h];
-                h++;
-            }
-
-            pnl[d] = last - prev;
-            prev = last;
-        }
-
-        return pnl;
-    }
-
-    /// <summary>Operaciones que entraron cada día.</summary>
-    public static int[] TradesPerDay(ConfigRun run, IReadOnlyList<DateOnly> days)
-    {
-        var map = new Dictionary<DateOnly, int>();
-        for (int i = 0; i < days.Count; i++) map[days[i]] = i;
-        var n = new int[days.Count];
-        foreach (var t in run.Trades)
-            if (map.TryGetValue(DateOnly.FromDateTime(t.EntryTime), out int i))
-                n[i]++;
-        return n;
-    }
-
-    private static int LowerEntry(ClosedTrade[] trades, DateTime t)
-    {
-        int lo = 0, hi = trades.Length;
-        while (lo < hi)
-        {
-            int mid = (lo + hi) >>> 1;
-            if (trades[mid].EntryTime < t) lo = mid + 1;
-            else hi = mid;
-        }
-
-        return lo;
-    }
-
-    private static int Lower(long[] a, long t)
-    {
-        int lo = 0, hi = a.Length;
-        while (lo < hi)
-        {
-            int mid = (lo + hi) >>> 1;
-            if (a[mid] < t) lo = mid + 1;
-            else hi = mid;
-        }
-
-        return lo;
-    }
+    public DailyPerformance[] Daily(ConfigRun run) =>
+        Calendar.Select(day => run.Accounting.Day(day.From, day.To, Capital)).ToArray();
 }
 
 /// <summary>
@@ -584,17 +456,9 @@ public static class Overfitting
         return splits == 0 ? null : ((double)below / splits, (double)losses / splits, splits);
     }
 
-    /// <summary>
-    /// Validación cruzada combinatoria purgada (López de Prado, «Advances in Financial Machine Learning», 2018): parte la
-    /// historia en grupos seguidos; para cada par de grupos de prueba elige la combinación (por meseta) con los demás días
-    /// —sin los pegados a la prueba (purga y embargo)— y mide cómo le fue en esos dos grupos. Con eso se arman varios
-    /// caminos fuera de muestra completos en vez de uno solo.
-    /// </summary>
-    /// <param name="index">Índice de grilla de cada combinación (para la meseta).</param>
-    /// <param name="daily">Resultado diario de cada combinación.</param>
-    /// <param name="tradesPerDay">Operaciones que entraron cada día, por combinación.</param>
-    public static List<CpcvPath> Cpcv(IReadOnlyList<int[]> index, IReadOnlyList<double[]> daily, IReadOnlyList<int[]> tradesPerDay, int minTrades,
-        double capital, bool crypto, int groups = 8, int embargo = 1)
+    /// <summary>Retrospective purged combinatorial validation using exact marked daily paths.</summary>
+    public static List<CpcvPath> Cpcv(IReadOnlyList<int[]> index, IReadOnlyList<DailyPerformance[]> daily, int minTrades,
+        decimal capital, bool crypto, int groups = 8, int embargo = 1)
     {
         var paths = new List<CpcvPath>();
         int n = daily.Count;
@@ -603,67 +467,88 @@ public static class Overfitting
         while (groups >= 4 && days < groups * 5) groups--;
         if (groups < 4) return paths;
         var bounds = Enumerable.Range(0, groups + 1).Select(g => (int)((long)g * days / groups)).ToArray();
-        var pieces = Enumerable.Range(0, groups).Select(_ => new List<double[]>()).ToArray();
+        var pieces = Enumerable.Range(0, groups).Select(_ => new List<int>()).ToArray();
         var rows = new (int[] Idx, double Score)[n];
         foreach (var pair in Combinations(groups, 2))
         {
-            int a = pair[0], b = pair[1];
-            // días de entrenamiento: los que no son de prueba ni están a menos de «embargo» días de un grupo de prueba
-            var train = new bool[days];
-            for (int d = 0; d < days; d++) train[d] = true;
-            foreach (var g in new[] { a, b })
-                for (int d = Math.Max(0, bounds[g] - embargo); d < Math.Min(days, bounds[g + 1] + embargo); d++)
+            var train = Enumerable.Repeat(true, days).ToArray();
+            foreach (int group in pair)
+                for (int d = Math.Max(0, bounds[group] - embargo); d < Math.Min(days, bounds[group + 1] + embargo); d++)
                     train[d] = false;
             for (int c = 0; c < n; c++)
             {
-                double s = 0, q = 0;
-                int k = 0, trades = 0;
+                double sum = 0, sq = 0;
+                decimal equity = capital;
+                int count = 0, exits = 0;
+                bool available = true;
                 for (int d = 0; d < days; d++)
                 {
                     if (!train[d]) continue;
-                    double v = daily[c][d];
-                    s += v;
-                    q += v * v;
-                    k++;
-                    trades += tradesPerDay[c][d];
+                    var day = daily[c][d];
+                    if (!day.Available) { available = false; break; }
+                    decimal basis = Math.Max(capital, equity);
+                    double value = basis > 0 ? (double)(day.Path.Net / basis) : 0;
+                    equity += day.Path.Net;
+                    sum += value;
+                    sq += value * value;
+                    count++;
+                    exits += day.ActualClosingFills;
                 }
-
-                rows[c] = (index[c], trades >= minTrades ? Sharpe(s, q, k) : double.NegativeInfinity);
+                rows[c] = (index[c], available && exits >= minTrades && count > 0 ? Sharpe(sum, sq, count) : double.NegativeInfinity);
             }
 
             int pick = RobustSelection.Select(rows);
-            if (pick < 0) pick = 0;
-            foreach (var g in new[] { a, b }) pieces[g].Add(daily[pick][bounds[g]..bounds[g + 1]]);
+            foreach (int group in pair)
+            {
+                bool available = pick >= 0;
+                for (int d = bounds[group]; available && d < bounds[group + 1]; d++)
+                    available = daily[pick][d].Available;
+                pieces[group].Add(available ? pick : -1);
+            }
         }
 
-        // cada grupo fue de prueba en (grupos − 1) pares: el camino j toma la j-ésima vez de cada grupo
-        int count = pieces.Min(p => p.Count);
-        double ann = Math.Sqrt(crypto ? 365 : 252);
-        for (int j = 0; j < count; j++)
+        int pathCount = pieces.Min(p => p.Count);
+        double annualization = Math.Sqrt(crypto ? 365 : 252);
+        for (int j = 0; j < pathCount; j++)
         {
-            var series = pieces.SelectMany(p => p[j]).ToArray();
-            double eq = 0, peak = 0, dd = 0, sum = 0, sq = 0;
-            foreach (var v in series)
+            if (pieces.Any(p => p[j] < 0))
             {
-                eq += v;
-                peak = Math.Max(peak, eq);
-                dd = Math.Max(dd, peak - eq);
-                sum += v;
-                sq += v * v;
+                paths.Add(new CpcvPath
+                {
+                    Number = j + 1,
+                    Available = false,
+                    UnavailableReason = "A split has no eligible training configuration or its selected test range is incomplete.",
+                });
+                continue;
             }
-
-            double mean = series.Length > 0 ? sum / series.Length : 0;
-            double sd = series.Length > 1 ? Math.Sqrt(Math.Max(0, (sq - series.Length * mean * mean) / (series.Length - 1))) : 0;
+            EquityPathSummary summary = default;
+            decimal equity = capital;
+            double sum = 0, sq = 0;
+            int exits = 0;
+            for (int group = 0; group < groups; group++)
+                for (int d = bounds[group]; d < bounds[group + 1]; d++)
+                {
+                    var day = daily[pieces[group][j]][d];
+                    summary = summary.Append(day.Path);
+                    decimal basis = Math.Max(capital, equity);
+                    double value = basis > 0 ? (double)(day.Path.Net / basis) : 0;
+                    equity += day.Path.Net;
+                    sum += value;
+                    sq += value * value;
+                    exits += day.ActualClosingFills;
+                }
+            double mean = sum / days;
+            double sd = days > 1 ? Math.Sqrt(Math.Max(0, (sq - days * mean * mean) / (days - 1))) : 0;
             paths.Add(new CpcvPath
             {
                 Number = j + 1,
-                Net = (decimal)Math.Round(sum, 2),
-                Sharpe = sd > 0 ? mean / sd * ann : 0,
-                MaxDrawdown = (decimal)Math.Round(dd, 2),
-                Days = series.Length,
+                Net = summary.Net,
+                Sharpe = sd > 0 ? mean / sd * annualization : 0,
+                MaxDrawdown = summary.MaxDrawdown,
+                Days = days,
+                ActualClosingFills = exits,
             });
         }
-
         return paths;
     }
 

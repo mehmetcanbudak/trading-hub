@@ -63,7 +63,18 @@ public sealed record ClosedTrade(
     string ExitName,
     int Bars)
 {
-    public decimal NetPnl => Pnl - Commission;
+    public decimal NetPnl => AttributionNet ?? Pnl - Commission;
+    public TradeAttribution Attribution { get; init; }
+    public decimal? AttributionNet { get; init; }
+    public DateTime? ActualEntryTime { get; init; }
+    public DateTime? WindowFrom { get; init; }
+    public DateTime? WindowTo { get; init; }
+    public decimal? OpeningMark { get; init; }
+    public decimal? ClosingMark { get; init; }
+    public decimal CarryNetCredit { get; init; }
+    public decimal CarryCommissionCredit { get; init; }
+    [JsonIgnore] public bool IsActualClosingFill => Attribution != TradeAttribution.WindowBoundaryValuation;
+    [JsonIgnore] public bool HasCompleteTradeEvidence => Attribution == TradeAttribution.Execution;
 
     /// <summary>
     /// Cómo venía el mercado al entrar (últimas 24 horas, con las velas que veía la estrategia): eficiencia de la tendencia
@@ -85,7 +96,10 @@ public sealed record ClosedTrade(
 public sealed record OpenPosition(bool IsLong, decimal Quantity, decimal AveragePrice, DateTime EntryTime);
 
 /// <summary>Un punto de la curva de capital.</summary>
-public readonly record struct EquityPoint(DateTime Time, decimal Equity, decimal Drawdown);
+public readonly record struct EquityPoint(DateTime Time, decimal Equity, decimal Drawdown)
+{
+    public DateTime? AvailableAt { get; init; }
+}
 
 /// <summary>Métricas de rendimiento.</summary>
 public sealed class PerformanceMetrics
@@ -95,7 +109,10 @@ public sealed class PerformanceMetrics
     public decimal GrossLoss { get; set; }
     public decimal Commission { get; set; }
     public decimal ProfitFactor { get; set; }
+    /// <summary>Actual closing fills, including partial closes and reversal closing legs, never boundary marks.</summary>
     public int TotalTrades { get; set; }
+    public int AttributionSamples { get; set; }
+    public PerformanceAttributionUnit AttributionUnit { get; set; }
     public int Winners { get; set; }
     public int Losers { get; set; }
     public decimal WinRate { get; set; }
@@ -122,7 +139,7 @@ public sealed class PerformanceMetrics
     /// <summary>Valor de la métrica elegida para optimizar.</summary>
     public double Fitness(FitnessMetric m) => m switch
     {
-        FitnessMetric.ProfitFactor => TotalTrades == 0 ? 0 : (double)Math.Min(ProfitFactor, 100),
+        FitnessMetric.ProfitFactor => AttributionSamples == 0 && TotalTrades == 0 ? 0 : (double)Math.Min(ProfitFactor, 100),
         FitnessMetric.Sharpe => SharpeRatio,
         FitnessMetric.Sortino => SortinoRatio,
         FitnessMetric.RecoveryFactor => (double)RecoveryFactor,
@@ -134,7 +151,13 @@ public sealed class PerformanceMetrics
 
     public static PerformanceMetrics Compute(IReadOnlyList<ClosedTrade> trades, IReadOnlyList<EquityPoint> equity, decimal capital, bool crypto, long barsInMarket, long totalBars)
     {
-        var m = new PerformanceMetrics { TotalTrades = trades.Count };
+        var m = new PerformanceMetrics
+        {
+            TotalTrades = trades.Count(t => t.IsActualClosingFill),
+            AttributionSamples = trades.Count,
+            AttributionUnit = trades.Any(t => t.Attribution != TradeAttribution.Execution)
+                ? PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation : PerformanceAttributionUnit.ClosingFill,
+        };
         int run = 0, maxW = 0, maxL = 0;
         decimal sumBars = 0;
         foreach (var t in trades)
@@ -144,7 +167,7 @@ public sealed class PerformanceMetrics
             m.Commission += t.Commission;
             if (t.IsLong) m.LongNetProfit += p;
             else m.ShortNetProfit += p;
-            sumBars += t.Bars;
+            if (t.IsActualClosingFill) sumBars += t.Bars;
             if (p > 0)
             {
                 m.Winners++;
@@ -172,7 +195,7 @@ public sealed class PerformanceMetrics
         m.AverageLoss = m.Losers > 0 ? -m.GrossLoss / m.Losers : 0;
         m.PayoffRatio = m.AverageLoss != 0 ? m.AverageWin / -m.AverageLoss : 0;
         m.Expectancy = trades.Count > 0 ? m.WinRate / 100 * m.AverageWin + (1 - m.WinRate / 100) * m.AverageLoss : 0;
-        m.AverageBarsInTrade = trades.Count > 0 ? sumBars / trades.Count : 0;
+        m.AverageBarsInTrade = m.TotalTrades > 0 ? sumBars / m.TotalTrades : 0;
         m.ReturnPercent = capital > 0 ? 100 * m.NetProfit / capital : 0;
         m.ExposurePercent = totalBars > 0 ? 100m * barsInMarket / totalBars : 0;
 
@@ -195,12 +218,14 @@ public sealed class PerformanceMetrics
         var daily = new List<double>();
         if (equity.Count > 1)
         {
-            DateOnly day = DateOnly.FromDateTime(equity[0].Time);
-            double start = (double)capital, prev = start, last = (double)equity[0].Equity;
-            double Return() => Math.Max(prev, start) is var basis && basis > 0 ? (last - prev) / basis : 0;
+            DateOnly day = DateOnly.FromDateTime(equity[0].AvailableAt ?? equity[0].Time);
+            decimal start = capital, prev = start, last = equity[0].Equity;
+            double Return() => m.AttributionUnit == PerformanceAttributionUnit.ClosingFill
+                ? Math.Max((double)prev, (double)start) is var basis && basis > 0 ? ((double)last - (double)prev) / basis : 0
+                : Math.Max(prev, start) is var exactBasis && exactBasis > 0 ? (double)((last - prev) / exactBasis) : 0;
             foreach (var e in equity)
             {
-                var d = DateOnly.FromDateTime(e.Time);
+                var d = DateOnly.FromDateTime(e.AvailableAt ?? e.Time);
                 if (d != day)
                 {
                     daily.Add(Return());
@@ -208,7 +233,7 @@ public sealed class PerformanceMetrics
                     day = d;
                 }
 
-                last = (double)e.Equity;
+                last = e.Equity;
             }
 
             daily.Add(Return());

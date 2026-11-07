@@ -50,10 +50,10 @@ internal sealed partial class StrategiesView
     private readonly Panel _resultsPanel = new();
     private Control _emptyResults = null!;
     private BacktestResult? _lastResult;
+    private readonly TextBlock _backtestInputEvidence = new() { Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
     private CancellationTokenSource? _cts;
     private TickData? _ticks;
     private string? _ticksKey;
-    private string _compiledSource = "";
 
     private const string TradeColumns = "44,62,128,96,128,96,64,96,84,84,56,*";
 
@@ -163,7 +163,7 @@ internal sealed partial class StrategiesView
         bottom.Children.Add(tabPanels);
 
         var results = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*") };
-        results.Children.Add(_kpis);
+        results.Children.Add(Ui.V(8, _kpis, _backtestInputEvidence));
         var eqCard = Ui.Card(_equity, 6);
         eqCard.Margin = new Thickness(0, 14);
         Grid.SetRow(eqCard, 1);
@@ -226,10 +226,18 @@ internal sealed partial class StrategiesView
             Cell(5, t.ExitPrice.ToString("0.#####", CultureInfo.InvariantCulture), right: true);
             Cell(6, t.Quantity.ToString("0.####", CultureInfo.InvariantCulture), right: true);
             Cell(7, Money(t.NetPnl), t.NetPnl >= 0 ? Ui.Up : Ui.Down, true);
-            Cell(8, Money(t.Mae), Ui.Text2, true);
-            Cell(9, Money(t.Mfe), Ui.Text2, true);
-            Cell(10, t.Bars.ToString(), Ui.Text2, true);
-            Cell(11, t.ExitName, Ui.Text1);
+            Cell(8, t.HasCompleteTradeEvidence ? Money(t.Mae) : "Unavailable", Ui.Text2, true);
+            Cell(9, t.HasCompleteTradeEvidence ? Money(t.Mfe) : "Unavailable", Ui.Text2, true);
+            Cell(10, t.HasCompleteTradeEvidence ? t.Bars.ToString() : "Unavailable", Ui.Text2, true);
+            Cell(11, t.Attribution switch
+            {
+                TradeAttribution.Execution => t.ExitName,
+                TradeAttribution.WindowClosingFill => "Closing-fill contribution",
+                TradeAttribution.WindowBoundaryValuation => "Boundary valuation",
+                _ => throw new ArgumentOutOfRangeException(nameof(t.Attribution), t.Attribution, "Unknown trade attribution."),
+            }, Ui.Text1);
+            if (!t.HasCompleteTradeEvidence)
+                ToolTip.SetTip(g, $"Attribution {t.Attribution}. Actual entry {t.ActualEntryTime:O}. Window {t.WindowFrom:O} to {t.WindowTo:O}. Opening mark {t.OpeningMark}. Closing mark {t.ClosingMark}. Carry net credit {t.CarryNetCredit}. Carry commission credit {t.CarryCommissionCredit}.");
             return g;
         });
         var dock = new DockPanel();
@@ -241,11 +249,17 @@ internal sealed partial class StrategiesView
     }
 
     private static string Money(decimal v) => v.ToString("+#,##0.00;-#,##0.00;0.00", Es);
+    private static string Money(decimal? v) => v.HasValue ? Money(v.Value) : "Unavailable";
 
     /// <summary>Pone esta estrategia (con sus parámetros) en el gráfico activo de Trading.</summary>
-    private async Task PutOnChartAsync()
+    private Task PutOnChartAsync() => _svc.Work.RunAsync(PutOnChartOwnedAsync);
+
+    private async Task PutOnChartOwnedAsync(CancellationToken stopping)
     {
-        if (_current?.Type == null && !await CompileAsync()) return;
+        if (_generation == null && !await CompileOwnedAsync(stopping)) return;
+        stopping.ThrowIfCancellationRequested();
+        var generation = _generation!;
+        var parameters = new Dictionary<string, object?>(_state.Parameters);
         if (TopLevel.GetTopLevel(this) is not TradingHub.App.Windows.MainWindow main || main.Trading.ActiveTab is not { Model: not null } tab)
         {
             _status("Open a chart in Trading first.");
@@ -253,17 +267,22 @@ internal sealed partial class StrategiesView
         }
 
         main.Navigate("trading");
-        await main.Trading.AddStrategyAsync(tab, _current!, _state.Parameters);
+        await main.Trading.AddStrategyAsync(tab, _current!, parameters, generation: generation);
     }
 
     /// <summary>Abre «Nueva estrategia en vivo» con esta estrategia y sus parámetros (en la sección En vivo).</summary>
-    private async Task OpenLiveLaunchAsync()
+    private Task OpenLiveLaunchAsync() => _svc.Work.RunAsync(OpenLiveLaunchOwnedAsync);
+
+    private async Task OpenLiveLaunchOwnedAsync(CancellationToken stopping)
     {
-        if (_current?.Type == null && !await CompileAsync()) return;
+        if (_generation == null && !await CompileOwnedAsync(stopping)) return;
+        stopping.ThrowIfCancellationRequested();
+        var generation = _generation!;
+        var parameters = new Dictionary<string, object?>(_state.Parameters);
         SaveState();
         if (TopLevel.GetTopLevel(this) is not TradingHub.App.Windows.MainWindow main) return;
         main.Navigate("live");
-        if (main.Page("live") is LiveView live) live.OpenLaunch(_current!.Id, _state.Parameters);
+        if (main.Page("live") is LiveView live) live.OpenLaunch(generation.Id, parameters, generation: generation);
     }
 
     // ===================================================================== datos disponibles
@@ -458,18 +477,15 @@ internal sealed partial class StrategiesView
         string root = AppPaths.Ticks;
         string key = $"{root}|{s.FeedId}|{s.Symbol}|{s.FromUtc:O}|{s.ToUtc:O}";
         var cached = _ticks;
-        if (cached != null && _ticksKey == key)
-        {
-            if (s.FeedId != IbBarImport.FeedId) return cached;
-            if (cached.StorageStamp is { } captured &&
-                captured == await Task.Run(() => IbBarStore.GetStamp(root, s.Symbol, s.FromUtc, s.ToUtc, ct), ct))
-                return cached;
-        }
+        if (cached != null && _ticksKey == key && await Task.Run(() => cached.IsCurrent(root, s.FromUtc, s.ToUtc, ct), ct))
+            return cached;
         var inst = await ResolveInstrumentAsync(s.FeedId, s.Symbol);
+        ct.ThrowIfCancellationRequested();
         _runStatus.Text = $"Loading trades for {s.Symbol}…";
         _runProgress.IsVisible = true;
         var progress = new Progress<double>(p =>
         {
+            if (ct.IsCancellationRequested || _svc.Work.IsStopping) return;
             _runProgress.Value = p;
             _runStatus.Text = $"Loading trades for {s.Symbol}… {p * 100:0}%";
         });
@@ -490,11 +506,11 @@ internal sealed partial class StrategiesView
     private void BuildParameterForm()
     {
         _paramsPanel.Children.Clear();
-        if (_current?.Type == null) return;
-        var desc = Strategy.Description(_current.Type);
+        if (_generation is not { } generation) return;
+        var desc = Strategy.Description(generation.Type);
         if (!string.IsNullOrWhiteSpace(desc)) _paramsPanel.Children.Add(new TextBlock { Text = desc, Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap });
         bool commonHeader = false;
-        foreach (var p in Strategy.Parameters(_current.Type))
+        foreach (var p in Strategy.Parameters(generation.Type))
         {
             if (p.DeclaringType == typeof(Strategy) && !commonHeader)
             {
@@ -570,15 +586,20 @@ internal sealed partial class StrategiesView
         _wfoButton.IsEnabled = !running;
     }
 
-    private async Task RunBacktestAsync()
+    private Task RunBacktestAsync() => _svc.Work.RunAsync(RunBacktestOwnedAsync);
+
+    private async Task RunBacktestOwnedAsync(CancellationToken stopping)
     {
-        if (_current?.Type == null && !await CompileAsync()) return;
-        var file = _current!;
+        if (_generation == null && !await CompileOwnedAsync(stopping)) return;
+        stopping.ThrowIfCancellationRequested();
+        var generation = _generation!;
+        var parameters = new Dictionary<string, object?>(_state.Parameters);
         var settings = ReadSettingsFromForm(validate: true);
         if (settings == null) return;
         SaveState();
-        _cts = new CancellationTokenSource();
-        var ct = _cts.Token;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stopping);
+        _cts = cancellation;
+        var ct = cancellation.Token;
         SetRunning(true, "Preparing…");
         try
         {
@@ -591,31 +612,33 @@ internal sealed partial class StrategiesView
 
             _runProgress.IsIndeterminate = true;
             _runStatus.Text = $"Simulating {data.Count:N0} trades…";
-            var strategy = file.Create();
-            strategy.SetParameters(_state.Parameters);
-            // el contexto de mercado arranca con el mes anterior, como en vivo (si no, las primeras horas no sabe si hay
-            // rango o tendencia y un filtro de contexto no bloquearía nada)
-            var res = await Task.Run(() => new BacktestEngine(strategy, data, settings) { ContextHistory = MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc) }.Run(ct), ct);
+            var strategy = generation.Create();
+            strategy.SetParameters(parameters);
+            var res = await Task.Run(() => new BacktestEngine(strategy, data, settings) { ContextHistory = MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc, ct) }.Run(ct), ct);
+            ct.ThrowIfCancellationRequested();
+            var evidence = RunInputEvidence.Capture(res, data);
+            _backtestInputEvidence.Text = InputEvidenceText(evidence);
             ShowResult(res);
             var run = new StrategyRun
             {
-                StrategyId = file.Id,
-                StrategyName = file.DisplayName,
+                StrategyId = generation.Id,
+                StrategyName = generation.DisplayName,
                 Kind = RunKind.Backtest,
                 Settings = settings,
                 Parameters = res.Parameters,
                 Metrics = res.Metrics,
                 Trades = res.Trades,
-                Equity = res.Equity.ToList(),
+                Equity = res.Equity,
                 Ticks = res.Ticks,
                 Bars = res.Bars,
                 Seconds = res.Seconds,
+                InputEvidence = evidence,
             };
-            if (res.Ok) StrategyStore.Save(run, _compiledSource.Length > 0 ? _compiledSource : File.ReadAllText(file.Path));
+            if (res.Ok) await Task.Run(() => StrategyStore.Save(run, generation.Source.Text), ct);
             SetRunning(false, res.Ok
                 ? $"{res.Metrics.TotalTrades} trades · {res.Ticks:N0} ticks · {res.Bars:N0} bars in {res.Seconds:0.0} s · saved to history"
                 : "Strategy failed: " + res.Error);
-            _status(res.Ok ? $"Backtest of {file.DisplayName}: {Money(res.Metrics.NetProfit)}" : "Backtest error: " + res.Error);
+            _status(res.Ok ? $"Backtest of {generation.DisplayName}: {Money(res.Metrics.NetProfit)}" : "Backtest error: " + res.Error);
         }
         catch (OperationCanceledException)
         {
@@ -626,6 +649,11 @@ internal sealed partial class StrategiesView
             SetRunning(false, "Error: " + ex.Message);
             CrashLog.Write(ex);
         }
+        finally
+        {
+            if (ReferenceEquals(_cts, cancellation)) _cts = null;
+            SetRunning(false, _runStatus.Text ?? "");
+        }
     }
 
     private void ShowResult(BacktestResult r)
@@ -634,13 +662,14 @@ internal sealed partial class StrategiesView
         _emptyResults.IsVisible = false;
         _resultsPanel.Children[0].IsVisible = true;
         var m = r.Metrics;
+        bool attributed = m.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation;
         _kpis.Children.Clear();
         _kpis.Children.Add(Kpi("Net PnL", Money(m.NetProfit), $"{m.ReturnPercent:0.##}% of capital", m.NetProfit >= 0 ? Ui.Up : Ui.Down));
-        _kpis.Children.Add(Kpi("Profit factor", m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es), $"{Money(m.GrossProfit)} / {Money(-m.GrossLoss)}", m.ProfitFactor >= 1.3m ? Ui.Up : m.ProfitFactor >= 1 ? Ui.Warn : Ui.Down));
-        _kpis.Children.Add(Kpi("Winners", $"{m.WinRate:0.#}%", $"{m.Winners} of {m.TotalTrades}", null));
+        _kpis.Children.Add(Kpi(attributed ? "Profit factor per contribution" : "Profit factor", m.ProfitFactor >= 999 ? "∞" : m.ProfitFactor.ToString("0.00", Es), $"{Money(m.GrossProfit)} / {Money(-m.GrossLoss)}", m.ProfitFactor >= 1.3m ? Ui.Up : m.ProfitFactor >= 1 ? Ui.Warn : Ui.Down));
+        _kpis.Children.Add(Kpi(attributed ? "Win rate per contribution" : "Winners", $"{m.WinRate:0.#}%", attributed ? $"{m.Winners} of {m.AttributionSamples} contributions" : $"{m.Winners} of {m.TotalTrades}", null));
         _kpis.Children.Add(Kpi("Max drawdown", Money(-m.MaxDrawdown), $"{m.MaxDrawdownPercent:0.##}% · recovery {m.RecoveryFactor:0.##}x", Ui.Down));
         _kpis.Children.Add(Kpi("Sharpe", m.SharpeRatio.ToString("0.00", Es), $"Sortino {m.SortinoRatio:0.00}", m.SharpeRatio >= 1 ? Ui.Up : null));
-        _kpis.Children.Add(Kpi("Expectancy", Money(m.Expectancy), $"avg. {Money(m.AverageWin)} / {Money(m.AverageLoss)}", m.Expectancy >= 0 ? Ui.Up : Ui.Down));
+        _kpis.Children.Add(Kpi(attributed ? "Expectancy per contribution" : "Expectancy", Money(m.Expectancy), $"avg. {Money(m.AverageWin)} / {Money(m.AverageLoss)}", m.Expectancy >= 0 ? Ui.Up : Ui.Down));
         _equity.SetData(r.Equity, r.Settings.InitialCapital);
         _tradesList.ItemsSource = r.Trades;
         FillMetrics(m, r);
@@ -656,6 +685,7 @@ internal sealed partial class StrategiesView
         if (color != null) v.Foreground = color;
         var card = Ui.Card(Ui.V(3, new TextBlock { Text = title.ToUpperInvariant(), Classes = { "h3" } }, v, new TextBlock { Text = sub, Classes = { "faint", "small" }, TextTrimming = TextTrimming.CharacterEllipsis }), 14);
         card.Width = 178;
+        ToolTip.SetTip(card, sub);
         return card;
     }
 
@@ -663,16 +693,23 @@ internal sealed partial class StrategiesView
     {
         _metricsGrid.Children.Clear();
         _metricsGrid.RowDefinitions.Clear();
+        bool attributed = m.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation;
         var rows = new (string, string)[]
         {
             ("Net PnL", Money(m.NetProfit)), ("Gross profit", Money(m.GrossProfit)), ("Gross loss", Money(-m.GrossLoss)), ("Commissions", Money(-m.Commission)),
-            ("Profit factor", m.ProfitFactor.ToString("0.00", Es)), ("Return", $"{m.ReturnPercent:0.##}%"), ("Trades", m.TotalTrades.ToString()), ("Winners / losers", $"{m.Winners} / {m.Losers}"),
-            ("% winners", $"{m.WinRate:0.##}%"), ("Average per trade", Money(m.AverageTrade)), ("Average profit", Money(m.AverageWin)), ("Average loss", Money(m.AverageLoss)),
-            ("Win/loss ratio", m.PayoffRatio.ToString("0.00", Es)), ("Expectancy", Money(m.Expectancy)), ("Largest profit", Money(m.LargestWin)), ("Largest loss", Money(m.LargestLoss)),
+            (attributed ? "Profit factor per contribution" : "Profit factor", m.ProfitFactor.ToString("0.00", Es)), ("Return", $"{m.ReturnPercent:0.##}%"), (attributed ? "Actual closing fills" : "Trades", m.TotalTrades.ToString()), (attributed ? "Winning / losing contributions" : "Winners / losers", $"{m.Winners} / {m.Losers}"),
+            (attributed ? "Win rate per contribution" : "% winners", $"{m.WinRate:0.##}%"), (attributed ? "Average per contribution" : "Average per trade", Money(m.AverageTrade)), ("Average profit", Money(m.AverageWin)), ("Average loss", Money(m.AverageLoss)),
+            ("Win/loss ratio", m.PayoffRatio.ToString("0.00", Es)), (attributed ? "Expectancy per contribution" : "Expectancy", Money(m.Expectancy)), ("Largest profit", Money(m.LargestWin)), ("Largest loss", Money(m.LargestLoss)),
             ("Longest winning streak", m.MaxConsecutiveWins.ToString()), ("Longest losing streak", m.MaxConsecutiveLosses.ToString()), ("Maximum drawdown", $"{Money(-m.MaxDrawdown)} ({m.MaxDrawdownPercent:0.##}%)"), ("Recovery factor", m.RecoveryFactor.ToString("0.00", Es)),
-            ("Sharpe (annual)", m.SharpeRatio.ToString("0.00", Es)), ("Sortino (annual)", m.SortinoRatio.ToString("0.00", Es)), ("Average bars in a trade", m.AverageBarsInTrade.ToString("0.#", Es)), ("Time in market", $"{m.ExposurePercent:0.#}%"),
+            ("Sharpe (annual)", m.SharpeRatio.ToString("0.00", Es)), ("Sortino (annual)", m.SortinoRatio.ToString("0.00", Es)), ("Average bars in a trade", attributed ? "Unavailable" : m.AverageBarsInTrade.ToString("0.#", Es)), ("Time in market", attributed ? "Unavailable" : $"{m.ExposurePercent:0.#}%"),
             ("Long PnL", Money(m.LongNetProfit)), ("Short PnL", Money(m.ShortNetProfit)), ("Simulated ticks", r.Ticks.ToString("N0", Es)), ("Candles", r.Bars.ToString("N0", Es)),
         };
+        if (attributed)
+            rows = rows.Concat(new[]
+            {
+                ("Attribution samples", m.AttributionSamples.ToString()),
+                ("Attribution unit", "Closing-fill contributions and final boundary valuations"),
+            }).ToArray();
         int half = (rows.Length + 1) / 2;
         for (int i = 0; i < half; i++) _metricsGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         for (int i = 0; i < rows.Length; i++)
@@ -692,7 +729,7 @@ internal sealed partial class StrategiesView
 
     private void RunMonteCarlo()
     {
-        if (_lastResult == null || _lastResult.Trades.Count < 2)
+        if (_lastResult == null || (_lastResult.Trades.All(t => t.HasCompleteTradeEvidence) && _lastResult.Trades.Count < 2))
         {
             _status("Monte Carlo requires at least two trades.");
             return;
@@ -701,10 +738,16 @@ internal sealed partial class StrategiesView
         var r = _lastResult;
         var mc = Optimizer.MonteCarlo(r.Trades, r.Settings.InitialCapital, 1000);
         _mcKpis.Children.Clear();
+        if (!mc.Available)
+        {
+            _mcKpis.Children.Add(new TextBlock { Text = mc.UnavailableReason ?? "Monte Carlo is unavailable.", Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap, MaxWidth = 650 });
+            _mcChart.SetData(Array.Empty<EquityPoint>(), r.Settings.InitialCapital);
+            return;
+        }
         _mcKpis.Children.Add(Kpi("Typical drawdown (50%)", Money(-mc.DrawdownP50), "half of simulated paths", null));
         _mcKpis.Children.Add(Kpi("DD probable (95%)", Money(-mc.DrawdownP95), "one in 20 paths is worse", Ui.Warn));
         _mcKpis.Children.Add(Kpi("Extreme DD (99%)", Money(-mc.DrawdownP99), $"worst observed {Money(-mc.WorstDrawdown)}", Ui.Down));
-        _mcKpis.Children.Add(Kpi("Risk of ruin", $"{mc.RuinProbabilityPercent:0.#}%", "paths with DD ≥ 50% of capital", mc.RuinProbabilityPercent > 5 ? Ui.Down : Ui.Up));
+        _mcKpis.Children.Add(Kpi("Risk of ruin", mc.RuinProbabilityPercent.HasValue ? $"{mc.RuinProbabilityPercent:0.#}%" : "Unavailable", "paths with DD ≥ 50% of capital", mc.RuinProbabilityPercent == null ? Ui.Warn : mc.RuinProbabilityPercent > 5 ? Ui.Down : Ui.Up));
         _mcChart.SetData(Array.Empty<EquityPoint>(), r.Settings.InitialCapital, mc.SampleCurves.Select(c => (IReadOnlyList<decimal>)c).ToList());
     }
 }

@@ -26,6 +26,9 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     private IDisposable? _subscription;
     private CancellationTokenSource? _cts;
     private TickRecorder? _recorder;
+    private readonly HashSet<Task> _recordingCompletions = new();
+    private bool _recordingStopped;
+    private Task? _recordingShutdown;
     private FeedStatus _status = FeedStatus.Disconnected;
     private string? _statusMessage;
     private volatile bool _statusDirty;
@@ -164,11 +167,16 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         ReceiveStatus(generation, FeedStatus.Connecting, "Connecting…");
 
         RecordingWarning = null;
-        if (Feed.IsLive && RecordingRoot != null && RecordLive)
+        lock (_lifecycle)
         {
-            _recorder = new TickRecorder(RecordingRoot, Instrument);
-            if (!_recorder.IsActive)
-                RecordingWarning = "Live recording unavailable: another history writer owns this instrument. Market data remains readable, but new ticks are not being saved.";
+            if (!_recordingStopped && Feed.IsLive && RecordingRoot != null && RecordLive)
+            {
+                _recordingCompletions.RemoveWhere(task => task.IsCompletedSuccessfully);
+                _recorder = new TickRecorder(RecordingRoot, Instrument);
+                _recordingCompletions.Add(_recorder.Completion);
+                if (!_recorder.IsActive)
+                    RecordingWarning = "Live recording unavailable: another history writer owns this instrument. Market data remains readable, but new ticks are not being saved.";
+            }
         }
 
         // 1) vivo primero (se acumula mientras carga la historia)
@@ -659,12 +667,18 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             OpenInterest.Clear();
             OpenInterest.Availability = OpenInterestAvailability.Unavailable;
         }
-        cts?.Cancel();
-        cts?.Dispose();
-        subscription?.Dispose();
-        openInterestSubscription?.Dispose();
-        recorder?.Dispose();
-        DepthHistory.Stop(Feed.Now);
+        try
+        {
+            cts?.Cancel();
+            cts?.Dispose();
+            subscription?.Dispose();
+            openInterestSubscription?.Dispose();
+        }
+        finally
+        {
+            try { recorder?.Dispose(); }
+            finally { DepthHistory.Stop(Feed.Now); }
+        }
     }
 
     private static IEnumerable<DateOnly> EachDay(DateTime fromUtc, DateTime toUtc)
@@ -1102,12 +1116,28 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         }
     }
 
+    /// <summary>Closes recording admission and owns every recorder, including those detached by earlier stops.</summary>
+    public Task StopRecordingAsync()
+    {
+        lock (_lifecycle)
+        {
+            if (_recordingShutdown != null) return _recordingShutdown;
+            _recordingStopped = true;
+            _recorder?.StopAsync();
+            _recorder = null;
+            return _recordingShutdown = Task.WhenAll(_recordingCompletions);
+        }
+    }
+
     public void Dispose()
     {
         if (Feed is IHistoryRefreshFeed refresh) refresh.HistoryInvalidated -= OnHistoryInvalidated;
-        Stop();
-        _disposed = true;
-        DepthHistory.Dispose();
+        try { Stop(); }
+        finally
+        {
+            _disposed = true;
+            DepthHistory.Dispose();
+        }
     }
 }
 
@@ -1118,7 +1148,12 @@ public sealed class TickRecorder : IDisposable
     private readonly Instrument _instrument;
     private readonly BlockingCollection<Trade> _queue = new(new ConcurrentQueue<Trade>(), 1_000_000);
     private readonly Thread? _thread;
+    private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly FileStream? _lock;
+    private readonly HistoryWriteOwnership? _ownership;
+    private readonly Dictionary<DateOnly, int> _pendingDays = new();
+    private readonly List<DateOnly> _acceptDays = new();
+    private DateOnly? _openDay;
     private TickFile.Writer? _writer;
     private DateOnly _day;
     private readonly object _writeGate = new();
@@ -1138,11 +1173,21 @@ public sealed class TickRecorder : IDisposable
             _lock = ownership.StartRecorder();
         }
         else _lock = TickFile.TryLock(root, instrument.FeedId, instrument.Symbol, recordingWriter: true);
-        if (_lock == null) return;
-        _thread = new Thread(Run) { IsBackground = true, Name = "recorder-" + instrument.Symbol };
-        try { _thread.Start(); }
+        if (_lock == null)
+        {
+            _completion.TrySetResult();
+            return;
+        }
+        try
+        {
+            if (instrument.FeedId != IbBarImport.FeedId)
+                _ownership = HistoryWriteOwnership.AcquireDays(root, instrument.FeedId, instrument.Symbol, []);
+            _thread = new Thread(Run) { IsBackground = true, Name = "recorder-" + instrument.Symbol };
+            _thread.Start();
+        }
         catch
         {
+            _ownership?.Dispose();
             _lock.Dispose();
             _leaseReleased = true;
             throw;
@@ -1152,18 +1197,55 @@ public sealed class TickRecorder : IDisposable
     /// <summary>Owns the writer lease, including any asynchronous drain after a bounded Dispose.</summary>
     public bool IsActive => _lock != null && !_leaseReleased;
 
+    /// <summary>Settles only after accepted rows, writer disposal and physical lease release. Recording failures fault it.</summary>
+    public Task Completion => _completion.Task;
+
     public void WriteLive(IReadOnlyList<Trade> trades)
     {
         lock (_writeGate)
         {
             if (_lock == null || _closed) return;
+            if (_ownership != null)
+            {
+                _acceptDays.Clear();
+                foreach (var trade in trades)
+                {
+                    if (trade.Id < 0) continue;
+                    var day = DateOnly.FromDateTime(trade.Time);
+                    if (!_pendingDays.ContainsKey(day) && !_acceptDays.Contains(day)) _acceptDays.Add(day);
+                }
+                try { if (_acceptDays.Count > 0) _ownership.ReserveDays(_acceptDays); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    Error = "Tick recording could not reserve incoming history: " + error.Message;
+                    return;
+                }
+                foreach (var day in _acceptDays) _pendingDays.Add(day, 0);
+            }
             foreach (var trade in trades)
-                if (trade.Id >= 0 && !_queue.TryAdd(trade))
+            {
+                if (trade.Id < 0) continue;
+                var day = DateOnly.FromDateTime(trade.Time);
+                if (_ownership != null) _pendingDays[day]++;
+                if (!_queue.TryAdd(trade))
+                {
+                    if (_ownership != null) _pendingDays[day]--;
                     Error = "Tick recording queue is full; some live observations were not saved.";
+                }
+            }
+            if (_ownership != null)
+                foreach (var day in _acceptDays) ReleaseUnusedDay(day);
         }
     }
 
     public void WriteHistory(IReadOnlyList<Trade> trades) => WriteLive(trades);
+
+    private void ReleaseUnusedDay(DateOnly day)
+    {
+        if (_openDay == day || !_pendingDays.TryGetValue(day, out int pending) || pending != 0) return;
+        _pendingDays.Remove(day);
+        _ownership!.ReleaseDay(day);
+    }
 
     private void Run()
     {
@@ -1172,25 +1254,46 @@ public sealed class TickRecorder : IDisposable
             foreach (var t in _queue.GetConsumingEnumerable())
             {
                 var day = DateOnly.FromDateTime(t.Time);
-                if (_writer == null || day != _day)
+                if (_writer == null || day != _day || (!_writer.IncludesProvenance && TickFile.RequiresExtended(t)))
                 {
-                    _writer?.Dispose();
+                    var previousWriter = _writer;
+                    _writer = null;
+                    previousWriter?.Dispose();
+                    if (_ownership != null)
+                    {
+                        lock (_writeGate)
+                        {
+                            var previousDay = _openDay;
+                            _openDay = day;
+                            if (previousDay is { } closedDay) ReleaseUnusedDay(closedDay);
+                        }
+                    }
                     _day = day;
                     var path = TickFile.DayPath(_root, _instrument.FeedId, _instrument.Symbol, day);
-                    TickArchive.EnsureRawDay(path);
-                    if (TickFile.RequiresExtended(t)) TickFile.EnsureProvenanceFormat(path, _instrument);
-                    _writer = new TickFile.Writer(path, _instrument, includeProvenance: !File.Exists(path));
-                }
-                if (!_writer.IncludesProvenance && TickFile.RequiresExtended(t))
-                {
-                    _writer.Dispose();
-                    var path = TickFile.DayPath(_root, _instrument.FeedId, _instrument.Symbol, day);
-                    TickFile.EnsureProvenanceFormat(path, _instrument);
-                    _writer = new TickFile.Writer(path, _instrument);
+                    if (_ownership == null)
+                    {
+                        TickArchive.EnsureRawDay(path);
+                        if (TickFile.RequiresExtended(t)) TickFile.EnsureProvenanceFormat(path, _instrument);
+                        _writer = new TickFile.Writer(path, _instrument, includeProvenance: !File.Exists(path));
+                    }
+                    else
+                    {
+                        TickArchive.EnsureRawDay(path, _ownership);
+                        if (TickFile.RequiresExtended(t)) TickFile.EnsureProvenanceFormat(path, _instrument, _ownership);
+                        _writer = new TickFile.Writer(path, _instrument, _ownership, includeProvenance: !File.Exists(path));
+                    }
                 }
 
                 _writer.Write(t);
                 if (_queue.Count == 0) _writer.Flush();
+                if (_ownership != null)
+                {
+                    lock (_writeGate)
+                    {
+                        _pendingDays[day]--;
+                        ReleaseUnusedDay(day);
+                    }
+                }
             }
         }
         catch (Exception error)
@@ -1199,30 +1302,51 @@ public sealed class TickRecorder : IDisposable
         }
         finally
         {
-            lock (_writeGate)
-            {
-                _closed = true;
-                if (!_queue.IsAddingCompleted) _queue.CompleteAdding();
-            }
+            CloseAdmission();
             try { _writer?.Dispose(); }
             catch (Exception error) { Error = "Tick recording could not finish saving: " + error.Message; }
+            bool leasesReleased = false;
+            try
+            {
+                _ownership?.Dispose();
+                leasesReleased = true;
+            }
+            catch (Exception error) { Error = "Tick recording could not finish saving: " + error.Message; }
+            try { _lock?.Dispose(); }
+            catch (Exception error)
+            {
+                leasesReleased = false;
+                Error = "Tick recording could not finish saving: " + error.Message;
+            }
             finally
             {
-                _lock?.Dispose();
-                _leaseReleased = true;
+                _leaseReleased = leasesReleased;
+                if (Error is { } error) _completion.TrySetException(new IOException(error));
+                else _completion.TrySetResult();
             }
         }
     }
 
-    public void Dispose()
+    private bool CloseAdmission()
     {
         lock (_writeGate)
         {
-            if (_closed) return;
+            if (_closed) return false;
             _closed = true;
             _queue.CompleteAdding();
+            return true;
         }
-        _thread?.Join(2000);
+    }
+
+    public Task StopAsync()
+    {
+        CloseAdmission();
+        return Completion;
+    }
+
+    public void Dispose()
+    {
+        if (CloseAdmission()) _thread?.Join(2000);
     }
 }
 
@@ -1230,6 +1354,10 @@ public sealed class TickRecorder : IDisposable
 public sealed class MarketDataHub : IDisposable
 {
     private readonly Dictionary<string, InstrumentData> _items = new();
+    private readonly object _recordingGate = new();
+    private readonly HashSet<Task> _recordingDrains = new();
+    private bool _recordingStopped;
+    private Task? _recordingShutdown;
 
     public string? RecordingRoot { get; set; }
     public DepthRecordingOptions DepthRecording { get; set; } = new();
@@ -1247,24 +1375,29 @@ public sealed class MarketDataHub : IDisposable
 
     public InstrumentData GetOrStart(IMarketDataFeed feed, Instrument instrument, TimeSpan history)
     {
-        string key = feed is IDataScopeFeed scope ? instrument.Key + "\u001f" + scope.DataScopeKey : instrument.Key;
-        if (_items.TryGetValue(key, out var d))
+        InstrumentData data;
+        lock (_recordingGate)
         {
-            if (feed is IDataScopeFeed && !ReferenceEquals(d.Feed, feed))
-                throw new InvalidOperationException("An active data scope is already bound to a different feed instance. Use the stable scoped feed or a new configuration scope.");
-            return d;
+            string key = feed is IDataScopeFeed scope ? instrument.Key + "\u001f" + scope.DataScopeKey : instrument.Key;
+            if (_items.TryGetValue(key, out var existing))
+            {
+                if (feed is IDataScopeFeed && !ReferenceEquals(existing.Feed, feed))
+                    throw new InvalidOperationException("An active data scope is already bound to a different feed instance. Use the stable scoped feed or a new configuration scope.");
+                return existing;
+            }
+            ObjectDisposedException.ThrowIf(_recordingStopped, this);
+            data = new InstrumentData(instrument, feed)
+            {
+                RecordingRoot = RecordingRoot, RecordLive = RecordLive, TickWindow = TickWindow,
+                RawTradeLimit = Math.Clamp(MaxDiskTrades, 1_000, 30_000_000), CompactRoot = CompactRoot,
+                UseCompactHistory = UseCompactHistory, CompactMinutes = CompactMinutes,
+                CompactTradeLimit = Math.Clamp(MaxCompactTrades, 1_000, 5_000_000),
+                DepthRecording = DepthRecording,
+            };
+            _items[key] = data;
         }
-        d = new InstrumentData(instrument, feed)
-        {
-            RecordingRoot = RecordingRoot, RecordLive = RecordLive, TickWindow = TickWindow,
-            RawTradeLimit = Math.Clamp(MaxDiskTrades, 1_000, 30_000_000), CompactRoot = CompactRoot,
-            UseCompactHistory = UseCompactHistory, CompactMinutes = CompactMinutes,
-            CompactTradeLimit = Math.Clamp(MaxCompactTrades, 1_000, 5_000_000),
-            DepthRecording = DepthRecording,
-        };
-        _items[key] = d;
-        d.Start(feed.Now - history);
-        return d;
+        data.Start(feed.Now - history);
+        return data;
     }
 
     public void Release(InstrumentData data)
@@ -1283,9 +1416,29 @@ public sealed class MarketDataHub : IDisposable
         foreach (var d in _items.Values) d.Reconnect();
     }
 
+    /// <summary>Closes fresh recording admission before terminal waits, without prematurely disposing feed subscriptions.</summary>
+    public Task StopRecordingAsync()
+    {
+        lock (_recordingGate)
+        {
+            if (_recordingShutdown != null) return _recordingShutdown;
+            _recordingStopped = true;
+            _recordingDrains.RemoveWhere(task => task.IsCompletedSuccessfully);
+            foreach (var data in _items.Values) _recordingDrains.Add(data.StopRecordingAsync());
+            return _recordingShutdown = Task.WhenAll(_recordingDrains);
+        }
+    }
+
     public void Dispose()
     {
-        foreach (var d in _items.Values) d.Dispose();
-        _items.Clear();
+        InstrumentData[] items;
+        lock (_recordingGate)
+        {
+            items = _items.Values.ToArray();
+            _recordingDrains.RemoveWhere(task => task.IsCompletedSuccessfully);
+            foreach (var data in items) _recordingDrains.Add(data.StopRecordingAsync());
+            _items.Clear();
+        }
+        foreach (var data in items) data.Dispose();
     }
 }

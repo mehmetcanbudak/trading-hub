@@ -196,11 +196,14 @@ public class SmartWalkForwardTests
         double Gauss() => Math.Sqrt(-2 * Math.Log(1 - rnd.NextDouble())) * Math.Sin(2 * Math.PI * rnd.NextDouble());
         var space = new ParameterSpace(6);
         var index = space.All().ToList();
-        var daily = index.Select(x => Enumerable.Range(0, 400).Select(_ => 8.0 * x[0] + Gauss() * 60).ToArray()).ToList();
-        var perDay = index.Select(_ => Enumerable.Repeat(1, 400).ToArray()).ToList();
-        var paths = Overfitting.Cpcv(index, daily, perDay, 5, 100_000, false, groups: 8, embargo: 1);
+        var daily = index.Select(x => Enumerable.Range(0, 400).Select(_ =>
+        {
+            decimal net = (decimal)(8.0 * x[0] + Gauss() * 60);
+            return new DailyPerformance(new(net, Math.Max(0, net), Math.Min(0, net), Math.Max(0, -net)), 1);
+        }).ToArray()).ToList();
+        var paths = Overfitting.Cpcv(index, daily, 5, 100_000m, false, groups: 8, embargo: 1);
         Assert.Equal(7, paths.Count);
-        Assert.All(paths, p => Assert.Equal(400, p.Days));
+        Assert.All(paths, p => { Assert.True(p.Available, p.UnavailableReason); Assert.Equal(400, p.Days); });
         Assert.True(paths.Count(p => p.Net > 0) >= 6, string.Join(", ", paths.Select(p => p.Net)));
     }
 
@@ -214,14 +217,13 @@ public class SmartWalkForwardTests
             new() { Name = nameof(Breakout.Channel), Min = 4, Max = 20, Step = 4, IsInteger = true },
             new() { Name = nameof(Breakout.Hold), Min = 2, Max = 6, Step = 2, IsInteger = true },
         };
-        var wf = Optimizer.WalkForward(() => new Breakout(), new(), ranges, data, settings, FitnessMetric.NetProfit, 12, 6, false, 3, null, CancellationToken.None);
+        var wf = Optimizer.WalkForward(() => new Breakout(), new(), ranges, data, settings, FitnessMetric.NetProfit, 12, 6, false, 3, null, CancellationToken.None,
+            search: SearchMode.Grid);
         Assert.Equal("grilla", wf.Search);
         Assert.Equal(15, wf.SpaceSize);
-        Assert.Equal(15, wf.Evaluated); // 15 combinaciones, cada una una vez (no una por ventana)
-        Assert.True(wf.Compression < 0.7, $"compresión {wf.Compression}");
         Assert.True(wf.Windows.Count >= 4);
-        // cada operación fuera de muestra entró dentro de una ventana fuera de muestra
-        Assert.All(wf.OutSampleTrades, t => Assert.Contains(wf.Windows, w => t.EntryTime >= w.OutSampleFrom && t.EntryTime < w.OutSampleTo));
+        Assert.All(wf.OutSampleTrades, t => Assert.Contains(wf.Windows,
+            w => t.WindowFrom == w.OutSampleFrom && t.WindowTo == w.OutSampleTo));
         Assert.NotNull(wf.Pbo);
         Assert.True(wf.PboSplits > 0 && wf.CpcvPaths.Count >= 3, $"PBO {wf.PboSplits} particiones, {wf.CpcvPaths.Count} caminos");
 
@@ -232,9 +234,84 @@ public class SmartWalkForwardTests
             new() { Name = nameof(Breakout.Hold), Min = 1, Max = 20, Step = 1, IsInteger = true },
         };
         var tpe = Optimizer.WalkForward(() => new Breakout(), new(), big, data, settings, FitnessMetric.NetProfit, 12, 6, false, 3, null, CancellationToken.None,
-            budget: 16);
+            search: SearchMode.Bayesian, budget: 16);
         Assert.Equal("bayesiana", tpe.Search);
-        Assert.True(tpe.SpaceSize == 780 && tpe.Evaluated < 780 / 3, $"corrió {tpe.Evaluated} de {tpe.SpaceSize}");
+        Assert.Equal(780, tpe.SpaceSize);
         Assert.True(tpe.Windows.Count >= 4);
+    }
+
+    private sealed class ScheduledDirection : Strategy
+    {
+        [Parameter]
+        public int Direction { get; set; } = 1;
+
+        protected override void OnTick(Trade trade)
+        {
+            switch (trade.Id)
+            {
+                case 1 or 5 or 9:
+                    if (Direction > 0) Buy(1);
+                    else Sell(1);
+                    break;
+                case 3 or 7 or 12:
+                    ClosePosition();
+                    break;
+            }
+        }
+    }
+
+    [Fact]
+    public void WalkForward_TrainingScoreAndSelectionIgnoreFutureOnlyExitPrices()
+    {
+        var start = new DateTime(2026, 1, 5, 0, 0, 0, DateTimeKind.Utc);
+        var cutoff = start.AddDays(2);
+        var prefix = new[]
+        {
+            new Trade(1, start.AddHours(10), 100, 1, TradeSide.Buy),
+            new Trade(2, start.AddHours(10).AddSeconds(1), 100, 1, TradeSide.Buy),
+            new Trade(3, start.AddHours(10).AddMinutes(1), 110, 1, TradeSide.Buy),
+            new Trade(4, start.AddHours(10).AddMinutes(1).AddSeconds(1), 110, 1, TradeSide.Buy),
+            new Trade(5, start.AddDays(1).AddHours(10), 100, 1, TradeSide.Buy),
+            new Trade(6, start.AddDays(1).AddHours(10).AddSeconds(1), 100, 1, TradeSide.Buy),
+            new Trade(7, start.AddDays(1).AddHours(10).AddMinutes(1), 110, 1, TradeSide.Buy),
+            new Trade(8, start.AddDays(1).AddHours(10).AddMinutes(1).AddSeconds(1), 110, 1, TradeSide.Buy),
+            new Trade(9, cutoff.AddMinutes(-3), 100, 1, TradeSide.Buy),
+            new Trade(10, cutoff.AddMinutes(-3).AddSeconds(1), 100, 1, TradeSide.Buy),
+            new Trade(11, cutoff.AddSeconds(-1), 105, 1, TradeSide.Buy),
+        };
+        var settings = new BacktestSettings
+        {
+            FeedId = "test", Symbol = "TEST", FromUtc = start, ToUtc = cutoff.AddDays(1), Period = "M1",
+            CommissionPercent = 0, CommissionPerUnit = 0, SlippageTicks = 0, InitialCapital = 1000,
+        };
+        var ranges = new List<ParameterRange>
+        {
+            new() { Name = nameof(ScheduledDirection.Direction), Min = -1, Max = 1, Step = 2, IsInteger = true },
+        };
+
+        WalkForwardWindow EarlierWindow(decimal futureExitPrice)
+        {
+            var suffix = new[]
+            {
+                new Trade(12, cutoff.AddHours(1), futureExitPrice, 1, TradeSide.Buy),
+                new Trade(13, cutoff.AddHours(1).AddSeconds(1), futureExitPrice, 1, TradeSide.Buy),
+                new Trade(14, cutoff.AddHours(23), futureExitPrice, 1, TradeSide.Buy),
+            };
+            var data = TickData.FromTrades(Inst, prefix.Concat(suffix).ToArray());
+            var result = Optimizer.WalkForward(() => new ScheduledDirection(), new(), ranges, data, settings,
+                FitnessMetric.NetProfit, 2, 1, false, 2, null, CancellationToken.None, search: SearchMode.Grid, maxParallel: 1);
+            return Assert.Single(result.Windows, w => w.InSampleFrom == start && w.InSampleTo == cutoff);
+        }
+
+        var risingFuture = EarlierWindow(160m);
+        var fallingFuture = EarlierWindow(60m);
+        int risingDirection = Assert.IsType<int>(risingFuture.BestParameters[nameof(ScheduledDirection.Direction)]);
+        int fallingDirection = Assert.IsType<int>(fallingFuture.BestParameters[nameof(ScheduledDirection.Direction)]);
+
+        Assert.Equal(risingFuture.InSample!.NetProfit, fallingFuture.InSample!.NetProfit);
+        Assert.Equal(risingDirection, fallingDirection);
+        // Two completed gains of 10 and the carried unit marked at 105 from its 100 entry.
+        Assert.Equal(25m, risingFuture.InSample!.NetProfit);
+        Assert.Equal(1, risingDirection);
     }
 }

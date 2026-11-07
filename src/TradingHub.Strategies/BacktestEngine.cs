@@ -25,6 +25,8 @@ public sealed class BacktestEngine : IStrategyHost
     private readonly List<ClosedTrade> _trades = new();
     private readonly List<EquityPoint> _equity = new();
     private readonly List<string> _log = new();
+    private AccountingTrace? _accounting;
+    private AccountingEntry? _accountingEntry;
     private BarBuilder _builder = null!;
     private long _nextId = 1;
     private int _index;
@@ -65,6 +67,14 @@ public sealed class BacktestEngine : IStrategyHost
     /// </summary>
     public IReadOnlyList<(DateTime Time, decimal Close)>? ContextHistory { get; init; }
 
+    internal AccountingTrace RunWindows(IReadOnlyList<DateTime> cutoffs, CancellationToken ct)
+    {
+        _accounting = new AccountingTrace(cutoffs, _equity);
+        var result = Run(ct);
+        _accounting.Error = result.Error;
+        return _accounting;
+    }
+
     /// <summary>Corre la estrategia completa.</summary>
     public BacktestResult Run(CancellationToken ct = default)
     {
@@ -76,21 +86,22 @@ public sealed class BacktestEngine : IStrategyHost
             SourceIdentity = _data.SourceIdentity, CorrectionRevision = _data.CorrectionRevision,
             HasKnownAvailability = _data.HasKnownAvailability,
         };
+        bool initialized = false, stopped = false;
         try
         {
-            if (!_data.HasKnownAvailability)
+            if (_accounting == null && !_data.HasKnownAvailability)
             {
                 result.DataWarning = "Source availability is unknown. Reimport declared source timing before running a causal backtest.";
                 throw new InvalidOperationException(result.DataWarning);
             }
             CandleSeries? resolutionHelper = null;
-            if (_data.ResolutionSeconds > 0)
+            if (_data.ResolutionSeconds > 0 && (_accounting == null || _period.IsTimeBased))
             {
                 if (!_period.IsTimeBased)
                     throw new InvalidOperationException("Interval summaries require time bars containing the complete source window.");
                 resolutionHelper = new CandleSeries(_inst, _period, 1, _session);
                 long lastFrom = long.MinValue, lastTo = long.MinValue;
-                for (int i = _data.Start; i < _data.End; i++)
+                for (int i = _data.Start; _accounting == null && i < _data.End; i++)
                 {
                     if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
                     var provenance = _data.Provenance(i);
@@ -102,7 +113,7 @@ public sealed class BacktestEngine : IStrategyHost
                     lastFrom = window.From.Ticks; lastTo = window.To.Ticks;
                 }
             }
-            var causalOrder = _data.GetCausalOrder();
+            var causalOrder = _accounting == null ? _data.GetCausalOrder() : null;
             if ((_data.Quality & (DataQuality.Compact | DataQuality.Synthetic)) != 0)
             {
                 result.DataWarning = "This run contains compact or synthetic events, not individual observed trades. Input-event counts and intrabar paths may be estimates. Orders cannot fill from interval facts predating their submission; same-window anchors cannot execute a newly learned close signal.";
@@ -114,6 +125,7 @@ public sealed class BacktestEngine : IStrategyHost
                 _log.Add(result.DataWarning);
             }
             _strategy.InternalInit(this);
+            initialized = true;
             if (ContextHistory is { Count: > 0 } history && _data.End > _data.Start)
             {
                 long first = _data.TimeTicks(_data.Start);
@@ -124,14 +136,29 @@ public sealed class BacktestEngine : IStrategyHost
             result.Parameters = _strategy.GetParameters();
             _builder = new BarBuilder(_inst, _period, _session, _strategy.UseFootprint, resolutionHelper);
             bool ticks = _strategy.WantsTicks;
+            using var accountingInputs = _accounting == null ? null : AccountingInputs.Enumerate(_data, ct).GetEnumerator();
             for (int offset = 0; offset < _data.Count; offset++)
             {
                 if ((offset & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
-                int i = causalOrder?[offset] ?? _data.Start + offset;
+                if (accountingInputs != null && !accountingInputs.MoveNext()) break;
+                int i = accountingInputs?.Current.Index ?? causalOrder?[offset] ?? _data.Start + offset;
+                long availableTicks = accountingInputs?.Current.AvailableTicks ?? _data.AvailableTimeTicks(i);
+                if (_accounting != null)
+                {
+                    if (availableTicks >= _accounting.NextCutoffTicks)
+                        _accounting.CaptureThrough(availableTicks, CaptureAccounting());
+                    if (!_accounting.Accepting) break;
+                    if (accountingInputs!.Current.TimingError is { } timingError)
+                        throw new InvalidOperationException("The source timing window is invalid.", timingError);
+                    var source = _data.Provenance(i);
+                    if (!source.HasKnownAvailability)
+                        throw new InvalidOperationException("Source availability is unknown. Reimport declared source timing before running a causal backtest.");
+                    if (source.ResolutionSeconds > 0 && (resolutionHelper == null || !resolutionHelper.IsResolutionCompatible(_data.TimeTicks(i), source)))
+                        throw new InvalidOperationException("The requested period does not contain the complete source interval. Use an aligned time period at least as coarse as its source.");
+                }
                 _index = _data.Start + offset;
                 long t = _data.TimeTicks(i), p = _data.PriceTicks(i);
                 var provenance = _data.Provenance(i);
-                long availableTicks = _data.AvailableTimeTicks(i);
                 _timeTicks = Math.Max(_timeTicks, availableTicks);
 
                 // 1) cierre de vela (la estrategia decide con lo que había hasta el cierre)
@@ -173,6 +200,7 @@ public sealed class BacktestEngine : IStrategyHost
                     _strategy.InternalTick(_data.Get(i));
                 }
             }
+            _accounting?.CaptureThrough(long.MaxValue, CaptureAccounting());
 
             var last = _builder.Flush();
             if (last != null) OnBarClosed(last);
@@ -184,6 +212,7 @@ public sealed class BacktestEngine : IStrategyHost
             }
 
             if (_pos != 0) result.OpenPosition = new OpenPosition(_pos > 0, Math.Abs(_pos), _avg, _entryTime);
+            stopped = true;
             _strategy.InternalStop();
             AddEquity(Time);
         }
@@ -198,9 +227,27 @@ public sealed class BacktestEngine : IStrategyHost
         }
         finally
         {
+            if (_accounting != null && initialized && !stopped)
+            {
+                try { _strategy.InternalStop(); }
+                catch (Exception ex)
+                {
+                    result.Error ??= $"{ex.GetType().Name}: {ex.Message}";
+                    _log.Add("ERROR " + ex);
+                }
+            }
             // Release owned streaming buffers on success, cancellation and user-code failures.
             // This does not invoke OnStop again or change any order lifecycle.
-            _strategy.DisposeIndicators();
+            if (_accounting == null) _strategy.DisposeIndicators();
+            else
+            {
+                try { _strategy.DisposeIndicators(); }
+                catch (Exception ex)
+                {
+                    result.Error ??= $"{ex.GetType().Name}: {ex.Message}";
+                    _log.Add("ERROR " + ex);
+                }
+            }
         }
 
         result.Trades = _trades;
@@ -208,7 +255,8 @@ public sealed class BacktestEngine : IStrategyHost
         result.Log = _log;
         result.Ticks = _data.Count;
         result.Bars = _bars.Count;
-        result.Metrics = PerformanceMetrics.Compute(_trades, _equity, _s.InitialCapital, _crypto, _barsInMarket, _bars.Count);
+        if (_accounting == null)
+            result.Metrics = PerformanceMetrics.Compute(_trades, _equity, _s.InitialCapital, _crypto, _barsInMarket, _bars.Count);
         result.Seconds = sw.Elapsed.TotalSeconds;
         return result;
     }
@@ -239,10 +287,16 @@ public sealed class BacktestEngine : IStrategyHost
 
     private void AddEquity(DateTime time)
     {
-        decimal eq = _s.InitialCapital + _realized + OpenPnL - _commissionOpen;
+        if (_accounting is { Accepting: false }) return;
+        decimal eq = MarkedEquity;
         _peak = Math.Max(_peak, eq);
-        _equity.Add(new EquityPoint(time, eq, _peak - eq));
+        _equity.Add(new EquityPoint(time, eq, _peak - eq) { AvailableAt = _accounting == null ? null : Time });
     }
+
+    private decimal MarkedEquity => _s.InitialCapital + _realized + OpenPnL - _commissionOpen;
+
+    private AccountingState CaptureAccounting() => new(_pos, _avg, _realized, _commissionOpen,
+        _commissionTotal, OpenPnL, LastPrice, MarkedEquity, _accountingEntry, _bars.Count);
 
     // ----------------------------------------------------------------- ejecuciones
 
@@ -299,6 +353,9 @@ public sealed class BacktestEngine : IStrategyHost
             foreach (var other in _orders.Where(x => x.OcoGroup == o.OcoGroup).ToList()) Cancel(other);
         }
 
+        decimal beforeQuantity = _pos, beforeRealized = _realized;
+        decimal closeQty = 0, entryComm = 0, exitComm = 0, flatEquity = 0;
+        ClosedTrade? closingTrade = null;
         decimal commission = qty * _s.CommissionPerUnit + Math.Abs(qty * price * _pointValue) * _s.CommissionPercent / 100m;
         _commissionTotal += commission;
         decimal signed = o.Side == OrderSide.Buy ? qty : -qty;
@@ -311,27 +368,29 @@ public sealed class BacktestEngine : IStrategyHost
         }
         else
         {
-            decimal closeQty = Math.Min(qty, Math.Abs(_pos));
+            closeQty = Math.Min(qty, Math.Abs(_pos));
             int dir = Math.Sign(_pos);
             decimal pnl = (price - _avg) * closeQty * dir * _pointValue;
-            decimal entryComm = _commissionOpen * closeQty / Math.Abs(_pos);
-            decimal exitComm = commission * closeQty / qty;
+            entryComm = _commissionOpen * closeQty / Math.Abs(_pos);
+            exitComm = commission * closeQty / qty;
             _commissionOpen -= entryComm;
             _realized += pnl - entryComm - exitComm;
-            _trades.Add(new ClosedTrade(++_tradeNumber, dir > 0, _entryTime, _avg, time, price, closeQty, pnl, entryComm + exitComm,
+            closingTrade = new ClosedTrade(++_tradeNumber, dir > 0, _entryTime, _avg, time, price, closeQty, pnl, entryComm + exitComm,
                 _mae * closeQty * _pointValue, _mfe * closeQty * _pointValue, _entryName, o.Name, _bars.Count - _entryBar)
             {
                 EntryTrend = _entryTrend,
                 EntryVolatility = _entryVolatility,
                 EntryVolatilityRank = _entryVolatilityRank,
                 EntryMarketDirection = _entryDirection,
-            });
+            };
+            if (_accounting == null) _trades.Add(closingTrade);
             _pos -= dir * closeQty;
             decimal rest = qty - closeQty;
             if (_pos == 0)
             {
                 _avg = 0;
                 _commissionOpen = 0;
+                flatEquity = _s.InitialCapital + _realized;
             }
 
             if (rest > 0)
@@ -343,6 +402,9 @@ public sealed class BacktestEngine : IStrategyHost
                 _commissionOpen = commission * rest / qty;
             }
         }
+        if (_accounting is { Accepting: true } accounting)
+            accounting.Fills.Add(new(time, o.Side, beforeQuantity, qty, price, commission, closeQty,
+                _realized - beforeRealized, entryComm, exitComm, flatEquity, _commissionTotal, closingTrade));
 
         _submitIndex = _index;
         UpdateProtection();
@@ -363,6 +425,8 @@ public sealed class BacktestEngine : IStrategyHost
         // el contexto que vio la estrategia al entrar (el mismo que usa su filtro de contexto)
         var context = _strategy.Context;
         (_entryTrend, _entryVolatility, _entryVolatilityRank, _entryDirection) = (context.Trend, context.Volatility, context.VolatilityRank, context.Direction);
+        if (_accounting != null)
+            _accountingEntry = new(time, name, _bars.Count, _entryTrend, _entryVolatility, _entryVolatilityRank, _entryDirection);
     }
 
     private void TrackExcursion(long p)

@@ -41,6 +41,7 @@ public static class SearchZoomFixture
         var services = (AppServices)RuntimeHelpers.GetUninitializedObject(typeof(AppServices));
         Set(services, "<Connections>k__BackingField", manager);
         Set(services, "<Settings>k__BackingField", new AppSettings());
+        Set(services, "<Work>k__BackingField", new OwnedOperationRegistry());
         return services;
     }
 

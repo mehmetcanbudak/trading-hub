@@ -158,7 +158,7 @@ Enable the API in TWS / IB Gateway (Configure → API → Settings), then enter 
 
 Supported roots are MNQ, MES, M2K, MYM, NQ, ES, RTY and YM. Same-instrument historical tick requests are paced at 15 seconds. Live trade side is inferred, not exchange-authoritative aggression; depth requires a fresh best bid/offer and reconnect invalidates stale state. Calendar contract rollover is not volume-roll selection or back-adjustment: price discontinuities are not adjusted away.
 
-New chart defaults use the 18:00 America/New_York session; saved and custom sessions are preserved. Stable profile/data scopes keep history associated with the chosen profile and refresh after imports. Deleting a profile retires its retained transport; it does not delete history. Explicit stored/offline mode never connects to Gateway. See [Data](datos.md#interactive-brokers-bars-and-offline-history) for import policy and fidelity; this unmerged capability is not present in the historical installed app described in the [dashboard](TRANSLATION_STATUS.md).
+New chart defaults use the 18:00 America/New_York session; saved and custom sessions are preserved. Stable profile/data scopes keep history associated with the chosen profile and refresh after imports. Deleting a profile retires its retained transport; it does not delete history. Explicit stored/offline mode never connects to Gateway. See [Data](datos.md#interactive-brokers-bars-and-offline-history) for import policy and fidelity. This data-only capability is part of accepted canonical `memoshi`; the [dashboard](TRANSLATION_STATUS.md) separates its source/fake-fixture acceptance from real IB entitlements and native-provider checks.
 
 ## Real and test accounts
 

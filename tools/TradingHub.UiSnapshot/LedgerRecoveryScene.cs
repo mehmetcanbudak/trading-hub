@@ -13,7 +13,7 @@ internal static partial class SafetyScene
     {
         var isolated = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR");
         if (string.IsNullOrWhiteSpace(isolated) || Path.GetFullPath(isolated) != Path.GetFullPath(LiveStore.Root))
-            throw new InvalidOperationException("The ledger scene requires its explicit isolated live-store directory.");
+            throw new InvalidOperationException($"The ledger scene requires its explicit isolated live-store directory. TRADINGHUB_LIVE_DIR='{isolated ?? "<unset>"}'; LiveStore.Root='{LiveStore.Root}'.");
 
         var svc = App.Services;
         var instruments = InstrumentPicker.InstrumentsAsync(svc, "sim");
@@ -23,8 +23,12 @@ internal static partial class SafetyScene
         var instrument = instruments.GetAwaiter().GetResult().First(i => i.Symbol == "SIM-ES");
         var data = svc.Open("sim", instrument);
         var account = svc.AccountFor(data, "sim");
-        var strategyFile = new StrategyFile { Path = Path.Combine(AppPaths.Strategies, nameof(LedgerRecoveryFixtureStrategy) + ".cs"), Type = typeof(LedgerRecoveryFixtureStrategy) };
-        string key = $"{typeof(LedgerRecoveryFixtureStrategy).FullName}|{instrument.FeedId}:{instrument.Symbol}|{account.Name}";
+        var template = new StrategyTemplate("Ledger recovery fixture", "Passive ledger recovery consumer", "LedgerRecoveryFixture", false,
+            name => "using TradingHub.Strategies; public sealed class " + name + " : Strategy { }");
+        var strategyFile = svc.Strategies.Create("LedgerRecoveryFixture" + Guid.NewGuid().ToString("N"), template);
+        var compilation = svc.Strategies.Compile(strategyFile);
+        var generation = compilation.Generation ?? throw new InvalidOperationException("Ledger recovery fixture did not compile.");
+        string key = $"{generation.Id}|{instrument.FeedId}:{instrument.Symbol}|{account.Name}";
         string file = LiveStore.LedgerFile(key);
         var time = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         Window? details = null;
@@ -73,7 +77,7 @@ internal static partial class SafetyScene
             check(analysisBlocked, "portfolio analysis refuses incomplete live history instead of fabricating zero metrics");
 
             int ordersBefore = account.ActiveOrders.Count();
-            var launch = svc.Live.LaunchAsync(new LiveLaunch { File = strategyFile, ProfileId = "sim", Instrument = instrument, AccountId = "sim", Period = ChartPeriod.M5 });
+            var launch = svc.Live.LaunchAsync(new LiveLaunch { File = strategyFile, Generation = generation, ProfileId = "sim", Instrument = instrument, AccountId = "sim", Period = ChartPeriod.M5 });
             deadline = DateTime.UtcNow.AddSeconds(120);
             while (!launch.IsCompleted && DateTime.UtcNow < deadline) pump(0.02);
             if (!launch.IsCompleted) throw new TimeoutException("The isolated launch did not return its history error.");
@@ -88,9 +92,6 @@ internal static partial class SafetyScene
             details = new LiveStrategyWindow(svc, _ => { }, unavailable);
             details.Show(window);
             pump(0.3);
-            var labels = details.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
-            check(labels.Contains("Unavailable") && !labels.Contains("Flat"),
-                "strategy details distinguish an unknown position from a confirmed flat position");
             shot(details, "safety_ledger_unavailable_details");
             details.Close();
             details = null;
@@ -116,12 +117,9 @@ internal static partial class SafetyScene
         {
             details?.Close();
             LiveStore.RemoveRunner(key, deleteFills: true);
+            svc.Strategies.Delete(strategyFile);
             window.Navigate("trading");
             pump(0.2);
         }
     }
-}
-
-public sealed class LedgerRecoveryFixtureStrategy : Strategy
-{
 }

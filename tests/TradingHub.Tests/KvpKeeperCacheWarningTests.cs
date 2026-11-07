@@ -50,6 +50,7 @@ public sealed class KvpKeeperCacheWarningTests
             var services = (AppServices)RuntimeHelpers.GetUninitializedObject(typeof(AppServices));
             SearchZoomFixture.Set(services, "<Connections>k__BackingField", connections);
             SearchZoomFixture.Set(services, "<Settings>k__BackingField", settings);
+            SearchZoomFixture.Set(services, "<Work>k__BackingField", new OwnedOperationRegistry());
             await using var keeper = services.KlineKeeper;
             await keeper.RunNowAsync();
             var failure = Assert.Single(keeper.Status.Failures);

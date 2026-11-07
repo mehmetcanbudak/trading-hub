@@ -62,6 +62,7 @@ internal sealed class MarketConditions
         /// <summary>Largo del archivo del día cuando se calculó (-1 = salió de las velas del exchange).</summary>
         public long Length { get; set; }
         public IbHistoryStamp? Stamp { get; set; }
+        public string? ContentIdentity { get; set; }
 
         public decimal?[] Closes { get; set; } = new decimal?[24];
     }
@@ -168,16 +169,16 @@ internal sealed class MarketConditions
     /// que un backtest, una optimización o un walk-forward arranquen su contexto de mercado como en vivo. Solo horas ya
     /// cerradas antes de <paramref name="untilUtc"/>.
     /// </summary>
-    public static List<(DateTime Time, decimal Close)> HourlyBefore(string feed, string symbol, DateTime untilUtc)
+    public static List<(DateTime Time, decimal Close)> HourlyBefore(string feed, string symbol, DateTime untilUtc, CancellationToken ct = default)
     {
         try
         {
             var last = DateOnly.FromDateTime(untilUtc);
-            var (hours, _, cache, changed, _) = ReadStored(feed, symbol, last.AddDays(-HistoryDays), last, CancellationToken.None);
+            var (hours, _, cache, changed, _, _) = ReadStored(feed, symbol, last.AddDays(-HistoryDays), last, ct);
             if (changed) Save(CachePath(feed, symbol), Prune(cache));
             return hours.Where(kv => kv.Key.AddHours(1) <= untilUtc).Select(kv => (kv.Key, kv.Value)).ToList();
         }
-        catch (Exception ex) when (feed != IbBarImport.FeedId)
+        catch (Exception ex) when (feed != IbBarImport.FeedId && ex is not OperationCanceledException)
         {
             CrashLog.Write(ex);
             return new List<(DateTime, decimal)>();
@@ -193,7 +194,7 @@ internal sealed class MarketConditions
     }
 
     /// <summary>Los días guardados entre dos fechas: de la caché o de los archivos de cada día (sin red).</summary>
-    private static (SortedDictionary<DateTime, decimal> Hours, List<DateOnly> Missing, Dictionary<DateOnly, DayCloses> Cache, bool Changed, Dictionary<DateOnly, IbHistoryStamp>? MissingStamps) ReadStored(
+    private static (SortedDictionary<DateTime, decimal> Hours, List<DateOnly> Missing, Dictionary<DateOnly, DayCloses> Cache, bool Changed, Dictionary<DateOnly, IbHistoryStamp>? MissingStamps, Dictionary<DateOnly, string>? MissingIdentities) ReadStored(
         string feed, string symbol, DateOnly first, DateOnly last, CancellationToken ct, bool captureMissingStamps = false)
     {
         using var ibSnapshot = feed == IbBarImport.FeedId ? IbBarStore.OpenSnapshot(AppPaths.Ticks, symbol, ct) : null;
@@ -202,6 +203,7 @@ internal sealed class MarketConditions
         var absent = new List<DateOnly>();
         bool dirty = false;
         Dictionary<DateOnly, IbHistoryStamp>? missingStamps = null;
+        Dictionary<DateOnly, string>? missingIdentities = null;
         for (var d = first; d <= last; d = d.AddDays(1))
         {
             ct.ThrowIfCancellationRequested();
@@ -209,15 +211,17 @@ internal sealed class MarketConditions
             // de cada fuente del día (la combinada de Rithmic y Databento lee las dos): la primera manda
             var files = ibSnapshot?.DayFiles(d) ?? HistorySources.DayFiles(AppPaths.Ticks, feed, symbol, d);
             long len = files.Count == 0 ? -1 : files.Sum(f => new FileInfo(f).Length);
+            string? identity = ibSnapshot == null ? HistorySources.GetDayContentIdentity(AppPaths.Ticks, feed, symbol, d, ct) : null;
             // un día ya no cambia media hora después de terminar (antes, puede seguir grabándose)
             bool final = DateTime.UtcNow - d.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) > TimeSpan.FromMinutes(30);
             decimal?[]? closes = null;
-            if (stored.TryGetValue(d, out var dc) && (ibSnapshot != null ? dc.Stamp == stamp : dc.Length == len)) closes = dc.Closes;
+            if (stored.TryGetValue(d, out var dc) && (ibSnapshot != null ? dc.Stamp == stamp : dc.ContentIdentity != null && dc.ContentIdentity == identity)) closes = dc.Closes;
             else if (len > 0)
             {
                 try
                 {
-                    closes = ibSnapshot != null ? FromComposedDay(ibSnapshot.ReadDay(d)) : FromTicks(files);
+                    closes = ibSnapshot != null ? FromComposedDay(ibSnapshot.ReadDay(d))
+                        : HistorySources.ReadHourlyCloses(AppPaths.Ticks, feed, symbol, d, out identity, ct);
                 }
                 catch (IOException) when (ibSnapshot == null)
                 {
@@ -226,7 +230,7 @@ internal sealed class MarketConditions
 
                 if (closes != null && final)
                 {
-                    stored[d] = new DayCloses { Length = len, Stamp = stamp, Closes = closes };
+                    stored[d] = new DayCloses { Length = len, Stamp = stamp, ContentIdentity = identity, Closes = closes };
                     dirty = true;
                 }
             }
@@ -235,19 +239,21 @@ internal sealed class MarketConditions
             {
                 absent.Add(d);
                 if (captureMissingStamps && stamp is { } missingStamp) (missingStamps ??= new())[d] = missingStamp;
+                if (captureMissingStamps && identity != null) (missingIdentities ??= new())[d] = identity;
+                if (stored.Remove(d)) dirty = true;
                 continue;
             }
 
             Add(found, d, closes);
         }
 
-        return (found, absent, stored, dirty, missingStamps);
+        return (found, absent, stored, dirty, missingStamps, missingIdentities);
     }
 
     private async Task<SortedDictionary<DateTime, decimal>> StoredAsync(string feed, string symbol, DateOnly first, DateOnly today, CancellationToken ct)
     {
         var path = CachePath(feed, symbol);
-        var (hours, missing, cache, changed, missingStamps) = await Task.Run(() => ReadStored(feed, symbol, first, today, ct, captureMissingStamps: true), ct);
+        var (hours, missing, cache, changed, missingStamps, missingIdentities) = await Task.Run(() => ReadStored(feed, symbol, first, today, ct, captureMissingStamps: true), ct);
 
         // días sin archivo: velas de 15 minutos del exchange, si ese mercado ya está abierto en la app o es cripto (velas
         // públicas); de a tramos seguidos, y un día ya cerrado queda en la caché aunque no haya tenido velas (un sábado de futuros)
@@ -280,6 +286,7 @@ internal sealed class MarketConditions
                         {
                             Length = -1,
                             Stamp = missingStamps != null && missingStamps.TryGetValue(d, out var stamp) ? stamp : null,
+                            ContentIdentity = missingIdentities != null && missingIdentities.TryGetValue(d, out var identity) ? identity : null,
                             Closes = arr ?? new decimal?[24],
                         };
                         changed = true;
@@ -354,27 +361,6 @@ internal sealed class MarketConditions
                 hours[day.ToDateTime(new TimeOnly(h, 0), DateTimeKind.Utc)] = c;
     }
 
-    /// <summary>El último precio de cada hora de un día guardado (las horas que no tiene el primer archivo, de los siguientes).</summary>
-    private static decimal?[] FromTicks(IReadOnlyList<string> files)
-    {
-        var closes = new decimal?[24];
-        foreach (var file in files)
-        {
-            var own = new decimal?[24];
-            var last = new long[24];
-            foreach (var t in TickFile.Read(file))
-            {
-                int h = t.Time.Hour;
-                if (t.Time.Ticks < last[h]) continue;
-                last[h] = t.Time.Ticks;
-                own[h] = t.Price;
-            }
-
-            for (int h = 0; h < 24; h++) closes[h] ??= own[h];
-        }
-
-        return closes;
-    }
 
     private static decimal?[] FromComposedDay(IReadOnlyList<Trade> rows)
     {

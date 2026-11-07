@@ -41,6 +41,33 @@ internal static class ReportBuilder
     private static string DateTimeText(DateTime t) => t.ToString("dd/MM/yyyy HH:mm", Es);
     private static string Ratio(decimal v) => v >= 999 ? "∞" : Num(v);
 
+    private static string Money(decimal? v) => v is { } value ? Money(value) : "Unavailable";
+    private static string Pct(double? v) => v is { } value ? Pct(value) : "Unavailable";
+    private static string Num(double? v) => v is { } value ? Num(value) : "Unavailable";
+    private static string Exact(decimal? v) => v?.ToString(CultureInfo.InvariantCulture) ?? "Unavailable";
+
+    private static void ContributionTables(StringBuilder sb, IReadOnlyList<ClosedTrade> contributions)
+    {
+        sb.AppendLine("### Contribution amounts");
+        sb.AppendLine();
+        Table(sb, new[] { "#", "Attribution", "Actual closing fill", "Side", "Quantity", "Gross PnL", "Commission", "Attribution net", "Net PnL", "Carry net credit", "Carry commission credit" },
+            contributions.Select(t => (IReadOnlyList<string>)new[]
+            {
+                t.Number.ToString(Es), t.Attribution.ToString(), t.IsActualClosingFill ? "Yes" : "No", t.IsLong ? "Long" : "Short",
+                Exact(t.Quantity), Exact(t.Pnl), Exact(t.Commission), Exact(t.AttributionNet), Exact(t.NetPnl), Exact(t.CarryNetCredit), Exact(t.CarryCommissionCredit),
+            }));
+        sb.AppendLine("### Contribution boundaries");
+        sb.AppendLine();
+        Table(sb, new[] { "#", "Actual entry", "Entry", "Exit", "Window from", "Window to", "Entry price", "Exit price", "Opening mark", "Closing mark" },
+            contributions.Select(t => (IReadOnlyList<string>)new[]
+            {
+                t.Number.ToString(Es), t.ActualEntryTime?.ToString("O", CultureInfo.InvariantCulture) ?? "Unavailable",
+                t.EntryTime.ToString("O", CultureInfo.InvariantCulture), t.ExitTime.ToString("O", CultureInfo.InvariantCulture),
+                t.WindowFrom?.ToString("O", CultureInfo.InvariantCulture) ?? "Unavailable", t.WindowTo?.ToString("O", CultureInfo.InvariantCulture) ?? "Unavailable",
+                Exact(t.EntryPrice), Exact(t.ExitPrice), Exact(t.OpeningMark), Exact(t.ClosingMark),
+            }));
+    }
+
     /// <summary>CAGR y Calmar solo tienen sentido con períodos largos (anualizar 5 días exagera todo).</summary>
     private static string Annualized(TradeAnalytics a, double value, bool percent) =>
         a.Days < 90 ? "— (less than 90 days)" : percent ? Pct(value, true) : Num(value);
@@ -71,6 +98,28 @@ internal static class ReportBuilder
     private static void KeyValues(StringBuilder sb, IEnumerable<(string Key, string Value)> rows) =>
         Table(sb, new[] { "Item", "Value" }, rows.Select(r => (IReadOnlyList<string>)new[] { r.Key, r.Value }));
 
+    private static void InputEvidenceTable(StringBuilder sb, StrategyRun run) =>
+        InputEvidenceTable(sb, run.Id, run.Kind, run.CodeHash, run.InputEvidence);
+
+    private static void InputEvidenceTable(StringBuilder sb, string runId, RunKind? kind, string? codeHash, RunInputEvidence? evidence)
+    {
+        KeyValues(sb, new[]
+        {
+            ("Run", runId),
+            ("Code version", string.IsNullOrEmpty(codeHash) ? "Unknown" : codeHash),
+            ("Run kind", kind?.ToString() ?? "Unknown"),
+            ("Input evidence", evidence == null ? "Unknown legacy input evidence" : "Captured from the run input"),
+            ("Input quality", evidence?.DataQuality.ToString() ?? "Unknown"),
+            ("Resolution (seconds)", evidence?.ResolutionSeconds.ToString(CultureInfo.InvariantCulture) ?? "Unknown"),
+            ("Source identity", evidence?.SourceIdentity ?? "Unknown"),
+            ("Correction revision", evidence?.CorrectionRevision.ToString(CultureInfo.InvariantCulture) ?? "Unknown"),
+            ("Known availability", evidence == null ? "Unknown" : evidence.HasKnownAvailability ? "Yes" : "No"),
+            ("Data warning", evidence == null ? "Unknown" : evidence.DataWarning ?? "None"),
+            ("Content identity", evidence?.ContentIdentity ?? "Unknown"),
+        });
+        sb.AppendLine();
+    }
+
     private static TimeZoneInfo Zone(BacktestSettings s)
     {
         if (string.IsNullOrEmpty(s.TimeZoneId)) return TimeZoneInfo.Utc;
@@ -99,6 +148,9 @@ internal static class ReportBuilder
         var images = new List<(string, byte[])>();
         var main = x.Backtest;
         var s = main?.Settings ?? x.WalkForward?.Settings ?? x.Optimization?.Settings;
+        var walkForward = x.WalkForward?.WalkForward ?? main?.WalkForward;
+        int completedWalkForwardWindows = walkForward?.Windows.Count(win => win.InSampleAvailable && win.InSample != null && win.OutSampleAvailable && win.OutSample != null) ?? 0;
+        var subject = main ?? x.WalkForward ?? x.Optimization;
 
         // ----------------------------------------------------------------- encabezado
         sb.AppendLine($"# {x.Title}");
@@ -140,7 +192,7 @@ internal static class ReportBuilder
         }
 
         TradeAnalytics? a = null;
-        if (trades != null && m != null)
+        if (trades != null && m != null && trades.All(t => t.HasCompleteTradeEvidence) && m.AttributionUnit == PerformanceAttributionUnit.ClosingFill)
             a = TradeAnalytics.Compute(trades, equity ?? new List<EquityPoint>(), capital, m, s != null ? Zone(s) : TimeZoneInfo.Utc,
                 s?.FromUtc ?? x.Portfolio?.From, s?.ToUtc ?? x.Portfolio?.To);
 
@@ -178,32 +230,50 @@ internal static class ReportBuilder
             };
             if (wf != null)
             {
-                pairs.Add(("Walk-forward efficiency", Num(wf.WalkForwardEfficiency)));
-                pairs.Add(("Profitable windows (WF)", Pct(wf.ProfitableWindowsPercent)));
+                pairs.Add(("Walk-forward efficiency", completedWalkForwardWindows > 0 ? Num(wf.WalkForwardEfficiency) : "Unavailable"));
+                pairs.Add(("Profitable windows (WF)", completedWalkForwardWindows > 0 ? Pct(wf.ProfitableWindowsPercent) : "Unavailable"));
             }
 
             if (mc != null)
             {
-                pairs.Add(("Drawdown p95 (Monte Carlo)", Money(mc.DrawdownP95)));
-                pairs.Add(("Risk of ruin", Pct(mc.RuinProbabilityPercent)));
+                if (mc.Available)
+                {
+                    pairs.Add(("Drawdown p95 (Monte Carlo)", Money(mc.DrawdownP95)));
+                    pairs.Add(("Risk of ruin", Pct(mc.RuinProbabilityPercent)));
+                }
+                else pairs.Add(("Monte Carlo", mc.UnavailableReason ?? "Unavailable"));
             }
 
             var rows = new List<IReadOnlyList<string>>();
             for (int i = 0; i < pairs.Count; i += 2)
                 rows.Add(new[] { pairs[i].Item1, pairs[i].Item2, i + 1 < pairs.Count ? pairs[i + 1].Item1 : "", i + 1 < pairs.Count ? pairs[i + 1].Item2 : "" });
             Table(sb, new[] { "Indicator", "Value", "Indicator", "Value" }, rows);
-
-            if (equity is { Count: > 1 })
+        }
+        else if (m != null)
+        {
+            KeyValues(sb, new[]
             {
-                var extra = x.Portfolio != null && main == null ? PortfolioCurves(x.Portfolio, capital) : null;
-                images.Add(("capital.png", ReportCharts.Equity(equity.Select(p => (p.Time, p.Equity)).ToList(), capital, main == null ? "Portfolio equity curve" : "Equity curve and drawdown", extra)));
-                sb.AppendLine("![Equity curve and drawdown]({{assets}}/capital.png)");
-                sb.AppendLine();
-            }
+                ("Net profit", Money(m.NetProfit, true)),
+                ("Actual closing fills", m.TotalTrades.ToString(Es)),
+                ("Attribution samples", m.AttributionSamples.ToString(Es)),
+                ("Profit factor per contribution", Ratio(m.ProfitFactor)),
+                ("Win rate per contribution", Pct(m.WinRate)),
+                ("Expectancy per contribution", Money(m.Expectancy, true)),
+            });
+            sb.AppendLine("Closing-fill contributions and final boundary valuations are not independent completed trades. Trade-only confidence, duration and excursion diagnostics are unavailable.");
+            sb.AppendLine();
+        }
+
+        if (equity is { Count: > 1 })
+        {
+            var extra = x.Portfolio != null && main == null ? PortfolioCurves(x.Portfolio, capital) : null;
+            images.Add(("capital.png", ReportCharts.Equity(equity.Select(p => (p.AvailableAt ?? p.Time, p.Equity)).ToList(), capital, main == null ? "Portfolio equity curve" : "Equity curve and drawdown", extra)));
+            sb.AppendLine("![Equity curve and drawdown]({{assets}}/capital.png)");
+            sb.AppendLine();
         }
 
         // ----------------------------------------------------------------- 2. estrategia
-        if (main != null || x.StrategyName != null)
+        if (subject != null || x.StrategyName != null)
         {
             sb.AppendLine(H2("Strategy"));
             sb.AppendLine();
@@ -213,16 +283,16 @@ internal static class ReportBuilder
                 sb.AppendLine();
             }
 
-            var parms = main?.Parameters ?? x.WalkForward?.Parameters;
+            var parms = subject?.Parameters;
             if (parms is { Count: > 0 })
             {
-                sb.AppendLine("**Parameters used**");
+                sb.AppendLine(main == null && subject?.Kind == RunKind.Optimization ? "**Best parameters**" : "**Parameters used**");
                 sb.AppendLine();
                 Table(sb, new[] { "Parameter", "Value" }, parms.Select(kv => (IReadOnlyList<string>)new[] { kv.Key, Cell(kv.Value) }));
             }
 
-            var hash = main?.CodeHash ?? x.WalkForward?.CodeHash;
-            if (!string.IsNullOrEmpty(hash)) sb.AppendLine($"Code version: `{hash[..Math.Min(12, hash.Length)]}` (retained in the strategy history).\n");
+            var hash = subject?.CodeHash;
+            if (!string.IsNullOrEmpty(hash)) sb.AppendLine($"Code version: `{hash}` (retained in the strategy history).\n");
         }
 
         // ----------------------------------------------------------------- 3. datos y supuestos
@@ -255,7 +325,7 @@ internal static class ReportBuilder
         {
             sb.AppendLine(H2("Performance"));
             sb.AppendLine();
-            sb.AppendLine("### Rentabilidad");
+            sb.AppendLine("### Profitability");
             sb.AppendLine();
             KeyValues(sb, new[]
             {
@@ -404,17 +474,27 @@ internal static class ReportBuilder
             }
         }
 
+        foreach (var run in new[] { x.Backtest, x.Optimization, x.WalkForward }.OfType<StrategyRun>().DistinctBy(run => run.Id))
+        {
+            sb.AppendLine(H2("Input evidence"));
+            sb.AppendLine();
+            InputEvidenceTable(sb, run);
+        }
+
         // ----------------------------------------------------------------- 8. optimización
-        if (x.Optimization?.Optimization is { } opt && opt.Rows.Count > 0)
+        if (x.Optimization?.Optimization is { } opt)
         {
             sb.AppendLine(H2("Optimization"));
             sb.AppendLine();
             var enabled = opt.Ranges.Where(r => r.Enabled).ToList();
+            var population = opt.GetPopulation();
             KeyValues(sb, new[]
             {
                 ("Optimized metric", opt.Metric.ToString()),
                 ("Combinations tested", opt.Combinations.ToString("N0", Es)),
-                ("Profitable combinations", Pct(100.0 * opt.Rows.Count(r => r.Metrics.NetProfit > 0) / opt.Rows.Count)),
+                ("Profitable combinations", population?.ProfitablePercent is { } share ? Pct(share) : "Unavailable"),
+                ("Measured combinations", population?.MeasuredCombinations.ToString("N0", Es) ?? "Unavailable"),
+                ("Retained rows", opt.Rows.Count.ToString("N0", Es)),
                 ("Time", $"{Num(opt.Seconds, 1)} s"),
             }.Concat(enabled.Select(r => ($"Range from {r.Label}", $"{Num(r.Min, 4)} to {Num(r.Max, 4)} in steps of {Num(r.Step, 4)}"))));
 
@@ -427,94 +507,182 @@ internal static class ReportBuilder
                     .Concat(new[] { Money(r.Metrics.NetProfit, true), Ratio(r.Metrics.ProfitFactor), Num(r.Metrics.SharpeRatio), Money(r.Metrics.MaxDrawdown), r.Metrics.TotalTrades.ToString(Es), Pct(r.Metrics.WinRate) })
                     .ToArray()));
 
+            sb.AppendLine("### Recommended combination");
+            sb.AppendLine();
+            if (opt.Recommended is { } recommended)
+            {
+                KeyValues(sb, recommended.Parameters.Select(pair => (pair.Key, Cell(pair.Value))).Concat(new[]
+                {
+                    ("Net profit", Money(recommended.Metrics.NetProfit, true)),
+                    ("Profit factor", Ratio(recommended.Metrics.ProfitFactor)),
+                    ("Sharpe", Num(recommended.Metrics.SharpeRatio)),
+                    ("Maximum drawdown", Money(recommended.Metrics.MaxDrawdown)),
+                }));
+            }
+            else sb.AppendLine("The exact recommended combination is unavailable.");
+            sb.AppendLine();
+
             sb.AppendLine("### Parameter sensitivity");
             sb.AppendLine();
-            sb.AppendLine("Average of all tested combinations at each value: a broad plateau suggests robustness; an isolated peak suggests overfitting.");
+            sb.AppendLine(population == null ? "Complete-population sensitivity is unavailable for this truncated legacy run."
+                : "Average of all measured combinations at each value. A broad plateau suggests robustness; an isolated peak suggests overfitting.");
             sb.AppendLine();
-            foreach (var r in enabled)
+            foreach (var r in enabled.Where(_ => population != null))
             {
                 sb.AppendLine($"**{r.Label}**");
                 sb.AppendLine();
-                var groups = opt.Rows.GroupBy(row => Cell(row.Parameters.GetValueOrDefault(r.Name)))
-                    .OrderBy(g => double.TryParse(g.Key, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : 0);
-                Table(sb, new[] { "Value", "Combinations", "Rentables", "Average net PnL", "Average Sharpe" },
-                    groups.Select(g => (IReadOnlyList<string>)new[]
+                var groups = population!.Parameters.FirstOrDefault(parameter => parameter.Name == r.Name)?.Values ?? new();
+                Table(sb, new[] { "Value", "Combinations", "Profitable", "Average net PnL", "Average Sharpe" },
+                    groups.OrderBy(group => double.TryParse(group.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : 0)
+                        .ThenBy(group => group.Value, StringComparer.Ordinal).Select(group => (IReadOnlyList<string>)new[]
                     {
-                        g.Key, g.Count().ToString(Es), Pct(100.0 * g.Count(z => z.Metrics.NetProfit > 0) / g.Count()),
-                        Money(g.Average(z => z.Metrics.NetProfit), true), Num(g.Average(z => z.Metrics.SharpeRatio)),
+                        group.Value, group.Combinations.ToString(Es), group.ProfitablePercent is { } profitable ? Pct(profitable) : "Unavailable",
+                        group.AverageNetProfit is { } average ? Money(average, true) : "Unavailable", Num(group.AverageSharpe),
                     }));
             }
         }
 
         // ----------------------------------------------------------------- 9. walk-forward
-        if (x.WalkForward?.WalkForward is { } w && w.Windows.Count > 0)
+        if (walkForward is { } w)
         {
             sb.AppendLine(H2("Walk-forward (out-of-sample validation)"));
             sb.AppendLine();
             var om = w.OutSampleMetrics;
+            bool available = completedWalkForwardWindows > 0;
+            bool attributed = w.AccountingPolicy != null || om.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation;
             KeyValues(sb, new[]
             {
+                ("Coverage", w.IsComplete && available ? "Complete" : available ? "Completed prefix only" : "Unavailable"),
+                ("Completed windows", $"{completedWalkForwardWindows} of {w.Windows.Count}"),
                 ("Walk-forward windows", $"{w.Windows.Count} · {w.InSampleDays} optimization days and {w.OutSampleDays} test days ({(w.Anchored ? "anchored" : "rolling")})"),
                 ("Metric", w.Metric.ToString()),
-                ("Walk-forward efficiency", Num(w.WalkForwardEfficiency)),
-                ("Profitable windows", Pct(w.ProfitableWindowsPercent)),
-                ("Out-of-sample net PnL", Money(om.NetProfit, true)),
-                ("Out-of-sample profit factor", Ratio(om.ProfitFactor)),
-                ("Out-of-sample Sharpe", Num(om.SharpeRatio)),
-                ("Out-of-sample maximum drawdown", $"{Money(om.MaxDrawdown)} ({Pct(om.MaxDrawdownPercent)})"),
-                ("Out-of-sample trades", om.TotalTrades.ToString(Es)),
-                ("Out-of-sample win rate", Pct(om.WinRate)),
+                ("Accounting policy", w.AccountingPolicy ?? "Unknown"),
+                ("Attribution policy", w.AttributionPolicy ?? "Unknown"),
+                ("CPCV policy", w.CpcvPolicy ?? "Unknown"),
+                ("Walk-forward efficiency", available ? Num(w.WalkForwardEfficiency) : "Unavailable"),
+                ("Profitable windows", available ? Pct(w.ProfitableWindowsPercent) : "Unavailable"),
+                ("Out-of-sample net PnL", available ? Money(om.NetProfit, true) : "Unavailable"),
+                (attributed ? "Profit factor per contribution" : "Out-of-sample profit factor", available ? Ratio(om.ProfitFactor) : "Unavailable"),
+                ("Out-of-sample Sharpe", available ? Num(om.SharpeRatio) : "Unavailable"),
+                ("Out-of-sample maximum drawdown", available ? $"{Money(om.MaxDrawdown)} ({Pct(om.MaxDrawdownPercent)})" : "Unavailable"),
+                (attributed ? "Actual out-of-sample closing fills" : "Out-of-sample trades", available ? om.TotalTrades.ToString(Es) : "Unavailable"),
+                (attributed ? "Win rate per contribution" : "Out-of-sample win rate", available ? Pct(om.WinRate) : "Unavailable"),
+                (attributed ? "Expectancy per contribution" : "Expectancy per trade", available ? Money(om.Expectancy, true) : "Unavailable"),
             });
-            Table(sb, new[] { "Window", "Optimization", "Test", "Selected parameters", "Net (optimization)", "Net (test)", "Test trades", "Efficiency" },
+            if (attributed)
+            {
+                sb.AppendLine("This warm mark-to-market research splice is not an executable portfolio. Selected configurations retain their own warm state, positions and capital. The splice does not transfer outgoing positions or charge deployment turnover.");
+                sb.AppendLine();
+                sb.AppendLine("Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Eligibility counts only actual closing fills. Boundary marks are not executions or independent completed trades.");
+                sb.AppendLine();
+                KeyValues(sb, new[]
+                {
+                    ("Attribution unit", om.AttributionUnit.ToString()),
+                    ("Attribution samples", available ? om.AttributionSamples.ToString(Es) : "Unavailable"),
+                    ("Trade-only confidence", "Unavailable for marked window contributions"),
+                });
+            }
+            Table(sb, new[] { "Window", "Optimization", "Test", "Selected parameters", "Net (optimization)", "Net (test)", attributed ? "Actual closing fills" : "Test trades", "Efficiency", "Unavailable reason" },
                 w.Windows.Select(win => (IReadOnlyList<string>)new[]
                 {
-                    win.Number.ToString(Es), $"{Date(win.InSampleFrom)} – {Date(win.InSampleTo)}", $"{Date(win.OutSampleFrom)} – {Date(win.OutSampleTo)}",
+                    win.Number.ToString(Es), $"{Date(win.InSampleFrom)} to {Date(win.InSampleTo)}", $"{Date(win.OutSampleFrom)} to {Date(win.OutSampleTo)}",
                     string.Join(", ", win.BestParameters.Select(kv => $"{TradingHub.Common.EnglishText.Of(kv.Key)}={Cell(kv.Value)}")),
-                    Money(win.InSample.NetProfit, true), Money(win.OutSample.NetProfit, true), win.OutSample.TotalTrades.ToString(Es), Num(win.Efficiency),
+                    win.InSampleAvailable && win.InSample is { } im ? Money(im.NetProfit, true) : "Unavailable",
+                    win.OutSampleAvailable && win.OutSample is { } osm ? Money(osm.NetProfit, true) : "Unavailable",
+                    win.OutSampleAvailable && win.OutSample != null ? win.OutSample.TotalTrades.ToString(Es) : "Unavailable",
+                    win.InSampleAvailable && win.OutSampleAvailable ? Num(win.Efficiency) : "Unavailable", win.UnavailableReason ?? "",
                 }));
+            if (attributed)
+            {
+                sb.AppendLine("### Boundary equity");
+                sb.AppendLine();
+                sb.AppendLine("Source book equity belongs to each warm configuration. Stitched equity rebases its measured change onto the completed prefix. Amounts below retain their exact decimals.");
+                sb.AppendLine();
+                Table(sb, new[] { "Window", "Training opening", "Training closing", "Test source opening", "Test source closing", "Stitched opening", "Stitched closing" },
+                    w.Windows.Select(win => (IReadOnlyList<string>)new[]
+                    {
+                        win.Number.ToString(Es), Exact(win.InSampleOpeningEquity), Exact(win.InSampleClosingEquity),
+                        Exact(win.OutSampleOpeningEquity), Exact(win.OutSampleClosingEquity),
+                        Exact(win.OutSampleStitchedOpeningEquity), Exact(win.OutSampleStitchedClosingEquity),
+                    }));
+                ContributionTables(sb, w.OutSampleTrades);
+            }
             if (w.OutSampleEquity.Count > 1)
             {
-                images.Add(("walkforward.png", ReportCharts.Equity(w.OutSampleEquity.Select(p => (p.Time, p.Equity)).ToList(), w.OutSampleEquity[0].Equity, "Out-of-sample equity (stitched)")));
+                images.Add(("walkforward.png", ReportCharts.Equity(w.OutSampleEquity.Select(p => (p.AvailableAt ?? p.Time, p.Equity)).ToList(), w.OutSampleEquity[0].Equity, "Out-of-sample equity (stitched)")));
                 sb.AppendLine("![Out-of-sample equity]({{assets}}/walkforward.png)");
                 sb.AppendLine();
             }
-
-            // qué tan estables fueron los parámetros entre ventanas
-            var paramNames = w.Windows.SelectMany(win => win.BestParameters.Keys).Distinct().ToList();
-            var varying = paramNames.Where(p => w.Windows.Select(win => Cell(win.BestParameters.GetValueOrDefault(p))).Distinct().Count() > 1).ToList();
+            var availablePaths = w.CpcvPaths.Where(p => p.Available && p.Net.HasValue && p.Sharpe.HasValue && p.MaxDrawdown.HasValue).OrderBy(p => p.Net).ToList();
+            sb.AppendLine("### Retrospective CPCV");
+            sb.AppendLine();
+            sb.AppendLine("Retrospective purged cross-validation of warm marked ranges is not a forward-only executable handoff. Shares and medians use only available paths.");
+            sb.AppendLine();
+            KeyValues(sb, new[]
+            {
+                ("Available paths", $"{availablePaths.Count} of {w.CpcvPaths.Count}"),
+                ("Groups", w.CpcvGroups.ToString(Es)),
+                ("Embargo days", w.EmbargoDays.ToString(Es)),
+                ("Profitable paths", availablePaths.Count > 0 ? $"{availablePaths.Count(p => p.Net > 0)} of {availablePaths.Count}" : "Unavailable"),
+                ("Profitable path share", availablePaths.Count > 0 ? Pct(100.0 * availablePaths.Count(p => p.Net > 0) / availablePaths.Count) : "Unavailable"),
+                ("Median path net PnL", availablePaths.Count > 0 ? Exact(availablePaths[availablePaths.Count / 2].Net) : "Unavailable"),
+            });
+            if (availablePaths.Count == 0)
+            {
+                sb.AppendLine("No eligible retrospective CPCV path is available.");
+                sb.AppendLine();
+            }
+            Table(sb, new[] { "Path", "Available", "Net PnL", "Sharpe", "Maximum drawdown", "Actual closing fills", "Days", "Unavailable reason" },
+                w.CpcvPaths.Select(p => (IReadOnlyList<string>)new[]
+                {
+                    p.Number.ToString(Es), p.Available ? "Yes" : "No", p.Available ? Exact(p.Net) : "Unavailable",
+                    p.Available ? Num(p.Sharpe) : "Unavailable", p.Available ? Exact(p.MaxDrawdown) : "Unavailable",
+                    p.Available ? p.ActualClosingFills?.ToString(Es) ?? "Unavailable" : "Unavailable", p.Days.ToString(Es), p.UnavailableReason ?? "",
+                }));
+            var trainingWindows = w.Windows.Where(win => win.InSampleAvailable && win.InSample != null).ToList();
+            var paramNames = trainingWindows.SelectMany(win => win.BestParameters.Keys).Distinct().ToList();
+            var varying = paramNames.Where(p => trainingWindows.Select(win => Cell(win.BestParameters.GetValueOrDefault(p))).Distinct().Count() > 1).ToList();
             if (varying.Count > 0)
             {
                 sb.AppendLine("### Parameter stability");
                 sb.AppendLine();
                 Table(sb, new[] { "Parameter", "Selected values (count)" }, varying.Select(p => (IReadOnlyList<string>)new[]
                 {
-                    p, string.Join(" · ", w.Windows.GroupBy(win => Cell(win.BestParameters.GetValueOrDefault(p))).OrderByDescending(g => g.Count()).Select(g => $"{g.Key} ({g.Count()})")),
+                    p, string.Join(" · ", trainingWindows.GroupBy(win => Cell(win.BestParameters.GetValueOrDefault(p))).OrderByDescending(g => g.Count()).Select(g => $"{g.Key} ({g.Count()})")),
                 }));
             }
         }
 
         // ----------------------------------------------------------------- 10. Monte Carlo
-        if (main?.MonteCarlo is { } mcr && mcr.Runs > 0)
+        if ((main?.MonteCarlo ?? x.WalkForward?.MonteCarlo) is { } mcr)
         {
             sb.AppendLine(H2("Monte Carlo"));
             sb.AppendLine();
-            sb.AppendLine($"The {main.Trades?.Count ?? 0} trades were randomly reordered {mcr.Runs:N0} times to estimate possible drawdowns with the same edge.");
-            sb.AppendLine();
-            KeyValues(sb, new[]
+            if (!mcr.Available)
             {
-                ("Simulations", mcr.Runs.ToString("N0", Es)),
-                ("Median drawdown", Money(mcr.DrawdownP50)),
-                ("Drawdown p95", Money(mcr.DrawdownP95)),
-                ("Drawdown p99", Money(mcr.DrawdownP99)),
-                ("Worst simulated drawdown", Money(mcr.WorstDrawdown)),
-                ("Risk of ruin (drawdown ≥ 50% of capital)", Pct(mcr.RuinProbabilityPercent)),
-                ("Suggested capital (2 × p99 drawdown)", Money(mcr.DrawdownP99 * 2)),
-            });
-            if (mcr.SampleCurves.Count > 0)
-            {
-                images.Add(("montecarlo.png", ReportCharts.Curves(mcr.SampleCurves.Select(cv => (IReadOnlyList<decimal>)cv).ToList(), capital, "Monte Carlo: equity paths with reordered trades")));
-                sb.AppendLine("![Monte Carlo]({{assets}}/montecarlo.png)");
+                sb.AppendLine(mcr.UnavailableReason ?? "Monte Carlo is unavailable.");
                 sb.AppendLine();
+            }
+            else
+            {
+                sb.AppendLine($"The {main?.Trades?.Count ?? x.WalkForward?.Trades?.Count ?? 0} trades were randomly reordered {mcr.Runs:N0} times to estimate possible drawdowns with the same edge.");
+                sb.AppendLine();
+                KeyValues(sb, new[]
+                {
+                    ("Simulations", mcr.Runs.ToString("N0", Es)),
+                    ("Median drawdown", Money(mcr.DrawdownP50)),
+                    ("Drawdown p95", Money(mcr.DrawdownP95)),
+                    ("Drawdown p99", Money(mcr.DrawdownP99)),
+                    ("Worst simulated drawdown", Money(mcr.WorstDrawdown)),
+                    ("Risk of ruin (drawdown ≥ 50% of capital)", Pct(mcr.RuinProbabilityPercent)),
+                    ("Suggested capital (2 × p99 drawdown)", Money(mcr.DrawdownP99 * 2)),
+                });
+                if (mcr.SampleCurves.Count > 0)
+                {
+                    images.Add(("montecarlo.png", ReportCharts.Curves(mcr.SampleCurves.Select(cv => (IReadOnlyList<decimal>)cv).ToList(), capital, "Monte Carlo: equity paths with reordered trades")));
+                    sb.AppendLine("![Monte Carlo]({{assets}}/montecarlo.png)");
+                    sb.AppendLine();
+                }
             }
         }
 
@@ -524,12 +692,37 @@ internal static class ReportBuilder
             sb.AppendLine(H2("Portfolio"));
             sb.AppendLine();
             if (pf.NoOverlap) sb.AppendLine("> Strategies have no common dates: periods were combined and correlation is unreliable.\n");
-            Table(sb, new[] { "#", "Strategy", "Instrument", "Weight", "Net", "Sharpe", "Max DD", "Ops" },
+            if (pf.Components.Any(c => c.ResearchCoverage != null))
+            {
+                sb.AppendLine("Includes warm mark-to-market research contributions, not an executable portfolio. Only common available OOS coverage is combined. Partial components retain their completed prefix.");
+                sb.AppendLine();
+                Table(sb, new[] { "Component", "Available from", "Available to", "Completed windows", "Coverage", "Accounting policy", "Attribution policy", "CPCV policy" },
+                    pf.Components.Where(c => c.ResearchCoverage != null).Select(c =>
+                    {
+                        var coverage = c.ResearchCoverage!;
+                        return (IReadOnlyList<string>)new[]
+                        {
+                            c.Label, coverage.From.ToString("O", CultureInfo.InvariantCulture), coverage.To.ToString("O", CultureInfo.InvariantCulture),
+                            $"{coverage.CompletedWindows} of {coverage.TotalWindows}", coverage.IsComplete ? "Complete" : "Completed prefix only",
+                            coverage.AccountingPolicy ?? "Unknown", coverage.AttributionPolicy ?? "Unknown", coverage.CpcvPolicy ?? "Unknown",
+                        };
+                    }));
+                ContributionTables(sb, pf.Trades);
+            }
+            Table(sb, new[] { "#", "Strategy", "Instrument", "Weight", "Net", "Sharpe", "Max DD", pf.Metrics.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation ? "Actual closing fills" : "Ops" },
                 pf.Components.Select((c, i) => (IReadOnlyList<string>)new[]
                 {
                     (i + 1).ToString(Es), c.StrategyName, $"{c.Settings.Symbol} {c.Settings.Period}", Num(c.Weight),
                     Money(pf.ComponentMetrics[i].NetProfit, true), Num(pf.ComponentMetrics[i].SharpeRatio), Money(pf.ComponentMetrics[i].MaxDrawdown), pf.ComponentMetrics[i].TotalTrades.ToString(Es),
                 }));
+            sb.AppendLine("### Component input evidence");
+            sb.AppendLine();
+            foreach (var component in pf.Components)
+            {
+                sb.AppendLine($"**{component.Label}**");
+                sb.AppendLine();
+                InputEvidenceTable(sb, component.RunId, component.Kind, component.CodeHash, component.InputEvidence);
+            }
             KeyValues(sb, new[]
             {
                 ("Common period", $"{Date(pf.From)} – {Date(pf.To)}"),
@@ -545,7 +738,7 @@ internal static class ReportBuilder
             sb.AppendLine();
             if (main != null)
             {
-                images.Add(("portafolio.png", ReportCharts.Equity(pf.Equity.Select(p => (p.Time, p.Equity)).ToList(), x.PortfolioCapital, "Portfolio equity curve", PortfolioCurves(pf, x.PortfolioCapital))));
+                images.Add(("portafolio.png", ReportCharts.Equity(pf.Equity.Select(p => (p.AvailableAt ?? p.Time, p.Equity)).ToList(), x.PortfolioCapital, "Portfolio equity curve", PortfolioCurves(pf, x.PortfolioCapital))));
                 sb.AppendLine("![Portfolio equity curve]({{assets}}/portafolio.png)");
                 sb.AppendLine();
             }

@@ -8,6 +8,17 @@
 
 **Historical storage incident:** the earlier startup-install receipt write failed with `ENOSPC`; its completed installation/preservation evidence was checksum-relocated externally. KVP promotion began with only about **560 MiB** of local headroom and used separately verified, newly owned APFS RAM for disposable SDK outputs, runtimes and fake fixtures, with no local backing image. Local headroom later improved independently; **15.803 GiB** was observed after KVP checkout cleanup. This task did not delete other active worktrees, user stores, port caches or rollback refs. Existing recording preferences were preserved, not disabled to disguise a storage failure.
 
+## Correctness program candidate
+
+The user authorized all eleven follow-up packages on `fix/memoshi-correctness`, based on `1310f0a1fcee0b04ae6aabfbb19bf906699b3366`. That baseline has the same runtime source as the accepted `5c2583c` installation. This candidate is not installed, merged, provider-certified or release-ready. The installed app, personal stores, credentials, historical source-review baseline, upstream checkpoint and Rust/Swift pins remain untouched.
+
+The coherent candidate builds all 15 Release projects with zero warnings or errors. The final unfiltered suite has 1,733 cases, with 1,726 passes, zero failures and seven existing Windows-only skips. All 19 new native cases and all 63 Accounts Close consumers pass. All 50 final compiled UI handlers pass, with resource/fidelity run separately. Nine runtime DLLs and two real guide inputs remain unchanged across the handler runs. Current Spanish, Chinese and English core captures and four exported HTML reports were inspected within the report's stated scope. The unchanged English/source guard reports 312 files and zero failures after 58 individual source decisions. Corrected real-session controls reproduce same-authority retained-state interference and different-path success, not the historical timeout causes. Comparative performance remains inconclusive.
+
+Before-fix cache, Accounts Close, saved-report and ordinary-Quit consumers run separately against the original baseline. A fixture compilation/setup failure is not counted as a reproduced application defect. Native Rithmic fill-inclusion and exit/deduplication guarantees remain unestablished by the available public protocol. No server-enforced reduce-only or exactly-once claim is added.
+
+The [correctness program report](correctness-program.md) records the delivered contracts, exact current gates, retained failures and remaining operator decisions. Three historical native timeout causes remain unattributed, and separate review contexts are not represented as cross-family review. Existing native/private-account deferrals below remain in force.
+
+
 ## Chart data status and native Mac acceptance — 2026-11-06
 
 The user authorized proceeding with the combined remaining work. Runtime **`5c2583c29208fa32afa167c8b5389033fe905cc8`**, based on canonical `27f4645` and the accepted `804e940` runtime, replaces large centred diagnostics with a small translated corner badge. Hover/click or keyboard navigation reveals the complete current warning; Escape closes details without dismissing the underlying condition. Ordinary chart focus does not open a large popup, and badge clicks do not start chart/order gestures. History limits, candle/raw/compact fidelity, provider errors, recording, trading ownership and persistence are unchanged. The accepted immutable-source startup and shutdown drains remain intact.

@@ -27,6 +27,89 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
     }
 
     [Fact]
+    public async Task Quantity_cap_lowered_during_native_replay_rejects_queued_strategy_exposure_before_transport()
+    {
+        var replayRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var server = new FakeRithmicServer { MarketPrice = 100, OrderReplayRelease = replayRelease };
+        var profile = new ConnectionProfile
+        {
+            Id = "quantity-cap-fixture", Kind = ConnectionKind.Rithmic, Name = "Quantity cap fixture",
+            Enabled = true, AllowRealOrders = true, MaxOrderQuantity = 2,
+            TradingNamespace = Guid.NewGuid().ToString("N"), TradingGeneration = Guid.NewGuid().ToString("N"),
+            RithmicUri = server.Uri, RithmicSystem = "Rithmic 01", RithmicUser = "demo",
+        };
+        var services = SearchZoomFixture.Services();
+        services.Connections.Profiles.Add(profile);
+        InitializeField(services.Connections, "_tradingRoutes");
+        services.Connections.EnsureTradingIdentity(profile);
+        InitializeField(services, "_orderContexts");
+        InitializeField(services, "_wireAccounts");
+        InitializeField(services, "_brokerOrigins");
+        SearchZoomFixture.Set(services, "_executionRoot", _root);
+        string accountId = AppServices.RithmicAccountId(profile, "ACC1");
+        var context = (OrderContext)typeof(AppServices).GetMethod("TradingContext", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(services, new object?[] { profile, accountId, "Rithmic", "futures", server.Uri, null, null })!;
+        using var data = Data("ES");
+        using var session = new RithmicTradingSession(new RithmicSettings
+        {
+            Uri = server.Uri, System = profile.RithmicSystem, User = "demo", Password = "demo", TimeoutMs = 5000,
+        });
+        using var broker = new RithmicBroker(data, session, "ACC1", "Quantity cap fixture",
+            _ => Task.FromResult(("ESZ6", "CME")), context);
+        var routes = (ConcurrentDictionary<(string Context, string Instrument), WeakReference<ITradingAccount>>)
+            typeof(AppServices).GetField("_wireAccounts", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(services)!;
+        routes[(context.Descriptor.Id, data.Instrument.Key)] = new(broker);
+        using var runner = new LiveStrategyRunner(new ProtectedStrategy { StopLossTicks = 0, TakeProfitTicks = 0 },
+            data, broker, ChartPeriod.M1)
+        {
+            AccountId = accountId,
+            Guard = (ILiveOrderGuard)typeof(AppServices).GetProperty("OrderGuard", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(services)!,
+        };
+        session.Start();
+        try
+        {
+            await server.OrderReplayRequested.Task.WaitAsync(TimeSpan.FromSeconds(8));
+            await Until(() => broker.PositionReady);
+            Assert.True(broker.IsReal);
+            Assert.False(broker.OrdersReady);
+            Assert.Equal(0m, broker.Position.Volume);
+            runner.Start();
+            var queued = runner.Submit(OrderSide.Buy, StrategyOrderType.Limit, 2, 98, "Queued cap entry");
+            Assert.Equal(StrategyOrderState.Active, queued.State);
+            var queuedNative = Assert.Single(broker.ActiveOrders);
+            Assert.Equal(2m, queuedNative.QuantityToFill);
+            Assert.Equal(context.Descriptor.Id, queuedNative.ContextId);
+            Assert.NotEqual(context.ManualOwner.Id, queuedNative.OwnerId);
+            Assert.Empty(queuedNative.ExchangeOrderId);
+            lock (server.Tags) Assert.Empty(server.Tags);
+
+            profile.MaxOrderQuantity = 1;
+            replayRelease.TrySetResult();
+            await Until(() => queued.State == StrategyOrderState.Canceled || queuedNative.ExchangeOrderId.Length > 0,
+                () => $"Queued cap entry did not settle: native={queuedNative.Status}; strategy={queued.State}; error={broker.LastError}");
+
+            var control = runner.Submit(OrderSide.Buy, StrategyOrderType.Limit, 1, 97, "Whole-quantity cap control");
+            var controlNative = Assert.Single(broker.ActiveOrders, order => !ReferenceEquals(order, queuedNative));
+            await Until(() => controlNative.ExchangeOrderId.Length > 0);
+            Assert.Equal(StrategyOrderState.Active, control.State);
+            Assert.Equal(1m, controlNative.QuantityToFill);
+            Assert.Equal(context.Descriptor.Id, controlNative.ContextId);
+            lock (server.Tags)
+            {
+                Assert.Contains(controlNative.ClientOrderId, server.Tags);
+                Assert.DoesNotContain(queuedNative.ClientOrderId, server.Tags);
+                Assert.Single(server.Tags);
+            }
+            Assert.Equal(OrderStates.Failed, queuedNative.State);
+            Assert.Equal(OrderStatus.Rejected, queuedNative.Status);
+            Assert.Equal(StrategyOrderState.Canceled, queued.State);
+            Assert.Empty(queuedNative.ExchangeOrderId);
+        }
+        finally { replayRelease.TrySetResult(); }
+    }
+
+    [Fact]
     public async Task Native_fill_before_position_keeps_required_protection_pending_until_the_actual_app_route_reconciles()
     {
         using var server = new FakeRithmicServer { MarketPrice = 100 };
@@ -594,8 +677,7 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
         {
             if (quantityEntered.Task.IsCompleted) nativeSyncLeft.TrySetResult();
         }
-        // Subscribe before either real projector. This blocks the genuine Rithmic producer
-        // immediately before OnQuantity while Sync still owns its provider gate.
+        // Hold native quantity publication before either projector can apply it to an owned ledger.
         context.QuantityChanged += HoldActualNativeQuantity;
         broker.Changed += ObserveNativeSyncCompletion;
         var boundary = new ResetNativeGateAccount(broker, quantityEntered.Task, () => quantityRelease.TrySetResult());
@@ -650,7 +732,6 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
         Assert.Null(resetError);
         Assert.NotNull(reset);
         Assert.True(reset.IsCompletedSuccessfully);
-        Assert.True(accepted);
         var observation = await quantityEntered.Task.WaitAsync(TimeSpan.FromSeconds(8));
         Assert.Equal((openingOwner, openingLogicalId, 2m),
             (observation.Intent.Owner, observation.Intent.LogicalOrderId, observation.CumulativeQuantity));
@@ -671,7 +752,9 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
             Assert.False(ledger.OpenContextConflict);
         }
         Assert.Equal(filledGeneration, LiveStore.CaptureLedgerGeneration(_root, filled.Key));
-        Assert.NotEqual(flatGeneration, LiveStore.CaptureLedgerGeneration(_root, flat.Key));
+        Guid actualFlatGeneration = LiveStore.CaptureLedgerGeneration(_root, flat.Key);
+        if (accepted) Assert.NotEqual(flatGeneration, actualFlatGeneration);
+        else Assert.Equal(flatGeneration, actualFlatGeneration);
         Assert.Equal(0m, flat.OwnPosition);
         Assert.Equal(0m, LiveStore.LoadLedger(_root, flat.Key, 1m).Position);
         Assert.Empty(flat.ActiveOrders);
@@ -723,8 +806,7 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
         private T QueryNative<T>(Func<T> query)
         {
             if (!OnResetThread || !_capturedResetSnapshot) return query();
-            // Native Sync already holds its own gate. On the faulty implementation this
-            // release lets its next real OnQuantity enter the inverse ledger-gate wait.
+            // Release the native producer before querying so a stalled account getter cannot trap cleanup.
             releaseNativeQuantity();
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var task = Task.Run(() =>

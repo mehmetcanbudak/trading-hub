@@ -157,9 +157,10 @@ internal sealed partial class LiveView : UserControl, IPage
         Refresh(force: true);
     }
 
-    internal void OpenLaunch(string? strategyId = null, IReadOnlyDictionary<string, object?>? parameters = null, string? portfolioId = null)
+    internal void OpenLaunch(string? strategyId = null, IReadOnlyDictionary<string, object?>? parameters = null, string? portfolioId = null,
+        CompiledStrategyGeneration? generation = null)
     {
-        var w = new LiveLaunchWindow(_svc, _status, strategyId, parameters, portfolioId);
+        var w = new LiveLaunchWindow(_svc, _status, strategyId, parameters, portfolioId, generation);
         w.Closed += (_, _) => Refresh(force: true);
         w.Show(_window);
     }

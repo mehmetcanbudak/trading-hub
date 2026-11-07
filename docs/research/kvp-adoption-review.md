@@ -2,7 +2,7 @@
 
 **Original decision date:** 2026-11-04. **Historical scope:** source-only selection review; it did not itself authorize an import, merge, implementation, installation or release.
 
-**Current canonical status — 2026-11-06:** the user's later selected KVP adoption and execution/IB consolidation are accepted on published `memoshi`, with latest tested runtime source `804e940ec774a0668968c6bdb952c6e7d9cbb671`. The original pinned-source findings below remain a dated comparison, not a claim that KVP is still deferred or that current upstream metadata was refreshed. The last accepted personal installation is `bd880f89b9ad600bd5ef43db72f7fbac802c013b`; this consolidation did not replace or restart it. See the [current validation dashboard](../en/TRANSLATION_STATUS.md) for combined build/suite/UI/catalog/signed-package evidence and separate external/native gates. Rust/Swift pins and the upstream checkpoint remain unchanged.
+**Current canonical status.** The user's later selected KVP adoption and execution/IB consolidation are accepted on canonical `memoshi`. The [current validation dashboard](../en/TRANSLATION_STATUS.md) owns the exact accepted runtime, package and personal-installation checkpoints and separate external/native gates. The original pinned-source findings below remain a dated comparison, not a claim that KVP is still deferred or that upstream metadata was refreshed. A later correctness branch does not replace or restart the installed app. Rust/Swift pins and the upstream checkpoint remain unchanged.
 
 ## 1. Current pins and evidence boundary
 

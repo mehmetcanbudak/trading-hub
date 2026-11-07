@@ -782,17 +782,10 @@ public sealed partial class TradingView
 
     // ===================================================================== operar
 
-    /// <summary>Confirma una orden en cuentas reales (si está activada la confirmación).</summary>
-    private async Task<bool> ConfirmAsync(ChartTab chart, ITradingAccount acc, string description, bool checkQuantity = true, decimal qty = 0)
+    private async Task<bool> ConfirmAsync(ChartTab chart, ITradingAccount acc, string description)
     {
         if (!acc.IsReal) return true;
         var profile = _svc.Connections.FindForAccount(chart.AccountId);
-        if (checkQuantity && profile?.MaxOrderQuantity > 0 && (qty > 0 ? qty : QtyOf(chart)) > profile.MaxOrderQuantity)
-        {
-            _status($"Order blocked: exceeds maximum configured quantity ({profile.MaxOrderQuantity}).");
-            return false;
-        }
-
         if (profile?.ConfirmOrders == false && !_svc.Settings.ConfirmRealOrders) return true;
         var owner = chart.Window ?? TopLevel.GetTopLevel(this) as Window;
         return owner != null && await ConfirmDialog.ShowAsync(owner, "Confirm REAL order", $"{description}\nAccount: {acc.Name}", "Submit order", danger: true);
@@ -827,7 +820,7 @@ public sealed partial class TradingView
         string desc = $"{Localization.Lang.T(dir == OrderDirections.Buy ? "BUY" : "SELL")} {Localization.Lang.T(type switch { OrderTypes.Market => "at market", OrderTypes.Limit => "limit", _ => "stop" })} {qty} {(chart.Model?.Settings.BlindReplay == true ? "Practice" : acc.Instrument.Symbol)}{(price > 0 ? " @ " + acc.Instrument.FormatPrice(price) : "")}";
         decimal signed = dir == OrderDirections.Buy ? qty : -qty;
         if (Blocked(chart, acc, signed)) return null;
-        if (!await ConfirmAsync(chart, acc, desc, qty: qty)) return null;
+        if (!await ConfirmAsync(chart, acc, desc)) return null;
         if (Blocked(chart, acc, signed)) return null; // the permission or the position may have changed while confirming
         bool entry = IsEntry(acc, dir);
         var order = type switch
@@ -854,7 +847,7 @@ public sealed partial class TradingView
         var acc = AccountOf(chart);
         if (acc == null || chart == null) return;
         string desc = $"Move {(order.Direction == OrderDirections.Buy ? "buy order" : "sell order")} to {acc.Instrument.FormatPrice(price)}";
-        if (!await ConfirmAsync(chart, acc, desc, checkQuantity: false)) return;
+        if (!await ConfirmAsync(chart, acc, desc)) return;
         _status(_svc.BracketsFor(acc).Move(order, price));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
@@ -870,7 +863,7 @@ public sealed partial class TradingView
         else if (d.Entry != null) msg = br.AttachToEntry(d.Entry, price, d.Role);
         else
         {
-            if (!await ConfirmAsync(chart, acc, $"Place stop/target on {acc.Instrument.FormatPrice(price)}", checkQuantity: false)) return;
+            if (!await ConfirmAsync(chart, acc, $"Place stop/target on {acc.Instrument.FormatPrice(price)}")) return;
             msg = br.DropFromPosition(price, d.Role);
         }
 
@@ -885,7 +878,7 @@ public sealed partial class TradingView
         var acc = AccountOf(chart);
         if (acc == null || chart == null) return;
         if (adds != null && Blocked(chart, acc, adds(acc))) return;
-        if (acc.IsReal && !await ConfirmAsync(chart, acc, message + "?", checkQuantity: false)) return;
+        if (acc.IsReal && !await ConfirmAsync(chart, acc, message + "?")) return;
         if (adds != null && Blocked(chart, acc, adds(acc))) return;
         action(acc);
         _status(acc.LastError is { Length: > 0 } error ? error : $"{message} requested; check account status for confirmation.");
@@ -898,7 +891,7 @@ public sealed partial class TradingView
     {
         var acc = AccountOf(chart);
         if (acc == null || chart == null) return;
-        if (acc.IsReal && !await ConfirmAsync(chart, acc, description + "?", checkQuantity: false)) return;
+        if (acc.IsReal && !await ConfirmAsync(chart, acc, description + "?")) return;
         _status(action(_svc.BracketsFor(acc)));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();

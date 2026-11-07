@@ -52,6 +52,7 @@ internal sealed class DataView : UserControl, IPage
     internal Task LosslessArchiveOperation { get; private set; } = Task.CompletedTask;
     private bool _refreshing;
     private bool _refreshAgain;
+    private TaskCompletionSource? _refreshCompletion;
 
     public DataView(AppServices svc, Action<string> status, MainWindow main, Uri? publicArchiveOrigin = null)
     {
@@ -272,28 +273,47 @@ internal sealed class DataView : UserControl, IPage
             Ui.Button("Cancel IB import", MaterialIconKind.Close, () => _ibCts?.Cancel())),
         _ibProgress, _ibOutcome);
 
-    private async Task ImportIbAsync()
+    private async Task RunDataOperationAsync(Func<CancellationToken, Task> operation)
+    {
+        bool admitted = false;
+        try
+        {
+            await _svc.Work.RunAsync(async cancellation =>
+            {
+                admitted = true;
+                try { await operation(cancellation); }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+                finally { await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background); }
+            });
+        }
+        catch (OperationCanceledException) when (!admitted && _svc.Work.IsStopping) { }
+        catch (ObjectDisposedException) when (!admitted && _svc.Work.IsStopping) { }
+    }
+
+    private Task ImportIbAsync() => RunDataOperationAsync(ImportIbOwnedAsync);
+
+    private async Task ImportIbOwnedAsync(CancellationToken terminal)
     {
         if (_ibCts != null) return;
-        using var cts = new CancellationTokenSource();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(terminal);
         _ibCts = cts;
         _ibProgress.IsVisible = true;
         try
         {
             string folder = _ibFolder.Text?.Trim() ?? "";
             string? symbol = string.IsNullOrWhiteSpace(_ibSymbol.Text) ? null : _ibSymbol.Text.Trim();
-            var preview = await Task.Run(() => IbBarImport.PreviewFolder(folder, AppPaths.Ticks, symbol, cts.Token));
+            var preview = await Task.Run(() => IbBarImport.PreviewFolder(folder, AppPaths.Ticks, symbol, cts.Token), cts.Token);
             _ibOutcome.Text = preview.Description + "\n" + string.Join("\n", preview.Days.Select(d => $"{d.Day:yyyy-MM-dd}: {d.Bars} incoming bars, {d.StoredSyntheticMinutes} stored synthetic minutes, {d.RecordedTrades} real ticks, {d.CoveredRealMinutes} conflicting real minutes"));
             bool replace = _ibReplace.IsChecked == true;
             if (!await ConfirmDialog.ShowAsync(_main, replace ? "Replace IB recorded minutes" : "Import IB history",
                     _ibOutcome.Text + (replace ? "\nOnly covered minutes are replaced. Original files and a recovery journal are preserved; a multi-file publication is not atomic." : "\nRecorded tick files remain byte-identical. Only uncovered minutes are filled."),
-                    replace ? "Replace with backups" : "Import uncovered minutes", danger: replace, cancelByDefault: true)) return;
+                    replace ? "Replace with backups" : "Import uncovered minutes", danger: replace, cancelByDefault: true, cancellationToken: cts.Token)) return;
             var progress = new Progress<double>(value => _ibProgress.Value = value);
             var result = await Task.Run(() => IbBarImport.Commit(preview, AppPaths.Ticks,
-                replace ? IbBarImport.ImportPolicy.ReplaceCoveredMinutes : IbBarImport.ImportPolicy.PreserveRecorded, progress, cts.Token));
+                replace ? IbBarImport.ImportPolicy.ReplaceCoveredMinutes : IbBarImport.ImportPolicy.PreserveRecorded, progress, cts.Token), cts.Token);
             _ibOutcome.Text = $"IB import: {result.Bars} validated incoming bars, {result.Days} UTC days, {result.FilesWritten} files published. Policy: {result.Policy}. Backups and journal: {result.BackupDirectory}";
             _svc.Connections.Save();
-            Refresh();
+            if (!terminal.IsCancellationRequested) await RefreshOwnedAsync(terminal);
         }
         catch (OperationCanceledException) { _ibOutcome.Text = "IB import canceled before publication; no history files changed."; }
         catch (Exception error) { _ibOutcome.Text = "IB import failed: " + error.Message; }
@@ -405,7 +425,9 @@ internal sealed class DataView : UserControl, IPage
         return runs;
     }
 
-    private async Task DatabentoQuoteAsync()
+    private Task DatabentoQuoteAsync() => RunDataOperationAsync(DatabentoQuoteOwnedAsync);
+
+    private async Task DatabentoQuoteOwnedAsync(CancellationToken terminal)
     {
         if (DatabentoProfile is not { } profile)
         {
@@ -426,12 +448,13 @@ internal sealed class DataView : UserControl, IPage
         {
             using var client = _svc.Connections.DatabentoOf(profile);
             decimal total = 0;
-            foreach (var (from, to) in Runs(days)) total += await client.CostAsync(DbRoot, from, to, CancellationToken.None);
+            foreach (var (from, to) in Runs(days)) total += await client.CostAsync(DbRoot, from, to, terminal);
             _dbQuote = total;
             _dbQuoteKey = $"{DbRoot}|{days.First()}|{days.Last()}|{days.Count}";
             _dbDownload!.IsEnabled = true;
             _dbStatus.Text = $"{DbRoot}: {days.Count} day(s) to download ({days.First():dd/MM/yyyy} → {days.Last():dd/MM/yyyy}) · estimated cost ≈ US$ {total.ToString("0.00", CultureInfo.InvariantCulture)} from your Databento credits.";
         }
+        catch (OperationCanceledException) when (terminal.IsCancellationRequested) { }
         catch (Exception ex)
         {
             _dbStatus.Text = "Could not estimate: " + ex.Message;
@@ -442,7 +465,9 @@ internal sealed class DataView : UserControl, IPage
         }
     }
 
-    private async Task DatabentoDownloadAsync()
+    private Task DatabentoDownloadAsync() => RunDataOperationAsync(DatabentoDownloadOwnedAsync);
+
+    private async Task DatabentoDownloadOwnedAsync(CancellationToken terminal)
     {
         if (DatabentoProfile is not { } profile || _dbQuote is not { } quote) return;
         var days = DatabentoDays();
@@ -457,11 +482,11 @@ internal sealed class DataView : UserControl, IPage
         // paid: Cancel is the default (Enter never spends credits) without styling the download as dangerous
         if (!await ConfirmDialog.ShowAsync(_main, "Download Databento history",
                 $"Downloads {days.Count} day(s) of {DbRoot} tick-by-tick. Databento charges ≈ US$ {cost} from your credits (any shortfall is charged to your Databento payment method).",
-                $"Download (≈ US$ {cost})", cancelByDefault: true)) return;
+                $"Download (≈ US$ {cost})", cancelByDefault: true, cancellationToken: terminal)) return;
 
         var inst = CmeInstrument(DbRoot);
-        _dbCts = new CancellationTokenSource();
-        var ct = _dbCts.Token;
+        using var cancellation = _dbCts = CancellationTokenSource.CreateLinkedTokenSource(terminal);
+        var ct = cancellation.Token;
         using var job = BackgroundWork.Begin($"downloading history for {DbRoot} from Databento");
         _dbDownload!.IsEnabled = false;
         _dbCost!.IsEnabled = false;
@@ -510,7 +535,7 @@ internal sealed class DataView : UserControl, IPage
             _dbCancel.IsVisible = false;
             _dbProgress.IsVisible = false;
             _dbCts = null;
-            Dispatcher.UIThread.Post(Refresh);
+            if (!terminal.IsCancellationRequested) await RefreshOwnedAsync(terminal);
         }
     }
 
@@ -529,7 +554,9 @@ internal sealed class DataView : UserControl, IPage
         return first.Length > 0 ? first : "IMPORTADO";
     }
 
-    private async Task ImportAsync()
+    private Task ImportAsync() => RunDataOperationAsync(ImportOwnedAsync);
+
+    private async Task ImportOwnedAsync(CancellationToken terminal)
     {
         if (TopLevel.GetTopLevel(this) is not { } top) return;
         var files = await top.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
@@ -538,6 +565,7 @@ internal sealed class DataView : UserControl, IPage
             AllowMultiple = true,
             FileTypeFilter = new[] { new Avalonia.Platform.Storage.FilePickerFileType("History (CSV, TXT)") { Patterns = new[] { "*.csv", "*.txt" } } },
         });
+        terminal.ThrowIfCancellationRequested();
         if (files.Count == 0) return;
         var offset = TimeSpan.FromHours(Zones[Math.Max(0, _importZone.SelectedIndex)].Hours);
         string typed = (_importSymbol.Text ?? "").Trim().ToUpperInvariant();
@@ -548,6 +576,7 @@ internal sealed class DataView : UserControl, IPage
         {
             for (int i = 0; i < files.Count; i++)
             {
+                terminal.ThrowIfCancellationRequested();
                 var path = files[i].TryGetLocalPath();
                 if (path == null) continue;
                 string symbol = typed.Length > 0 ? typed : GuessSymbol(path);
@@ -556,7 +585,7 @@ internal sealed class DataView : UserControl, IPage
                 var progress = new Progress<double>(p => _importProgress.Value = (index + p) / files.Count);
                 try
                 {
-                    var r = await Task.Run(() => CsvImport.Import(path, symbol, AppPaths.Ticks, offset, null, progress, CancellationToken.None));
+                    var r = await Task.Run(() => CsvImport.Import(path, symbol, AppPaths.Ticks, offset, null, progress, terminal), terminal);
                     lines.Add($"{symbol}: {r.Kind}, {r.Trades:N0} trades in {r.Days} day(s)" +
                               (r.From is { } f && r.To is { } t ? $" ({f:dd/MM/yyyy} → {t:dd/MM/yyyy})" : "") +
                               (r.BadLines > 0 ? $", {r.BadLines:N0} unreadable rows" : "") + $" · price increment {r.TickSize.ToString("0.########", CultureInfo.InvariantCulture)}" +
@@ -571,11 +600,12 @@ internal sealed class DataView : UserControl, IPage
             _importStatus.Text = "Done. " + string.Join(" · ", lines) + ". Available in the left-hand list (imported connection) and in backtests.";
             _status(_importStatus.Text);
         }
+        catch (OperationCanceledException) when (terminal.IsCancellationRequested) { }
         finally
         {
             _importButton.IsEnabled = true;
             _importProgress.IsVisible = false;
-            Refresh();
+            if (!terminal.IsCancellationRequested) await RefreshOwnedAsync(terminal);
         }
     }
 
@@ -685,19 +715,32 @@ internal sealed class DataView : UserControl, IPage
 
     private void Refresh()
     {
+        if (_svc.Work.IsStopping) return;
         _refreshAgain = true;
         if (!_refreshing) _ = RefreshAsync();
     }
 
-    private async Task RefreshAsync()
+    private Task RefreshAsync() => RunDataOperationAsync(RefreshOwnedAsync);
+
+    private async Task RefreshOwnedAsync(CancellationToken terminal)
     {
+        _refreshAgain = true;
+        if (_refreshing)
+        {
+            await _refreshCompletion!.Task;
+            terminal.ThrowIfCancellationRequested();
+            return;
+        }
+        var completion = _refreshCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _refreshing = true;
         try
         {
             do
             {
                 _refreshAgain = false;
-                try { _index = await Task.Run(() => HistoricalData.Scan(AppPaths.Ticks)); }
+                terminal.ThrowIfCancellationRequested();
+                try { _index = await Task.Run(() => HistoricalData.Scan(AppPaths.Ticks), terminal); }
+                catch (OperationCanceledException) when (terminal.IsCancellationRequested) { throw; }
                 catch (Exception error)
                 {
                     _index.Clear();
@@ -708,10 +751,15 @@ internal sealed class DataView : UserControl, IPage
                     _status("History could not be loaded: " + error.Message);
                     continue;
                 }
+                terminal.ThrowIfCancellationRequested();
                 ApplyIndex();
-            } while (_refreshAgain);
+            } while (_refreshAgain && !terminal.IsCancellationRequested);
         }
-        finally { _refreshing = false; }
+        finally
+        {
+            _refreshing = false;
+            completion.TrySetResult();
+        }
     }
 
     private void ApplyIndex()
@@ -773,7 +821,9 @@ internal sealed class DataView : UserControl, IPage
 
     private List<DayData> SelectedDays() => _days.SelectedItems?.OfType<ListBoxItem>().Select(i => (DayData)i.Tag!).ToList() ?? new();
 
-    private async Task ArchiveSelectedAsync()
+    private Task ArchiveSelectedAsync() => RunDataOperationAsync(ArchiveSelectedOwnedAsync);
+
+    private async Task ArchiveSelectedOwnedAsync(CancellationToken terminal)
     {
         if (_losslessArchiveCancellation != null) return;
         var selected = _selected;
@@ -794,7 +844,7 @@ internal sealed class DataView : UserControl, IPage
             return;
         }
         var instrument = new Instrument { FeedId = selected.FeedId, Symbol = selected.Symbol, TickSize = tickSize, Exchange = FeedName(selected.FeedId) };
-        using var cancellation = _losslessArchiveCancellation = new();
+        using var cancellation = _losslessArchiveCancellation = CancellationTokenSource.CreateLinkedTokenSource(terminal);
         var ct = cancellation.Token;
         _symbols.IsEnabled = _days.IsEnabled = false;
         if (_savedDayActions != null) _savedDayActions.IsEnabled = false;
@@ -828,11 +878,13 @@ internal sealed class DataView : UserControl, IPage
             if (_savedDayActions != null) _savedDayActions.IsEnabled = true;
             if (_losslessArchiveCancel != null) _losslessArchiveCancel.IsVisible = false;
             _losslessArchiveProgress.IsVisible = false;
-            Refresh();
+            if (!terminal.IsCancellationRequested) await RefreshOwnedAsync(terminal);
         }
     }
 
-    private async Task DeleteSelectedAsync()
+    private Task DeleteSelectedAsync() => RunDataOperationAsync(DeleteSelectedOwnedAsync);
+
+    private async Task DeleteSelectedOwnedAsync(CancellationToken terminal)
     {
         var days = SelectedDays();
         var selected = _selected;
@@ -842,17 +894,20 @@ internal sealed class DataView : UserControl, IPage
             return;
         }
 
-        if (!await ConfirmDialog.ShowAsync(_main, "Delete data", $"Deletes {days.Count} day(s) of {selected.Symbol} ({Size(days.Sum(d => d.Bytes))}). This cannot be undone.", "Delete", danger: true)) return;
+        if (!await ConfirmDialog.ShowAsync(_main, "Delete data", $"Deletes {days.Count} day(s) of {selected.Symbol} ({Size(days.Sum(d => d.Bytes))}). This cannot be undone.", "Delete", danger: true, cancellationToken: terminal)) return;
         try
         {
-            await Task.Run(() => HistoricalData.DeleteDays(AppPaths.Ticks, selected.FeedId, selected.Symbol, days.Select(d => d.Day)));
+            await Task.Run(() => HistoricalData.DeleteDays(AppPaths.Ticks, selected.FeedId, selected.Symbol, days.Select(d => d.Day)), terminal);
             _status($"Deleted {days.Count} day(s) of {selected.Symbol}");
-            Refresh();
+            if (!terminal.IsCancellationRequested) await RefreshOwnedAsync(terminal);
         }
+        catch (OperationCanceledException) when (terminal.IsCancellationRequested) { }
         catch (Exception error) { _status("History could not be deleted: " + error.Message); }
     }
 
-    private async Task ReplaySelectedAsync()
+    private Task ReplaySelectedAsync() => RunDataOperationAsync(ReplaySelectedOwnedAsync);
+
+    private async Task ReplaySelectedOwnedAsync(CancellationToken terminal)
     {
         var days = SelectedDays();
         var selected = _selected;
@@ -870,9 +925,10 @@ internal sealed class DataView : UserControl, IPage
         {
             try
             {
-                var instruments = await InstrumentPicker.InstrumentsAsync(_svc, selected.FeedId);
+                var instruments = await InstrumentPicker.InstrumentsAsync(_svc, selected.FeedId, terminal);
                 inst = instruments.FirstOrDefault(i => i.Symbol == selected.Symbol);
             }
+            catch (OperationCanceledException) when (terminal.IsCancellationRequested) { throw; }
             catch (Exception)
             {
                 // sin la conexión: los futuros igual se arman con el catálogo de CME
@@ -890,12 +946,14 @@ internal sealed class DataView : UserControl, IPage
         // arranca con el primer dato del día
         var start = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         Trade first;
-        try { first = await Task.Run(() => HistoricalData.Read(AppPaths.Ticks, selected.FeedId, selected.Symbol, start, start.AddDays(1)).FirstOrDefault()); }
+        try { first = await Task.Run(() => HistoricalData.Read(AppPaths.Ticks, selected.FeedId, selected.Symbol, start, start.AddDays(1)).FirstOrDefault(), terminal); }
+        catch (OperationCanceledException) when (terminal.IsCancellationRequested) { throw; }
         catch (Exception error)
         {
             _status("Replay history could not be loaded: " + error.Message);
             return;
         }
+        terminal.ThrowIfCancellationRequested();
         if (first.Time > start) start = first.Time;
         var end = lastDay.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(1);
         _main.Navigate("trading");
@@ -904,7 +962,9 @@ internal sealed class DataView : UserControl, IPage
 
     // ===================================================================== descargas
 
-    private async Task DownloadAsync()
+    private Task DownloadAsync() => RunDataOperationAsync(DownloadOwnedAsync);
+
+    private async Task DownloadOwnedAsync(CancellationToken terminal)
     {
         if (_dlInstrument == null || _dlProfile == null)
         {
@@ -931,8 +991,8 @@ internal sealed class DataView : UserControl, IPage
         var started = DateTime.UtcNow;
         int fetched = 0;
         string? lastProblem = null;
-        _cts = new CancellationTokenSource();
-        var ct = _cts.Token;
+        using var cancellation = _cts = CancellationTokenSource.CreateLinkedTokenSource(terminal);
+        var ct = cancellation.Token;
         _download.IsEnabled = false;
         _cancel.IsEnabled = true;
         _progress.IsVisible = true;
@@ -1009,7 +1069,7 @@ internal sealed class DataView : UserControl, IPage
             _cancel.IsEnabled = false;
             _progress.IsVisible = false;
             _cts = null;
-            Dispatcher.UIThread.Post(Refresh);
+            if (!terminal.IsCancellationRequested) await RefreshOwnedAsync(terminal);
         }
     }
 }

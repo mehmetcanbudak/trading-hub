@@ -168,7 +168,7 @@ internal sealed class LiveStrategyWindow : Window
         var catalog = _svc.Strategies;
         if (catalog.Files.Count == 0) catalog.Refresh();
         var file = catalog.Files.FirstOrDefault(f => f.Id == e.Info.StrategyId);
-        var type = r?.StrategyInstance.GetType() ?? file?.Type;
+        var type = r?.StrategyInstance.GetType() ?? _svc.Live.GenerationOf(e)?.Type ?? file?.Generation?.Type;
         var values = _svc.Live.ParametersOf(e);
         _params.Load(type, values, readOnly: locked, hidden: ContextParameters);
         var probe = type != null ? (Strategy)Activator.CreateInstance(type)! : null;

@@ -1,5 +1,11 @@
 # Non-KVP canonical source handoff — 2026-11-04
 
+## Current canonical review route
+
+This is a dated non-KVP handoff, not the latest full C# baseline. Start any new port review from the exact accepted source recorded in the [current dashboard](../en/TRANSLATION_STATUS.md). Later accepted work includes selected KVP capabilities, startup and execution/IB hardening. Review their recorded scope and evidence rather than using this document's older integration SHA as a complete inventory.
+
+This route remains review-only. Keep existing port worktrees and oracle pins unchanged until separately authorized adoption names an exact source and its native validation. A correctness candidate is not an accepted replacement for canonical source or the installed app.
+
 ## Exact review inputs
 
 - Canonical C# integration: `memoshi@b730d4c144b69f4a2695b5bdefd572dab6014369`.

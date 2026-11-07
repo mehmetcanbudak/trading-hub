@@ -10,10 +10,13 @@ Choose **Account** in Chart Trader. The selection is remembered per chart.
 
 | Chart | Available accounts |
 |---|---|
-| Any | Simulated account. |
+| Normal venue chart | Simulated account, plus applicable connected broker accounts below. |
 | Binance Futures / Spot | That profile's Binance account, marked testnet or **REAL**. |
+| Bybit linear | That profile's one-way UTA account, marked Demo, Testnet or **REAL**. |
 | Rithmic futures | Connected Rithmic practice or **REAL** accounts. |
 | Rithmic / Tradovate CME futures | Connected Tradovate demo or **REAL** accounts. |
+| Composite crypto | No executable account, including the shared simulator. Its composite price is not a venue. |
+| Isolated practice replay | Only the replay's own simulated account and balance. No shared simulator or live account. |
 
 Rithmic accounts appear after the order session connects; until then, the ticket explains the wait. Selecting a real account displays an orange **REAL ACCOUNT** warning.
 

@@ -184,7 +184,6 @@ internal static class LiveFinancialScene
             }
             decimal DisplayedStatistics()
             {
-                Select("Statistics");
                 var title = view.GetVisualDescendants().OfType<TextBlock>()
                     .Single(text => text.IsEffectivelyVisible && text.Text == "NET PNL");
                 string text = ((StackPanel)title.Parent!).Children.OfType<TextBlock>().ElementAt(1).Text!;
@@ -195,17 +194,25 @@ internal static class LiveFinancialScene
                 using var frame = window.CaptureRenderedFrame() ?? throw new InvalidOperationException("The journal surface did not render.");
                 frame.Save(Path.Combine(output, name));
             }
-            decimal beforeTrade = DisplayedTrade(), beforeStats = DisplayedStatistics();
+            decimal beforeTrade = DisplayedTrade();
+            Select("Statistics");
+            decimal beforeStats = DisplayedStatistics();
             Capture("account_journal_revision_before.png");
             if (beforeAnalysis != 500m || beforeSummary != 500m || beforeTrade != 500m || beforeStats != 500m ||
                 beforeMark != 5000.25m || beforeLink != 500m)
                 throw new InvalidOperationException($"Journal UI baseline failed: analysis={beforeAnalysis}, summary={beforeSummary}, trade={beforeTrade}, statistics={beforeStats}, mark={beforeMark}, link={beforeLink}.");
 
             service.Journal.Add(AccountCenter.SimId, entry with { Price = 5001.25m });
-            pump(0.6);
             decimal afterAnalysis = service.AccountCenter.Snapshot(account).Analysis.RealizedNet;
             decimal afterSummary = service.AccountCenter.SimSummary().DayPnl;
-            decimal afterStats = DisplayedStatistics();
+            decimal firstAfterStats = DisplayedStatistics();
+            decimal afterStats = firstAfterStats;
+            var statisticsDeadline = DateTime.UtcNow.AddSeconds(30);
+            while (afterStats != 400m && DateTime.UtcNow < statisticsDeadline)
+            {
+                pump(0.01);
+                afterStats = DisplayedStatistics();
+            }
             Capture("account_journal_revision_statistics_after.png");
             decimal afterTrade = DisplayedTrade();
             Capture("account_journal_revision_trade_after.png");
@@ -221,6 +228,7 @@ internal static class LiveFinancialScene
                 before = new { analysis = beforeAnalysis, summary = beforeSummary, trade = beforeTrade, statistics = beforeStats, mark = beforeMark, link = beforeLink },
                 after = new { analysis = afterAnalysis, summary = afterSummary, trade = afterTrade, statistics = afterStats, mark = afterMark, link = afterLink },
                 expectedAfter = new { net = 400m, entry = 5001.25m, effectiveExecutions = 2 },
+                firstAfterStatistics = firstAfterStats,
                 passed = correct,
                 authority = "Actual AccountCenter, AccountsView statistics/trades and TradingView marks/links; owned journal facts only, no provider orders or model calls",
             }, new JsonSerializerOptions { WriteIndented = true });
