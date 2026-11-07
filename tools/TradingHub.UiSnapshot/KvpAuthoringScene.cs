@@ -106,6 +106,8 @@ internal static class KvpAuthoringScene
         string monitorFile = Path.Combine(AppPaths.UserIndicators, "UiReloadIndicator.cs");
         const string initial = "using TradingHub.Indicators; public class UiReloadIndicator : Indicator { public UiReloadIndicator() : base(true) {} protected override void OnCalculate(int bar, decimal value) { ((ValueDataSeries)DataSeries[0])[bar] = 7m; } }";
         File.WriteAllText(monitorFile, initial); App.Services.Scripts!.CompileAll();
+        // CompileAll defers to the monitor when it has already observed a newer version of the folder.
+        Until(() => App.Services.Catalog.Items.Any(item => item.Type.Name == "UiReloadIndicator"), "the written monitored source is published to the catalog");
         decimal Output()
         {
             var type = App.Services.Catalog.Items.Single(item => item.Type.Name == "UiReloadIndicator").Type;
