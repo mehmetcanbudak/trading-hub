@@ -3980,6 +3980,7 @@
   "Not all of them started: {0}": "No arrancaron todas: {0}",
   "Not an active target.": "No es un objetivo activo.",
   "Not an independent completed-trade estimate": "No es una estimación basada en operaciones completas independientes",
+  "Not canceled: the stop already triggered at Binance and its order is executing.": "No cancelada: el stop ya se activó en Binance y su orden se está ejecutando.",
   "Not enabled: administrator permission is required.": "No se activó: hace falta tu permiso de administrador.",
   "Not enabled: your administrator permission is needed.": "No se activó: hace falta tu permiso de administrador.",
   "Not enough data yet": "Todavía sin datos suficientes",

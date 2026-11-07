@@ -564,6 +564,14 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         public PreparedOrderIntent? Intent;
         public bool SubmissionUnknown;
         public bool CancelRequested;
+
+        /// <summary>
+        /// The pending cancel was requested for the conditional order. If it triggers before Binance accepts the cancel,
+        /// the cancel is past: it is never retargeted to the order the trigger placed, which is executing that exit.
+        /// </summary>
+        public bool CancelTargetsConditional;
+        /// <summary>Set when the conditional order this pending cancel targeted triggered before the cancel was accepted.</summary>
+        public bool CancelPassedTrigger;
         public bool CancelQueued;
         public bool ReplacementPending;
         public bool RestoreReplacement;
@@ -1640,6 +1648,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         _byAlgoId.Remove(t.AlgoId);
         _finishedAlgo[t.AlgoId] = DateTime.UtcNow;
         t.AlgoId = 0;
+        if (t.CancelRequested && t.CancelTargetsConditional) t.CancelPassedTrigger = true;
         t.AlgoStatus = "";
         t.NotFound = 0;
         if (_byId.TryGetValue(orderId, out var shown) && shown != t)
@@ -2503,6 +2512,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             if (t != null)
             {
                 t.CancelRequested = true;
+                t.CancelTargetsConditional = IsConditional(order.Type);
+                t.CancelPassedTrigger = false;
                 RejectQueuedReprice(t, "Cancellation superseded the queued price update.");
             }
         }
@@ -2533,7 +2544,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
 
     private async Task CancelAsync(Tracked t)
     {
-        long id, algoId;
+        long id = 0, algoId = 0;
+        bool pastCancel;
         lock (_gate)
         {
             if (_disposed) return;
@@ -2542,11 +2554,31 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 t.CancelQueued = false;
                 return;
             }
-            id = t.Id;
-            algoId = t.AlgoId;
-            t.Busy++;
-            t.CancelQueued = true;
-            t.ReplaceFailure = null; // canceling it is what is wanted now
+            pastCancel = t.CancelPassedTrigger;
+            if (pastCancel)
+            {
+                // The conditional order triggered before Binance accepted this cancel: the handle now follows the order the
+                // trigger placed, which is executing the exit. That order was never the cancel's target.
+                t.CancelRequested = false;
+                t.CancelTargetsConditional = false;
+                t.CancelPassedTrigger = false;
+                t.CancelQueued = false;
+                LastError = "Not canceled: the stop already triggered at Binance and its order is executing.";
+            }
+            else
+            {
+                id = t.Id;
+                algoId = t.AlgoId;
+                t.Busy++;
+                t.CancelQueued = true;
+                t.ReplaceFailure = null; // canceling it is what is wanted now
+            }
+        }
+        if (pastCancel)
+        {
+            Publish();
+            PublishAccountChanged();
+            return;
         }
 
         BinanceOpenOrder? canceled = null;

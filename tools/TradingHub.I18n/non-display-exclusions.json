@@ -8,7 +8,7 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:647 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:611 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:843 TradingHub.Core/Trading/OrderContext.cs:1155 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:739",
+    "locations": "TradingHub.App/Services/AppServices.cs:647 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:619 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:851 TradingHub.Core/Trading/OrderContext.cs:1155 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:739",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Fee": {
