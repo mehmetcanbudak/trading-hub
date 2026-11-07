@@ -108,6 +108,7 @@ public sealed partial class OrderContext
     private bool _storageFault, _identityFault;
     private bool _configurationFrozen;
     private readonly Dictionary<string, string> _bindingFailures = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _releasedCloseDenials = new(StringComparer.Ordinal);
     private OrderOwnershipJournal? _journal;
     private Func<OrderRequest, string?>? _permission;
     private Func<OrderRequest, decimal, string?>? _nativePermission;
@@ -446,13 +447,14 @@ public sealed partial class OrderContext
                     else Save(dispatch);
                 }
                 TrackEmergencyExposure(intent, nativeInstrument, nativeExchange, actualQuantity ?? intent.Request.Quantity);
+                if (_releasedCloseDenials.Remove(intent.Id, out var releasedDenial) && _lastError == releasedDenial) _lastError = null;
                 return null;
             }
             catch (PositionCloseAdmissionDeniedException ex)
             {
                 // The current-close check refused before the dispatch record was written, so nothing was sent.
                 intent.ReleaseAttempt();
-                return LastError = "Could not commit dispatch ownership: " + ex.Message;
+                return _releasedCloseDenials[intent.Id] = LastError = "Could not commit dispatch ownership: " + ex.Message;
             }
             catch (PositionCloseAdmissionUnresolvedException ex)
             {

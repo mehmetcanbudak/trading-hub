@@ -98,6 +98,28 @@ public sealed partial class AccountsRithmicCloseRegressionTests
     }
 
     [Fact]
+    public void A_released_send_slot_refusal_is_cleared_once_the_same_close_commits()
+    {
+        string root = CreateCloseJournalRoot();
+        try
+        {
+            var context = new OrderContext(ClaimDescriptor(), Path.Combine(root, "shared-execution"));
+            var close = context.BeginPositionClose("rithmic:ESZ6", NativeClose());
+            Assert.Null(close.Error);
+            const string refusal = "Rithmic replay or cancellation is unresolved at the send slot; no close was sent.";
+            string? refused = context.StartDispatch(close, "ESZ6", "CME", 2m, 0m, 2m, _ => refusal);
+            Assert.NotNull(refused);
+            Assert.EndsWith(refusal, refused);
+            Assert.Equal(refused, context.LastError);
+            Assert.False(context.Find(close.Id)!.DispatchUncertain);
+            Assert.Null(context.StartDispatch(close, "ESZ6", "CME", 2m, 0m, 2m, _ => null));
+            Assert.Null(context.LastError);
+            Assert.True(context.Find(close.Id)!.DispatchUncertain);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task Terminal_replay_repairs_an_interrupted_accepted_amendment_index_without_promoting_other_successors()
     {
         using var server = new FakeRithmicServer { MarketPrice = 100, ReplayTerminalOrders = true };
