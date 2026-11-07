@@ -48,6 +48,7 @@ internal sealed class FakeRithmicServer : IDisposable
     public TaskCompletionSource<string> NewOrderResponseRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource? MarketFillRelease { get; set; }
     private readonly Dictionary<WebSocket, int> _tradingSessions = new();
+    private readonly Dictionary<WebSocket, string> _loginSystems = new();
     private readonly List<WebSocket> _orderSessions = new();
     public HashSet<string> OrderReplayExclusions { get; } = new(StringComparer.Ordinal);
 
@@ -192,17 +193,20 @@ internal sealed class FakeRithmicServer : IDisposable
                         WebSocket? kicked = null;
                         if (ok)
                         {
-                            // una sola sesión por usuario en cada planta: la nueva corta la anterior
+                            // One session per user, plant and system: a new login replaces the older one on the same system only.
+                            string system = m.String(153628) ?? "";
                             lock (_gate)
                             {
                                 Logins[infra] = Logins.GetValueOrDefault(infra) + 1;
-                                if (!AllowConcurrentTradingSessions && _sessions.TryGetValue(infra, out var old) && !ReferenceEquals(old, ws) && old.State == WebSocketState.Open)
+                                if (!AllowConcurrentTradingSessions && _sessions.TryGetValue(infra, out var old) && !ReferenceEquals(old, ws) &&
+                                    old.State == WebSocketState.Open && _loginSystems.GetValueOrDefault(old) == system)
                                 {
                                     kicked = old;
                                     Kicks++;
                                 }
 
                                 _sessions[infra] = ws;
+                                _loginSystems[ws] = system;
                                 if (infra is 2 or 4) _tradingSessions[ws] = infra;
                                 if (infra == 2) _orderSessions.Add(ws);
                             }
