@@ -663,8 +663,6 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             try
             {
                 _nativeReplayReady = false;
-                string? lookupError = await RefreshOrdersAsync(_cts.Token).ConfigureAwait(false);
-
                 decimal volume, averagePrice, unrealizedPnl;
                 if (_settings.Futures)
                 {
@@ -689,6 +687,9 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     unrealizedPnl = 0m;
                 }
 
+                // Read orders after the position: a fill between the two requests then appears as a newer order execution
+                // bounding an older position, which brackets expect, never as a position leading its working orders.
+                string? lookupError = await RefreshOrdersAsync(_cts.Token).ConfigureAwait(false);
                 (string? Error, bool NativeComplete) protection = (null, true);
                 if (lookupError == null)
                     protection = await RefreshExecutingProtectionAsync(_cts.Token).ConfigureAwait(false);
