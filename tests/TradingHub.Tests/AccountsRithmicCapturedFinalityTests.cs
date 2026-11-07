@@ -440,6 +440,13 @@ public sealed partial class AccountsRithmicCloseRegressionTests
         await server.PushOrder("newer-counter-stop", "external-newer-counter", false, 2, 95, type: 4);
         await using var fixture = new AccountsCloseFixture(server);
         await fixture.StartAsync();
+        // The test barrier below holds native admission while it waits for the late fill. Settle the stop's
+        // cancellation first: a trailing cancel notification would otherwise stall the fill on the same connection.
+        var stop = Assert.Single(fixture.Session.OrdersOf("ACC1"), order => order.BasketId == "newer-counter-stop");
+        await fixture.Session.CancelAsync("ACC1", stop.BasketId, CancellationToken.None).WaitAsync(Deadline);
+        await Assert.ThrowsAsync<RithmicTradingSession.RithmicRejectedException>(() =>
+            fixture.Session.CancelAsync("ACC1", stop.BasketId, CancellationToken.None).WaitAsync(Deadline));
+        Assert.True(stop.NativeTerminal && stop.Cancelled);
         var row = fixture.Position();
         var captured = Assert.IsType<RithmicPositionTarget>(row.Ref);
         var context = captured.Confirmation.Context;

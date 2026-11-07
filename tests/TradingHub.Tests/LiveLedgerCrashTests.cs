@@ -16,6 +16,7 @@ public sealed class LiveLedgerCrashTests : IDisposable
     private readonly string _previousRoot = LiveStore.Root;
     // These are deadlock watchdogs, never timing-based evidence that a checkpoint or a commit happened.
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan BulkRecoveryWatchdog = TimeSpan.FromSeconds(120);
 
     public LiveLedgerCrashTests()
     {
@@ -37,7 +38,8 @@ public sealed class LiveLedgerCrashTests : IDisposable
     [Fact]
     public async Task An_owned_bulk_recovery_delivers_every_head_without_recursive_stack_growth()
     {
-        var recovered = await ReadInFreshProcess("projection-recovery-batch");
+        // Durably recovering 512 heads alone takes 16 to 24 s on a developer Mac, close to the shared watchdog.
+        var recovered = await ReadInFreshProcess("projection-recovery-batch", BulkRecoveryWatchdog);
         Assert.Equal(512, recovered.Fills.Count);
         Assert.Equal(512m, recovered.Position);
         Assert.Equal(100m, recovered.AveragePrice);
@@ -411,7 +413,7 @@ public sealed class LiveLedgerCrashTests : IDisposable
         }
     }
 
-    private async Task<Snapshot> ReadInFreshProcess(string operation = "read")
+    private async Task<Snapshot> ReadInFreshProcess(string operation = "read", TimeSpan? snapshotWatchdog = null)
     {
         using var reader = Start(operation);
         // Drain from launch, not after exit: fixture diagnostics must never fill a redirected pipe.
@@ -427,7 +429,7 @@ public sealed class LiveLedgerCrashTests : IDisposable
             started = await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
             Assert.Equal("started", started);
             phase = "snapshot";
-            json = await reader.StandardOutput.ReadLineAsync().WaitAsync(Watchdog);
+            json = await reader.StandardOutput.ReadLineAsync().WaitAsync(snapshotWatchdog ?? Watchdog);
             phase = "exit";
             await reader.WaitForExitAsync().WaitAsync(Watchdog);
             Assert.True(reader.ExitCode == 0, $"Fixture exited with code {reader.ExitCode}.");

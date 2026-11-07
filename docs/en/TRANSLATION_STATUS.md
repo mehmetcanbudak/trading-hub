@@ -16,7 +16,7 @@ The coherent candidate builds all 15 Release projects with zero warnings or erro
 
 Before-fix cache, Accounts Close, saved-report and ordinary-Quit consumers run separately against the original baseline. A fixture compilation/setup failure is not counted as a reproduced application defect. Native Rithmic fill-inclusion and exit/deduplication guarantees remain unestablished by the available public protocol. No server-enforced reduce-only or exactly-once claim is added.
 
-The [correctness program report](./correctness-program.md) records the delivered contracts, exact current gates, root causes, retained failures and remaining operator decisions. The pending-peer close timeout was a send-slot race in production code, now fixed. The other two earlier native timeouts are attributed to shared fake-venue authority and removed by per-instance fake URIs. One retained-session reconnect consequence and one timing-bound Windows ledger recovery test await owner decisions. Existing native/private-account deferrals below remain in force.
+The [correctness program report](./correctness-program.md) records the delivered contracts, exact current gates, root causes, retained failures and remaining operator decisions. The pending-peer close timeout was a send-slot race in production code, now fixed. The other two earlier native timeouts are attributed to shared fake-venue authority and removed by per-instance fake URIs. Two later CI failures were test scheduling defects, and the bulk ledger recovery timeout was a test budget below measured durable work. One retained-session reconnect consequence awaits an owner decision. Existing native/private-account deferrals below remain in force.
 
 
 ## Chart data status and native Mac acceptance — 2026-11-06

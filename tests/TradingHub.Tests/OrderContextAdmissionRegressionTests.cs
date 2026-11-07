@@ -319,6 +319,8 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
         Assert.Equal(0, server.Position);
         Assert.Empty(runner.Ledger.Fills);
         lock (server.Tags) Assert.Equal(2, server.Tags.Count);
+        // The read loop's last order notification may still be committing this ledger; join it before cleanup.
+        await session.StopAsync().WaitAsync(TimeSpan.FromSeconds(8));
     }
 
     [Fact]
