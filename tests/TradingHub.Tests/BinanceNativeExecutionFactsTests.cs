@@ -2399,9 +2399,13 @@ public sealed class BinanceNativeExecutionFactsTests
                 order.Direction == OrderDirections.Buy && order.ExchangeOrderId.Length > 0), broker, fake);
             var opening = Assert.Single(broker.ActiveOrders, order => order.Direction == OrderDirections.Buy);
             fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            // Wait for protection priced from the opening execution (average 59990): a provisional stop repriced after the
+            // trigger is the separate race covered by Runner_reprice_cancel_of_a_triggered_stop_does_not_cancel_its_executing_market_child.
             await ConditionalState(() => runner.OwnPosition == 3m && broker.Position.Volume == 3m &&
-                broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
-                    order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+                !runner.Ledger.HasPendingFinancials && broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
+                    order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)) &&
+                runner.ActiveOrders.Any(order => order.IsProtective && order.Type == StrategyOrderType.Stop &&
+                    order.Live is Order { Type: OrderTypes.Stop, TriggerPrice: 59989.5m }), broker, fake);
             var strategyStop = Assert.Single(runner.ActiveOrders, order => order.IsProtective && order.Type == StrategyOrderType.Stop);
             var stop = Assert.IsType<Order>(strategyStop.Live);
             string ownerId = Assert.IsType<string>(stop.OwnerId);
@@ -2466,6 +2470,89 @@ public sealed class BinanceNativeExecutionFactsTests
             Assert.Empty(broker.ActiveOrders);
             Assert.Null(broker.LastError);
             Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Fact]
+    public async Task Runner_reprice_cancel_of_a_triggered_stop_does_not_cancel_its_executing_market_child()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true) { HoldMarketExecution = true };
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Runner reprice racing a triggered stop", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var strategy = new PassiveLimits { StopLossTicks = 5, TakeProfitTicks = 100 };
+            using var runner = new LiveStrategyRunner(strategy, data, broker, ChartPeriod.M1);
+            runner.Start();
+
+            // The opening fill's price history stays unavailable, so protection is placed at its provisional price.
+            var releaseHistory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseOrders = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fake.BeforeTradeReply = ct => releaseHistory.Task.WaitAsync(ct);
+            long childId;
+            Order stop;
+            StrategyOrder strategyStop;
+            try
+            {
+                strategy.BuyAt(59990m, 3m);
+                await ConditionalState(() => broker.ActiveOrders.Any(order =>
+                    order.Direction == OrderDirections.Buy && order.ExchangeOrderId.Length > 0), broker, fake);
+                var opening = Assert.Single(broker.ActiveOrders, order => order.Direction == OrderDirections.Buy);
+                fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+                await ConditionalState(() => runner.OwnPosition == 3m && broker.Position.Volume == 3m &&
+                    broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
+                        order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+                strategyStop = Assert.Single(runner.ActiveOrders, order => order.IsProtective && order.Type == StrategyOrderType.Stop);
+                stop = Assert.IsType<Order>(strategyStop.Live);
+                Assert.Equal((OrderTypes.Stop, 59999.5m), (stop.Type, stop.TriggerPrice));
+
+                // Polls cannot observe the trigger until the reprice's cancel has reached Binance.
+                fake.BeforeGetReply = (request, ct) => request.Route is "/fapi/v1/openOrders" or "/fapi/v1/openAlgoOrders"
+                    ? releaseOrders.Task.WaitAsync(ct) : Task.CompletedTask;
+                childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+                releaseHistory.TrySetResult();
+                fake.BeforeTradeReply = null;
+                // The opening price (average 59990) reprices the provisional stop; its cancel finds the stop triggered.
+                await ConditionalState(() => fake.Refused.Any(refused => refused.StartsWith("DELETE /fapi/v1/algoOrder", StringComparison.Ordinal)),
+                    broker, fake);
+                Assert.Equal(OrderTypes.Stop, stop.Type);
+            }
+            finally
+            {
+                releaseHistory.TrySetResult();
+                releaseOrders.TrySetResult();
+                fake.BeforeTradeReply = null;
+                fake.BeforeGetReply = null;
+            }
+
+            await ConditionalState(() => stop.Type == OrderTypes.Market && stop.Unfilled == 2m &&
+                runner.OwnPosition == 2m && broker.Position.Volume == 2m, broker, fake);
+            await ConditionalPolls(fake, broker);
+            await ConditionalPolls(fake, broker);
+            // The stop triggered before the cancel arrived: the venue-created child keeps executing the exit.
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Equal(OrderStates.Active, stop.State);
+            Assert.Equal(childId.ToString(CultureInfo.InvariantCulture), stop.ExchangeOrderId);
+            Assert.Same(strategyStop, Assert.Single(runner.ActiveOrders, order => order.Type == StrategyOrderType.Stop));
+            Assert.Equal(2m, broker.Position.Volume);
+
+            fake.Fill(childId, 2m);
+            await ConditionalState(() => runner.OwnPosition == 0m && broker.Position.Volume == 0m &&
+                !broker.ActiveOrders.Any(), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "FILLED", 3m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Equal(0m, strategy.Position);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Empty(broker.ActiveOrders);
         });
     }
 
