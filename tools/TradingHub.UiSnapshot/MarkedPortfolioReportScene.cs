@@ -318,7 +318,7 @@ internal static class MarkedPortfolioReportScene
 
     private static string ExecutiveSummary(string markdown)
     {
-        var sections = Regex.Split(markdown, @"(?m)^## \d+\. ");
+        var sections = Regex.Split(markdown.Replace("\r\n", "\n"), @"(?m)^## \d+\. ");
         return sections.FirstOrDefault(section => section.StartsWith("Executive summary\n", StringComparison.Ordinal)) ?? "";
     }
 
