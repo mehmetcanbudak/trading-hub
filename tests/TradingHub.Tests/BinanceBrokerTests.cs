@@ -1233,7 +1233,8 @@ public class BinanceBrokerTests : IDisposable
         fake.StallCancelOnceMs = 5000; // canceled at Binance, answer too late…
         fake.FailLookups = 1; // …and asking right away fails too
         OrderActions.Reprice(broker, exit, 59500m);
-        await Until(() => exit.State == OrderStates.Failed);
+        // The poll marks the handle Failed before it publishes the Modify error with the next change notification.
+        await Until(() => exit.State == OrderStates.Failed && errors.Any(e => e.Contains("replacement was not sent", StringComparison.Ordinal)));
         Assert.Equal(OrderStates.Failed, exit.State); // not a silent Canceled: the order is gone
         Assert.Equal(OrderStatus.Rejected, exit.Status);
         Assert.Contains(errors, e => e.Contains("replacement was not sent", StringComparison.Ordinal));
