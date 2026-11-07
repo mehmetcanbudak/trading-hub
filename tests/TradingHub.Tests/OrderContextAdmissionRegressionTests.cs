@@ -565,7 +565,8 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
         lock (server.Tags) Assert.Empty(server.Tags);
         Volatile.Write(ref openingPermission, 1);
         await server.PushOrder("manual-opening", "external-manual-opening", buy: true, qty: 2, price: 99);
-        await Until(() => broker.ActiveOrders.Any());
+        // A list published before the rejection can still hold the forbidden order; wait for the pushed one.
+        await Until(() => broker.ActiveOrders.Any(order => order.ExchangeOrderId == "manual-opening"));
         var opening = Assert.Single(broker.ActiveOrders);
         Assert.Null(opening.OwnerId);
         Assert.Null(opening.IntentId);

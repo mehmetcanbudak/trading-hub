@@ -451,10 +451,28 @@ public sealed class BybitAccountIdentityTests
                 clock: new BybitProviderTests.FixedClock(FakeBybitProtocol.Now), executionRoot: LiveStore.Root);
             using var broker = new BybitBroker(data, session, "Admission retry account");
             await session.RefreshAsync();
-            using var runner = new LiveStrategyRunner(new Passive(), data, broker, ChartPeriod.M1);
+            // Runner callbacks are marshalled to the context captured at construction. Drain them explicitly
+            // so assertions never depend on which xUnit context the test continuation resumed on.
+            var runnerContext = new BybitRunnerExecutionTests.QueuedSynchronizationContext();
+            LiveStrategyRunner CreateRunner()
+            {
+                var previousContext = SynchronizationContext.Current;
+                try
+                {
+                    SynchronizationContext.SetSynchronizationContext(runnerContext);
+                    return new LiveStrategyRunner(new Passive(), data, broker, ChartPeriod.M1);
+                }
+                finally { SynchronizationContext.SetSynchronizationContext(previousContext); }
+            }
+            using var runner = CreateRunner();
             runner.Start();
+            runnerContext.Drain();
             runner.Submit(OrderSide.Buy, StrategyOrderType.Limit, 1, 100, "Actual admission retry");
-            await ReconcileNative(session, () => broker.ActiveOrders.Any(order => order.ExchangeOrderId.Length > 0) && session.OrdersReady);
+            await ReconcileNative(session, () =>
+            {
+                runnerContext.Drain();
+                return broker.ActiveOrders.Any(order => order.ExchangeOrderId.Length > 0) && session.OrdersReady;
+            });
             var entry = Assert.Single(broker.ActiveOrders);
             string authorityDirectory = LiveStore.LedgerFile(runner.Key) + ".executions";
             Assert.False(Directory.Exists(authorityDirectory));
@@ -466,6 +484,7 @@ public sealed class BybitAccountIdentityTests
                 protocol.NetPosition = 1;
                 protocol.AveragePositionPrice = 100;
                 await session.RefreshAsync();
+                runnerContext.Drain();
                 Assert.Equal(1m, runner.OwnPosition);
                 Assert.True(runner.Ledger.HasPendingPrices);
             }
@@ -473,6 +492,7 @@ public sealed class BybitAccountIdentityTests
             var before = session.ExecutionSource.Capture(ExecutionCursor.Start);
             Assert.Single(before.Changes);
             AccountExecutionProjector.For(session.ExecutionSource, session.OrderContext).Synchronize();
+            runnerContext.Drain();
             Assert.False(runner.Ledger.HasPendingPrices);
             Assert.Equal(.1m, runner.Ledger.Fees);
             Assert.Single(runner.Ledger.Fills);
