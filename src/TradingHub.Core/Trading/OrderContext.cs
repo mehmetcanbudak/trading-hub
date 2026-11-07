@@ -34,6 +34,8 @@ public sealed class PreparedOrderIntent
     private int _attempted;
     internal bool Attempted => Volatile.Read(ref _attempted) != 0;
     internal bool TryAttempt() => Interlocked.Exchange(ref _attempted, 1) == 0;
+    // Only for a send-slot refusal proven to precede any durable dispatch record or transport send.
+    internal void ReleaseAttempt() => Volatile.Write(ref _attempted, 0);
     internal PreparedOrderIntent(OrderContext context, OwnedOrderIntent data, string? error = null)
     { Context = context; Data = data; Error = error; }
     internal OrderContext Context { get; }
@@ -445,6 +447,12 @@ public sealed partial class OrderContext
                 }
                 TrackEmergencyExposure(intent, nativeInstrument, nativeExchange, actualQuantity ?? intent.Request.Quantity);
                 return null;
+            }
+            catch (PositionCloseAdmissionDeniedException ex)
+            {
+                // The current-close check refused before the dispatch record was written, so nothing was sent.
+                intent.ReleaseAttempt();
+                return LastError = "Could not commit dispatch ownership: " + ex.Message;
             }
             catch (PositionCloseAdmissionUnresolvedException ex)
             {

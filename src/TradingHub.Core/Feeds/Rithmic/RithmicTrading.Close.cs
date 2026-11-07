@@ -48,6 +48,9 @@ public sealed partial class RithmicTradingSession
         public string? Fault;
         public bool Running;
         public Order? Order;
+        // Set when the send slot refuses only because a pending send this close waited on is now working.
+        public bool CancellationPending;
+        public readonly HashSet<string> AwaitedPendingTags = new(StringComparer.Ordinal);
     }
 
     private string EnvironmentIdentity
@@ -218,88 +221,102 @@ public sealed partial class RithmicTradingSession
             var cancellations = new HashSet<string>(StringComparer.Ordinal);
             while (true)
             {
-                timeout.Token.ThrowIfCancellationRequested();
-                string[] cancel;
-                bool ready;
-                lock (NativeAdmissionGate)
+                while (true)
                 {
-                    RefreshClose(operation);
-                    close = context.PositionCloseState(intent);
-                    if (operation.Fault != null) throw new IOException(operation.Fault);
-                    ready = OrdersReadyFor(close.Account) && PositionReadyFor(close.Account, close.Symbol, close.Exchange);
-                    if (ready)
+                    timeout.Token.ThrowIfCancellationRequested();
+                    string[] cancel;
+                    bool ready;
+                    lock (NativeAdmissionGate)
                     {
-                        string observedAccount = NativeAccountOf(close.Account);
-                        if (observedAccount != close.NativeAccount)
-                            throw new RithmicRejectedException("The captured Rithmic native account is unavailable or changed; no close was sent.");
-                        if (context.VerifyNativeAccount(observedAccount) is { } denied) throw new IOException(denied);
-                    }
-                    List<string>? pending = null;
-                    if (ready)
-                    {
-                        var orders = SharedNativeOrders(ContractKey(close), close.ObservationScope);
-                        bool complete = true;
-                        foreach (var target in close.Cancellations)
+                        RefreshClose(operation);
+                        close = context.PositionCloseState(intent);
+                        if (operation.Fault != null) throw new IOException(operation.Fault);
+                        ready = OrdersReadyFor(close.Account) && PositionReadyFor(close.Account, close.Symbol, close.Exchange);
+                        if (ready)
                         {
-                            var readiness = CurrentCloseReadinessFor(target.Basket, target.Buy, orders);
-                            if (readiness == CurrentCloseReadiness.Unknown)
-                                throw new PositionCloseAdmissionUnresolvedException(CurrentCloseUnresolved);
-                            if (readiness != CurrentCloseReadiness.Working) continue;
-                            complete = false;
-                            if (!cancellations.Contains(target.Basket)) (pending ??= new()).Add(target.Basket);
+                            string observedAccount = NativeAccountOf(close.Account);
+                            if (observedAccount != close.NativeAccount)
+                                throw new RithmicRejectedException("The captured Rithmic native account is unavailable or changed; no close was sent.");
+                            if (context.VerifyNativeAccount(observedAccount) is { } denied) throw new IOException(denied);
                         }
-                        if (complete && !orders.Any(order => order.UserTag != intent.ClientOrderId && order.Unresolved)) break;
+                        List<string>? pending = null;
+                        if (ready)
+                        {
+                            var orders = SharedNativeOrders(ContractKey(close), close.ObservationScope);
+                            bool complete = true;
+                            foreach (var target in close.Cancellations)
+                            {
+                                var readiness = CurrentCloseReadinessFor(target.Basket, target.Buy, orders);
+                                if (readiness == CurrentCloseReadiness.Unknown)
+                                    throw new PositionCloseAdmissionUnresolvedException(CurrentCloseUnresolved);
+                                if (readiness != CurrentCloseReadiness.Working) continue;
+                                complete = false;
+                                if (!cancellations.Contains(target.Basket)) (pending ??= new()).Add(target.Basket);
+                            }
+                            foreach (var order in orders)
+                                if (order.Unresolved && order.UserTag.Length > 0 && order.UserTag != intent.ClientOrderId)
+                                    operation.AwaitedPendingTags.Add(order.UserTag);
+                            if (complete && !orders.Any(order => order.UserTag != intent.ClientOrderId && order.Unresolved)) break;
+                        }
+                        cancel = pending?.ToArray() ?? Array.Empty<string>();
+                        if (ready && close.Phase != PositionClosePhase.Cancelling)
+                            context.UpdatePositionClose(intent, close with { Phase = PositionClosePhase.Cancelling });
                     }
-                    cancel = pending?.ToArray() ?? Array.Empty<string>();
-                    if (ready && close.Phase != PositionClosePhase.Cancelling)
-                        context.UpdatePositionClose(intent, close with { Phase = PositionClosePhase.Cancelling });
-                }
-                foreach (string basket in cancel)
-                {
-                    cancellations.Add(basket);
-                    RithmicTradingSession cancellationSession;
-                    lock (NativeAdmissionGate) cancellationSession = CancellationSession(close, basket);
-                    try { await cancellationSession.CancelAsync(close.Account, basket, timeout.Token).ConfigureAwait(false); }
-                    catch (RithmicRejectedException) { /* Current native observations, not a command response, resolve cancellation. */ }
-                }
-                await Task.Delay(20, timeout.Token).ConfigureAwait(false);
-            }
-            string nativeAccount = NativeAccountOf(close.Account);
-            if (nativeAccount.Length == 0 || nativeAccount != close.NativeAccount)
-                throw new RithmicRejectedException("The captured Rithmic native account is unavailable or changed; no close was sent.");
-            if (context.VerifyNativeAccount(nativeAccount) is { } accountError) throw new IOException(accountError);
-            int ceiling;
-            if (!NativeFuturesQuantity.TryConvert(Math.Abs(close.ConfirmedNet), out ceiling))
-                throw new RithmicRejectedException(NativeFuturesQuantity.Error);
-            await PlaceOwnedAsync(close.Account, close.Symbol, close.Exchange, close.ConfirmedNet < 0, 2, ceiling, 0, 0,
-                intent.ClientOrderId, timeout.Token, () =>
-                {
-                    RefreshClose(operation);
-                    var current = context.PositionCloseState(intent);
-                    if (operation.Fault != null) throw new PositionCloseAdmissionUnresolvedException(operation.Fault);
-                    if (NativeAccountOf(current.Account) != current.NativeAccount)
-                        throw new RithmicRejectedException("The captured Rithmic native account changed at the send slot; no close was sent.");
-                    if (ReducingQuantityUnknown(current))
-                        throw new PositionCloseAdmissionUnresolvedException(
-                            "Rithmic reducing-order cumulative quantity is unavailable; position inclusion remains unresolved.");
-                    decimal available = CloseCapacity(current);
-                    if (current.Invalidated || available <= 0)
+                    foreach (string basket in cancel)
                     {
-                        string outcome = current.Invalidated ? "The confirmed Rithmic position became flat or changed side; no close was sent." :
-                            "Known reducing fills exhausted the confirmed Rithmic close ceiling; remaining exposure is unresolved.";
-                        throw new RithmicRejectedException(outcome);
+                        cancellations.Add(basket);
+                        RithmicTradingSession cancellationSession;
+                        lock (NativeAdmissionGate) cancellationSession = CancellationSession(close, basket);
+                        try { await cancellationSession.CancelAsync(close.Account, basket, timeout.Token).ConfigureAwait(false); }
+                        catch (RithmicRejectedException) { /* Current native observations, not a command response, resolve cancellation. */ }
                     }
-                    if (!NativeFuturesQuantity.TryConvert(available, out int quantity)) throw new RithmicRejectedException(NativeFuturesQuantity.Error);
-                    var handle = CloseHandle(operation, quantity);
-                    handle.QuantityToFill = handle.Unfilled = quantity;
-                    if (context.StartDispatch(intent, current.Symbol, current.Exchange, quantity, 0,
-                        PositionSnapshotFor(current.Account, current.Symbol, current.Exchange).Net,
-                        latest => CheckCurrentCloseAdmission(operation, latest)) is { } denied)
-                        throw new RithmicRejectedException(denied);
-                    committedHere = true;
-                    context.UpdatePositionClose(intent, current with { Phase = PositionClosePhase.Dispatching });
-                    return quantity;
-                }).ConfigureAwait(false);
+                    await Task.Delay(20, timeout.Token).ConfigureAwait(false);
+                }
+                string nativeAccount = NativeAccountOf(close.Account);
+                if (nativeAccount.Length == 0 || nativeAccount != close.NativeAccount)
+                    throw new RithmicRejectedException("The captured Rithmic native account is unavailable or changed; no close was sent.");
+                if (context.VerifyNativeAccount(nativeAccount) is { } accountError) throw new IOException(accountError);
+                int ceiling;
+                if (!NativeFuturesQuantity.TryConvert(Math.Abs(close.ConfirmedNet), out ceiling))
+                    throw new RithmicRejectedException(NativeFuturesQuantity.Error);
+                operation.CancellationPending = false;
+                try
+                {
+                    await PlaceOwnedAsync(close.Account, close.Symbol, close.Exchange, close.ConfirmedNet < 0, 2, ceiling, 0, 0,
+                        intent.ClientOrderId, timeout.Token, () =>
+                        {
+                            RefreshClose(operation);
+                            var current = context.PositionCloseState(intent);
+                            if (operation.Fault != null) throw new PositionCloseAdmissionUnresolvedException(operation.Fault);
+                            if (NativeAccountOf(current.Account) != current.NativeAccount)
+                                throw new RithmicRejectedException("The captured Rithmic native account changed at the send slot; no close was sent.");
+                            if (ReducingQuantityUnknown(current))
+                                throw new PositionCloseAdmissionUnresolvedException(
+                                    "Rithmic reducing-order cumulative quantity is unavailable; position inclusion remains unresolved.");
+                            decimal available = CloseCapacity(current);
+                            if (current.Invalidated || available <= 0)
+                            {
+                                string outcome = current.Invalidated ? "The confirmed Rithmic position became flat or changed side; no close was sent." :
+                                    "Known reducing fills exhausted the confirmed Rithmic close ceiling; remaining exposure is unresolved.";
+                                throw new RithmicRejectedException(outcome);
+                            }
+                            if (!NativeFuturesQuantity.TryConvert(available, out int quantity)) throw new RithmicRejectedException(NativeFuturesQuantity.Error);
+                            var handle = CloseHandle(operation, quantity);
+                            handle.QuantityToFill = handle.Unfilled = quantity;
+                            if (context.StartDispatch(intent, current.Symbol, current.Exchange, quantity, 0,
+                                PositionSnapshotFor(current.Account, current.Symbol, current.Exchange).Net,
+                                latest => CheckCurrentCloseAdmission(operation, latest)) is { } denied)
+                                throw new RithmicRejectedException(denied);
+                            committedHere = true;
+                            context.UpdatePositionClose(intent, current with { Phase = PositionClosePhase.Dispatching });
+                            return quantity;
+                        }).ConfigureAwait(false);
+                    break;
+                }
+                // An equivalent session's order can become working between the last cancellation pass and the
+                // send slot. Nothing was committed or sent, so cancel it within the same bounded close.
+                catch (RithmicRejectedException) when (!committedHere && operation.CancellationPending) { }
+            }
             lock (NativeAdmissionGate)
             {
                 RefreshClose(operation);
@@ -384,14 +401,22 @@ public sealed partial class RithmicTradingSession
         }
         var orders = SharedNativeOrders(ContractKey(close), close.ObservationScope);
         string? denied = null;
+        bool awaitedWorking = false, unexpectedWorking = false;
         foreach (var target in close.Cancellations)
         {
             var readiness = CurrentCloseReadinessFor(target.Basket, target.Buy, orders);
             if (readiness == CurrentCloseReadiness.Unknown)
                 throw new PositionCloseAdmissionUnresolvedException(CurrentCloseUnresolved);
             if (readiness == CurrentCloseReadiness.Working)
+            {
+                string tag = orders.FirstOrDefault(order => order.BasketId == target.Basket).UserTag ?? "";
+                if (tag.Length > 0 && operation.AwaitedPendingTags.Contains(tag)) awaitedWorking = true;
+                else unexpectedWorking = true;
                 denied = "Rithmic replay or cancellation is unresolved at the send slot; no close was sent.";
+            }
         }
+        // Only a pending send this close already waited on may be cancelled without a new confirmation.
+        operation.CancellationPending = awaitedWorking && !unexpectedWorking;
         foreach (var target in close.Surveillance ?? Array.Empty<PositionCloseObservation>())
             if (CurrentCloseReadinessFor(target.Basket, target.Buy, orders) is
                 CurrentCloseReadiness.Unknown or CurrentCloseReadiness.Working)

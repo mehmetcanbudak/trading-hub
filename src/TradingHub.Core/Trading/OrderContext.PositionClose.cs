@@ -6,6 +6,9 @@ public sealed record PositionCloseObservation(string Basket, bool Buy, decimal? 
 
 internal sealed class PositionCloseAdmissionUnresolvedException(string message) : Exception(message) { }
 
+/// <summary>The current-close send-slot check refused before anything was persisted or sent.</summary>
+internal sealed class PositionCloseAdmissionDeniedException(string message) : InvalidOperationException(message) { }
+
 internal readonly record struct PositionCloseFailure(bool CommittedHere, bool Definite, string Outcome,
     long SettledRevision, string SettledObservationScope);
 
@@ -385,7 +388,7 @@ internal sealed partial class OrderOwnershipJournal
         if (currentCloseAdmission != null)
         {
             var latest = ReferenceEquals(close, current.PositionClose) ? current : current with { PositionClose = close };
-            if (currentCloseAdmission(latest) is { } denied) throw new InvalidOperationException(denied);
+            if (currentCloseAdmission(latest) is { } denied) throw new PositionCloseAdmissionDeniedException(denied);
         }
         if (dispatch.NativeInstrument != close.Symbol || dispatch.NativeExchange != close.Exchange || !dispatch.Request.ReduceOnly ||
             dispatch.Request.Direction != (close.ConfirmedNet < 0 ? OrderDirections.Buy : OrderDirections.Sell) ||

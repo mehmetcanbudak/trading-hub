@@ -1,0 +1,2 @@
+# Raw C# string literals keep source line endings; Windows checkouts must compile the same text as macOS.
+*.cs text eol=lf

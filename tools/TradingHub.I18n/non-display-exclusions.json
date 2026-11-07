@@ -8,7 +8,7 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:647 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:611 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:842 TradingHub.Core/Trading/OrderContext.cs:1145 TradingHub.Core/Trading/OrderContext.cs:157 TradingHub.Core/Trading/OrderContext.cs:729",
+    "locations": "TradingHub.App/Services/AppServices.cs:647 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:611 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:842 TradingHub.Core/Trading/OrderContext.cs:1153 TradingHub.Core/Trading/OrderContext.cs:159 TradingHub.Core/Trading/OrderContext.cs:737",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Fee": {
@@ -36,7 +36,7 @@
     "reason": "Persisted IB recovery-journal schema-version property. It is not user-facing prose."
   },
   "local simulation": {
-    "locations": "TradingHub.Core/Trading/OrderContext.cs:164",
+    "locations": "TradingHub.Core/Trading/OrderContext.cs:166",
     "reason": "Simulation account-context environment identity. Preserve it rather than translating routing metadata."
   },
   "rithmic-position|{0}|{1}|{2}": {
@@ -44,7 +44,7 @@
     "reason": "Internal exact native-account-context, symbol and exchange broker-cache key. Preserve its stable partition prefix and separators rather than translating routing identity."
   },
   "session:{0}|{1}": {
-    "locations": "TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:74 TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:76",
+    "locations": "TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:77 TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:79",
     "reason": "Private per-session fallback native-account admission partition when proven native account identity is unavailable. It is not a display label and must not merge unproven sessions by translation."
   },
   "symbol={0}&fromId={1}&limit=1000": {
