@@ -161,6 +161,13 @@ internal static class LiveFinancialScene
             service.Journal.Add(AccountCenter.SimId, entry);
             service.Journal.Add(AccountCenter.SimId, exit);
             pump(0.6);
+            // TradingView refreshes trade marks only on its slow frame; a loaded runner can deliver fewer ticks than the pump assumes.
+            void ChartMarksRefresh(Func<bool> current)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                while (!current() && DateTime.UtcNow < deadline) pump(0.01);
+            }
+            ChartMarksRefresh(() => model.TradeMarks.Any(mark => mark.Buy));
             decimal beforeMark = model.TradeMarks.Single(mark => mark.Buy).Price;
             decimal beforeLink = model.TradeLinks.Single().Pnl;
             var account = service.AccountCenter.Accounts().Single(a => a.Id == AccountCenter.SimId);
@@ -218,6 +225,7 @@ internal static class LiveFinancialScene
             Capture("account_journal_revision_trade_after.png");
             window.Navigate("trading");
             pump(0.6);
+            ChartMarksRefresh(() => model.TradeMarks.Any(mark => mark.Buy && mark.Price == 5001.25m));
             decimal afterMark = model.TradeMarks.Single(mark => mark.Buy).Price;
             decimal afterLink = model.TradeLinks.Single().Pnl;
             Capture("account_journal_revision_chart_after.png");
