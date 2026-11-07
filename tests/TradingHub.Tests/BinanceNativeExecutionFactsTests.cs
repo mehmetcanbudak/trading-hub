@@ -2169,9 +2169,10 @@ public sealed class BinanceNativeExecutionFactsTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Triggered_partial_market_stop_remains_current_while_sibling_capacity_reconciles(bool strategyProtection)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Triggered_partial_market_stop_remains_current_while_sibling_capacity_reconciles(bool strategyProtection, bool fillBetweenOrderAndPositionReads)
     {
         await WithRecoveryRoot(async root =>
         {
@@ -2257,6 +2258,20 @@ public sealed class BinanceNativeExecutionFactsTests
                         releaseNative.TrySetResult();
                         fake.BeforeGetReply = null;
                     }
+                }
+                else if (remaining == 2 && fillBetweenOrderAndPositionReads)
+                {
+                    // The execution lands after the open-orders body was captured and before the position is read.
+                    int filled = 0;
+                    fake.BeforeGetReply = (request, _) =>
+                    {
+                        if (request.Route == "/fapi/v1/openOrders" && Interlocked.Exchange(ref filled, 1) == 0)
+                        {
+                            fake.Fill(childId, 1m);
+                            fake.BeforeGetReply = null;
+                        }
+                        return Task.CompletedTask;
+                    };
                 }
                 else fake.Fill(childId, 1m);
             }
