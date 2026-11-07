@@ -23,6 +23,12 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
     public void Dispose()
     {
         LiveStore.Root = _previousRoot;
+        // Execution projection outlives its runner by design and may still be reading a ledger. Windows refuses
+        // to delete an open file, so cleanup waits for that real work instead of racing it.
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!AccountExecutionProjector.BackgroundWorkIdle && DateTime.UtcNow < deadline) Thread.Sleep(20);
+        if (!AccountExecutionProjector.BackgroundWorkIdle)
+            throw new InvalidOperationException("Execution projection did not settle before ledger cleanup.");
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 

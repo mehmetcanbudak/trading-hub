@@ -23,7 +23,7 @@ The canonical checkout, personal data, credentials, upstream checkpoint, histori
 | Marked portfolio coverage | Missing coverage and cuts through measured windows are refused. | Common available intervals and exact weighted money remain authoritative. |
 | Marked report consumers | Equity and drawdown remain visible without pretending boundary marks are independent trades. | Complete, partial and unavailable research coverage stays explicit through saved and exported reports. |
 
-The [development guide](desarrollo.md#native-execution-ownership), [backtesting guide](./backtesting.md), [strategy guide](estrategias.md#files-and-compilation) and [data guide](datos.md#interactive-brokers-bars-and-offline-history) describe the resulting contracts.
+The [development guide](./desarrollo.md#native-execution-ownership), [backtesting guide](./backtesting.md), [strategy guide](./estrategias.md#files-and-compilation) and [data guide](./datos.md#interactive-brokers-bars-and-offline-history) describe the resulting contracts.
 
 ## Current verification
 
@@ -43,19 +43,20 @@ The [development guide](desarrollo.md#native-execution-ownership), [backtesting 
 
 These are source, fake-provider, durable-consumer and isolated Avalonia results. They are not private-venue, installed-package or native-Windows certification.
 
-Local receipts, before runtimes, failed runs and exact manifests are preserved under `/Volumes/Elements/memoshi-correctness-evidence-e8bb16b7cb`. The [validation dashboard](TRANSLATION_STATUS.md#correctness-program-candidate) remains the release-status authority.
+Local receipts, before runtimes, failed runs and exact manifests are preserved under `/Volumes/Elements/memoshi-correctness-evidence-e8bb16b7cb`. The [validation dashboard](./TRANSLATION_STATUS.md#correctness-program-candidate) remains the release-status authority.
 
 The [decision trail](correctness-decisions.tsv) preserves the append-only implementation and verification history. Later publication receipts remain in the external evidence directory.
 
 ## Attention
 
-- Three earlier native consumers timed out. Two waited for fake position publication and one waited for close-task completion. Their original causes remain unattributed. Current consumers retain caller-visible outcomes and failure-state evidence. All three pass after fake-authority isolation with the original eight-second deadlines. A new pass does not identify an old cause.
-- Corrected real-session controls reproduce retained-state interference between independent fake venues with the same native authority. Changing only the client URI path lets the original close sequence pass. The production retention is correct. Each fake now owns one immutable endpoint path. The controlled early refusal is not the historical flat-wait failure.
+- Three earlier native consumer timeouts came from shared fake-venue authority, not from the close code. Each fake server used a random loopback port without a path, so independent fakes on one port looked like one Rithmic account. Stopped sessions with open orders stay registered by design. An instrumented root-URI suite counted up to 43 such authorities and an expected 0.18 colliding fake starts per run, mostly in Accounts Close tests. A collision leaves a foreign working order that can never become terminal, so the close waits past the 8-second test deadline. Real-session controls reproduce the interference, and the per-instance URI path removes it: an instrumented isolated run had zero inherited sessions across 116 fakes.
+- Retained stopped sessions have a production consequence that needs an owner decision. If a working order ends at the exchange while a connection is stopped, and the same account reconnects in the same process, Accounts Close for that contract keeps refusing until restart. It never sends a wrong order, but it blocks the emergency close.
 - The journal consumer now samples corrected data immediately and observes the genuine timer until Statistics displays the same result. A controlled run observed 500 then 400 without reselection. No production timer or financial assertion changed.
-- Independent reviews used separate contexts on GPT 6.1 Sol. Cross-family adversarial review was unavailable on this host. Agreement is not represented as model diversity.
+- Earlier independent reviews used separate GPT 6.1 Sol contexts. A later Claude review read the native close, admission, durable close journal, quantity caps and live launch code and found only the retained-session consequence above. Remaining files were not re-reviewed across families.
 - Comparative performance is inconclusive. Resource checks are not a speedup, physical-disk throughput or GPU claim.
 - Automated language-candidate detection is not a natural-language proof. Browser inspection found and fixed one hard-coded Spanish heading after the automated gate passed. All four final English exports retain their loaded charts, and the three ordinary-containing reports now show the English profitability heading.
-- The last Marksman run reported four link diagnostics. The maintained-documentation checker passes all 508 local references. These editor diagnostics were not suppressed or represented as fixed.
+- Marksman's earlier four warnings most likely came from the editor integration, which indexes the session's main checkout and rejects this worktree as a workspace. Run directly on this tree, it reported 157 ambiguous links and 2 broken links. The Spanish and English guides share file names, and Marksman matches bare names across folders. Same-folder links now use `./`, and the two links into a separate Errata repository are plain text. Marksman now reports zero findings, with a deliberate broken-link control still detected.
+- Windows CI exposed four recurring and two intermittent failures, four of which also fail on `memoshi`. Fixture cleanup deleted directory junctions with recursive delete, which .NET routes through `DeleteVolumeMountPoint`. Tick tests read a live day with a stricter share mode than production readers. Ledger fixtures deleted storage while execution projection still held it open. A macOS CI chart scene read the strategy overlay before its timer redraw.
 - Native Rithmic evidence does not establish exchange-atomic position/fill inclusion, venue-command acknowledgment correlation, server-enforced reduce-only, native OCO or exactly-once delivery. The in-process amendment revision is not a persisted cross-process clock.
 - Real local storage failures and a failed archive command remain in the evidence. All eight temporary generated roots were restored as verified current real directories. English, safety and saved-report consumers passed from those paths. Only the owned RAM device was retired after exact runtime and fixture preservation. No personal stores or installed app were used to recover space.
 

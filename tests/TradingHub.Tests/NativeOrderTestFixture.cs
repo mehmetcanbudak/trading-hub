@@ -1,4 +1,5 @@
 using TradingHub.Data;
+using TradingHub.Strategies;
 using TradingHub.Feeds.Binance;
 using TradingHub.Feeds.Rithmic;
 using TradingHub.Feeds.Tradovate;
@@ -35,6 +36,11 @@ internal sealed class NativeOrderTestFixture : IDisposable
 
     public void Dispose()
     {
+        // Execution projection outlives the adapters and may still write their journals; delete after it settles.
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!AccountExecutionProjector.BackgroundWorkIdle && DateTime.UtcNow < deadline) Thread.Sleep(20);
+        if (!AccountExecutionProjector.BackgroundWorkIdle)
+            throw new InvalidOperationException("Execution projection did not settle before journal cleanup.");
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 }

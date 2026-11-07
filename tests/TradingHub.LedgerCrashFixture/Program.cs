@@ -270,8 +270,10 @@ internal static class Program
         }, maxStackSize: 128 * 1024);
         thread.Start();
         thread.Join();
+        Progress("reset recovery complete");
         if (failure != null) throw new IOException("The owned recovery batch failed.", failure);
         if (!delivered.Wait(TimeSpan.FromSeconds(10))) throw new IOException("The committed recovery batch was not fully delivered.");
+        Progress("batch delivered");
         if (ledger.Fills.Count != count || ledger.Position != count)
             throw new IOException("Recovered execution quantity was lost or duplicated.");
         Console.WriteLine(JsonSerializer.Serialize(new

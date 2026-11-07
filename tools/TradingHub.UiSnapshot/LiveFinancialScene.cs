@@ -296,7 +296,21 @@ internal static class LiveFinancialScene
             chart.Strategies.Add(cs);
             model.Strategies.Add(cs.Overlay);
             model.CenterOn(entryAt, exitAt);
-            pump(0.6);
+            // The chart redraws strategy overlays from its timer, so read the displayed values once that redraw lands.
+            bool Displayed(Func<bool> condition)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                while (DateTime.UtcNow < deadline)
+                {
+                    if (condition()) return true;
+                    pump(0.01);
+                }
+                return condition();
+            }
+            bool Settled(decimal price, decimal net) => Displayed(() =>
+                cs.Overlay.Signals.Count(signal => signal.Entry) == 1 && cs.Overlay.Links.Count == 1 &&
+                cs.Overlay.Signals.Single(signal => signal.Entry).Price == price && cs.Overlay.Links.Single().Pnl == net);
+            Settled(entryPrice, 94m);
             decimal beforeEntry = cs.Overlay.Signals.Single(signal => signal.Entry).Price;
             decimal beforeNet = cs.Overlay.Links.Single().Pnl;
             if (beforeEntry != entryPrice || beforeNet != 94m)
@@ -304,13 +318,14 @@ internal static class LiveFinancialScene
 
             if (LiveStore.AppendFill(key, entry with { Price = correctedPrice, Fees = new[] { new ExecutionFee(4m, "USD") } }) is { } correctionError)
                 throw new IOException(correctionError);
-            pump(0.6);
+            Settled(correctedPrice, 53m);
             decimal afterEntry = cs.Overlay.Signals.Single(signal => signal.Entry).Price;
             decimal afterNet = cs.Overlay.Links.Single().Pnl;
             if (LiveStore.AppendFill(key, entry with
                 { Price = correctedPrice, Fees = Array.Empty<ExecutionFee>(), FeesComplete = false }) is { } pendingError)
                 throw new IOException(pendingError);
-            pump(0.6);
+            Displayed(() => cs.SavedLedger is { HasPendingFinancials: true } && cs.Overlay.Links.Count == 0 &&
+                cs.Overlay.Signals.Count(signal => signal.Entry) == 1 && cs.Overlay.Signals.Count(signal => !signal.Entry) == 1);
             var pendingEntry = cs.Overlay.Signals.Single(signal => signal.Entry);
             var pendingExit = cs.Overlay.Signals.Single(signal => !signal.Entry);
             bool pendingLabelIsNumeric = decimal.TryParse(pendingExit.Label, NumberStyles.Any, CultureInfo.InvariantCulture, out _);
@@ -331,7 +346,7 @@ internal static class LiveFinancialScene
                 pendingFrame.Save(Path.Combine(output, "live_stopped_chart_pending.png"));
             if (LiveStore.AppendFill(key, entry with { Price = correctedPrice, Fees = new[] { new ExecutionFee(4m, "USD") } }) is { } recoveryError)
                 throw new IOException(recoveryError);
-            pump(0.6);
+            Settled(correctedPrice, 53m);
             decimal recoveredNet = cs.Overlay.Links.Single().Pnl;
             using var frame = window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Restored chart did not render.");
             frame.Save(Path.Combine(output, "live_stopped_chart_revision.png"));
