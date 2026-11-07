@@ -671,33 +671,41 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             try
             {
                 _nativeReplayReady = false;
-                decimal volume, averagePrice, unrealizedPnl;
-                if (_settings.Futures)
+                decimal volume = 0m, averagePrice = 0m, unrealizedPnl = 0m;
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo? positionFailure = null;
+                try
                 {
-                    var pos = (await _client.GetPositionsAsync(_cts.Token).ConfigureAwait(false)).FirstOrDefault(p => p.Symbol == Instrument.Symbol);
-                    volume = pos?.Quantity ?? 0;
-                    averagePrice = pos?.EntryPrice ?? 0;
-                    unrealizedPnl = pos?.UnrealizedPnl ?? 0;
-                }
-                else
-                {
-                    _spotBaseAsset ??= await _client.GetSpotBaseAssetAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false);
-                    var balances = await _client.GetBalancesAsync(_cts.Token).ConfigureAwait(false);
-                    decimal quantity = 0m;
-                    for (int i = 0; i < balances.Count; i++)
+                    if (_settings.Futures)
                     {
-                        if (balances[i].Asset != _spotBaseAsset) continue;
-                        quantity = balances[i].Wallet;
-                        break;
+                        var pos = (await _client.GetPositionsAsync(_cts.Token).ConfigureAwait(false)).FirstOrDefault(p => p.Symbol == Instrument.Symbol);
+                        volume = pos?.Quantity ?? 0;
+                        averagePrice = pos?.EntryPrice ?? 0;
+                        unrealizedPnl = pos?.UnrealizedPnl ?? 0;
                     }
-                    volume = quantity;
-                    averagePrice = 0m;
-                    unrealizedPnl = 0m;
+                    else
+                    {
+                        _spotBaseAsset ??= await _client.GetSpotBaseAssetAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false);
+                        var balances = await _client.GetBalancesAsync(_cts.Token).ConfigureAwait(false);
+                        decimal quantity = 0m;
+                        for (int i = 0; i < balances.Count; i++)
+                        {
+                            if (balances[i].Asset != _spotBaseAsset) continue;
+                            quantity = balances[i].Wallet;
+                            break;
+                        }
+                        volume = quantity;
+                    }
+                }
+                catch (Exception ex) when (!_cts.IsCancellationRequested)
+                {
+                    positionFailure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
                 }
 
                 // Read orders after the position: a fill between the two requests then appears as a newer order execution
                 // bounding an older position, which brackets expect, never as a position leading its working orders.
                 string? lookupError = await RefreshOrdersAsync(_cts.Token).ConfigureAwait(false);
+                // A failed position read still lets fills, terminal states and deferred cancels apply first.
+                positionFailure?.Throw();
                 (string? Error, bool NativeComplete) protection = (null, true);
                 if (lookupError == null)
                     protection = await RefreshExecutingProtectionAsync(_cts.Token).ConfigureAwait(false);
@@ -2512,7 +2520,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             if (t != null)
             {
                 t.CancelRequested = true;
-                t.CancelTargetsConditional = IsConditional(order.Type);
+                // Own conditional orders are STOP_MARKET: once triggered, the order they placed is executing the exit.
+                t.CancelTargetsConditional = t.Own && IsConditional(order.Type);
                 t.CancelPassedTrigger = false;
                 RejectQueuedReprice(t, "Cancellation superseded the queued price update.");
             }
@@ -2647,6 +2656,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             foreach (var t in _byOrder.Values)
             {
                 t.CancelRequested = true;
+                t.CancelTargetsConditional = false;
+                t.CancelPassedTrigger = false;
                 RejectQueuedReprice(t, "Cancellation superseded the queued price update.");
             }
         _ = Task.Run(async () =>
