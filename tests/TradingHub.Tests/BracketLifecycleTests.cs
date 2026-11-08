@@ -807,6 +807,47 @@ public class BracketLifecycleTests
         Assert.DoesNotContain(stop, account.ReplaceRequests);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Execution_applied_while_a_sync_runs_never_resizes_the_executing_stop_child(bool trackedAmendment)
+    {
+        Account account = trackedAmendment
+            ? new AmendingAccount { OptimisticQuantity = true }
+            : new Account();
+        using var brackets = new BracketManager(account);
+        brackets.SetStopLoss(90);
+        var stop = brackets.StopLoss!;
+        TriggerExecutingChild(account, stop);
+        account.Fill(stop, 1, marketPrice: 90);
+        Assert.Equal((3m, 3m), (account.Position.Volume, stop.Unfilled));
+
+        // A broker thread applies the child's next execution while a Sync runs: after this Sync booked the child's
+        // fills (first working-order read) and before reconciliation compares it (second read). Its position update follows.
+        bool applied = false;
+        account.UpdateOnRead(2, () =>
+        {
+            stop.Unfilled = 2;
+            applied = true;
+        });
+        account.Publish();
+        Assert.True(applied);
+
+        // The unbooked execution must not read as a request to enlarge the child (2 unfilled against a 3-unit intent).
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal((OrderStates.Active, 2m), (stop.State, stop.Unfilled));
+
+        account.Position.Volume = 2;
+        account.Publish();
+        account.Fill(stop, 2, marketPrice: 90);
+        Assert.Equal(0m, account.Position.Volume);
+        Assert.Equal(OrderStatus.Filled, stop.Status);
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+    }
+
     // Mirrors a venue conditional order that triggered: the handle follows its reduce-only MARKET child.
     private static void TriggerExecutingChild(Account account, Order stop)
     {
@@ -889,7 +930,27 @@ public class BracketLifecycleTests
         public List<Order> Working { get; } = new();
         public List<Order> CancelRequests { get; } = new();
         public List<Order> ReplaceRequests { get; } = new();
-        public IEnumerable<Order> ActiveOrders => Working.ToArray();
+        private (int At, Action Update)? _readUpdate;
+        private int _reads;
+        public IEnumerable<Order> ActiveOrders
+        {
+            get
+            {
+                if (_readUpdate is { } pending && ++_reads == pending.At)
+                {
+                    _readUpdate = null;
+                    pending.Update();
+                }
+                return Working.ToArray();
+            }
+        }
+
+        /// <summary>Runs an unpublished update at the given working-order read from now, as a concurrent broker thread would.</summary>
+        public void UpdateOnRead(int at, Action update)
+        {
+            _reads = 0;
+            _readUpdate = (at, update);
+        }
         public bool PositionReady { get; set; } = true;
         public bool OrdersReady { get; set; } = true;
         public bool DelayAcceptance { get; set; }
