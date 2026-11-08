@@ -1102,6 +1102,7 @@ public sealed class BinanceNativeExecutionFactsTests
             string parentIntentId, childIntentId, logicalId;
             NativeOrderIdentity parentNative, childNative;
             long childId;
+            var staleDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             using (var first = orders.Binance(data, settings, "Replacement cumulative recovery", context))
             {
                 var projector = AccountExecutionProjector.For(first.Executions, context);
@@ -1128,6 +1129,16 @@ public sealed class BinanceNativeExecutionFactsTests
                 Assert.Equal(("CANCELED", 2m), (fake.Order(parentId).Status, fake.Order(parentId).Executed));
                 Assert.Equal(("BUY", 3m, 102m), (fake.Order(childId).Side, fake.Order(childId).Qty, fake.Order(childId).Price));
                 Assert.Equal(parentIntentId, Assert.IsType<OwnedOrderIntent>(context.Find(childIntentId)).PredecessorId);
+                // A disposed broker's last history request can reach the venue after the next hook is installed;
+                // hold one so its late delivery precedes the recovered broker's first native replay.
+                var staleArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                fake.BeforeTradeReply = async ct =>
+                {
+                    staleArrived.TrySetResult();
+                    await staleDelivery.Task.WaitAsync(ct);
+                    if (fake.BeforeTradeReply is { } late) await late(ct);
+                };
+                await staleArrived.Task.WaitAsync(TimeSpan.FromSeconds(12));
             }
             var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1136,6 +1147,7 @@ public sealed class BinanceNativeExecutionFactsTests
                 entered.TrySetResult();
                 return release.Task.WaitAsync(ct);
             };
+            staleDelivery.TrySetResult();
             try
             {
                 var loaded = new OrderContext(context.Descriptor, root);
