@@ -1161,8 +1161,8 @@ public sealed class BinanceNativeExecutionFactsTests
                 var projector = AccountExecutionProjector.For(broker.Executions, loaded);
                 projector.Synchronize();
                 await entered.Task.WaitAsync(TimeSpan.FromSeconds(12));
-                Assert.True(broker.OrdersReady);
-                Assert.True(broker.PositionReady);
+                // A held history request proves only that some broker reached history, not that this one has replayed.
+                await Until(() => broker.OrdersReady && broker.PositionReady, broker, fake);
                 Assert.Equal(2m, broker.Position.Volume);
                 var recovered = Assert.Single(broker.ActiveOrders);
                 Assert.Equal((childId.ToString(CultureInfo.InvariantCulture), owner.Id, childIntentId, logicalId),
