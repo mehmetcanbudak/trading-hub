@@ -728,8 +728,7 @@ public sealed class BracketManager : IDisposable
         foreach (var owned in _owned)
         {
             var order = Current(owned);
-            decimal filled = Math.Max(0, order.Filled);
-            if (order.Status == OrderStatus.Filled) filled = Math.Max(filled, order.QuantityToFill);
+            decimal filled = Executed(order);
             decimal delta = Math.Max(0, filled - owned.Booked);
             if (delta > 0)
             {
@@ -872,6 +871,10 @@ public sealed class BracketManager : IDisposable
         exit.Side == Math.Sign(Volume) && order.Direction == ExitDirection &&
         Account.OrderContext.FindExecutingProtection(order, Account.OrderContext.ManualOwner) != null;
 
+    private static decimal Executed(Order order) => order.Status == OrderStatus.Filled
+        ? Math.Max(Math.Max(0, order.Filled), order.QuantityToFill)
+        : Math.Max(0, order.Filled);
+
     private void ReconcileExits(bool allowPlacement)
     {
         // Optional tracked replacements preserve native amendments and broker-owned cancel/replace sequencing.
@@ -881,6 +884,13 @@ public sealed class BracketManager : IDisposable
             if (intent.Current is not { } owned) continue;
             var order = Current(owned);
             if (Terminal(order)) continue;
+            // A broker thread may apply an execution after ObserveExits booked this order. Comparing the intent with it
+            // would read that fill as a resize request (an executing child would be enlarged or cancelled); book it first.
+            if (Executed(order) > owned.Booked)
+            {
+                _syncAgain = true;
+                continue;
+            }
             if (intent.Phase == ExitPhase.Replacing && intent.Quantity > 0) continue;
             // A triggered stop's executing child is reducing a same-side position. A position report can lead its fills, so
             // a reduction would be computed from a stale fill count and cancel or shrink the order closing the position.
