@@ -552,6 +552,8 @@ public sealed class BybitAccountIdentityTests
             using var resumed = new LiveStrategyRunner(new Passive(), data, broker, ChartPeriod.M1)
             { MaxDrawdown = .2m, CloseOnLimit = false };
             resumed.Start();
+            var limitHit = new ManualResetEventSlim(); // Not disposed: a late delivery may still raise it.
+            resumed.LimitHit += (_, _) => limitHit.Set();
             Assert.Equal(.1m, resumed.Ledger.Fees);
             Assert.True(resumed.IsRunning);
 
@@ -579,6 +581,9 @@ public sealed class BybitAccountIdentityTests
             }
             else Assert.Equal(.3m, LiveStore.LoadLedger(LiveStore.Root, key, 1).Fees);
             AccountExecutionProjector.For(current.ExecutionSource, current.OrderContext).Synchronize();
+            // The recovered head is published to a thread-pool financial drain. Synchronize returns without delivering
+            // it while that drain is in flight; the drawdown stop raises LimitHit once the head reaches the runner.
+            Assert.True(limitHit.Wait(TimeSpan.FromSeconds(10)), "The recovered head did not reach the resumed runner's risk.");
             Assert.Equal(.3m, resumed.Ledger.Fees);
             Assert.Equal(-.3m, resumed.Ledger.Realized);
             Assert.Equal(.3m, resumed.AvailableCurrentDrawdown);
