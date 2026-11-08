@@ -882,8 +882,12 @@ public sealed class BracketManager : IDisposable
             var order = Current(owned);
             if (Terminal(order)) continue;
             if (intent.Phase == ExitPhase.Replacing && intent.Quantity > 0) continue;
-            bool change = intent.Quantity != order.Unfilled ||
-                (intent.Price != PriceOf(order) && !ExecutingStopChild(intent, order));
+            // A triggered stop's executing child is reducing a same-side position. A position report can lead its fills, so
+            // a reduction would be computed from a stale fill count and cancel or shrink the order closing the position.
+            // Its venue order is reduce-only; a closed or flipped position, or an explicit cancel, ends the exemption.
+            bool executing = ExecutingStopChild(intent, order);
+            bool change = (intent.Quantity != order.Unfilled && !(executing && intent.Quantity < order.Unfilled)) ||
+                (intent.Price != PriceOf(order) && !executing);
             if (intent.Phase != ExitPhase.CancelPending && !change) continue;
             if (intent.Phase != ExitPhase.CancelPending)
             {
