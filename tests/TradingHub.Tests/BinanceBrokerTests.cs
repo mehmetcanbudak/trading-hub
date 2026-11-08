@@ -1233,7 +1233,8 @@ public class BinanceBrokerTests : IDisposable
         fake.StallCancelOnceMs = 5000; // canceled at Binance, answer too late…
         fake.FailLookups = 1; // …and asking right away fails too
         OrderActions.Reprice(broker, exit, 59500m);
-        await Until(() => exit.State == OrderStates.Failed);
+        // The poll marks the handle Failed before it publishes the Modify error with the next change notification.
+        await Until(() => exit.State == OrderStates.Failed && errors.Any(e => e.Contains("replacement was not sent", StringComparison.Ordinal)));
         Assert.Equal(OrderStates.Failed, exit.State); // not a silent Canceled: the order is gone
         Assert.Equal(OrderStatus.Rejected, exit.Status);
         Assert.Contains(errors, e => e.Contains("replacement was not sent", StringComparison.Ordinal));
@@ -1587,6 +1588,126 @@ public class BinanceBrokerTests : IDisposable
     }
 
     [Fact]
+    public async Task Canceling_a_manual_stop_limit_that_triggered_first_cancels_its_resting_limit()
+    {
+        // A stop-limit placed on Binance's website: once triggered, its LIMIT rests in the book. Canceling it before the
+        // poll observed the trigger must still cancel that resting limit; it is not an executing exit.
+        using var fake = new FakeBinance(futures: true);
+        long algoId = fake.AddExternalAlgo("BUY", "STOP", 3m, triggerPrice: 61000m, price: 61100m);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any());
+        var order = Assert.Single(broker.ActiveOrders);
+        Assert.Equal("algo:" + algoId.ToString(Inv), order.ExchangeOrderId);
+
+        var releaseOrders = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        long childId;
+        try
+        {
+            // Polls cannot observe the trigger until the cancel has reached Binance.
+            fake.BeforeGetReply = (request, ct) => request.Route is "/fapi/v1/openOrders" or "/fapi/v1/openAlgoOrders"
+                ? releaseOrders.Task.WaitAsync(ct) : Task.CompletedTask;
+            childId = fake.Trigger(algoId); // its LIMIT rests unfilled
+            broker.Cancel(order);
+            await Until(() => fake.Refused.Any(refused => refused.StartsWith("DELETE /fapi/v1/algoOrder", StringComparison.Ordinal)));
+            Assert.Equal(OrderTypes.Stop, order.Type);
+        }
+        finally
+        {
+            releaseOrders.TrySetResult();
+            fake.BeforeGetReply = null;
+        }
+
+        string dropped = "";
+        await Observed(broker, fake, () =>
+        {
+            if (broker.LastError is { } error && error.StartsWith("Not canceled", StringComparison.Ordinal)) dropped = error;
+            return order.State != OrderStates.Active || dropped.Length > 0;
+        });
+        Assert.True(dropped.Length == 0, "The deferred cancel was dropped: " + dropped);
+        Assert.Equal(("LIMIT", "CANCELED", 0m), (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+        Assert.Equal((OrderStates.Done, OrderStatus.Canceled, childId.ToString(Inv)), (order.State, order.Status, order.ExchangeOrderId));
+        Assert.Contains(fake.Calls, call => call == "DELETE /fapi/v1/order");
+        Assert.Empty(broker.ActiveOrders);
+        Assert.Empty(fake.Open);
+    }
+
+    [Fact]
+    public async Task Orders_reach_terminal_states_while_the_futures_position_read_keeps_failing()
+    {
+        using var fake = new FakeBinance(futures: true);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.PositionReady);
+        var filled = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 2m, 59000m, "Test: entry");
+        var canceled = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1m, 58000m, "Test: entry");
+        await Accepted(fake, filled);
+        await Accepted(fake, canceled);
+
+        fake.FailFuturesPositions = true;
+        await Observed(broker, fake, () => !broker.PositionReady && broker.LastError?.Contains("Position snapshot unavailable", StringComparison.Ordinal) == true);
+        fake.Fill(IdOf(filled), 2m);
+        fake.CancelAtExchange(IdOf(canceled));
+        await Until(() => filled.State != OrderStates.Active && canceled.State != OrderStates.Active);
+        Assert.Equal((OrderStates.Done, OrderStatus.Filled, 2m), (filled.State, filled.Status, filled.Filled));
+        Assert.Equal((OrderStates.Done, OrderStatus.Canceled), (canceled.State, canceled.Status));
+        Assert.Empty(broker.ActiveOrders);
+        // The position endpoint is still failing: its snapshot was never applied and the failure stays reported.
+        await Polls(fake, 1);
+        Assert.False(broker.PositionReady);
+        Assert.Contains("Position snapshot unavailable", broker.LastError);
+        Assert.Equal(0m, broker.Position.Volume);
+
+        fake.FailFuturesPositions = false;
+        await Until(() => broker.PositionReady && broker.Position.Volume == 2m);
+        Assert.Null(broker.LastError);
+    }
+
+    [Fact]
+    public async Task CancelAll_after_a_refused_stop_cancel_cancels_the_market_order_its_trigger_placed()
+    {
+        // An own stop's cancel is refused because it triggered; CancelAll arrives before any poll observes the trigger and
+        // its regular cancel-all fails. CancelAll's explicit intent covers the executing child, so the deferred cancel must
+        // not be dropped by the single cancel's stale "targets the conditional order" flag.
+        using var fake = new FakeBinance(futures: true) { HoldMarketExecution = true };
+        using var broker = Broker(fake);
+        var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 3m, 59000m, "Test: Stop loss", reduceOnly: true);
+        await Accepted(fake, stop);
+        long algoId = Assert.Single(fake.PlacedAlgo).AlgoId;
+
+        var releaseOrders = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        long childId;
+        try
+        {
+            fake.BeforeGetReply = (request, ct) => request.Route is "/fapi/v1/openOrders" or "/fapi/v1/openAlgoOrders"
+                ? releaseOrders.Task.WaitAsync(ct) : Task.CompletedTask;
+            childId = fake.Trigger(algoId, fill: 1m); // its MARKET order is executing, partly filled
+            broker.Cancel(stop);
+            await Until(() => fake.Refused.Any(refused => refused.StartsWith("DELETE /fapi/v1/algoOrder", StringComparison.Ordinal)));
+            fake.RejectCancelAlls = 1;
+            broker.CancelAll();
+            await Until(() => fake.Refused.Any(refused => refused.StartsWith("DELETE /fapi/v1/allOpenOrders", StringComparison.Ordinal)));
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED"), (fake.Order(childId).Type, fake.Order(childId).Status));
+            Assert.Equal(OrderTypes.Stop, stop.Type);
+        }
+        finally
+        {
+            releaseOrders.TrySetResult();
+            fake.BeforeGetReply = null;
+        }
+
+        string dropped = "";
+        await Observed(broker, fake, () =>
+        {
+            if (broker.LastError is { } error && error.StartsWith("Not canceled", StringComparison.Ordinal)) dropped = error;
+            return stop.State != OrderStates.Active || dropped.Length > 0;
+        });
+        Assert.True(dropped.Length == 0, "The deferred CancelAll cancel was dropped: " + dropped);
+        Assert.Equal(("MARKET", "CANCELED", 1m), (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+        Assert.Equal((OrderStates.Done, OrderTypes.Market, 1m, childId.ToString(Inv)), (stop.State, stop.Type, stop.Filled, stop.ExchangeOrderId));
+        Assert.Empty(broker.ActiveOrders);
+        Assert.Empty(fake.Open);
+    }
+
+    [Fact]
     public async Task Spot_stops_stay_STOP_LOSS_orders_on_the_api_v3_order_route()
     {
         using var fake = new FakeBinance(futures: false);
@@ -1804,6 +1925,7 @@ internal sealed class FakeBinance : IDisposable
     public string SpotBaseAsset { get; set; } = "BTC";
     public string SpotQuoteAsset { get; set; } = "USDT";
     public bool FailSpotBalances { get; set; }
+    public bool FailFuturesPositions { get; set; }
 
     public void SetSpotBalance(string asset, decimal free, decimal locked)
     {
@@ -1873,6 +1995,8 @@ internal sealed class FakeBinance : IDisposable
     /// <summary>How many of the next new orders Binance refuses.</summary>
     public int RejectPosts { get; set; }
     public int RejectCancels { get; set; }
+    /// <summary>How many of the next cancel-all requests for regular orders Binance refuses.</summary>
+    public int RejectCancelAlls { get; set; }
     public int UnknownPosts { get; set; }
     public int UnknownPostStatus { get; set; } = 503;
     public int UnknownPostCode { get; set; } = -1007;
@@ -2379,6 +2503,7 @@ internal sealed class FakeBinance : IDisposable
                     return (200, Json(o));
                 }
                 case ("GET", "/fapi/v2/positionRisk"):
+                    if (FailFuturesPositions) return (503, "{\"code\":-1001,\"msg\":\"Position snapshot unavailable.\"}");
                     return (200, "[" + string.Join(",", _futuresPositions.Select(position =>
                         $"{{\"symbol\":\"{position.Key}\",\"positionAmt\":\"{Num(position.Value.Quantity)}\",\"entryPrice\":\"{Num(position.Value.Average)}\",\"unRealizedProfit\":\"0\",\"leverage\":\"1\"}}")) + "]");
                 case ("GET", "/fapi/v1/userTrades"):
@@ -2389,6 +2514,11 @@ internal sealed class FakeBinance : IDisposable
                         .Select(b => $"{{\"asset\":\"{b.Key}\",\"free\":\"{Num(b.Value.Free)}\",\"locked\":\"{Num(b.Value.Locked)}\"}}")) + "]}");
                 case ("DELETE", "/fapi/v1/allOpenOrders" or "/api/v3/openOrders"):
                 {
+                    if (RejectCancelAlls > 0)
+                    {
+                        RejectCancelAlls--;
+                        return Error(-1001, "Internal error; unable to process your request. Please try again.");
+                    }
                     var canceled = _orders.Values.Where(o => o.IsOpen && o.Symbol == r.Query("symbol")).ToList();
                     foreach (var o in canceled) CancelLocked(o);
                     return Futures ? (200, "{\"code\":200,\"msg\":\"The operation of cancel all open order is done.\"}") : (200, "[" + string.Join(",", canceled.Select(Json)) + "]");

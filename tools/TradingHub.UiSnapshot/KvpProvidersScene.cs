@@ -453,6 +453,8 @@ internal static class KvpProvidersScene
             demoWire.FailPositions = false; Await(demoSession.RefreshAsync(), "a complete authoritative snapshot restores account readiness");
             demoWire.WalletKnown = false; Await(demoSession.RefreshAsync(), "wallet fixture supplies absent rather than zero financial fields"); RefreshUi();
             snapshot = Services.AccountCenter.Snapshot(account);
+            // The Accounts view refreshes on its own timer; a fixed pump can end before that tick on a loaded machine.
+            Until(() => Card(view, 0) == "—" && Card(view, 2) != "—", "the Accounts timer renders the missing wallet measurements");
             Check(snapshot.Balance == null && snapshot.Available == null && snapshot.OpenPnlKnown && snapshot.OpenPnl == 3 && Card(view, 0) == "—" && Card(view, 2) != "—",
                 "actual account UI handles unknown wallet independently of known nonflat position PnL");
             Snapshot("Bybit missing wallet measurements", snapshot); Shot("kvp_providers_bybit_unknown_wallet");

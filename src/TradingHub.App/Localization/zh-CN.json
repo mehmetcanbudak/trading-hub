@@ -3980,6 +3980,7 @@
   "Not all of them started: {0}": "未能全部启动：{0}",
   "Not an active target.": "这不是生效中的目标。",
   "Not an independent completed-trade estimate": "并非基于独立完整交易的估计",
+  "Not canceled: the stop already triggered at Binance and its order is executing.": "未取消：止损单已在 Binance 触发，其订单正在执行。",
   "Not enabled: administrator permission is required.": "未启用：需要你的管理员权限。",
   "Not enabled: your administrator permission is needed.": "未启用：需要你的管理员权限。",
   "Not enough data yet": "数据尚不足",

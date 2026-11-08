@@ -565,7 +565,8 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
         lock (server.Tags) Assert.Empty(server.Tags);
         Volatile.Write(ref openingPermission, 1);
         await server.PushOrder("manual-opening", "external-manual-opening", buy: true, qty: 2, price: 99);
-        await Until(() => broker.ActiveOrders.Any());
+        // A list published before the rejection can still hold the forbidden order; wait for the pushed one.
+        await Until(() => broker.ActiveOrders.Any(order => order.ExchangeOrderId == "manual-opening"));
         var opening = Assert.Single(broker.ActiveOrders);
         Assert.Null(opening.OwnerId);
         Assert.Null(opening.IntentId);
@@ -881,8 +882,18 @@ public sealed class OrderContextAdmissionRegressionTests : IDisposable
         // persisted identities remain available; only this test's private namespace is affected.
         string directory = Assert.Single(Directory.GetDirectories(Path.Combine(_root, "execution-state")));
         string lease = Path.Combine(directory, ".lease");
-        File.Delete(lease);
-        Directory.CreateDirectory(lease);
+        // Take the journal's own lease mutex: an in-flight ownership write keeps .lease open, and Windows refuses to delete it.
+        using var mutex = new Mutex(false, "TradingHub.OrderOwnership." + OrderContext.Hash(Path.GetFullPath(directory)));
+        bool owned;
+        try { owned = mutex.WaitOne(TimeSpan.FromSeconds(8)); }
+        catch (AbandonedMutexException) { owned = true; }
+        Assert.True(owned, "The ownership journal lease was not released.");
+        try
+        {
+            File.Delete(lease);
+            Directory.CreateDirectory(lease);
+        }
+        finally { mutex.ReleaseMutex(); }
     }
 
     private static void InitializeField(object target, string name)

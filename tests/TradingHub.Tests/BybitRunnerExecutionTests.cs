@@ -50,7 +50,7 @@ public sealed class BybitRunnerExecutionTests
         }
     }
 
-    private sealed class QueuedSynchronizationContext : SynchronizationContext
+    internal sealed class QueuedSynchronizationContext : SynchronizationContext
     {
         private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _pending = new();
         public override void Post(SendOrPostCallback callback, object? state) => _pending.Enqueue((callback, state));
