@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # C# strategies
 
@@ -10,7 +10,9 @@ A Trading Hub strategy is a C# class derived from `Strategy`. The same class run
 - An empty folder receives Moving-average crossover, Range breakout, Delta absorption and VWAP mean-reversion examples. The app compiles them in memory using Roslyn.
 - Compile with **Compile** (⌘B), **Compile and test**, when opening a strategy, after Claude edits, or before first use. **Save** (⌘S) writes the file only: after editing, compile before backtesting, which otherwise uses the last compiled version.
 - Use a public, nonabstract `Strategy` subclass with a parameterless constructor and `using TradingHub.Strategies;`. System, System.Linq and System.Collections.Generic are implicit. Prefer one class per same-named file. History is keyed by class name: renaming creates a different history identity.
-- Compilation applies the same ATAS namespace adaptations and `TRADINGHUB` / `CROSS_PLATFORM` symbols as [Indicators](indicadores.md).
+- Compilation applies the same ATAS namespace adaptations and `TRADINGHUB` / `CROSS_PLATFORM` symbols as [Indicators](./indicadores.md).
+
+Each execution captures one immutable successful compilation before data preparation. That generation owns its exact source, full source digest, type and factory. Editing the file or publishing another compilation cannot change an already admitted run. Chart continuation and same-process live restart retain their captured generation unless the user explicitly chooses another one. Saved source lookup verifies the new exact digest while retaining the older normalized 12-character lookup for historical runs.
 
 ## Parameters
 
@@ -64,7 +66,7 @@ LocalTime, TimeBetween and session-day calculations use the backtest's session t
 | `ClosePosition(name?)` | Cancel pending entry orders and close at market. |
 | `CancelAll()` / `Cancel(order)` / `Modify(order, price)` | Cancel pending orders, cancel one, or change a limit/stop price. |
 
-Omitted quantity uses Quantity; prices round to tick size. StrategyOrder exposes Id, Side, Type, Quantity, Price, Name, State (Active/Filled/Canceled), IsActive, FillPrice, FillTime and IsProtective. Exit names appear in backtest reasons and live broker comments. See [fill simulation](backtesting.md#what-a-backtest-simulates).
+Omitted quantity uses Quantity; prices round to tick size. StrategyOrder exposes Id, Side, Type, Quantity, Price, Name, State (Active/Filled/Canceled), IsActive, FillPrice, FillTime and IsProtective. Exit names appear in backtest reasons and live broker comments. See [fill simulation](./backtesting.md#what-a-backtest-simulates).
 
 ## Automatic stop, target and trailing
 
@@ -128,7 +130,7 @@ Values may be null until enough history exists: seven closes, and at least a day
 
 No additional code is needed for RegimeFilter and Min/MaxVolatilityRank. RegimeFilter allows combinations of range, mixed, uptrend and downtrend: All, RangeOnly, NoTrend, TrendOnly, NoRange, UpTrendOnly, DownTrendOnly, MixedOnly, RangeOrUpTrend, RangeOrDownTrend, MixedOrUpTrend, MixedOrDownTrend, NoDownTrend, NoUpTrend and NoMixed.
 
-Outside the filter, orders cannot open/increase exposure: only the closing portion passes, with the remainder canceled and logged. Exits always pass. Missing context does not block. Live filters can change without restarting; see [Live](en-vivo.md).
+Outside the filter, orders cannot open/increase exposure: only the closing portion passes, with the remainder canceled and logged. Exits always pass. Missing context does not block. Live filters can change without restarting; see [Live](./en-vivo.md).
 
 ## Example 1: Moving-average crossover with trading hours
 
@@ -243,7 +245,7 @@ The C# editor highlights code and lists clickable diagnostics. Controls: Save (�
 
 ## Ask Claude to write it
 
-Describe a strategy, for example an opening 30-minute range breakout with an ATR stop. Claude creates/edits the strategy file; compilation follows. Successful compilation offers **Test in backtest**; errors offer **Ask Claude to fix**. Laboratory mode additionally runs tests/optimizations/walk-forward and creates a report. See [Claude](asistente-claude.md).
+Describe a strategy, for example an opening 30-minute range breakout with an ATR stop. Claude creates/edits the strategy file; compilation follows. Successful compilation offers **Test in backtest**; errors offer **Ask Claude to fix**. Laboratory mode additionally runs tests/optimizations/walk-forward and creates a report. See [Claude](./asistente-claude.md).
 
 Imported C# executes in-process without a security sandbox. Review untrusted strategies/indicators before compiling or running them.
 
@@ -251,4 +253,4 @@ Imported C# executes in-process without a security sandbox. Review untrusted str
 
 `Qt(QuanTAlib.AbstractBase indicator, PriceSource source = PriceSource.Close)` transfers ownership to the host, which updates it on closed bars and disposes it. For example, inside strategy initialization: `var average = Qt(new Q.Jma(20));` (`Q` is the compiler's QuanTAlib alias). Store the series in a field when consuming later. `IsReady` follows library `IsHot`, not merely the requested period; `AvailableValue` distinguishes unavailable input from real zero/negative results.
 
-`Camarilla()` uses the host session; `Camarilla("America/New_York", 18)` explicitly selects CME-style rollover. Check `IsReady` or nullable `Levels` before using PP/H1–H6/L1–L6; the primary series value is H3. Levels come from the previous observed session, whose initial history can be partial. These optional APIs do not replace existing moving-average helpers or authorize live trades. [Indicator documentation](indicadores.md#selected-additional-native-studies) explains display/warmup and retrospective flow limits.
+`Camarilla()` uses the host session; `Camarilla("America/New_York", 18)` explicitly selects CME-style rollover. Check `IsReady` or nullable `Levels` before using PP/H1–H6/L1–L6; the primary series value is H3. Levels come from the previous observed session, whose initial history can be partial. These optional APIs do not replace existing moving-average helpers or authorize live trades. [Indicator documentation](./indicadores.md#selected-additional-native-studies) explains display/warmup and retrospective flow limits.

@@ -1,10 +1,10 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Indicators
 
-Open **Indicators** from the chart toolbar or **Chart → Indicators** (⌘I). Search the library by name/category and double-click or Add to chart. Select an active indicator to edit properties. Templates save/apply settings and choose defaults for new instances; see [Charts](graficos.md#indicators).
+Open **Indicators** from the chart toolbar or **Chart → Indicators** (⌘I). Search the library by name/category and double-click or Add to chart. Select an active indicator to edit properties. Templates save/apply settings and choose defaults for new instances; see [Charts](./graficos.md#indicators).
 
-Strategy indicator factories such as Sma/Ema/Rsi are a separate, simpler [API](estrategias.md#indicators).
+Strategy indicator factories such as Sma/Ema/Rsi are a separate, simpler [API](./estrategias.md#indicators).
 
 ## Included indicators
 
@@ -92,7 +92,7 @@ public class AverageRange : Indicator
 - OnCalculate receives zero-based bar index and closing value. GetCandle exposes OHLC, Volume, Ask, Bid, Delta, MaxDelta, MinDelta and Time. CurrentBar is bar count. Guard negative indices during warmup.
 - Optional rendering: set EnableCustomDrawing and subscribe to DrawingLayouts.Final in the constructor. Override OnRender(RenderContext, DrawingLayouts); use ChartInfo.GetXByBar/GetYByPrice and context DrawLine/FillRectangle/DrawString. Visible indices are FirstVisibleBarNumber through LastVisibleBarNumber.
 
-The [Claude assistant](asistente-claude.md) can also write indicators into this directory. **Untrusted C# executes in-process, not in a sandbox.**
+The [Claude assistant](./asistente-claude.md) can also write indicators into this directory. **Untrusted C# executes in-process, not in a sandbox.**
 
 ## Validation checklist
 
@@ -154,14 +154,14 @@ CrossColor/CrossColors alias System.Drawing.Color; CrossPen, CrossPens, CrossSol
 
 ## Selected additional native studies
 
-These selected studies complement, rather than replace, the existing moving average and **Session volume profile**. The [dashboard](TRANSLATION_STATUS.md) distinguishes the accepted non-KVP runtime from the separate KVP capability candidate and its actual validation evidence.
+These selected studies complement, rather than replace, the existing moving average and **Session volume profile**. The [dashboard](./TRANSLATION_STATUS.md) distinguishes the accepted non-KVP runtime from the separate KVP capability candidate and its actual validation evidence.
 
 - **QuanTAlib moving average** and the ribbon offer SMA, EMA, WMA, HMA, ALMA, JMA, KAMA, T3, ZLEMA, DEMA, TEMA, VIDYA and SuperSmoother. Type, Period, Source and Show warmup control display; readiness still follows library `IsHot`. Showing warmup does not make a value ready. Genuine zero/negative results remain distinct from unavailable values. Latest-bar replacement updates streaming state; arbitrary historical edits replay the series.
 - **QuanTAlib Camarilla** supplies PP and H1–H6/L1–L6 from the previous **observed** session. Initial loaded history may begin partway through a session; no levels are invented before rollover. Select Chart session, CME (18:00 New York), or Custom session with a valid time zone/start hour.
 - **Anchored Flow VWAP** selects Manual, Swing or VolumeSpike anchor modes. Manual UTC uses `yyyy-MM-dd HH:mm` (empty means loaded-history start). Swing anchors become known only after the configured closed bars on each side; primary VWAP/band series are **causal and never backfilled into earlier strategy bars**. Optional **Retrospective chart lines** preserve the visual pivot-to-confirmation segment as drawing-only data; `RetrospectiveValueAt` must be interpreted with `RetrospectiveConfirmationAt`, not as an earlier live signal. Volume spikes compare preceding bars, not a baseline contaminated by the candidate. Weight selects AbsoluteDelta, Volume or AbsolutePriceNotional (absolute price × volume).
 - **Refill Zones (heuristic)** uses Minimum bucket volume, Floor-price bucket size, Absorption only and Project until mitigation. It is an absorption/refill heuristic, **not proof of book replenishment or icebergs**. Optional estimated OHLC uses threshold × 0.4 and at most 200 buckets.
 - **Composite Volume Profile** uses host Session/Week/Month boundaries, nearest-price grouping (ties away from zero), Value area (%) and optional chronological composition when the next POC is inside the current value area. Month is session-based, not simply a UTC date label. Equal-volume POCs choose the lower price; equal adjacent value-area volume expands upward first. POC projection uses a 60-profile lookback with up to 10 tested POCs; untested projections follow their configured limit (zero means all within the finite lookback).
-- **Open interest** shows server-observed OI and adjacent-known-cutoff signed change. See [Data fidelity](datos.md#open-interest-observation-fidelity) for retention, freshness and missing-value rules.
+- **Open interest** shows server-observed OI and adjacent-known-cutoff signed change. See [Data fidelity](./datos.md#open-interest-observation-fidelity) for retention, freshness and missing-value rules.
 
 For all three flow/profile studies, **Allow estimated OHLC** is off by default. Any observed footprint rows win over aggregate fallback, but mixed observed/estimated contributions remain marked incomplete; observed rows include Between volume and do not certify exchange-authoritative aggressor side (IB sides are inferred). Composite OHLC fallback is bounded to 200 samples. Coverage annotations distinguish observed, estimated, incomplete and missing bars; absence of a plot is not automatically a zero signal. Estimates and retrospective anchors must not be represented as observed trades in strategy evaluation.
 
@@ -185,7 +185,7 @@ The KVP capability adoption reuses the existing native catalog and persistent st
 | **Higher-timeframe structure** | Mapped or explicitly selected periods, closed HTF candles/FVG, PO3/T-Spot and projections. Forming previews are explicitly labelled and are not silently published as confirmed strategy values. |
 | **Triple Bollinger** | Three independently mapped/configured periods, completed-candle length and population deviation multipliers. Warmup stays unavailable; monthly aggregation follows actual session calendars. |
 | **VWAP Claire** | Explicitly **bar-based HLC3 estimates**, with 30/90/365-calendar-day completed-session windows and optional session/week/month anchors. Values are held within the current session; short history is partial, not tick-exact VWAP. |
-| **Orderbook Delta** | Recorded-depth bid/ask, delta, imbalance and change; explicit sample-average, duration-average, last or maximum semantics. See [Depth fidelity](datos.md#recorded-depth-and-heatmap-fidelity). |
+| **Orderbook Delta** | Recorded-depth bid/ask, delta, imbalance and change; explicit sample-average, duration-average, last or maximum semantics. See [Depth fidelity](./datos.md#recorded-depth-and-heatmap-fidelity). |
 
 Raw prints, measured compact buckets, synthetic OHLC and inferred aggressor sides remain distinct through the SDK. Measured compact rows may support an explicitly aggregated profile; they are not individual Big Trades or observed event-complete footprints. Estimated OHLC opt-ins remain visible. Repeated forming-bar replacement must replace the prior contribution rather than add it again.
 

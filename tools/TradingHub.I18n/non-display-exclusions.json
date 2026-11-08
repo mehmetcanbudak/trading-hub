@@ -1,0 +1,58 @@
+{
+  "Accounting quality: legacy or modeled figures are estimates; only fully reported execution costs are authoritative.": {
+    "locations": "TradingHub.App/Services/LiveRiskAgent.cs:235",
+    "reason": "Canonical model-input instruction in BuildPrompt, not a runtime display literal. Assistant response language is selected separately."
+  },
+  "Auto,Auto,Auto,*": {
+    "locations": "TradingHub.App/Views/StrategiesView.Optimize.cs:512",
+    "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
+  },
+  "Binance": {
+    "locations": "TradingHub.App/Services/AppServices.cs:647 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:619 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:859 TradingHub.Core/Trading/OrderContext.cs:1155 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:739",
+    "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
+  },
+  "Fee": {
+    "locations": "TradingHub.Strategies/LivePortfolio.cs:1560 TradingHub.Strategies/LivePortfolio.cs:1565",
+    "reason": "Existing imported-execution JSON property name, validated and decoded without renaming persisted records."
+  },
+  "PORTFOLIO (closed trades; {0} accounting): net {1} · {2} trades · PF {3} · max drawdown {4} · ": {
+    "locations": "TradingHub.App/Services/LiveRiskAgent.cs:242",
+    "reason": "Inclusive extraction of the first concatenated model-input template in BuildPrompt. It is not a display label."
+  },
+  "PORTFOLIO (closed trades; {0} accounting): net {1} · {2} trades · PF {3} · max drawdown {4} · Sharpe {5} · currently open {6}": {
+    "locations": "TradingHub.App/Services/LiveRiskAgent.cs:242",
+    "reason": "Complete concatenated model-input template in BuildPrompt. Assistant response language is selected separately from canonical input instructions."
+  },
+  "State": {
+    "locations": "TradingHub.Core/Data/IbHistoryCoordinator.cs:115",
+    "reason": "Persisted IB recovery-journal JSON property. Renaming it would invalidate existing transactions."
+  },
+  "Symbol": {
+    "locations": "TradingHub.Strategies/LivePortfolio.cs:1574",
+    "reason": "Existing imported-execution JSON property, not a column label. Preserve its stored schema."
+  },
+  "Version": {
+    "locations": "TradingHub.Core/Data/IbHistoryCoordinator.cs:118",
+    "reason": "Persisted IB recovery-journal schema-version property. It is not user-facing prose."
+  },
+  "local simulation": {
+    "locations": "TradingHub.Core/Trading/OrderContext.cs:167",
+    "reason": "Simulation account-context environment identity. Preserve it rather than translating routing metadata."
+  },
+  "rithmic-position|{0}|{1}|{2}": {
+    "locations": "TradingHub.App/Services/AppServices.Rithmic.cs:74",
+    "reason": "Internal exact native-account-context, symbol and exchange broker-cache key. Preserve its stable partition prefix and separators rather than translating routing identity."
+  },
+  "session:{0}|{1}": {
+    "locations": "TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:77 TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:79",
+    "reason": "Private per-session fallback native-account admission partition when proven native account identity is unavailable. It is not a display label and must not merge unproven sessions by translation."
+  },
+  "symbol={0}&fromId={1}&limit=1000": {
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:241",
+    "reason": "Signed Binance trade-history query template. Payload keys and interpolation positions are broker protocol, not display text."
+  },
+  "unresolved endpoint": {
+    "locations": "TradingHub.App/Services/AppServices.cs:698",
+    "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
+  }
+}

@@ -96,7 +96,7 @@ public sealed class PineImportTests
     public async Task AppOwnershipRegistersBeforePendingReviewAwaitRejectsNewSendsAndWaitsForItsCancellationDrain()
     {
         using var fixture = new PineFixture();
-        var owner = new PineHandoffRegistry();
+        var owner = new OwnedOperationRegistry();
         var source = new PineImportSource(Path.Combine(fixture.Root, "source.pine"), "source.pine", "plot(close)", "fixture");
         var preview = PineImports.Preview(source, "codex", null, null);
         var bridge = new DraftBridge("codex");

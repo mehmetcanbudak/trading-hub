@@ -274,7 +274,7 @@ public static class CsvImport
     // Corrections can move a source point to another UTC day. Day-local merging cannot retire its old
     // location, so reconcile only the bars present in this import against the pre-existing source days.
     private static decimal RemoveObsoleteBarPoints(string root, Instrument instrument, IReadOnlyList<DateOnly> previousDays,
-        Dictionary<long, BarPlacement> placements, HashSet<DateOnly> archiveRefresh, CancellationToken ct)
+        Dictionary<long, BarPlacement> placements, HashSet<DateOnly> archiveRefresh, HistoryWriteOwnership ownership, CancellationToken ct)
     {
         decimal tick = instrument.TickSize;
         string sourceIdentity = instrument.Key;
@@ -293,6 +293,7 @@ public static class CsvImport
         };
         foreach (var day in previousDays)
         {
+            ownership.RequirePath(TickFile.DayPath(root, instrument.FeedId, instrument.Symbol, day));
             ct.ThrowIfCancellationRequested();
             var existing = TickFile.ExistingDayPath(root, instrument.FeedId, instrument.Symbol, day);
             if (existing == null) continue;
@@ -301,7 +302,7 @@ public static class CsvImport
             if (removed == 0) continue;
             if (rows.Count == 0)
             {
-                HistoricalData.DeleteDays(root, instrument.FeedId, instrument.Symbol, new[] { day });
+                HistoricalData.DeleteDays(root, instrument.FeedId, instrument.Symbol, new[] { day }, ownership);
                 continue;
             }
             var storedInstrument = StorageInstrument(instrument, existing);
@@ -310,7 +311,7 @@ public static class CsvImport
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                using (var writer = new TickFile.Writer(temporary, storedInstrument, includeProvenance: true))
+                using (var writer = new TickFile.Writer(temporary, storedInstrument, ownership, includeProvenance: true))
                     foreach (var trade in rows) writer.Write(trade);
                 File.Move(temporary, path, overwrite: true);
             }
@@ -343,8 +344,7 @@ public static class CsvImport
             tick = 1m;
             for (int i = 0; i < shape.PriceDecimals; i++) tick /= 10m;
         }
-        using var lease = TickFile.TryLock(root, FeedId, symbol, failOnNonSharingError: true)
-            ?? throw new IOException("Another writer owns this imported instrument.");
+        using var lease = HistoryWriteOwnership.AcquireSymbol(root, FeedId, symbol);
         IReadOnlyList<DateOnly> previousDays = l.IsBars ? HistorySources.AvailableDays(root, FeedId, symbol) : Array.Empty<DateOnly>();
         var placements = previousDays.Count > 0 ? new Dictionary<long, BarPlacement>() : null;
         var archiveRefresh = new HashSet<DateOnly>();
@@ -373,7 +373,7 @@ public static class CsvImport
             var existing = TickFile.ExistingDayPath(root, inst.FeedId, inst.Symbol, day);
             var storedInstrument = existing == null ? inst : StorageInstrument(inst, existing);
             tick = Math.Min(tick, storedInstrument.TickSize);
-            HistoricalData.WriteDay(root, storedInstrument, day, dayTrades);
+            HistoricalData.WriteDay(root, storedInstrument, day, dayTrades, lease);
             if (File.Exists(TickArchive.PathFor(TickFile.DayPath(root, inst.FeedId, inst.Symbol, day)))) archiveRefresh.Add(day);
             trades += dayTrades.Count;
             writtenDays.Add(day);
@@ -484,12 +484,12 @@ public static class CsvImport
 
         Flush();
         if (placements is { Count: > 0 })
-            tick = Math.Min(tick, RemoveObsoleteBarPoints(root, inst, previousDays, placements, archiveRefresh, ct));
+            tick = Math.Min(tick, RemoveObsoleteBarPoints(root, inst, previousDays, placements, archiveRefresh, lease, ct));
         foreach (var day in archiveRefresh)
         {
             ct.ThrowIfCancellationRequested();
             var archiveRawPath = TickFile.DayPath(root, inst.FeedId, inst.Symbol, day);
-            if (File.Exists(archiveRawPath)) TickArchive.ArchiveDay(root, StorageInstrument(inst, archiveRawPath), day, ct);
+            if (File.Exists(archiveRawPath)) TickArchive.ArchiveDay(root, StorageInstrument(inst, archiveRawPath), day, lease, ct);
         }
         progress?.Report(1);
         return new ImportResult(l.IsBars ? $"{Math.Max(1, shape.BarTicks / TimeSpan.TicksPerMinute)}-minute bars" : "ticks",

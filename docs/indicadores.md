@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Indicadores
 
@@ -6,9 +6,9 @@ Los indicadores del gráfico se agregan desde la ventana **Indicadores** (botón
 o **Gráfico → Indicadores…**, ⌘I). A la izquierda está la **Biblioteca**, con un buscador por nombre o categoría;
 **Agregar al gráfico** (o doble clic) lo suma, y al elegir uno de los que ya están en el gráfico se editan sus
 propiedades a la derecha. **Plantillas** guarda los ajustes de un indicador, aplica uno guardado o elige con cuál
-arrancan los nuevos. El resto del manejo del gráfico está en [Gráficos](graficos.md#indicadores).
+arrancan los nuevos. El resto del manejo del gráfico está en [Gráficos](./graficos.md#indicadores).
 
-Los indicadores de las estrategias (`Sma`, `Ema`, `Rsi`…) son otra API, más simple: ver [Estrategias](estrategias.md).
+Los indicadores de las estrategias (`Sma`, `Ema`, `Rsi`…) son otra API, más simple: ver [Estrategias](./estrategias.md).
 
 ## Incluidos
 
@@ -121,7 +121,7 @@ public class RangoPromedio : Indicator
   `FillRectangle`, `DrawString`…). Las velas visibles van de `FirstVisibleBarNumber` a `LastVisibleBarNumber`.
 
 Claude también escribe indicadores: pedíselo en el panel de Backtesting y los deja en esta carpeta (ver
-[Claude](asistente-claude.md)).
+[Claude](./asistente-claude.md)).
 
 ## DLLs extra
 

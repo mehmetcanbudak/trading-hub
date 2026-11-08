@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Claude in Trading Hub
 
@@ -8,12 +8,12 @@ Trading Hub defaults to **Claude Code** using your own logged-in session and sub
 |---|---|
 | Backtesting → Code, Claude panel | Write, explain and repair strategies/indicators. |
 | Same panel, Laboratory enabled | Run backtests, optimization, walk-forward and Monte Carlo; create reports/verdicts. |
-| Live → Portfolios | Per-portfolio [risk agent](en-vivo.md#risk-agent). |
+| Live → Portfolios | Per-portfolio [risk agent](./en-vivo.md#risk-agent). |
 | Live → Proposals | Ask the laboratory to review current strategies and propose sizes. |
 
 ## Finding Claude Code
 
-The app searches `/usr/local/bin`, `/opt/homebrew/bin`, `~/.claude/local`, `~/.local/bin`, `~/.npm-global/bin`, PATH and supported Claude desktop CLI locations under `~/Library/Application Support/Claude/claude-code/…`. It chooses the newest discovered version. Override with `TRADINGHUB_CLAUDE_CLI`; see [Installation](instalacion.md#claude-code-optional).
+The app searches `/usr/local/bin`, `/opt/homebrew/bin`, `~/.claude/local`, `~/.local/bin`, `~/.npm-global/bin`, PATH and supported Claude desktop CLI locations under `~/Library/Application Support/Claude/claude-code/…`. It chooses the newest discovered version. Override with `TRADINGHUB_CLAUDE_CLI`; see [Installation](./instalacion.md#claude-code-optional).
 
 On Windows, discovery also supports native `claude.exe` and recognized npm/pnpm/Yarn `claude.cmd` shims in user installation locations and PATH. Supported shims are resolved to their Node entry point or native executable, so multiline and oversized prompts do not pass through `cmd.exe`; an unknown shim fails visibly. The explicit override supports these forms. Login opens a Windows terminal rather than macOS Terminal. Native discovery/login/quoting evidence is tracked in the validation dashboard.
 
@@ -105,7 +105,7 @@ Old reports, user-written strategy labels and third-party text are not automatic
 
 ## What is sent to Claude
 
-Your prompt, files the CLI reads, tool results (metrics, trades, data summaries, chart images) and requested live-portfolio information can be sent to Anthropic through your CLI/account. Keychain credentials are not exposed by Trading Hub laboratory tools, but do not put secrets into prompts or source files. See [Privacy](privacidad.md).
+Your prompt, files the CLI reads, tool results (metrics, trades, data summaries, chart images) and requested live-portfolio information can be sent to Anthropic through your CLI/account. Keychain credentials are not exposed by Trading Hub laboratory tools, but do not put secrets into prompts or source files. See [Privacy](./privacidad.md).
 
 Prompts request replies and report prose in the selected English/Spanish/Simplified Chinese interface language while generated C# and identifiers stay English. A provider outage, unsupported model, existing conversation context or explicit user request can affect output. Real paid Claude calls are not required for localization regression checks; use fake CLI fixtures. Existing reports/conversations are not rewritten.
 
@@ -123,4 +123,4 @@ Research is **off by default**. The provider requires an eligible Essential-or-h
 
 Discovery fetches authenticated, paginated tool **metadata**, not tool results. Review the offered names/descriptions/schema and choose from the fixed 19-tool research intersection. All watchlist and alert tools and unknown tools are denied, even if metadata claims read-only; `get_active_watchlist` is denied because its name does not make its behavior safe. Catalog/schema fingerprints, changed grants, reauthorization, canceled review and revocation invalidate approval before a call; changed metadata requires review again.
 
-Only approved research calls may reach `https://mcp.tradingview.com/mcp`. Queries/arguments and tool results can leave the machine and then enter the selected model context; consider both providers' retention/cost policies. Missing supported application registration fails explicitly; no fabricated hosted client metadata or reused CLI OAuth session is supplied. No real TradingView OAuth/entitlement/account certification is claimed from fake-server tests. See [Privacy](privacidad.md#optional-assistant-and-research-data) and [Development](desarrollo.md#selected-non-kvp-reproduction).
+Only approved research calls may reach `https://mcp.tradingview.com/mcp`. Queries/arguments and tool results can leave the machine and then enter the selected model context; consider both providers' retention/cost policies. Missing supported application registration fails explicitly; no fabricated hosted client metadata or reused CLI OAuth session is supplied. No real TradingView OAuth/entitlement/account certification is claimed from fake-server tests. See [Privacy](./privacidad.md#optional-assistant-and-research-data) and [Development](./desarrollo.md#selected-non-kvp-reproduction).

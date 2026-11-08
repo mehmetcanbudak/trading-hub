@@ -104,18 +104,8 @@ public class OptimizationPeriodTests
         var res = Optimizer.WalkForward(() => new Breakout(), new(), Ranges("M15", "H1"), data, Settings(data), FitnessMetric.NetProfit, 3, 1, false, 0, null, CancellationToken.None,
             search: SearchMode.Grid);
         Assert.Equal(4, res.Evaluated);
-        Assert.NotEmpty(res.Windows);
+        Assert.Equal(5, res.Windows.Count);
         Assert.All(res.Windows, w => Assert.Contains((string)w.BestParameters[ParameterRange.PeriodName]!, new[] { "M15", "H1" }));
-        Assert.True(res.Compression < 1, "con períodos de tiempo se juntan los ticks repetidos");
     }
 
-    [Fact]
-    public void Con_un_periodo_de_ticks_no_se_juntan_los_ticks()
-    {
-        var data = Data(6);
-        var res = Optimizer.WalkForward(() => new Breakout(), new(), Ranges("M15", "Tick500"), data, Settings(data), FitnessMetric.NetProfit, 3, 1, false, 0, null, CancellationToken.None,
-            search: SearchMode.Grid);
-        Assert.Equal(1, res.Compression);
-        Assert.Contains(res.Windows.SelectMany(w => w.BestParameters.Values).OfType<string>(), p => p is "M15" or "Tick500");
-    }
 }

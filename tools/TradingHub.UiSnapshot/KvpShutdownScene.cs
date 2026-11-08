@@ -157,13 +157,13 @@ internal static class KvpShutdownScene
             File.WriteAllText(strategyPath, "using TradingHub.Strategies; [Strategy(\"Owned shutdown launch\")] public class KvpShutdownLaunch : Strategy { }");
             services.Strategies.Refresh();
             var file = services.Strategies.Files.Single(item => item.FileName == "KvpShutdownLaunch");
-            services.Strategies.Compile(file);
-            Check(file.Type != null, "real strategy compiler provides pending chart/panel launch consumer");
-            var cs = new ChartStrategy { StrategyId = file.Id, AccountId = "sim", Live = true };
+            var generation = services.Strategies.Compile(file).Generation;
+            Check(generation != null, "real strategy compiler provides pending chart/panel launch consumer");
+            var cs = new ChartStrategy { StrategyId = file.Id, AccountId = "sim", Live = true, Generation = generation };
             chart.Strategies.Add(cs);
             chart.Model!.Strategies.Add(cs.Overlay);
-            pendingChartLaunch = owner.Trading.RunStrategyAsync(chart, cs);
-            pendingPanelLaunch = services.Live.LaunchAsync(new LiveLaunch { File = file, ProfileId = launchId, Instrument = launchInstrument, AccountId = "sim", Period = ChartPeriod.M1 });
+            pendingChartLaunch = owner.Trading.RunStrategyAsync(chart, cs, generation: generation);
+            pendingPanelLaunch = services.Live.LaunchAsync(new LiveLaunch { File = file, Generation = generation, ProfileId = launchId, Instrument = launchInstrument, AccountId = "sim", Period = ChartPeriod.M1 });
             Check(!pendingChartLaunch.IsCompleted && !pendingPanelLaunch.IsCompleted, "both actual launch paths wait before any live runner publication");
 
             byte[] source = Encoding.UTF8.GetBytes("//@version=5\nindicator(\"Owned shutdown fixture\")\nplot(close)\n");

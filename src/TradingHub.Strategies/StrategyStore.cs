@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace TradingHub.Strategies;
 
@@ -34,6 +35,15 @@ public sealed class StrategyRun
     public long Ticks { get; set; }
     public int Bars { get; set; }
     public double Seconds { get; set; }
+    public RunInputEvidence? InputEvidence { get; set; }
+
+    internal StrategyRun ForStorage()
+    {
+        var saved = (StrategyRun)MemberwiseClone();
+        if (Equity != null) saved.Equity = BacktestResult.Downsample(Equity, 3000);
+        if (Optimization != null) saved.Optimization = Optimization.ForStorage(1000);
+        return saved;
+    }
 
     public StrategyRunSummary Summary() => new()
     {
@@ -56,6 +66,7 @@ public sealed class StrategyRun
         Notes = Notes,
         Starred = Starred,
         CodeHash = CodeHash,
+        InputEvidence = InputEvidence,
         ParametersText = string.Join(", ", Parameters.Select(kv => $"{kv.Key}={kv.Value}")),
     };
 }
@@ -83,6 +94,7 @@ public sealed class StrategyRunSummary
     public bool Starred { get; set; }
     public string CodeHash { get; set; } = "";
     public string ParametersText { get; set; } = "";
+    public RunInputEvidence? InputEvidence { get; set; }
 }
 
 /// <summary>
@@ -96,6 +108,18 @@ public static class StrategyStore
         WriteIndented = false,
         Converters = { new JsonStringEnumConverter() },
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers =
+            {
+                info =>
+                {
+                    if (info.Type != typeof(WalkForwardResult)) return;
+                    var equity = info.Properties.First(property => property.Name == nameof(WalkForwardResult.OutSampleEquity));
+                    equity.Get = value => BacktestResult.Downsample(((WalkForwardResult)value).OutSampleEquity, 3000);
+                },
+            },
+        },
     };
 
     private static readonly object Lock = new();
@@ -110,8 +134,8 @@ public static class StrategyStore
 
     public static string HashCode(string source)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(source.Replace("\r\n", "\n").Trim()));
-        return Convert.ToHexString(bytes)[..12].ToLowerInvariant();
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(source));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     /// <summary>Guarda una corrida (y el código si se pasa).</summary>
@@ -127,13 +151,16 @@ public static class StrategyStore
                 var codeDir = Path.Combine(dir, "codigo");
                 Directory.CreateDirectory(codeDir);
                 var codePath = Path.Combine(codeDir, run.CodeHash + ".cs");
-                if (!File.Exists(codePath)) File.WriteAllText(codePath, source);
+                if (File.Exists(codePath))
+                {
+                    if (!string.Equals(File.ReadAllText(codePath), source, StringComparison.Ordinal))
+                        throw new IOException("Saved strategy source does not match its content digest.");
+                }
+                else File.WriteAllText(codePath, source);
             }
 
-            if (run.Equity != null) run.Equity = BacktestResult.Downsample(run.Equity, 3000);
-            if (run.Optimization != null && run.Optimization.Rows.Count > 1000) run.Optimization.Rows = run.Optimization.Rows.Take(1000).ToList();
-            if (run.WalkForward != null) run.WalkForward.OutSampleEquity = BacktestResult.Downsample(run.WalkForward.OutSampleEquity, 3000);
-            File.WriteAllText(Path.Combine(dir, run.Id + ".json"), JsonSerializer.Serialize(run, Json));
+            var saved = run.ForStorage();
+            File.WriteAllText(Path.Combine(dir, run.Id + ".json"), JsonSerializer.Serialize(saved, Json));
             var index = LoadIndex(run.StrategyId);
             index.RemoveAll(s => s.Id == run.Id);
             index.Insert(0, run.Summary());
@@ -168,10 +195,18 @@ public static class StrategyStore
         }
     }
 
-    public static string? LoadCode(string strategyId, string hash)
+    public static string? LoadCode(StrategyRun run)
     {
-        var path = Path.Combine(Folder(strategyId), "codigo", hash + ".cs");
-        return File.Exists(path) ? File.ReadAllText(path) : null;
+        string hash = run.CodeHash;
+        if (hash.Length is not (12 or 64) || hash.Any(c => !Uri.IsHexDigit(c))) return null;
+        var path = Path.Combine(Folder(run.StrategyId), "codigo", hash + ".cs");
+        if (!File.Exists(path)) return null;
+        string source = File.ReadAllText(path);
+        // Legacy hashes identify normalized text, not the exact bytes originally compiled.
+        string expected = hash.Length == 12
+            ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source.Replace("\r\n", "\n").Trim())))[..12].ToLowerInvariant()
+            : HashCode(source);
+        return string.Equals(hash, expected, StringComparison.OrdinalIgnoreCase) ? source : null;
     }
 
     public static void Delete(string strategyId, string runId)

@@ -1,8 +1,8 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Settings
 
-**Settings** (⌘, on macOS; Ctrl+, on Windows) saves changes immediately. Provider-specific options are in [Connections](conexiones.md), chart options in [Charts](graficos.md), per-instrument brackets in [Trading](operar.md), and portfolio risk agents in [Live](en-vivo.md).
+**Settings** (⌘, on macOS; Ctrl+, on Windows) saves changes immediately. Provider-specific options are in [Connections](./conexiones.md), chart options in [Charts](./graficos.md), per-instrument brackets in [Trading](./operar.md), and portfolio risk agents in [Live](./en-vivo.md).
 
 ## General
 
@@ -16,7 +16,7 @@
 
 **Settings → General → Language** offers English (`en`), Spanish (`es`) and Simplified Chinese (`zh-CN`). The choice is saved immediately but applies when Trading Hub reopens; **Restart now** appears for a pending change. Existing English-fork `settings.json` without `Language` stays English. A fresh installation follows the OS: Spanish for `es`, Simplified Chinese for `zh`, English otherwise.
 
-**Restart now** uses the same protection-aware quit flow as explicit Quit, rather than launching a second process first. **Don't quit** cancels the restart without changing running strategies; the saved language choice remains for the next opening. With live positions, choose deliberately whether to retain broker stops/targets, cancel them while leaving exposure open, or request market closure. Pending close/cancel acknowledgments are waited for up to about ten seconds, then unresolved state is reported before exit. A warning is not execution confirmation: check actual broker positions/orders. After that decision, owned provider/history/authoring processes and pending work are canceled/drained before any replacement launch and desktop exit. Closing to the tray does not perform this disposal. See [Live](en-vivo.md#closing-the-window-and-reopening).
+**Restart now** uses the same protection-aware quit flow as explicit Quit, rather than launching a second process first. **Don't quit** cancels the restart without changing running strategies; the saved language choice remains for the next opening. With live positions, choose deliberately whether to retain broker stops/targets, cancel them while leaving exposure open, or request market closure. Pending close/cancel acknowledgments are waited for up to about ten seconds, then unresolved state is reported before exit. A warning is not execution confirmation: check actual broker positions/orders. After that decision, owned provider/history/authoring processes and pending work are canceled/drained before any replacement launch and desktop exit. Closing to the tray does not perform this disposal. See [Live](./en-vivo.md#closing-the-window-and-reopening).
 
 Interface text, reports and Claude reply/report prose follow the selected language. Generated C# code, filenames, classes, parameter names, identifiers and code comments remain **English in every UI language**; existing user code is not renamed. Stored keys, provider payloads, numeric interchange formats and folder names remain stable. Display culture follows the selection (`en-US`, `es-AR`, `zh-CN`); invariant parsing/serialization contracts do not change. Platform fonts plus glyph fallback/shaping support CJK text in controls, charts and reports; native font/DPI appearance still needs platform visual validation. Arbitrary user/provider/system text and missing catalog entries may remain in their original language or English.
 
@@ -68,7 +68,7 @@ Bindings apply to the active chart in Trading or detached windows. While typing,
 
 Click a binding and press keys. Esc cancels; Delete clears it. Reusing a combination unassigns its previous action and displays a notice. **Restore defaults** resets bindings. Real-order confirmations still apply to hotkey actions when enabled.
 
-Committed text on a focused chart opens explicit symbol/period entry; numeric-symbol ambiguity remains visible. IME preedit, popup focus and stale searches cannot become trading hotkeys. These navigation controls add no keyboard order submission or new confirmation gestures. See [Charts](graficos.md#instrument-and-history).
+Committed text on a focused chart opens explicit symbol/period entry; numeric-symbol ambiguity remains visible. IME preedit, popup focus and stale searches cannot become trading hotkeys. These navigation controls add no keyboard order submission or new confirmation gestures. See [Charts](./graficos.md#instrument-and-history).
 
 ## Data
 
@@ -79,13 +79,13 @@ Committed text on a focused chart opens explicit symbol/period entry; numeric-sy
 | Custom indicators (C#) | Documents known folder → `Trading Hub/Indicadores`, Open button. |
 | Strategies (C#) | Documents known folder → `Trading Hub/Estrategias`, Open button. |
 
-See [Data](datos.md) and [Privacy](privacidad.md).
+See [Data](./datos.md) and [Privacy](./privacidad.md).
 
 ## History and depth
 
 Recent raw history, raw/compact memory limits, measured compact **1/5/15/60-minute** buckets and candle fallback are separate choices. Compact buckets remain aggregates, not individual large executions. The chart's automatic price-step suggestion is a bounded display-row grouping calculation, not a change to the instrument's exchange order tick.
 
-**Record received depth** is off by default. Heatmap display and recorded-day reading do not enable recording. Per-instrument live/selected-history/queue byte budgets and disk/retention caps bound resources; dense books can consume the disk cap rapidly, so configured days are a maximum retention policy, not a promise of that much continuous coverage. Partial books, gaps, staleness, dropped/evicted coverage and I/O failures stay visible. See [Data fidelity](datos.md#raw-compact-and-candle-history) and [depth semantics](datos.md#recorded-depth-and-heatmap-fidelity).
+**Record received depth** is off by default. Heatmap display and recorded-day reading do not enable recording. Per-instrument live/selected-history/queue byte budgets and disk/retention caps bound resources; dense books can consume the disk cap rapidly, so configured days are a maximum retention policy, not a promise of that much continuous coverage. Partial books, gaps, staleness, dropped/evicted coverage and I/O failures stay visible. See [Data fidelity](./datos.md#raw-compact-and-candle-history) and [depth semantics](./datos.md#recorded-depth-and-heatmap-fidelity).
 
 **Candle maintenance** is an explicit opt-in with instrument selection/tracking, years, interval, per-cycle limit, Run and Cancel. It does not overlap itself, preserves finer recorded data and retains failed older month/resolution slots for retry. Status reports partial/error coverage rather than clearing an old failure merely because a later request succeeded. **Use saved instrument catalogs only** avoids discovery/ticker requests and labels saved time/provider/stale status.
 

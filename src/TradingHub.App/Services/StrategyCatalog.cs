@@ -3,29 +3,32 @@ using TradingHub.Strategies;
 
 namespace TradingHub.App.Services;
 
-/// <summary>Una estrategia en disco (un archivo .cs) y su última compilación.</summary>
+/// <summary>A strategy source file and its latest published compilation.</summary>
 public sealed class StrategyFile
 {
+    private StrategyCompilation? _lastCompile;
+    internal object CompilationGate { get; } = new();
+    internal long CompileRequest { get; set; }
     public required string Path { get; init; }
     public string FileName => System.IO.Path.GetFileNameWithoutExtension(Path);
-    public Type? Type { get; set; }
-    public ScriptCompileResult? LastCompile { get; set; }
-    public DateTime CompiledFileTime { get; set; }
-    public string DisplayName => Type != null ? Strategy.DisplayName(Type) : FileName;
+    public StrategyCompilation? LastCompile => Volatile.Read(ref _lastCompile);
+    public CompiledStrategyGeneration? Generation => LastCompile?.Generation;
+    public string DisplayName => Generation?.DisplayName ?? FileName;
+    public string Id => Generation?.Id ?? FileName;
 
-    /// <summary>Id estable para el historial (el nombre de la clase).</summary>
-    public string Id => Type?.FullName ?? FileName;
-
-    public Strategy Create() => (Strategy)Activator.CreateInstance(Type ?? throw new InvalidOperationException("Strategy is not compiled."))!;
+    internal void Publish(StrategyCompilation compilation) => Volatile.Write(ref _lastCompile, compilation);
 }
 
 /// <summary>Estrategias del usuario: archivos en ~/Documents/Trading Hub/Estrategias, compilados con Roslyn.</summary>
 public sealed class StrategyCatalog
 {
+    internal const string SourceReadFailureId = "TH02";
     private readonly ScriptCompiler _compiler = new();
+    private readonly Func<IReadOnlyList<ScriptSource>, string, ScriptCompileResult> _compile;
 
-    public StrategyCatalog()
+    public StrategyCatalog(Func<IReadOnlyList<ScriptSource>, string, ScriptCompileResult>? compile = null)
     {
+        _compile = compile ?? ((sources, name) => _compiler.CompileSources(sources, name));
         _ = typeof(Strategy); // asegura que TradingHub.Strategies esté cargado para referenciarlo al compilar
         // TRADINGHUB_BACKTESTS_DIR: historial alternativo (pruebas)
         StrategyStore.Root = Environment.GetEnvironmentVariable("TRADINGHUB_BACKTESTS_DIR") is { Length: > 0 } dir ? dir : AppPaths.Backtests;
@@ -53,31 +56,66 @@ public sealed class StrategyCatalog
         Changed?.Invoke();
     }
 
-    /// <summary>Compila un archivo (si cambió desde la última vez o si se fuerza).</summary>
-    public ScriptCompileResult Compile(StrategyFile file, bool force = false)
+    /// <summary>Compiles captured source and publishes only the latest requested outcome.</summary>
+    public StrategyCompilation Compile(StrategyFile file, bool force = false)
     {
-        var stamp = File.GetLastWriteTimeUtc(file.Path);
-        if (!force && file.LastCompile != null && stamp == file.CompiledFileTime) return file.LastCompile;
-        var res = _compiler.Compile(new[] { file.Path }, "Estrategia_" + file.FileName);
-        file.LastCompile = res;
-        file.CompiledFileTime = stamp;
-        if (res.Success && res.Assembly != null)
+        long request;
+        ScriptSource source;
+        ScriptDiagnostic? sourceError = null;
+        lock (file.CompilationGate)
         {
-            var types = res.Assembly.GetTypes().Where(t => !t.IsAbstract && typeof(Strategy).IsAssignableFrom(t) && t.GetConstructor(Type.EmptyTypes) != null).ToList();
-            file.Type = types.FirstOrDefault();
-            if (file.Type == null)
+            request = ++file.CompileRequest;
+            try
             {
-                var diag = new ScriptDiagnostic(file.Path, 1, 1, "error", "TH01", "The file contains no public Strategy subclass with a parameterless constructor.");
-                file.LastCompile = new ScriptCompileResult { Success = false, Diagnostics = res.Diagnostics.Append(diag).ToList(), Elapsed = res.Elapsed };
+                source = new ScriptSource(file.Path, File.ReadAllText(file.Path));
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                source = new ScriptSource(file.Path, "");
+                sourceError = new ScriptDiagnostic(file.Path, 1, 1, "error", SourceReadFailureId, "Could not read strategy source: " + ex.Message);
+            }
+            if (sourceError == null && !force && file.LastCompile is { } cached && cached.Source == source &&
+                !cached.Diagnostics.Any(diagnostic => diagnostic.Id == SourceReadFailureId)) return cached;
+        }
+
+        var result = sourceError == null
+            ? _compile(new[] { source }, "Estrategia_" + file.FileName)
+            : new ScriptCompileResult { Success = false, Diagnostics = Array.AsReadOnly(new[] { sourceError! }) };
+        var type = result.Success && result.Assembly != null
+            ? result.Assembly.GetTypes().FirstOrDefault(t => !t.IsAbstract && typeof(Strategy).IsAssignableFrom(t) && t.GetConstructor(Type.EmptyTypes) != null)
+            : null;
+        if (result.Success && type == null)
+        {
+            var diagnostic = new ScriptDiagnostic(file.Path, 1, 1, "error", "TH01", "The file contains no public Strategy subclass with a parameterless constructor.");
+            result = new ScriptCompileResult
+            {
+                Success = false,
+                Diagnostics = Array.AsReadOnly(result.Diagnostics.Append(diagnostic).ToArray()),
+                Elapsed = result.Elapsed,
+            };
         }
         else
         {
-            file.Type = null;
+            result = new ScriptCompileResult
+            {
+                Success = result.Success,
+                Assembly = result.Assembly,
+                Diagnostics = Array.AsReadOnly(result.Diagnostics.ToArray()),
+                Elapsed = result.Elapsed,
+            };
         }
 
-        Changed?.Invoke();
-        return file.LastCompile;
+        var generation = type != null ? new CompiledStrategyGeneration(source, result, type) : null;
+        var outcome = new StrategyCompilation(source, result, generation);
+        bool published;
+        lock (file.CompilationGate)
+        {
+            published = request == file.CompileRequest;
+            if (published) file.Publish(outcome);
+        }
+
+        if (published) Changed?.Invoke();
+        return outcome;
     }
 
     /// <summary>Crea un archivo nuevo desde una plantilla y devuelve su ruta.</summary>

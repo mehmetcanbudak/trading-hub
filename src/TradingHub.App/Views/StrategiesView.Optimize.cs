@@ -20,6 +20,7 @@ internal sealed partial class StrategiesView
     private readonly NumericUpDown _minTrades = new() { Value = 10, Minimum = 0, Increment = 5, FormatString = "0" };
     private readonly ListBox _optList = new() { Background = Brushes.Transparent };
     private readonly TextBlock _optSummary = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _optimizationInputEvidence = new() { Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
     private Button _optButton = null!;
     private Button _wfoButton = null!;
     private OptimizationResult? _lastOpt;
@@ -31,6 +32,8 @@ internal sealed partial class StrategiesView
     private readonly ComboBox _search = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _wfoPreview = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
     private readonly WrapPanel _wfoKpis = new() { ItemSpacing = 10, LineSpacing = 10 };
+    private readonly TextBlock _wfoPolicy = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) };
+    private readonly TextBlock _walkForwardInputEvidence = new() { Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
     private readonly EquityChart _wfoChart = new() { Height = 250, EmptyText = "Run walk-forward to view out-of-sample equity" };
     private readonly ListBox _wfoList = new() { Background = Brushes.Transparent };
 
@@ -74,7 +77,7 @@ internal sealed partial class StrategiesView
             Ui.Field("Rank by", _metric),
             Ui.Field("Minimum trades", _minTrades, "Exclude combinations with too few trades (potentially lucky results)."),
             _optButton,
-            _optSummary));
+            _optSummary, _optimizationInputEvidence));
         config.Margin = new Thickness(0, 0, 10, 8);
         var left = new ScrollViewer { Content = config, Width = 380 };
 
@@ -258,11 +261,18 @@ internal sealed partial class StrategiesView
 
     private Dictionary<string, object?> BaseParameters() => new(_state.Parameters);
 
-    private async Task RunOptimizationAsync()
+    private Task RunOptimizationAsync() => _svc.Work.RunAsync(RunOptimizationOwnedAsync);
+
+    private async Task RunOptimizationOwnedAsync(CancellationToken stopping)
     {
-        if (_current?.Type == null && !await CompileAsync()) return;
-        var file = _current!;
-        long combos = Optimizer.Combinations(_state.Ranges);
+        if (_generation == null && !await CompileOwnedAsync(stopping)) return;
+        stopping.ThrowIfCancellationRequested();
+        var generation = _generation!;
+        var basePars = BaseParameters();
+        var ranges = _state.Ranges.Select(r => r.Clone()).ToList();
+        var metric = _state.Metric;
+        int minTrades = _state.MinTrades;
+        long combos = Optimizer.Combinations(ranges);
         if (combos <= 1)
         {
             _optSummary.Text = "Select at least one parameter with a range.";
@@ -283,8 +293,9 @@ internal sealed partial class StrategiesView
         }
 
         SaveState();
-        _cts = new CancellationTokenSource();
-        var ct = _cts.Token;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stopping);
+        _cts = cancellation;
+        var ct = cancellation.Token;
         SetRunning(true);
         _optButton.IsEnabled = false;
         _optSummary.Text = "Loading data…";
@@ -301,24 +312,30 @@ internal sealed partial class StrategiesView
             var started = DateTime.UtcNow;
             var progress = new Progress<double>(p =>
             {
+                if (ct.IsCancellationRequested || _svc.Work.IsStopping) return;
                 var el = DateTime.UtcNow - started;
                 var eta = p > 0.02 ? TimeSpan.FromSeconds(el.TotalSeconds / p * (1 - p)) : (TimeSpan?)null;
                 _optSummary.Text = $"Testing combinations… {p * 100:0}%{(eta is { } e ? $" · about {(e.TotalMinutes >= 1 ? $"{e.TotalMinutes:0} min" : $"{e.TotalSeconds:0} s")}" : "")}";
                 _runProgress.IsIndeterminate = false;
                 _runProgress.Value = p;
             });
-            var basePars = BaseParameters();
-            var ranges = _state.Ranges.Select(r => r.Clone()).ToList();
-            var metric = _state.Metric;
-            int minTrades = _state.MinTrades;
-            var res = await Task.Run(() => Optimizer.Optimize(file.Create, basePars, ranges, data, settings, metric, minTrades, progress, ct,
-                contextHistory: Services.MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc)), ct);
+            var (res, evidence) = await Task.Run(() =>
+            {
+                var periods = new ParameterSpace(ranges, generation.Type).Periods;
+                var input = (periods.Count > 0 ? periods : new[] { settings.Period }).All(period => Optimizer.CanCompress(generation.Type, period))
+                    ? data.Compress() : data;
+                var result = Optimizer.Optimize(generation.Create, basePars, ranges, input, settings, metric, minTrades, progress, ct,
+                    contextHistory: Services.MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc, ct));
+                return (result.WithCapturedPopulation(), RunInputEvidence.Capture(input));
+            }, ct);
+            ct.ThrowIfCancellationRequested();
+            _optimizationInputEvidence.Text = InputEvidenceText(evidence);
             ShowOptimization(res);
             var best = res.Best;
             var run = new StrategyRun
             {
-                StrategyId = file.Id,
-                StrategyName = file.DisplayName,
+                StrategyId = generation.Id,
+                StrategyName = generation.DisplayName,
                 Kind = RunKind.Optimization,
                 Settings = settings,
                 Parameters = best?.Parameters ?? new(),
@@ -326,10 +343,11 @@ internal sealed partial class StrategiesView
                 Optimization = res,
                 Ticks = data.Count,
                 Seconds = res.Seconds,
+                InputEvidence = evidence,
             };
-            StrategyStore.Save(run, _compiledSource.Length > 0 ? _compiledSource : File.ReadAllText(file.Path));
+            await Task.Run(() => StrategyStore.Save(run, generation.Source.Text), ct);
             _optSummary.Text = $"{res.Combinations:N0} combinations on {res.Seconds:0.#} s · saved to history";
-            _status($"Optimization of {file.DisplayName} finished");
+            _status($"Optimization of {generation.DisplayName} finished");
         }
         catch (OperationCanceledException)
         {
@@ -343,6 +361,7 @@ internal sealed partial class StrategiesView
         finally
         {
             SetRunning(false, _runStatus.Text ?? "");
+            if (ReferenceEquals(_cts, cancellation)) _cts = null;
             _optButton.IsEnabled = true;
         }
     }
@@ -370,10 +389,11 @@ internal sealed partial class StrategiesView
     }
 
     /// <summary>Copia parámetros al formulario de backtest y lo corre.</summary>
-    private void ApplyParameters(IReadOnlyDictionary<string, object?> pars)
+    private void ApplyParameters(IReadOnlyDictionary<string, object?> pars) => _ = RunViewOperationAsync(async stopping =>
     {
-        if (_current?.Type == null) return;
-        var s = _current.Create();
+        stopping.ThrowIfCancellationRequested();
+        if (_generation is not { } generation) return;
+        var s = generation.Create();
         s.SetParameters(_state.Parameters);
         s.SetParameters(pars);
         _state.Parameters = s.GetParameters();
@@ -383,8 +403,8 @@ internal sealed partial class StrategiesView
         BuildParameterForm();
         _tabs.Select("backtest");
         ShowTab("backtest");
-        _ = RunBacktestAsync();
-    }
+        await RunBacktestOwnedAsync(stopping);
+    });
 
     // ===================================================================== walk-forward
 
@@ -439,13 +459,13 @@ internal sealed partial class StrategiesView
             Ui.Field("Parameter search", _search),
             new TextBlock
             {
-                Text = "Runs each combination once over the entire history (repeated ticks combined), selecting the best plateau in each window rather than the highest peak. " +
-                       "Measures overfitting with PBO and multiple out-of-sample CPCV paths.",
+                Text = "Runs each combination once with warm strategy state and selects a parameter plateau at each causal cutoff. " +
+                       "The mark-to-market research splice is not an executable portfolio. CPCV is retrospective validation.",
                 Classes = { "faint", "small" },
                 TextWrapping = TextWrapping.Wrap,
             },
             _wfoPreview,
-            _wfoButton));
+            _wfoButton, _walkForwardInputEvidence));
         config.Margin = new Thickness(0, 0, 10, 8);
         var left = new ScrollViewer { Content = config, Width = 380 };
 
@@ -475,9 +495,13 @@ internal sealed partial class StrategiesView
             Cell(2, $"{w.OutSampleFrom:dd/MM} → {w.OutSampleTo:dd/MM}");
             var optimized = _state.Ranges.Where(r => r.Enabled).ToDictionary(r => r.Name, r => r.Label);
             Cell(3, string.Join("  ·  ", w.BestParameters.Where(kv => optimized.Count == 0 || optimized.ContainsKey(kv.Key)).Select(kv => $"{(optimized.TryGetValue(kv.Key, out var l) ? l : kv.Key)} {FormatValue(kv.Value)}")), Ui.Text1);
-            Cell(4, Money(w.InSample.NetProfit), Ui.Text1, true);
-            Cell(5, Money(w.OutSample.NetProfit), w.OutSample.NetProfit >= 0 ? Ui.Up : Ui.Down, true);
-            Cell(6, $"{w.Efficiency * 100:0}%", w.Efficiency >= 0.5 ? Ui.Up : w.Efficiency >= 0 ? Ui.Warn : Ui.Down, true);
+            var training = w.InSampleAvailable ? w.InSample : null;
+            var testing = w.OutSampleAvailable ? w.OutSample : null;
+            Cell(4, training != null ? Money(training.NetProfit) : "Unavailable", training != null ? Ui.Text1 : Ui.Warn, true);
+            Cell(5, testing != null ? Money(testing.NetProfit) : "Unavailable", testing == null ? Ui.Warn : testing.NetProfit >= 0 ? Ui.Up : Ui.Down, true);
+            var efficiency = training != null && testing != null ? w.Efficiency : null;
+            Cell(6, efficiency.HasValue ? $"{efficiency * 100:0}%" : "Unavailable", efficiency == null ? Ui.Warn : efficiency >= 0.5 ? Ui.Up : efficiency >= 0 ? Ui.Warn : Ui.Down, true);
+            ToolTip.SetTip(g, w.UnavailableReason ?? $"Training source equity {w.InSampleOpeningEquity} to {w.InSampleClosingEquity}. Test source equity {w.OutSampleOpeningEquity} to {w.OutSampleClosingEquity}. Stitched equity {w.OutSampleStitchedOpeningEquity} to {w.OutSampleStitchedClosingEquity}.");
             return g;
         });
         var table = new DockPanel();
@@ -485,14 +509,16 @@ internal sealed partial class StrategiesView
         table.Children.Add(header);
         table.Children.Add(_wfoList);
 
-        var results = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*") };
+        var results = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*") };
         results.Children.Add(_wfoKpis);
+        Grid.SetRow(_wfoPolicy, 1);
+        results.Children.Add(_wfoPolicy);
         var chart = Ui.Card(_wfoChart, 6);
         chart.Margin = new Thickness(0, 14);
-        Grid.SetRow(chart, 1);
+        Grid.SetRow(chart, 2);
         results.Children.Add(chart);
         var tableCard = Ui.Card(table, 8);
-        Grid.SetRow(tableCard, 2);
+        Grid.SetRow(tableCard, 3);
         results.Children.Add(tableCard);
         results.Margin = new Thickness(18, 0, 0, 0);
 
@@ -517,10 +543,19 @@ internal sealed partial class StrategiesView
         _wfoPreview.Foreground = windows > 0 ? Ui.Text1 : Ui.Warn;
     }
 
-    private async Task RunWalkForwardAsync()
+    private Task RunWalkForwardAsync() => _svc.Work.RunAsync(RunWalkForwardOwnedAsync);
+
+    private async Task RunWalkForwardOwnedAsync(CancellationToken stopping)
     {
-        if (_current?.Type == null && !await CompileAsync()) return;
-        var file = _current!;
+        if (_generation == null && !await CompileOwnedAsync(stopping)) return;
+        stopping.ThrowIfCancellationRequested();
+        var generation = _generation!;
+        var basePars = BaseParameters();
+        var ranges = _state.Ranges.Select(r => r.Clone()).ToList();
+        var metric = _state.Metric;
+        int minTrades = _state.MinTrades, isD = _state.InSampleDays, osD = _state.OutSampleDays;
+        bool anchored = _state.Anchored;
+        var search = _state.Search;
         var settings = ReadSettingsFromForm(validate: true);
         if (settings == null)
         {
@@ -528,15 +563,16 @@ internal sealed partial class StrategiesView
             return;
         }
 
-        if (Optimizer.Combinations(_state.Ranges) <= 1)
+        if (Optimizer.Combinations(ranges) <= 1)
         {
             _wfoPreview.Text = "First select parameter ranges in Optimization.";
             return;
         }
 
         SaveState();
-        _cts = new CancellationTokenSource();
-        var ct = _cts.Token;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stopping);
+        _cts = cancellation;
+        var ct = cancellation.Token;
         SetRunning(true);
         _wfoButton.IsEnabled = false;
         try
@@ -550,34 +586,38 @@ internal sealed partial class StrategiesView
 
             var progress = new Progress<double>(p =>
             {
+                if (ct.IsCancellationRequested || _svc.Work.IsStopping) return;
                 _wfoPreview.Text = $"Optimizing and validating windows… {p * 100:0}%";
                 _runProgress.IsIndeterminate = false;
                 _runProgress.Value = p;
             });
-            var basePars = BaseParameters();
-            var ranges = _state.Ranges.ToList();
-            var metric = _state.Metric;
-            int minTrades = _state.MinTrades, isD = _state.InSampleDays, osD = _state.OutSampleDays;
-            bool anchored = _state.Anchored;
-            var search = _state.Search;
-            var res = await Task.Run(() => Optimizer.WalkForward(file.Create, basePars, ranges, data, settings, metric, isD, osD, anchored, minTrades, progress, ct,
-                Services.MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc), search), ct);
-            ShowWalkForward(res, settings.InitialCapital);
-            StrategyStore.Save(new StrategyRun
+            var (res, evidence) = await Task.Run(() =>
             {
-                StrategyId = file.Id,
-                StrategyName = file.DisplayName,
+                var result = Optimizer.WalkForward(generation.Create, basePars, ranges, data, settings, metric, isD, osD, anchored, minTrades, progress, ct,
+                    Services.MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc, ct), search);
+                return (result, RunInputEvidence.Capture(data));
+            }, ct);
+            ct.ThrowIfCancellationRequested();
+            _walkForwardInputEvidence.Text = InputEvidenceText(evidence);
+            ShowWalkForward(res, settings.InitialCapital);
+            var run = new StrategyRun
+            {
+                StrategyId = generation.Id,
+                StrategyName = generation.DisplayName,
                 Kind = RunKind.WalkForward,
                 Settings = settings,
-                Parameters = res.Windows.LastOrDefault()?.BestParameters ?? new(),
+                Parameters = res.Windows.LastOrDefault(w => w.InSampleAvailable && w.InSample != null && w.OutSampleAvailable && w.OutSample != null)?.BestParameters ?? new(),
                 Metrics = res.OutSampleMetrics,
                 Trades = res.OutSampleTrades,
-                Equity = res.OutSampleEquity.ToList(),
+                Equity = res.OutSampleEquity,
                 WalkForward = res,
                 Ticks = data.Count,
                 Seconds = res.Seconds,
-            }, _compiledSource.Length > 0 ? _compiledSource : File.ReadAllText(file.Path));
-            _wfoPreview.Text = $"{res.Windows.Count} windows in {res.Seconds:0.#} s · search {TradingHub.Common.EnglishText.Of(res.Search)}: {res.Evaluated} of {res.SpaceSize} combinations, each run once" +
+                InputEvidence = evidence,
+            };
+            await Task.Run(() => StrategyStore.Save(run, generation.Source.Text), ct);
+            int completed = res.Windows.Count(w => w.InSampleAvailable && w.InSample != null && w.OutSampleAvailable && w.OutSample != null);
+            _wfoPreview.Text = $"{completed} of {res.Windows.Count} windows complete in {res.Seconds:0.#} s · search {TradingHub.Common.EnglishText.Of(res.Search)}: {res.Evaluated} of {res.SpaceSize} combinations, each run once" +
                                (res.Compression < 0.99 ? $" · ticks compressed to {res.Compression * 100:0}%" : "") + " · saved to history";
         }
         catch (OperationCanceledException)
@@ -592,6 +632,7 @@ internal sealed partial class StrategiesView
         finally
         {
             SetRunning(false, _runStatus.Text ?? "");
+            if (ReferenceEquals(_cts, cancellation)) _cts = null;
             _wfoButton.IsEnabled = true;
         }
     }
@@ -599,23 +640,51 @@ internal sealed partial class StrategiesView
     private void ShowWalkForward(WalkForwardResult res, decimal capital)
     {
         var m = res.OutSampleMetrics;
+        var completed = res.Windows.Where(w => w.InSampleAvailable && w.InSample != null && w.OutSampleAvailable && w.OutSample != null).ToList();
+        bool available = completed.Count > 0;
+        bool attributed = res.AccountingPolicy != null || m.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation;
         _wfoKpis.Children.Clear();
-        _wfoKpis.Children.Add(Kpi("Out of sample", Money(m.NetProfit), $"{m.TotalTrades} trades · PF {m.ProfitFactor:0.00}", m.NetProfit >= 0 ? Ui.Up : Ui.Down));
-        _wfoKpis.Children.Add(Kpi("WF efficiency", $"{res.WalkForwardEfficiency * 100:0}%", "daily PnL outside / inside sample · > 50% is a good sign", res.WalkForwardEfficiency >= 0.5 ? Ui.Up : res.WalkForwardEfficiency >= 0 ? Ui.Warn : Ui.Down));
-        _wfoKpis.Children.Add(Kpi("Profitable windows", $"{res.ProfitableWindowsPercent:0}%", $"{res.Windows.Count(w => w.OutSample.NetProfit > 0)} of {res.Windows.Count}", res.ProfitableWindowsPercent >= 60 ? Ui.Up : Ui.Warn));
-        _wfoKpis.Children.Add(Kpi("Out-of-sample DD", Money(-m.MaxDrawdown), $"{m.MaxDrawdownPercent:0.##}%", Ui.Down));
+        _wfoKpis.Children.Add(Kpi(res.IsComplete ? "Coverage" : "Incomplete coverage", $"{completed.Count} of {res.Windows.Count}",
+            available ? res.IsComplete ? "All out-of-sample windows are complete." : "Only the completed out-of-sample prefix is reported."
+                : "No complete out-of-sample window is available.", res.IsComplete && available ? Ui.Up : Ui.Warn));
+        _wfoKpis.Children.Add(Kpi("Out of sample", available ? Money(m.NetProfit) : "Unavailable",
+            attributed ? $"{m.TotalTrades} actual closing fills · {m.AttributionSamples} contributions" : $"{m.TotalTrades} trades · PF {m.ProfitFactor:0.00}",
+            !available ? Ui.Warn : m.NetProfit >= 0 ? Ui.Up : Ui.Down));
+        if (attributed)
+        {
+            _wfoKpis.Children.Add(Kpi("Profit factor per contribution", available ? m.ProfitFactor.ToString("0.00", Es) : "Unavailable", "Closing-fill contributions and final boundary valuations", null));
+            _wfoKpis.Children.Add(Kpi("Win rate per contribution", available ? $"{m.WinRate:0.#}%" : "Unavailable", $"{m.Winners} of {m.AttributionSamples} contributions", null));
+            _wfoKpis.Children.Add(Kpi("Expectancy per contribution", available ? Money(m.Expectancy) : "Unavailable", "Not an independent completed-trade estimate", null));
+        }
+        _wfoKpis.Children.Add(Kpi("WF efficiency", available ? $"{res.WalkForwardEfficiency * 100:0}%" : "Unavailable",
+            "daily PnL outside / inside sample · completed windows only", !available ? Ui.Warn : res.WalkForwardEfficiency >= 0.5 ? Ui.Up : res.WalkForwardEfficiency >= 0 ? Ui.Warn : Ui.Down));
+        _wfoKpis.Children.Add(Kpi("Profitable windows", available ? $"{res.ProfitableWindowsPercent:0}%" : "Unavailable",
+            $"{completed.Count(w => w.OutSample!.NetProfit > 0)} of {completed.Count} completed windows", res.ProfitableWindowsPercent >= 60 && available ? Ui.Up : Ui.Warn));
+        _wfoKpis.Children.Add(Kpi("Out-of-sample DD", available ? Money(-m.MaxDrawdown) : "Unavailable", available ? $"{m.MaxDrawdownPercent:0.##}%" : "No complete out-of-sample window is available.", Ui.Down));
         if (res.PboLoss is { } loss && res.Pbo is { } pbo)
             _wfoKpis.Children.Add(Kpi("Overfitting", $"{(1 - loss) * 100:0}%", $"times the best on one half is profitable on the other · PBO {pbo * 100:0}%",
                 loss < ValidationGate.MaxPboLoss ? Ui.Up : loss < ValidationGate.FailPboLoss ? Ui.Warn : Ui.Down));
-        if (res.CpcvPaths.Count > 0)
+        var paths = res.CpcvPaths.Where(p => p.Available && p.Net.HasValue && p.Sharpe.HasValue && p.MaxDrawdown.HasValue).OrderBy(p => p.Net).ToList();
+        if (paths.Count > 0)
         {
-            int good = res.CpcvPaths.Count(p => p.Net > 0);
-            var median = res.CpcvPaths.OrderBy(p => p.Net).ElementAt(res.CpcvPaths.Count / 2).Net;
-            _wfoKpis.Children.Add(Kpi("Paths (CPCV)", $"{good} of {res.CpcvPaths.Count}", $"profitable · median {Money(median)}",
-                median <= 0 ? Ui.Down : (double)good / res.CpcvPaths.Count >= ValidationGate.MinProfitablePaths ? Ui.Up : Ui.Warn));
+            int good = paths.Count(p => p.Net > 0);
+            decimal median = paths[paths.Count / 2].Net!.Value;
+            _wfoKpis.Children.Add(Kpi("Paths (CPCV)", $"{good} of {paths.Count}",
+                $"profitable · median {Money(median)} · {paths.Count} of {res.CpcvPaths.Count} paths available",
+                median <= 0 ? Ui.Down : (double)good / paths.Count >= ValidationGate.MinProfitablePaths ? Ui.Up : Ui.Warn));
         }
-
-        _wfoChart.SetData(res.OutSampleEquity, capital, marks: res.Windows.Select(w => (w.OutSampleFrom, $"V{w.Number}")).ToList());
+        else
+            _wfoKpis.Children.Add(Kpi("Paths (CPCV)", "Unavailable", $"0 of {res.CpcvPaths.Count} paths available. No eligible retrospective CPCV path is available.", Ui.Warn));
+        _wfoPolicy.Text = attributed
+            ? $"Accounting policy {res.AccountingPolicy ?? "Unknown"}. Attribution policy {res.AttributionPolicy ?? "Unknown"}. " +
+              "Warm mark-to-market research splice, not an executable portfolio. Positions are not transferred between configurations. Sizing does not use stitched capital, and deployment turnover is not charged. " +
+              "Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Only actual closing fills count for eligibility. " +
+              $"CPCV policy {res.CpcvPolicy ?? "Unknown"}. Retrospective validation uses only available paths for shares and medians."
+            : "";
+        var unavailable = res.Windows.Where(w => !w.InSampleAvailable || !w.OutSampleAvailable).Select(w => w.UnavailableReason)
+            .Concat(res.CpcvPaths.Where(p => !p.Available).Select(p => p.UnavailableReason)).Where(reason => !string.IsNullOrWhiteSpace(reason)).Distinct();
+        foreach (var reason in unavailable) _wfoPolicy.Text += "\n" + reason;
+        _wfoChart.SetData(res.OutSampleEquity, capital, marks: completed.Select(w => (w.OutSampleFrom, $"V{w.Number}")).ToList());
         _wfoList.ItemsSource = res.Windows;
     }
 }

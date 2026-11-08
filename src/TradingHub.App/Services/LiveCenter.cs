@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Avalonia.Threading;
 using TradingHub.App.Controls;
 using TradingHub.App.Views;
@@ -88,6 +89,7 @@ internal readonly record struct OrderPlan(decimal Units, string Symbol, string S
 internal sealed class LiveLaunch
 {
     public required StrategyFile File { get; init; }
+    public CompiledStrategyGeneration? Generation { get; init; }
     public required string ProfileId { get; init; }
     public required Instrument Instrument { get; init; }
     public required string AccountId { get; init; }
@@ -128,7 +130,8 @@ internal sealed partial class LiveCenter
 {
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     private readonly AppServices _svc;
-    private readonly HashSet<LiveStrategyRunner> _watched = new(ReferenceEqualityComparer.Instance);
+    private readonly ConditionalWeakTable<LiveStrategyRunner, LiveCenter> _watched = new();
+    private readonly Dictionary<string, CompiledStrategyGeneration> _panelGenerations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (long Length, DateTime WriteTime, LiveLedger Ledger)> _ledgers = new();
     private readonly record struct ExcursionBasis(bool IsLong, DateTime EntryTime, DateTime ExitTime,
         decimal EntryPrice, decimal ExitPrice, decimal Quantity, decimal PointValue, string Feed, string Symbol);
@@ -187,7 +190,7 @@ internal sealed partial class LiveCenter
     /// <summary>Se suscribe a los avisos de una estrategia (una vez): límites tocados y órdenes ejecutadas.</summary>
     public void Watch(LiveStrategyRunner r)
     {
-        if (!_watched.Add(r)) return;
+        if (!_watched.TryAdd(r, this)) return;
         r.LimitHit += (_, msg) => Dispatcher.UIThread.Post(() =>
         {
             Notify("⚠ " + msg);
@@ -200,6 +203,9 @@ internal sealed partial class LiveCenter
     public LiveStrategyRunner? Running(string key) =>
         _svc.Runners.FirstOrDefault(r => r.Key == key && r.IsRunning)
         ;
+
+    internal CompiledStrategyGeneration? GenerationOf(LiveEntry entry) =>
+        entry.ChartStrategy?.Generation ?? _panelGenerations.GetValueOrDefault(entry.Key);
 
     internal const string PendingBrokerMessage = "Order cancellation or position closure is still awaiting broker confirmation. Wait and reconcile the account before restarting or removing this strategy.";
     private const string ShuttingDownMessage = "Trading Hub is shutting down; strategies cannot be started.";
@@ -456,7 +462,8 @@ internal sealed partial class LiveCenter
             return cs.Overlay.Error;
         }
 
-        var launch = await LaunchFromInfoAsync(e.Info);
+        var generation = GenerationOf(e);
+        var launch = await LaunchFromInfoAsync(e.Info, generation);
         if (launch.Error != null) return launch.Error;
         var (runner, message) = await LaunchAsync(launch.Spec!);
         return runner == null ? message : null;
@@ -518,15 +525,27 @@ internal sealed partial class LiveCenter
         _svc.SaveLiveState();
     }
 
-    /// <summary>Reconstruye cómo se lanzó una estrategia guardada (null si falta algo, con el motivo).</summary>
-    public async Task<(LiveLaunch? Spec, string? Error)> LaunchFromInfoAsync(LiveRunnerInfo info)
+    /// <summary>Rebuilds a launch. Without an in-process generation, process-exit restore uses the current catalog.</summary>
+    public async Task<(LiveLaunch? Spec, string? Error)> LaunchFromInfoAsync(LiveRunnerInfo info, CompiledStrategyGeneration? generation = null)
     {
+        info = new LiveRunnerInfo
+        {
+            Key = info.Key, Strategy = info.Strategy, StrategyId = info.StrategyId,
+            ProfileId = info.ProfileId, FeedId = info.FeedId, AccountId = info.AccountId, Account = info.Account,
+            Symbol = info.Symbol, Period = info.Period, TimeZoneId = info.TimeZoneId, SessionStartHours = info.SessionStartHours,
+            Parameters = new(info.Parameters), Size = info.Size, MaxDailyLoss = info.MaxDailyLoss, MaxDrawdown = info.MaxDrawdown,
+            CloseOnLimit = info.CloseOnLimit, PortfolioId = info.PortfolioId, Paused = info.Paused,
+            ProtectionOrderIds = info.ProtectionOrderIds?.ToList(),
+        };
         var catalog = _svc.Strategies;
         if (catalog.Files.Count == 0) catalog.Refresh();
-        var file = catalog.Files.FirstOrDefault(f => f.Id == info.StrategyId) ?? catalog.Files.FirstOrDefault(f => f.FileName == info.StrategyId.Split('.').Last());
+        var file = generation == null
+            ? catalog.Files.FirstOrDefault(f => f.Id == info.StrategyId) ?? catalog.Files.FirstOrDefault(f => f.FileName == info.StrategyId.Split('.').Last())
+            : catalog.Files.FirstOrDefault(f => f.Path == generation.Source.Path) ?? new StrategyFile { Path = generation.Source.Path };
         if (file == null) return (null, $"Strategy not found: «{info.Strategy}» in Backtesting.");
-        if (file.Type == null) await Task.Run(() => catalog.Compile(file));
-        if (file.Type == null) return (null, $"«{info.Strategy}» has compilation errors.");
+        generation ??= file.Generation ?? (await Task.Run(() => catalog.Compile(file))).Generation;
+        if (generation == null) return (null, $"«{info.Strategy}» has compilation errors.");
+        var saved = SavedBacktest(generation, _svc.Settings.TimeZoneId);
         string profileId = info.ProfileId.Length > 0 ? info.ProfileId : _svc.Connections.Enabled.FirstOrDefault(p => p.MarketDataId == info.FeedId)?.Id ?? "";
         if (profileId.Length == 0) return (null, $"No active connection for {info.FeedId}.");
         // las guardadas por una versión anterior no tienen la cuenta: la simulada se reconoce por el nombre
@@ -542,7 +561,6 @@ internal sealed partial class LiveCenter
         if (parameters.Count == 0)
         {
             // guardada por una versión anterior (sin parámetros): los de su Backtest, que son con los que se había lanzado
-            var saved = SavedBacktest(file, _svc.Settings.TimeZoneId);
             parameters = saved.Parameters;
             if (info.AccountId.Length == 0)
             {
@@ -554,6 +572,7 @@ internal sealed partial class LiveCenter
         return (new LiveLaunch
         {
             File = file,
+            Generation = generation,
             ProfileId = profileId,
             Instrument = inst,
             AccountId = accountId,
@@ -582,14 +601,14 @@ internal sealed partial class LiveCenter
     /// Lo último que se configuró en el Backtest de una estrategia: parámetros (los que falten, los de la clase), velas y
     /// sesión. Es lo que usa «Nueva estrategia en vivo» y lo que se toma de una guardada por una versión anterior.
     /// </summary>
-    public static (Dictionary<string, object?> Parameters, string? Period, string? TimeZoneId, TimeSpan SessionStart) SavedBacktest(StrategyFile file, string? defaultTimeZone)
+    public static (Dictionary<string, object?> Parameters, string? Period, string? TimeZoneId, TimeSpan SessionStart) SavedBacktest(CompiledStrategyGeneration generation, string? defaultTimeZone)
     {
-        var values = file.Type != null ? file.Create().GetParameters() : new Dictionary<string, object?>();
+        var values = generation.Create().GetParameters();
         string? period = null, timeZone = defaultTimeZone;
         var session = TimeSpan.Zero;
         try
         {
-            var path = Path.Combine(AppPaths.Backtests, string.Concat(file.Id.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)), "ui.json");
+            var path = Path.Combine(AppPaths.Backtests, string.Concat(generation.Id.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)), "ui.json");
             if (File.Exists(path))
             {
                 var opts = new System.Text.Json.JsonSerializerOptions { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
@@ -651,10 +670,11 @@ internal sealed partial class LiveCenter
         if (e.Runner is { } r) return r.StrategyInstance.GetParameters();
         if (e.ChartStrategy is { } cs) return new Dictionary<string, object?>(cs.Parameters);
         if (e.Info.Parameters.Count > 0) return e.Info.Parameters.ToDictionary(kv => kv.Key, kv => kv.Value);
+        if (GenerationOf(e) is { } retained) return SavedBacktest(retained, _svc.Settings.TimeZoneId).Parameters;
         var catalog = _svc.Strategies;
         if (catalog.Files.Count == 0) catalog.Refresh();
         var file = catalog.Files.FirstOrDefault(f => f.Id == e.Info.StrategyId);
-        return file != null ? SavedBacktest(file, _svc.Settings.TimeZoneId).Parameters : new Dictionary<string, object?>();
+        return file?.Generation is { } generation ? SavedBacktest(generation, _svc.Settings.TimeZoneId).Parameters : new Dictionary<string, object?>();
     }
 
     /// <summary>Lanza una estrategia en vivo (la confirmación de cuenta real la pide la ventana antes).</summary>
@@ -673,16 +693,19 @@ internal sealed partial class LiveCenter
     {
         if (_svc.IsShuttingDown) return (null, ShuttingDownMessage);
         cancellationToken.ThrowIfCancellationRequested();
-        if (spec.File.Type == null) await Task.Run(() => _svc.Strategies.Compile(spec.File));
+        var parameters = new Dictionary<string, object?>(spec.Parameters);
+        var protectionIds = spec.AdoptProtectionIds?.ToArray();
+        bool smartContracts = _svc.Settings.SmartContracts;
+        var generation = spec.Generation ?? spec.File.Generation ?? (await Task.Run(() => _svc.Strategies.Compile(spec.File))).Generation;
         if (_svc.IsShuttingDown) return (null, ShuttingDownMessage);
         cancellationToken.ThrowIfCancellationRequested();
-        if (spec.File.Type == null) return (null, $"«{spec.File.FileName}» has errors: fix them in Backtesting.");
+        if (generation == null) return (null, $"«{spec.File.FileName}» has errors: fix them in Backtesting.");
         var data = _svc.Open(spec.ProfileId, spec.Instrument);
         for (int i = 0; i < 240 && data.IsLoadingHistory && !_svc.IsShuttingDown; i++) await Task.Delay(500, cancellationToken);
         if (_svc.IsShuttingDown) return (null, ShuttingDownMessage);
         cancellationToken.ThrowIfCancellationRequested();
-        var strategy = spec.File.Create();
-        strategy.SetParameters(spec.Parameters);
+        var strategy = generation.Create();
+        strategy.SetParameters(parameters);
         LiveStrategyRunner NewRunner(ITradingAccount selected, Instrument execution, decimal executionRatio) =>
             new(strategy, data, selected, spec.Period, spec.TimeZoneId, spec.SessionStart)
             {
@@ -710,7 +733,7 @@ internal sealed partial class LiveCenter
         decimal ratio;
         try
         {
-            (execInst, ratio) = await ExecutionContractForAsync(spec.ProfileId, spec.Instrument, spec.Parameters, spec.Size, preparedKey);
+            (execInst, ratio) = await ExecutionContractForAsync(spec.ProfileId, spec.Instrument, parameters, spec.Size, preparedKey, smartContracts);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -728,7 +751,7 @@ internal sealed partial class LiveCenter
                 return (null, "The execution instrument resolved to a different account scope; saved history and protection were not adopted.");
         }
         // resume, auto-resume and restarts adopt the stop loss and take profit the previous run left working at the broker
-        runner.AdoptProtectionIds = spec.AdoptProtectionIds ?? (IReadOnlyCollection<string>?)LiveStore.InfoFor(runner.Key)?.ProtectionOrderIds ?? Array.Empty<string>();
+        runner.AdoptProtectionIds = protectionIds ?? (IReadOnlyCollection<string>?)LiveStore.InfoFor(runner.Key)?.ProtectionOrderIds ?? Array.Empty<string>();
         if (Running(runner.Key) != null) return (null, $"«{runner.StrategyName}» is already running on {spec.Instrument.Symbol} with {TradingHub.Common.EnglishText.Of(account.Name)}.");
         if (AwaitingBroker(runner.Key)) return (null, PendingBrokerMessage);
         try
@@ -741,13 +764,14 @@ internal sealed partial class LiveCenter
         }
 
         if (spec.Paused) runner.SetPaused(true);
+        _panelGenerations[runner.Key] = generation;
         _svc.Runners.RemoveAll(r => r.Key == runner.Key && !r.IsRunning && !r.IsClosing && !r.HasWorkingOrders);
         _svc.Runners.Add(runner);
         Watch(runner);
         _svc.SaveLiveState();
         if (MarketInfo.IsFutures(spec.Instrument.FeedId))
         {
-            decimal units = runner.UnitsFor(QuantityOf(spec.Parameters));
+            decimal units = runner.UnitsFor(QuantityOf(parameters));
             Notify(runner.CrossExecution
                 ? $"«{runner.StrategyName}» executes in micros: each order submits {units:0.####} {execInst.Symbol} (equivalent to {units / ratio:0.####} {spec.Instrument.Symbol})"
                 : $"«{runner.StrategyName}» trades {units:0.####} {execInst.Symbol} per order");
@@ -800,9 +824,9 @@ internal sealed partial class LiveCenter
     /// micro con la misma exposición (5 MNQ); con minis enteros, en el mini. Devuelve el contrato y cuántos de ese contrato
     /// vale uno del que mira la estrategia.
     /// </summary>
-    internal (string Symbol, decimal Ratio) PreferredContract(string feed, string symbol, decimal strategyQuantity, decimal size)
+    internal (string Symbol, decimal Ratio) PreferredContract(string feed, string symbol, decimal strategyQuantity, decimal size, bool? smartContracts = null)
     {
-        if (!_svc.Settings.SmartContracts || !MarketInfo.IsFutures(feed) || MarketInfo.MicroOf(symbol) is not { } micro) return (symbol, 1);
+        if (!(smartContracts ?? _svc.Settings.SmartContracts) || !MarketInfo.IsFutures(feed) || MarketInfo.MicroOf(symbol) is not { } micro) return (symbol, 1);
         decimal exposure = Math.Abs(strategyQuantity) * size;
         if (size <= 0 || (exposure >= 1 && exposure == Math.Floor(exposure))) return (symbol, 1);
         return (micro, RatioOf(symbol, micro));
@@ -820,9 +844,9 @@ internal sealed partial class LiveCenter
     /// pide fracciones del mini), salvo que tenga una posición abierta, que sigue en el contrato en que está.
     /// </summary>
     internal async Task<(Instrument Instrument, decimal Ratio)> ExecutionContractForAsync(string profileId, Instrument signal, IReadOnlyDictionary<string, object?> parameters,
-        decimal size, string preparedRunnerKey)
+        decimal size, string preparedRunnerKey, bool? smartContracts = null)
     {
-        var (symbol, ratio) = PreferredContract(signal.FeedId, signal.Symbol, QuantityOf(parameters), size);
+        var (symbol, ratio) = PreferredContract(signal.FeedId, signal.Symbol, QuantityOf(parameters), size, smartContracts);
         var ledger = LiveStore.LoadLedger(preparedRunnerKey, signal.PointValue);
         if (ledger.Position != 0)
         {
@@ -869,6 +893,7 @@ internal sealed partial class LiveCenter
     /// <summary>Reinicia con otros parámetros (sigue la misma contabilidad y, si tenía posición, la sigue gestionando).</summary>
     public async Task<string?> RestartWithParametersAsync(LiveEntry e, Dictionary<string, object?> parameters)
     {
+        parameters = new Dictionary<string, object?>(parameters);
         if (e.Ledger == null) return e.LedgerError ?? "History unavailable";
         if (e.Locked) return "Locked: parameters cannot be changed here.";
         if (e.ChartStrategy is { } cs && e.Chart is { } chart && Trading?.Invoke() is { } tv)
@@ -879,9 +904,10 @@ internal sealed partial class LiveCenter
             return cs.Overlay.Error;
         }
 
-        var launch = await LaunchFromInfoAsync(e.Info);
+        var old = e.Runner ?? Running(e.Key);
+        var generation = GenerationOf(e);
+        var launch = await LaunchFromInfoAsync(e.Info, generation);
         if (launch.Error != null) return launch.Error;
-        var old = e.Runner;
         if (old is { IsRunning: true })
         {
             old.StopReason = "Restarted with new parameters";
@@ -894,6 +920,7 @@ internal sealed partial class LiveCenter
         var (runner, message) = await LaunchAsync(new LiveLaunch
         {
             File = spec.File,
+            Generation = spec.Generation,
             ProfileId = spec.ProfileId,
             Instrument = spec.Instrument,
             AccountId = spec.AccountId,
@@ -940,6 +967,7 @@ internal sealed partial class LiveCenter
             i.Realized = 0;
             i.Trades = 0;
         });
+        if (!e.Running) _panelGenerations.Remove(e.Key);
         _svc.SaveLiveState();
         return null;
     }
@@ -961,13 +989,14 @@ internal sealed partial class LiveCenter
         {
             LiveStore.RemoveRunner(e.Key, history);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
             return ex.Message;
         }
         if (e.ChartStrategy is { } cs && e.Chart is { } chart && Trading?.Invoke() is { } tv) tv.RemoveStrategy(chart, cs);
         _svc.Runners.RemoveAll(x => x.Key == e.Key && !x.IsClosing && !x.HasWorkingOrders);
         _ledgers.Remove(e.Key);
+        _panelGenerations.Remove(e.Key);
         // también de los portafolios
         var defs = LiveStore.LoadPortfolios();
         foreach (var d in defs) d.Members.Remove(e.Key);

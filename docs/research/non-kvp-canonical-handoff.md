@@ -1,5 +1,11 @@
 # Non-KVP canonical source handoff — 2026-11-04
 
+## Current canonical review route
+
+This is a dated non-KVP handoff, not the latest full C# baseline. Start any new port review from the exact accepted source recorded in the [current dashboard](../en/TRANSLATION_STATUS.md). Later accepted work includes selected KVP capabilities, startup and execution/IB hardening. Review their recorded scope and evidence rather than using this document's older integration SHA as a complete inventory.
+
+This route remains review-only. Keep existing port worktrees and oracle pins unchanged until separately authorized adoption names an exact source and its native validation. A correctness candidate is not an accepted replacement for canonical source or the installed app.
+
 ## Exact review inputs
 
 - Canonical C# integration: `memoshi@b730d4c144b69f4a2695b5bdefd572dab6014369`.
@@ -11,7 +17,7 @@
 
 PANASV adaptations cover cross-connection instrument discovery without account switching; 13 QuanTAlib moving averages/ribbon, Camarilla and strategy helpers; optional own Codex CLI; preservation-first IB CSV/offline/TWS/Gateway **market data only**; and explicitly granted/revocable research-only TradingView MCP. Jjuan adaptations cover timestamp-safe Binance Futures open interest, anchored Flow VWAP with estimates off by default, explicitly heuristic refill zones, bounded session/week/month/composite profiles preserving SessionVolumeProfile, and bounded deeper zoom with a historical 50,000-candle UI scenario.
 
-Review the [dashboard](../en/TRANSLATION_STATUS.md#canonical-non-kvp-integration--2026-11-04), [adoption provenance](fork-feature-report.md#canonical-integration-supersession--2026-11-04) and [third-party notices](../../THIRD_PARTY_NOTICES.md), rather than importing community trees wholesale. TradeDock's 28-commit translation is already inherited. Dham screenshots/hash/signature/source manifests are optional evidence/documentation tooling, not missing runtime; no Dham runtime or Intel packaging was imported. [KVP review](kvp-adoption-review.md) is source-only: no KVP code/import is authorized.
+Review the [dashboard](../en/TRANSLATION_STATUS.md#canonical-non-kvp-integration--2026-11-04), [adoption provenance](./fork-feature-report.md#canonical-integration-supersession--2026-11-04) and [third-party notices](../../THIRD_PARTY_NOTICES.md), rather than importing community trees wholesale. TradeDock's 28-commit translation is already inherited. Dham screenshots/hash/signature/source manifests are optional evidence/documentation tooling, not missing runtime; no Dham runtime or Intel packaging was imported. [KVP review](./kvp-adoption-review.md) is source-only: no KVP code/import is authorized.
 
 ## Port coordination contract
 

@@ -321,20 +321,24 @@ public sealed partial class AppServices
     /// <summary>Sesión de órdenes de Rithmic de una conexión (se conecta en segundo plano la primera vez).</summary>
     public TradingHub.Feeds.Rithmic.RithmicTradingSession RithmicSessionFor(ConnectionProfile p)
     {
-        if (_rithmicSessions.TryGetValue(p.Id, out var s)) return s;
-        // Do not replace an unresolved account's transport in place. A changed connection remains reduction/cancel-only
-        // through its original session until it is confirmed idle; this also avoids competing Rithmic order logins.
-        foreach (var retired in _retiredRithmicSessions)
-            if (_rithmicOrigins.TryGetValue(retired, out var old) && old.Profile == p.Id && RithmicInUse(retired)) return retired;
-        Connections.EnsureTradingIdentity(p);
-        s = new TradingHub.Feeds.Rithmic.RithmicTradingSession(Connections.RithmicSettingsOf(p), network: NetworkProxy.CreateFactory());
-        _rithmicSessions[p.Id] = s;
-        _rithmicOrigins.Add(s, new(p.Id, p.TradingNamespace, p.TradingGeneration, PublicEndpoint(p.RithmicUri) + "|" + p.RithmicSystem));
-        // cada ejecución queda en el historial de la cuenta (saldo, operaciones y estadísticas)
-        s.FillReceived += f => Journal.Add(RithmicAccountId(p, f.Account),
-            new AccountFill(f.Id, f.Time, f.Symbol, f.IsBuy, f.Quantity, f.Price, AccountCenter.PointValueOf(f.Symbol), 0, f.BasketId));
-        s.Start();
-        return s;
+        lock (_shutdownGate)
+        {
+            if (_rithmicSessions.TryGetValue(p.Id, out var s)) return s;
+            // Do not replace an unresolved account's transport in place. A changed connection remains reduction/cancel-only
+            // through its original session until it is confirmed idle; this also avoids competing Rithmic order logins.
+            foreach (var retired in _retiredRithmicSessions)
+                if (_rithmicOrigins.TryGetValue(retired, out var old) && old.Profile == p.Id && RithmicInUse(retired)) return retired;
+            if (IsShuttingDown) throw new InvalidOperationException(RithmicAdmissionClosed);
+            Connections.EnsureTradingIdentity(p);
+            s = new TradingHub.Feeds.Rithmic.RithmicTradingSession(Connections.RithmicSettingsOf(p), network: NetworkProxy.CreateFactory());
+            _rithmicSessions[p.Id] = s;
+            _rithmicOrigins.Add(s, new(p.Id, p.TradingNamespace, p.TradingGeneration, PublicEndpoint(p.RithmicUri) + "|" + p.RithmicSystem));
+            // cada ejecución queda en el historial de la cuenta (saldo, operaciones y estadísticas)
+            s.FillReceived += f => Journal.Add(RithmicAccountId(p, f.Account),
+                new AccountFill(f.Id, f.Time, f.Symbol, f.IsBuy, f.Quantity, f.Price, AccountCenter.PointValueOf(f.Symbol), 0, f.BasketId));
+            s.Start();
+            return s;
+        }
     }
 
     /// <summary>Estado de la sesión de órdenes de Rithmic para un instrumento (null si no es de Rithmic).</summary>
@@ -342,8 +346,8 @@ public sealed partial class AppServices
     {
         var p = Connections.Enabled.FirstOrDefault(x => x.IsRithmic && x.MarketDataId == data.Instrument.FeedId && !string.IsNullOrWhiteSpace(x.RithmicUser));
         if (p == null) return null;
-        var s = RithmicSessionFor(p);
-        return s.IsConnected ? null : "Rithmic: " + s.StatusText;
+        var s = DiscoverRithmicSession(p);
+        return s == null ? RithmicAdmissionClosed : s.IsConnected ? null : "Rithmic: " + s.StatusText;
     }
 
     /// <summary>Id de una cuenta de Rithmic en Trading Hub: rithmic|conexión|cuenta.</summary>
@@ -363,10 +367,13 @@ public sealed partial class AppServices
         // Trading contexts are immutable. Retire old sessions without moving outstanding requests to new credentials.
         Connections.Reconfigured += p =>
         {
-            if (_rithmicSessions.Remove(p.Id, out var session))
+            lock (_shutdownGate)
             {
-                if (RithmicInUse(session)) _retiredRithmicSessions.Add(session);
-                else session.Dispose();
+                if (_rithmicSessions.Remove(p.Id, out var session))
+                {
+                    if (RithmicInUse(session)) _retiredRithmicSessions.Add(session);
+                    else RetireRithmicSession(session);
+                }
             }
             // A changed profile gets a new Tradovate context. Existing activity keeps its original transport.
             if (_tradovateSessions.Remove(p.Id, out var tv))
@@ -577,7 +584,8 @@ public sealed partial class AppServices
         // cuentas de Rithmic (aparecen cuando la sesión de órdenes termina de conectarse)
         foreach (var p in Connections.Enabled.Where(p => p.IsRithmic && p.MarketDataId == data.Instrument.FeedId && !string.IsNullOrWhiteSpace(p.RithmicUser)))
         {
-            var session = RithmicSessionFor(p);
+            var session = DiscoverRithmicSession(p);
+            if (session == null) continue;
             foreach (var a in session.Accounts)
             {
                 if (session.IsPractice) yield return new AccountOption(RithmicAccountId(p, a.AccountId), $"{a.AccountId} · Rithmic (practice)", false);
@@ -623,13 +631,11 @@ public sealed partial class AppServices
             var rp = Connections.Find(parts[1]) ?? throw new KeyNotFoundException(accountId);
             if (!rp.IsRithmic) throw new InvalidOperationException("This saved account no longer belongs to a Rithmic connection.");
             var session = RithmicSessionFor(rp);
-            var feed = (TradingHub.Feeds.Rithmic.RithmicFeed)Connections.GetFeed(rp.Id);
-            var origin = _rithmicOrigins.GetValue(session, _ => new(rp.Id, rp.TradingNamespace, rp.TradingGeneration,
-                PublicEndpoint(rp.RithmicUri) + "|" + rp.RithmicSystem));
-            var context = TradingContext(rp, accountId, "Rithmic", "futures", origin.Environment, null, origin);
+            var context = RithmicContextFor(rp, session, parts[2]);
+            var contract = RithmicContractResolver(rp, session, data, parts[2]);
             return Cache(key, rp, new TradingHub.Feeds.Rithmic.RithmicBroker(data, session, parts[2],
                 $"{parts[2]} · Rithmic{(session.IsPractice ? " (practice)" : " — REAL")}",
-                ct => feed.ContractAsync(data.Instrument, ct), context), rithmicSession: session);
+                contract, context), rithmicSession: session);
         }
 
         var p = Connections.Find(accountId) ?? throw new KeyNotFoundException(accountId);
@@ -717,7 +723,7 @@ public sealed partial class AppServices
             if (increases && !Connections.IsTradingGenerationCurrent(profile, generation))
                 return "The connection's trading namespace changed: new exposure is disabled; original-context reductions/cancels remain allowed.";
             return CheckRealOrderForProfile(Connections.Profiles.Contains(profile) ? profile : null, broker, position, signed);
-        });
+        }, provider == "Rithmic" ? (request, position) => CheckRithmicNativePermission(profile, generation, id, request, position) : null);
         _orderContexts.Add(id, context);
         return context;
     }
@@ -726,7 +732,7 @@ public sealed partial class AppServices
     {
         foreach (var broker in _realBrokers.Values.Concat(_replacedBrokers))
             if (_brokerOrigins.TryGetValue(broker, out var origin) && ReferenceEquals(origin.RithmicSession, session) && BrokerInUse(broker)) return true;
-        return !session.IsConnected || session.Accounts.Any(account =>
+        return session.HasUnresolvedPositionClose || !session.IsConnected || session.Accounts.Any(account =>
             !session.OrdersReadyFor(account.AccountId) ||
             session.OrdersOf(account.AccountId).Any(order => !order.Done && order.Unfilled > 0) ||
             session.PositionsOf(account.AccountId).Any(position => position.Position.Net != 0));
@@ -817,12 +823,18 @@ public sealed partial class AppServices
             _retiredTradovateSessions.RemoveAt(i);
             DisposeTradovate(session);
         }
-        for (int i = _retiredRithmicSessions.Count - 1; i >= 0; i--)
+        if (_retiredRithmicSessions.Count > 0)
         {
-            var session = _retiredRithmicSessions[i];
-            if (RithmicInUse(session)) continue;
-            _retiredRithmicSessions.RemoveAt(i);
-            session.Dispose();
+            lock (_shutdownGate)
+            {
+                for (int i = _retiredRithmicSessions.Count - 1; i >= 0; i--)
+                {
+                    var session = _retiredRithmicSessions[i];
+                    if (RithmicInUse(session)) continue;
+                    _retiredRithmicSessions.RemoveAt(i);
+                    RetireRithmicSession(session);
+                }
+            }
         }
         Connections.ReleaseRetiredFeeds();
         ReleaseRetiredBybitSessions();
@@ -840,9 +852,10 @@ public sealed partial class AppServices
 
     private string? CheckRealOrderForProfile(ConnectionProfile? p, ITradingAccount account, decimal position, decimal signedQuantity)
     {
-        if (IsShuttingDown && RealOrderPermission.IncreasesExposure(position, signedQuantity))
+        bool increases = RealOrderPermission.IncreasesExposure(position, signedQuantity);
+        if (IsShuttingDown && increases)
             return "Trading Hub is shutting down: new exposure is disabled; cancellation and reducing exits remain available.";
-        if (p != null && _brokerOrigins.TryGetValue(account, out var origin) && RealOrderPermission.IncreasesExposure(position, signedQuantity))
+        if (p != null && _brokerOrigins.TryGetValue(account, out var origin) && increases)
         {
             // Rithmic brokers follow their session's mode; the others keep the one they were built with
             bool realNow = p.IsRithmic ? account.IsReal : p.Kind == ConnectionKind.Bybit
@@ -853,6 +866,8 @@ public sealed partial class AppServices
             if (origin.Real != realNow) return $"{p.Name} is now {Mode(realNow)} but this account was opened as {Mode(origin.Real)}" + Rest;
             if (origin.Replaced) return $"the connection {p.Name} changed its keys, system or login after this account was opened" + Rest;
         }
+        if (increases && p is { MaxOrderQuantity: > 0 } && Math.Abs(signedQuantity) > p.MaxOrderQuantity)
+            return "Order quantity exceeds this connection's configured maximum.";
 
         return RealOrderPermission.Check(account.IsReal, p is { } c ? (c.Name, c.Enabled, c.AllowRealOrders) : null, position, signedQuantity);
     }
@@ -954,16 +969,18 @@ public sealed partial class AppServices
         }
         try
         {
+            var workDrain = CloseOwnedAsync(Work.StopAsync, "Error closing ordinary work");
+            var recordingDrain = CloseOwnedAsync(Hub.StopRecordingAsync, "Error closing recorded history");
             Close(() => StopLiveForQuit(QuitMode.CancelStops));
             TradingHub.Strategies.LiveStrategyRunner.Started -= OnRunnerStarted;
-            // Close admission/cancel every producer before awaiting any one held operation. Provider
-            // callbacks keep their journal/alert/feed dependencies until all owned operations have drained.
+            // Cancel admission first; ordinary consumers keep their dependencies through final persistence and refresh.
             var startsDrain = CloseOwnedAsync(() => _live?.ShutdownStartsAsync() ?? Task.CompletedTask, "Error closing pending strategy starts");
             var authoringDrain = CloseOwnedAsync(ShutdownAuthoringAsync, "Error closing authoring");
-            var researchDrain = CloseOwnedAsync(() => TradingViewResearchService.DisposeDefaultAsync().AsTask(), "Error closing authorized research");
-            var scriptDrain = CloseOwnedAsync(() => Scripts?.DisposeAsync().AsTask() ?? Task.CompletedTask, "Error closing custom indicator monitoring");
             var historyDrain = CloseOwnedAsync(ShutdownHistoryArchivesAsync, "Error closing history archives");
             var operationsDrain = CloseOwnedAsync(ShutdownOperationsAsync, "Error closing background history");
+            await workDrain;
+            var researchDrain = CloseOwnedAsync(() => TradingViewResearchService.DisposeDefaultAsync().AsTask(), "Error closing authorized research");
+            var scriptDrain = CloseOwnedAsync(() => Scripts?.DisposeAsync().AsTask() ?? Task.CompletedTask, "Error closing custom indicator monitoring");
             var providerDrain = CloseOwnedAsync(ShutdownKvpProvidersAsync, "Error closing provider sessions");
             var longbridgeDrain = CloseOwnedAsync(Connections.StopLongbridgeAsync, "Error closing Longbridge authorization or data");
             await startsDrain;
@@ -974,16 +991,16 @@ public sealed partial class AppServices
             await operationsDrain;
             await providerDrain;
             await longbridgeDrain;
+            await CloseOwnedAsync(DrainRithmicSessionsAsync, "Error closing Rithmic trading session");
             await CloseOwnedAsync(() => DisposeReplayAlertsAsync().AsTask(), "Error closing replay or alerts");
             Close(Sleep.Dispose);
             foreach (var broker in _realBrokers.Values) Close(() => (broker as IDisposable)?.Dispose());
             foreach (var broker in _replacedBrokers) Close(() => (broker as IDisposable)?.Dispose());
-            foreach (var session in _rithmicSessions.Values) Close(session.Dispose);
             foreach (var session in _tradovateSessions.Values) Close(() => DisposeTradovate(session));
             foreach (var session in _retiredTradovateSessions) Close(() => DisposeTradovate(session));
-            foreach (var session in _retiredRithmicSessions) Close(session.Dispose);
             foreach (var broker in _simBrokers.Values) Close(broker.Dispose);
             Close(Hub.Dispose);
+            await recordingDrain;
             Close(Connections.DisposeAll);
         }
         finally

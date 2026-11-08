@@ -202,10 +202,20 @@ public sealed class RithmicClient : IAsyncDisposable
         await _ws.ConnectAsync(new Uri(uri), _transport, t.Token).ConfigureAwait(false);
     }
 
-    public async Task SendAsync(ProtoWriter w, CancellationToken ct)
+    public async Task SendAsync(ProtoWriter w, CancellationToken ct, Func<ProtoWriter>? prepare = null, object? admissionGate = null)
     {
         await _send.WaitAsync(ct).ConfigureAwait(false);
-        try { await _ws.SendAsync(w.ToArray(), WebSocketMessageType.Binary, true, ct).ConfigureAwait(false); }
+        try
+        {
+            ValueTask send;
+            lock (admissionGate ?? _send)
+            {
+                ct.ThrowIfCancellationRequested();
+                var message = prepare?.Invoke() ?? w;
+                send = _ws.SendAsync((ReadOnlyMemory<byte>)message.ToArray(), WebSocketMessageType.Binary, true, ct);
+            }
+            await send.ConfigureAwait(false);
+        }
         finally { _send.Release(); }
     }
 

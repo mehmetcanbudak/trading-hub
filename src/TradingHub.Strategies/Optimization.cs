@@ -121,11 +121,33 @@ public sealed class OptimizationResult
     public double Seconds { get; set; }
     public OptimizationRow? Best => Rows.Count > 0 ? Rows[0] : null;
 
-    /// <summary>La recomendada: la mejor meseta (promedio con sus vecinas), no el mejor pico. Índice en <see cref="Rows"/>.</summary>
+    /// <summary>The selected plateau's index in the full measured population, or -1 when no eligible selection exists.</summary>
     public int RecommendedIndex { get; set; } = -1;
+    public OptimizationRow? RecommendedRow { get; set; }
+    public OptimizationPopulation? Population { get; set; }
 
     [System.Text.Json.Serialization.JsonIgnore]
-    public OptimizationRow? Recommended => RecommendedIndex >= 0 && RecommendedIndex < Rows.Count ? Rows[RecommendedIndex] : Best;
+    public OptimizationRow? Recommended => RecommendedRow ??
+        ((Population != null || Rows.Count == Combinations) && RecommendedIndex >= 0 && RecommendedIndex < Rows.Count ? Rows[RecommendedIndex] : null);
+
+    public OptimizationPopulation? GetPopulation() => Population ??
+        (Rows.Count == Combinations ? OptimizationPopulation.Capture(Rows, Ranges) : null);
+
+    public OptimizationResult WithCapturedPopulation() => Project(int.MaxValue, OptimizationPopulation.Capture(Rows, Ranges));
+
+    internal OptimizationResult ForStorage(int maximumRows) => Project(maximumRows, GetPopulation());
+
+    private OptimizationResult Project(int maximumRows, OptimizationPopulation? population) => new()
+    {
+        Metric = Metric,
+        Ranges = Ranges,
+        Rows = Rows.Count > maximumRows ? Rows.Take(maximumRows).ToList() : Rows,
+        Combinations = Combinations,
+        Seconds = Seconds,
+        RecommendedIndex = RecommendedIndex,
+        RecommendedRow = Recommended,
+        Population = population,
+    };
 }
 
 /// <summary>Una ventana del walk-forward.</summary>
@@ -137,11 +159,21 @@ public sealed class WalkForwardWindow
     public DateTime OutSampleFrom { get; set; }
     public DateTime OutSampleTo { get; set; }
     public Dictionary<string, object?> BestParameters { get; set; } = new();
-    public PerformanceMetrics InSample { get; set; } = new();
-    public PerformanceMetrics OutSample { get; set; } = new();
+    public PerformanceMetrics? InSample { get; set; } = new();
+    public PerformanceMetrics? OutSample { get; set; } = new();
 
     /// <summary>Rendimiento fuera de muestra / dentro de muestra (anualizado por días).</summary>
-    public double Efficiency { get; set; }
+    public double? Efficiency { get; set; } = 0;
+    public bool InSampleAvailable { get; set; } = true;
+    public bool OutSampleAvailable { get; set; } = true;
+    public string? UnavailableReason { get; set; }
+    public decimal? InSampleOpeningEquity { get; set; }
+    public decimal? InSampleClosingEquity { get; set; }
+    /// <summary>Source configuration marks retain its original warm capital, not the stitched capital.</summary>
+    public decimal? OutSampleOpeningEquity { get; set; }
+    public decimal? OutSampleClosingEquity { get; set; }
+    public decimal? OutSampleStitchedOpeningEquity { get; set; }
+    public decimal? OutSampleStitchedClosingEquity { get; set; }
 }
 
 /// <summary>Resultado del walk-forward.</summary>
@@ -151,12 +183,16 @@ public sealed class WalkForwardResult
     public int OutSampleDays { get; set; }
     public bool Anchored { get; set; }
     public FitnessMetric Metric { get; set; }
+    public string? AccountingPolicy { get; set; }
+    public string? AttributionPolicy { get; set; }
+    public string? CpcvPolicy { get; set; }
+    public bool IsComplete { get; set; } = true;
 
     /// <summary>Rangos que se optimizaron en cada ventana (para medir la estabilidad de los parámetros elegidos).</summary>
     public List<ParameterRange> Ranges { get; set; } = new();
     public List<WalkForwardWindow> Windows { get; set; } = new();
 
-    /// <summary>Todas las operaciones fuera de muestra, encadenadas.</summary>
+    /// <summary>Closing-fill contributions and final boundary valuations, not independent completed trades.</summary>
     public List<ClosedTrade> OutSampleTrades { get; set; } = new();
     public List<EquityPoint> OutSampleEquity { get; set; } = new();
     public PerformanceMetrics OutSampleMetrics { get; set; } = new();
@@ -167,11 +203,11 @@ public sealed class WalkForwardResult
     /// <summary>Cómo se buscaron los parámetros en cada ventana: "grilla" o "bayesiana".</summary>
     public string Search { get; set; } = "grilla";
 
-    /// <summary>Combinaciones distintas que se corrieron (cada una una sola vez, sobre toda la historia) y cuántas había.</summary>
+    /// <summary>Distinct configurations, each executed once with warm state through the final availability cutoff.</summary>
     public int Evaluated { get; set; }
     public long SpaceSize { get; set; }
 
-    /// <summary>Eventos después de juntar los ticks repetidos sobre los ticks originales (1 = sin comprimir).</summary>
+    /// <summary>Input compression ratio. Walk-forward does not coalesce events across its accounting cutoffs.</summary>
     public double Compression { get; set; } = 1;
 
     /// <summary>
@@ -193,13 +229,15 @@ public sealed class WalkForwardResult
 public sealed class MonteCarloResult
 {
     public int Runs { get; set; }
-    public decimal DrawdownP50 { get; set; }
-    public decimal DrawdownP95 { get; set; }
-    public decimal DrawdownP99 { get; set; }
-    public decimal WorstDrawdown { get; set; }
-    public decimal NetProfit { get; set; }
-    public double RuinProbabilityPercent { get; set; }
+    public decimal? DrawdownP50 { get; set; } = 0;
+    public decimal? DrawdownP95 { get; set; } = 0;
+    public decimal? DrawdownP99 { get; set; } = 0;
+    public decimal? WorstDrawdown { get; set; } = 0;
+    public decimal? NetProfit { get; set; } = 0;
+    public double? RuinProbabilityPercent { get; set; } = 0;
     public List<List<decimal>> SampleCurves { get; set; } = new();
+    public bool Available { get; set; } = true;
+    public string? UnavailableReason { get; set; }
 }
 
 /// <summary>Optimización, walk-forward y Monte Carlo.</summary>
@@ -276,30 +314,19 @@ public static class Optimizer
     }
 
     /// <summary>
-    /// Walk-forward: en cada ventana elige parámetros mirando solo lo de adentro (dentro de muestra) y los prueba en los días
-    /// siguientes (fuera de muestra); lo que importa es el resultado encadenado fuera de muestra. Cómo trabaja:
-    /// <list type="bullet">
-    /// <item>Cada combinación se corre una sola vez sobre toda la historia (ticks repetidos juntados, indicadores calientes
-    /// y contexto como en vivo) y las ventanas recortan ese resultado: no se repiten backtests.</item>
-    /// <item>Busca con la grilla entera si es chica (<see cref="GridLimit"/>) o con optimización bayesiana (TPE) si es
-    /// grande, en cada ventana con lo de esa ventana solamente.</item>
-    /// <item>Elige la mejor meseta (promedio con las vecinas), no el mejor pico.</item>
-    /// <item>Al final mide el sobreajuste con todas las combinaciones corridas: PBO y caminos de la CPCV.</item>
-    /// </list>
+    /// Executes each configuration once with warm state. Training uses marked accounting frozen strictly before each
+    /// availability cutoff. Selected out-of-sample changes form a research splice, not an executable position handoff.
+    /// Closing fills determine eligibility; monetary distributions also include the final valuation of remaining exposure.
     /// </summary>
     public static WalkForwardResult WalkForward(Func<Strategy> factory, Dictionary<string, object?> baseParameters, IReadOnlyList<ParameterRange> ranges,
         TickData data, BacktestSettings settings, FitnessMetric metric, int inSampleDays, int outSampleDays, bool anchored, int minTrades,
         IProgress<double>? progress, CancellationToken ct, IReadOnlyList<(DateTime Time, decimal Close)>? contextHistory = null,
         SearchMode search = SearchMode.Auto, int budget = 0, int maxParallel = 0)
     {
-        // cada ventana arranca su contexto de mercado con lo anterior a ella (de antes del rango y de las ventanas previas),
-        // como en vivo: sin esto, cada ventana fuera de muestra empezaba sin saber si había rango o tendencia
-        contextHistory = MarketContextTracker.Merge(contextHistory, MarketContextTracker.HourlyCloses(data));
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var type = factory().GetType();
         int raw = data.Count;
         var space = new ParameterSpace(ranges, type);
-        if (!data.Compressed && CanCompress(type, space, settings)) data = data.Compress();
         bool grid = search == SearchMode.Grid || (search == SearchMode.Auto && space.Size <= GridLimit);
         int parallel = maxParallel > 0 ? maxParallel : Math.Max(1, Environment.ProcessorCount - 1);
         if (budget <= 0) budget = DefaultBudget;
@@ -307,11 +334,18 @@ public static class Optimizer
         {
             InSampleDays = inSampleDays, OutSampleDays = outSampleDays, Anchored = anchored, Metric = metric, Ranges = ranges.Where(r => r.Enabled).ToList(),
             Search = grid ? "grilla" : "bayesiana", SpaceSize = space.Size, Compression = raw > 0 ? Math.Round((double)data.Count / raw, 4) : 1,
+            AccountingPolicy = "warm-mark-to-market-splice",
+            AttributionPolicy = "closing-fill-proportional-carry-residual-and-final-mark",
         };
         var windows = Windows(settings, inSampleDays, outSampleDays, anchored);
         if (windows.Count == 0) throw new InvalidOperationException("The date range is too short for these windows: extend the range or shorten the windows.");
 
-        var cache = new ConfigCache(factory, baseParameters, data, settings.Clone(), contextHistory, space, ct);
+        var calendar = new List<(DateTime From, DateTime To)>();
+        for (var day = settings.FromUtc.Date; day < settings.ToUtc; day = day.AddDays(1))
+            calendar.Add((day, day.AddDays(1) < settings.ToUtc ? day.AddDays(1) : settings.ToUtc));
+        var cutoffs = windows.SelectMany(w => new[] { w.IsFrom, w.IsTo, w.OsTo })
+            .Concat(calendar.SelectMany(day => new[] { day.From, day.To })).Distinct().OrderBy(t => t).ToArray();
+        var cache = new ConfigCache(factory, baseParameters, data, settings.Clone(), contextHistory, space, cutoffs, calendar, ct);
         long expected = grid ? space.Size : Math.Min(space.Size, (long)budget * windows.Count / 2 + budget);
         int ran = 0;
         void Ran() => progress?.Report(Math.Min(0.95, 0.95 * Interlocked.Increment(ref ran) / Math.Max(1, expected)));
@@ -319,16 +353,16 @@ public static class Optimizer
 
         double isProfit = 0, isDaysTotal = 0, osProfit = 0, osDaysTotal = 0;
         decimal capital = settings.InitialCapital;
-        var chained = new List<EquityPoint>();
+        decimal peak = capital;
         for (int w = 0; w < windows.Count; w++)
         {
             ct.ThrowIfCancellationRequested();
             var (isFrom, isTo, osTo) = windows[w];
             double Score(ConfigRun run)
             {
-                if (!run.Ok) return double.NegativeInfinity;
-                var m = cache.Measure(run, isFrom, isTo);
-                return m.TotalTrades < minTrades ? double.NegativeInfinity : m.Fitness(metric);
+                var measured = cache.Measure(run, isFrom, isTo);
+                return measured == null || measured.Metrics.TotalTrades < minTrades
+                    ? double.NegativeInfinity : measured.Metrics.Fitness(metric);
             }
 
             var rows = grid
@@ -339,13 +373,46 @@ public static class Optimizer
                     return points.Select(p => Score(cache.Get(p))).ToArray();
                 }, budget, 1000 + w, parallel, ct);
             int pick = RobustSelection.Select(rows);
-            if (pick < 0) continue;
+            if (pick < 0)
+            {
+                res.IsComplete = false;
+                res.Windows.Add(new WalkForwardWindow
+                {
+                    Number = w + 1, InSampleFrom = isFrom, InSampleTo = isTo, OutSampleFrom = isTo, OutSampleTo = osTo,
+                    InSampleAvailable = false, OutSampleAvailable = false,
+                    InSample = null, OutSample = null, Efficiency = null,
+                    UnavailableReason = "No complete training configuration satisfies the actual closing-fill minimum.",
+                });
+                continue;
+            }
             var best = cache.Get(rows[pick].Idx);
-            var isM = cache.Measure(best, isFrom, isTo);
-            var (osTrades, osEquity) = cache.Slice(best, isTo, osTo, chained.Count > 0 ? chained[^1].Equity : capital);
-            var osM = PerformanceMetrics.Compute(osTrades, osEquity, chained.Count > 0 ? chained[^1].Equity : capital, cache.Crypto, 0, 0);
-            foreach (var t in osTrades) res.OutSampleTrades.Add(t with { Number = res.OutSampleTrades.Count + 1 });
-            chained.AddRange(osEquity);
+            var training = cache.Measure(best, isFrom, isTo)!;
+            var isM = training.Metrics;
+            var testing = best.Accounting.Measure(isTo, osTo, capital, cache.Crypto);
+            if (testing == null || !res.IsComplete)
+            {
+                res.IsComplete = false;
+                res.Windows.Add(new WalkForwardWindow
+                {
+                    Number = w + 1, InSampleFrom = isFrom, InSampleTo = isTo, OutSampleFrom = isTo, OutSampleTo = osTo,
+                    BestParameters = best.Parameters, InSample = isM, OutSampleAvailable = false,
+                    OutSample = null, Efficiency = null,
+                    InSampleOpeningEquity = training.OpeningEquity, InSampleClosingEquity = training.ClosingEquity,
+                    UnavailableReason = testing == null ? best.Accounting.Error ?? "The selected test range is incomplete."
+                        : "An earlier out-of-sample segment is unavailable.",
+                });
+                continue;
+            }
+            var osM = testing.Metrics;
+            decimal stitchedOpening = capital;
+            foreach (var contribution in testing.Contributions)
+                res.OutSampleTrades.Add(contribution with { Number = res.OutSampleTrades.Count + 1 });
+            foreach (var point in testing.Equity)
+            {
+                peak = Math.Max(peak, point.Equity);
+                res.OutSampleEquity.Add(point with { Drawdown = peak - point.Equity });
+            }
+            capital += testing.ClosingEquity - testing.OpeningEquity;
 
             double isDays = Math.Max(1, (isTo - isFrom).TotalDays), osDays = Math.Max(1, (osTo - isTo).TotalDays);
             double isRate = (double)isM.NetProfit / isDays, osRate = (double)osM.NetProfit / osDays;
@@ -364,22 +431,22 @@ public static class Optimizer
                 InSample = isM,
                 OutSample = osM,
                 Efficiency = isRate > 0 ? osRate / isRate : 0,
+                InSampleOpeningEquity = training.OpeningEquity,
+                InSampleClosingEquity = training.ClosingEquity,
+                OutSampleOpeningEquity = testing.OpeningEquity,
+                OutSampleClosingEquity = testing.ClosingEquity,
+                OutSampleStitchedOpeningEquity = stitchedOpening,
+                OutSampleStitchedClosingEquity = capital,
             });
         }
 
-        // la curva fuera de muestra encadenada, con su drawdown
-        decimal peak = settings.InitialCapital;
-        foreach (var e in chained)
-        {
-            peak = Math.Max(peak, e.Equity);
-            res.OutSampleEquity.Add(e with { Drawdown = peak - e.Equity });
-        }
-
         res.OutSampleMetrics = PerformanceMetrics.Compute(res.OutSampleTrades, res.OutSampleEquity, settings.InitialCapital, cache.Crypto, 0, 0);
+        res.OutSampleMetrics.AttributionUnit = PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation;
         // eficiencia global: ganancia diaria fuera de muestra / ganancia diaria dentro de muestra
         double isDaily = isDaysTotal > 0 ? isProfit / isDaysTotal : 0, osDaily = osDaysTotal > 0 ? osProfit / osDaysTotal : 0;
         res.WalkForwardEfficiency = isDaily > 0 ? osDaily / isDaily : 0;
-        res.ProfitableWindowsPercent = res.Windows.Count > 0 ? 100.0 * res.Windows.Count(x => x.OutSample.NetProfit > 0) / res.Windows.Count : 0;
+        var completeWindows = res.Windows.Where(w => w.InSampleAvailable && w.OutSampleAvailable).ToList();
+        res.ProfitableWindowsPercent = completeWindows.Count > 0 ? 100.0 * completeWindows.Count(x => x.OutSample!.NetProfit > 0) / completeWindows.Count : 0;
         Overfit(res, cache, settings, minTrades);
         res.Evaluated = cache.Count;
         res.Seconds = sw.Elapsed.TotalSeconds;
@@ -409,31 +476,37 @@ public static class Optimizer
     /// <summary>PBO y CPCV con el resultado diario de todas las combinaciones que se corrieron (hacen falta 4 o más).</summary>
     private static void Overfit(WalkForwardResult res, ConfigCache cache, BacktestSettings settings, int minTrades)
     {
-        var runs = cache.Done.Where(r => r.Ok && r.HourTimes.Length > 0).OrderBy(r => ParameterSpace.Key(r.Index), StringComparer.Ordinal).ToList();
-        if (runs.Count < 4) return;
-        var days = runs[0].HourTimes.Select(t => DateOnly.FromDateTime(new DateTime(t, DateTimeKind.Utc))).Distinct().OrderBy(d => d).ToList();
-        if (days.Count < 20) return;
-        double capital = (double)settings.InitialCapital;
-        var daily = runs.Select(r => ConfigCache.Daily(r, days, capital)).ToList();
-        if (Overfitting.Pbo(daily) is { } pbo)
+        var runs = cache.Done.OrderBy(r => ParameterSpace.Key(r.Index), StringComparer.Ordinal).ToList();
+        if (runs.Count < 4 || cache.Calendar.Count < 20) return;
+        var daily = runs.Select(cache.Daily).ToList();
+        var completeDaily = daily.Where(days => days.All(day => day.Available))
+            .Select(days => days.Select(day => (double)day.Path.Net).ToArray()).ToList();
+        if (Overfitting.Pbo(completeDaily) is { } pbo)
         {
             res.Pbo = Math.Round(pbo.Pbo, 4);
             res.PboLoss = Math.Round(pbo.Loss, 4);
             res.PboSplits = pbo.Splits;
         }
 
-        // embargo: lo que suele durar una operación (al menos un día), para que lo elegido no vea la prueba por la ventana de al lado
-        var holds = runs.SelectMany(r => r.Trades.Take(200)).Select(t => (t.ExitTime - t.EntryTime).TotalDays).OrderBy(d => d).ToList();
+        var holds = runs.SelectMany(r => r.Accounting.Fills.Where(f => f.ClosingTrade != null).Take(200))
+            .Select(f => (f.AvailableAt - f.ClosingTrade!.EntryTime).TotalDays).OrderBy(days => days).ToList();
         int embargo = holds.Count > 0 ? Math.Clamp((int)Math.Ceiling(holds[holds.Count / 2]), 1, 5) : 1;
-        var perDay = runs.Select(r => ConfigCache.TradesPerDay(r, days)).ToList();
-        res.CpcvPaths = Overfitting.Cpcv(runs.Select(r => r.Index).ToList(), daily, perDay, minTrades, capital, cache.Crypto, groups: 8, embargo: embargo);
+        res.CpcvPaths = Overfitting.Cpcv(runs.Select(r => r.Index).ToList(), daily, minTrades, settings.InitialCapital, cache.Crypto, groups: 8, embargo: embargo);
         res.CpcvGroups = res.CpcvPaths.Count > 0 ? res.CpcvPaths.Count + 1 : 0;
         res.EmbargoDays = embargo;
+        res.CpcvPolicy = "retrospective-warm-marked-ranges";
     }
 
     /// <summary>Reordena las operaciones al azar muchas veces para ver qué drawdowns son posibles.</summary>
     public static MonteCarloResult MonteCarlo(IReadOnlyList<ClosedTrade> trades, decimal capital, int runs = 1000, decimal ruinDrawdownPercent = 50, int seed = 7)
     {
+        if (trades.Any(t => !t.HasCompleteTradeEvidence))
+            return new MonteCarloResult
+            {
+                Available = false, UnavailableReason = "Marked window contributions are not independent completed trades.",
+                DrawdownP50 = null, DrawdownP95 = null, DrawdownP99 = null, WorstDrawdown = null,
+                NetProfit = null, RuinProbabilityPercent = null,
+            };
         var res = new MonteCarloResult { Runs = runs, NetProfit = trades.Sum(t => t.NetPnl) };
         if (trades.Count < 2) return res;
         var rnd = new Random(seed);

@@ -19,19 +19,26 @@ public sealed class TickData
     private Summary? _summary;
     private sealed record Summary(DataQuality Quality, int ResolutionSeconds, long CorrectionRevision, string SourceIdentity, bool HasKnownAvailability);
 
-    private TickData(Instrument instrument, long[] ids, long[] times, long[] prices, decimal[] volumes, byte[] sides, ushort[] quality, TradeProvenance[] provenance, string?[]? eventIds, long eventIdTextBytes, int start, int end, bool compressed, Timeline? timeline = null, IbHistoryStamp? storageStamp = null)
+    private TickData(Instrument instrument, long[] ids, long[] times, long[] prices, decimal[] volumes, byte[] sides, ushort[] quality, TradeProvenance[] provenance, string?[]? eventIds, long eventIdTextBytes, int start, int end, bool compressed, Timeline? timeline = null, IbHistoryStamp? storageStamp = null, string? contentIdentity = null)
     {
         Instrument = instrument; _ids = ids; _times = times; _prices = prices; _volumes = volumes; _sides = sides;
         _quality = quality; _provenance = provenance; Start = start; End = end; Compressed = compressed;
         _eventIds = eventIds; _eventIdTextBytes = eventIdTextBytes;
         _timeline = timeline ?? new Timeline(times, quality, provenance);
         StorageStamp = storageStamp;
+        ContentIdentity = contentIdentity;
     }
 
     public Instrument Instrument { get; }
     public bool Compressed { get; }
     /// <summary>Identity captured before the original disk-load range; slices and compression retain that scope's stamp.</summary>
     public IbHistoryStamp? StorageStamp { get; }
+    public string? ContentIdentity { get; }
+
+    public bool IsCurrent(string root, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default) =>
+        Instrument.FeedId == IbBarImport.FeedId
+            ? StorageStamp is { } stamp && stamp == IbBarStore.GetStamp(root, Instrument.Symbol, fromUtc, toUtc, ct)
+            : ContentIdentity != null && ContentIdentity == HistorySources.GetRangeContentIdentity(root, Instrument.FeedId, Instrument.Symbol, fromUtc, toUtc, ct);
     public int Start { get; }
     public int End { get; }
     public int Count => End - Start;
@@ -149,11 +156,11 @@ public sealed class TickData
         if (Compressed) return this;
         var builder = new Builder(Instrument, Math.Min(Count, 1 << 20));
         for (int i = Start; i < End; i++) builder.Add(Get(i), compress: true);
-        return builder.Finish(compressed: true, storageStamp: StorageStamp);
+        return builder.Finish(compressed: true, storageStamp: StorageStamp, contentIdentity: ContentIdentity);
     }
 
     public TickData Slice(DateTime fromUtc, DateTime toUtc) =>
-        new(Instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance, _eventIds, _eventIdTextBytes, Lower(fromUtc.Ticks), Lower(toUtc.Ticks), Compressed, _timeline, StorageStamp);
+        new(Instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance, _eventIds, _eventIdTextBytes, Lower(fromUtc.Ticks), Lower(toUtc.Ticks), Compressed, _timeline, StorageStamp, ContentIdentity);
 
     private int Lower(long time)
     {
@@ -166,20 +173,30 @@ public sealed class TickData
     {
         using var ibSnapshot = instrument.FeedId == IbBarImport.FeedId ? IbBarStore.OpenSnapshot(root, instrument.Symbol, ct) : null;
         IbHistoryStamp? storageStamp = ibSnapshot?.GetStamp(fromUtc, toUtc);
+        var identities = new List<string>();
         var builder = new Builder(instrument, 1 << 20);
         int days = Math.Max(1, DateOnly.FromDateTime(toUtc).DayNumber - DateOnly.FromDateTime(fromUtc).DayNumber + 1), done = 0;
-        for (var day = DateOnly.FromDateTime(fromUtc); day <= DateOnly.FromDateTime(toUtc); day = day.AddDays(1))
+        for (var day = DateOnly.FromDateTime(fromUtc); day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) < toUtc; day = day.AddDays(1))
         {
             ct.ThrowIfCancellationRequested();
-            var rows = ibSnapshot != null ? ibSnapshot.ReadDay(day, instrument.TickSize) : HistorySources.ReadDay(root, instrument.FeedId, instrument.Symbol, day);
+            List<Trade> rows;
+            if (ibSnapshot != null) rows = ibSnapshot.ReadDay(day, instrument.TickSize);
+            else
+            {
+                rows = HistorySources.ReadDay(root, instrument.FeedId, instrument.Symbol, day, out string identity, ct);
+                identities.Add(identity);
+            }
             foreach (var trade in rows)
             {
+                ct.ThrowIfCancellationRequested();
                 if (trade.Time < fromUtc || trade.Time >= toUtc) continue;
                 builder.Add(trade, compress);
             }
             if (ibSnapshot == null) progress?.Report(++done / (double)days);
         }
-        var result = builder.Finish(compress, storageStamp);
+        string contentIdentity = storageStamp is { } captured ? "ib:" + captured.FilesFingerprint
+            : HistorySources.RangeContentIdentity(instrument.FeedId, instrument.Symbol, fromUtc, toUtc, identities);
+        var result = builder.Finish(compress, storageStamp, contentIdentity);
         // Inline consumers may reenter history; publish progress only after releasing snapshot ownership.
         ibSnapshot?.Dispose();
         if (ibSnapshot != null) progress?.Report(1);
@@ -291,12 +308,12 @@ public sealed class TickData
             index = (ushort)_provenance.Count; _provenance.Add(provenance); _indices.Add(provenance, index); return index;
         }
 
-        public TickData Finish(bool compressed, IbHistoryStamp? storageStamp = null)
+        public TickData Finish(bool compressed, IbHistoryStamp? storageStamp = null, string? contentIdentity = null)
         {
             FlushProvenance();
             Array.Resize(ref _ids, _count); Array.Resize(ref _times, _count); Array.Resize(ref _prices, _count); Array.Resize(ref _volumes, _count); Array.Resize(ref _sides, _count); Array.Resize(ref _quality, _count);
             if (_eventIds != null) Array.Resize(ref _eventIds, _count);
-            return new TickData(_instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance.ToArray(), _eventIds, _eventIdTextBytes, 0, _count, compressed, storageStamp: storageStamp);
+            return new TickData(_instrument, _ids, _times, _prices, _volumes, _sides, _quality, _provenance.ToArray(), _eventIds, _eventIdTextBytes, 0, _count, compressed, storageStamp: storageStamp, contentIdentity: contentIdentity);
         }
     }
 }

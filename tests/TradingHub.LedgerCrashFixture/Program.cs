@@ -28,6 +28,8 @@ internal static class Program
         try
         {
             Progress("operation " + args[1]);
+            if (args[1] == "native-close-claim") return NativeCloseClaim(root);
+            if (args[1] == "native-close-journal" && args.Length == 3) return NativeCloseJournal(root, args[2]);
             if (args[1].StartsWith("execution-", StringComparison.Ordinal)) return ExecutionRestart(args[1]);
             if (args[1] == "projection-recovery-batch") return RecoveryBatch();
             if (args[1] is "write" or "flat-write")
@@ -134,6 +136,76 @@ internal static class Program
         Progress("checkpoint released");
     }
 
+    private static int NativeCloseClaim(string root)
+    {
+        var descriptor = new AccountContextDescriptor("native-close-claim", "Rithmic", "futures", "loopback-native-claim",
+            "native-close-claim", "native-close-claim-generation");
+        var context = new OrderContext(descriptor, Path.Combine(root, "shared-execution"));
+        if (context.PositionCloses().Count != 0) throw new IOException("The native close fixture did not cache an empty journal.");
+        Pause();
+        var close = new NativePositionClose("ACC1", JsonSerializer.Serialize(new[] { "FCM", "IB", "ACC1" }), "ESZ6", "CME",
+            2, Guid.Parse("00000000-0000-0000-0000-000000000001"), 10000, PositionClosePhase.Reconciling,
+            Array.Empty<PositionCloseCancellation>(), ObservationScope: "claim-fixture");
+        var claim = context.BeginPositionClose("rithmic:ESZ6", close);
+        if (claim.Error != null) throw new IOException(claim.Error);
+        bool dispatched = context.StartDispatch(claim, "ESZ6", "CME", 2) == null;
+        Console.WriteLine(JsonSerializer.Serialize(new { claim.Id, claim.ClientOrderId, Dispatched = dispatched }));
+        Console.Out.Flush();
+        return 0;
+    }
+
+    private static int NativeCloseJournal(string root, string operation)
+    {
+        var descriptor = new AccountContextDescriptor("native-close-claim", "Rithmic", "futures", "loopback-native-claim",
+            "native-close-claim", "native-close-claim-generation");
+        var context = new OrderContext(descriptor, Path.Combine(root, "shared-execution"));
+        var ticket = context.PositionCloses().Single();
+        var close = context.PositionCloseState(ticket);
+        var native = new NativeOrderIdentity("rithmic:basket", "journal-close-basket");
+        Order? terminal = null;
+        if (operation == "terminal")
+        {
+            terminal = new Order
+            {
+                Security = new Security { SecurityId = "rithmic:ESZ6" }, Direction = OrderDirections.Sell,
+                Type = OrderTypes.Market, QuantityToFill = 2, Unfilled = 0, ReduceOnly = true,
+                ExchangeOrderId = native.Id, State = OrderStates.Done, Status = OrderStatus.Filled,
+            };
+            if (context.RecoverNativeOrder(terminal, ticket.ClientOrderId, native, "rithmic:ESZ6", "ESZ6", "CME", notify: false) == null)
+                throw new IOException("The fixture terminal handle did not recover its exact native owner.");
+        }
+        Pause();
+        string? error = null;
+        if (operation is "merge-first" or "merge-second")
+        {
+            string basket = operation == "merge-first" ? "journal-reduction-one" : "journal-reduction-two";
+            context.UpdatePositionClose(ticket, close with
+            {
+                Cancellations = close.Cancellations.Select(fact => fact.Basket == basket ? fact with { Observed = 1 } : fact).ToArray(),
+                Surveillance = close.Surveillance?.Select(fact => fact.Basket == basket ? fact with { Observed = 1 } : fact).ToArray(),
+                KnownReductions = 1,
+            });
+            if (operation == "merge-second") error = context.StartDispatch(ticket, "ESZ6", "CME", 1);
+        }
+        else if (operation == "sticky-fact")
+            context.UpdatePositionClose(ticket, close with
+            {
+                Cancellations = close.Cancellations.Select(fact => fact with { Observed = 1 }).ToArray(),
+                KnownReductions = 1, Invalidated = true, LateFillUnresolved = true, Phase = PositionClosePhase.Unresolved,
+            });
+        else if (operation == "binding") error = context.BindNative(ticket, native);
+        else if (operation == "terminal") error = context.RecordNativeTerminal(terminal!);
+        else return 64;
+        var persisted = context.PositionCloseState(ticket);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            ticket.Id, persisted.KnownReductions, persisted.Invalidated, persisted.LateFillUnresolved,
+            Dispatched = operation == "merge-second" && error == null, Error = error,
+        }));
+        Console.Out.Flush();
+        return 0;
+    }
+
     private static int RecoveryBatch()
     {
         const int count = 512;
@@ -198,8 +270,10 @@ internal static class Program
         }, maxStackSize: 128 * 1024);
         thread.Start();
         thread.Join();
+        Progress("reset recovery complete");
         if (failure != null) throw new IOException("The owned recovery batch failed.", failure);
         if (!delivered.Wait(TimeSpan.FromSeconds(10))) throw new IOException("The committed recovery batch was not fully delivered.");
+        Progress("batch delivered");
         if (ledger.Fills.Count != count || ledger.Position != count)
             throw new IOException("Recovered execution quantity was lost or duplicated.");
         Console.WriteLine(JsonSerializer.Serialize(new

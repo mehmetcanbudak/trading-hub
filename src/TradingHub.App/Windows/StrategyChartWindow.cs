@@ -39,7 +39,7 @@ internal sealed class StrategyChartWindow : Window
     private readonly TextBlock _state = new() { TextWrapping = TextWrapping.Wrap, FontWeight = FontWeight.SemiBold };
     private readonly List<(PropertyInfo Prop, Func<object?> Read)> _editors = new();
     private readonly Avalonia.Threading.DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
-    private StrategyFile? _file;
+    private readonly CompiledStrategyGeneration? _generation;
     private bool _accountChoiceChanged;
 
     public StrategyChartWindow(TradingView host, ChartTab chart, ChartStrategy cs)
@@ -54,7 +54,8 @@ internal sealed class StrategyChartWindow : Window
         MinHeight = 420;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = Ui.Bg1;
-        _file = host.StrategyCatalog.Files.FirstOrDefault(f => f.Id == cs.StrategyId) ?? host.StrategyCatalog.Files.FirstOrDefault(f => f.FileName == cs.StrategyId);
+        _generation = cs.Generation ?? (host.StrategyCatalog.Files.FirstOrDefault(f => f.Id == cs.StrategyId) ??
+            host.StrategyCatalog.Files.FirstOrDefault(f => f.FileName == cs.StrategyId))?.Generation;
 
         _visual.IsChecked = !cs.Live;
         _live.IsChecked = cs.Live;
@@ -128,15 +129,15 @@ internal sealed class StrategyChartWindow : Window
     {
         _params.Children.Clear();
         _editors.Clear();
-        if (_file?.Type == null)
+        if (_generation == null)
         {
             _params.Children.Add(Note("Strategy is not compiled: open it in Strategies."));
             return;
         }
 
-        var current = _file.Create();
+        var current = _generation.Create();
         current.SetParameters(_cs.Parameters);
-        foreach (var p in Strategy.Parameters(_file.Type))
+        foreach (var p in Strategy.Parameters(_generation.Type))
         {
             object? value = p.GetValue(current);
             Control editor;
@@ -283,9 +284,9 @@ internal sealed class StrategyChartWindow : Window
 
     private void Apply()
     {
-        if (_file?.Type != null)
+        if (_generation is { } generation)
         {
-            var s = _file.Create();
+            var s = generation.Create();
             s.SetParameters(_cs.Parameters);
             foreach (var (prop, read) in _editors)
             {
@@ -313,7 +314,7 @@ internal sealed class StrategyChartWindow : Window
             _cs.AccountId = a.Id;
         }
         _cs.Paused = false;
-        _ = _host.RunStrategyAsync(_chart, _cs);
+        _ = _host.RunStrategyAsync(_chart, _cs, generation: _generation);
         Refresh();
     }
 }

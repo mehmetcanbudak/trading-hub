@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Operar
 
@@ -8,7 +8,7 @@ gráfico opera con la cuenta que le elijas; de entrada es la **Cuenta simulada**
 ## Elegir la cuenta
 
 Cada gráfico recuerda su cuenta. Se elige en el Chart Trader, en **Cuenta**. Siempre está la Cuenta simulada; las demás
-aparecen según el instrumento del gráfico y tus [conexiones](conexiones.md):
+aparecen según el instrumento del gráfico y tus [conexiones](./conexiones.md):
 
 | Gráfico | Cuentas que aparecen |
 |---|---|
@@ -149,7 +149,7 @@ ni órdenes.
 ## Seguridad
 
 - **Nada real por defecto.** Cada conexión tiene su casilla de órdenes reales, apagada de entrada. Sin ella, la cuenta
-  real no aparece para operar (ver [Conexiones](conexiones.md#cuentas-reales-y-cuentas-de-prueba)).
+  real no aparece para operar (ver [Conexiones](./conexiones.md#cuentas-reales-y-cuentas-de-prueba)).
 - **Sin confirmaciones en las cuentas de prueba.** En la cuenta simulada y en las cuentas demo, de práctica o
   testnet, cada clic manda la orden al instante.
 - **Confirmación en cuentas reales.** De fábrica, cada orden a una cuenta real abre la confirmación «Confirmar orden

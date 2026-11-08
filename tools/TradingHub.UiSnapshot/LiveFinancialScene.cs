@@ -161,6 +161,13 @@ internal static class LiveFinancialScene
             service.Journal.Add(AccountCenter.SimId, entry);
             service.Journal.Add(AccountCenter.SimId, exit);
             pump(0.6);
+            // TradingView refreshes trade marks only on its slow frame; a loaded runner can deliver fewer ticks than the pump assumes.
+            void ChartMarksRefresh(Func<bool> current)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                while (!current() && DateTime.UtcNow < deadline) pump(0.01);
+            }
+            ChartMarksRefresh(() => model.TradeMarks.Any(mark => mark.Buy));
             decimal beforeMark = model.TradeMarks.Single(mark => mark.Buy).Price;
             decimal beforeLink = model.TradeLinks.Single().Pnl;
             var account = service.AccountCenter.Accounts().Single(a => a.Id == AccountCenter.SimId);
@@ -184,7 +191,6 @@ internal static class LiveFinancialScene
             }
             decimal DisplayedStatistics()
             {
-                Select("Statistics");
                 var title = view.GetVisualDescendants().OfType<TextBlock>()
                     .Single(text => text.IsEffectivelyVisible && text.Text == "NET PNL");
                 string text = ((StackPanel)title.Parent!).Children.OfType<TextBlock>().ElementAt(1).Text!;
@@ -195,22 +201,31 @@ internal static class LiveFinancialScene
                 using var frame = window.CaptureRenderedFrame() ?? throw new InvalidOperationException("The journal surface did not render.");
                 frame.Save(Path.Combine(output, name));
             }
-            decimal beforeTrade = DisplayedTrade(), beforeStats = DisplayedStatistics();
+            decimal beforeTrade = DisplayedTrade();
+            Select("Statistics");
+            decimal beforeStats = DisplayedStatistics();
             Capture("account_journal_revision_before.png");
             if (beforeAnalysis != 500m || beforeSummary != 500m || beforeTrade != 500m || beforeStats != 500m ||
                 beforeMark != 5000.25m || beforeLink != 500m)
                 throw new InvalidOperationException($"Journal UI baseline failed: analysis={beforeAnalysis}, summary={beforeSummary}, trade={beforeTrade}, statistics={beforeStats}, mark={beforeMark}, link={beforeLink}.");
 
             service.Journal.Add(AccountCenter.SimId, entry with { Price = 5001.25m });
-            pump(0.6);
             decimal afterAnalysis = service.AccountCenter.Snapshot(account).Analysis.RealizedNet;
             decimal afterSummary = service.AccountCenter.SimSummary().DayPnl;
-            decimal afterStats = DisplayedStatistics();
+            decimal firstAfterStats = DisplayedStatistics();
+            decimal afterStats = firstAfterStats;
+            var statisticsDeadline = DateTime.UtcNow.AddSeconds(30);
+            while (afterStats != 400m && DateTime.UtcNow < statisticsDeadline)
+            {
+                pump(0.01);
+                afterStats = DisplayedStatistics();
+            }
             Capture("account_journal_revision_statistics_after.png");
             decimal afterTrade = DisplayedTrade();
             Capture("account_journal_revision_trade_after.png");
             window.Navigate("trading");
             pump(0.6);
+            ChartMarksRefresh(() => model.TradeMarks.Any(mark => mark.Buy && mark.Price == 5001.25m));
             decimal afterMark = model.TradeMarks.Single(mark => mark.Buy).Price;
             decimal afterLink = model.TradeLinks.Single().Pnl;
             Capture("account_journal_revision_chart_after.png");
@@ -221,6 +236,7 @@ internal static class LiveFinancialScene
                 before = new { analysis = beforeAnalysis, summary = beforeSummary, trade = beforeTrade, statistics = beforeStats, mark = beforeMark, link = beforeLink },
                 after = new { analysis = afterAnalysis, summary = afterSummary, trade = afterTrade, statistics = afterStats, mark = afterMark, link = afterLink },
                 expectedAfter = new { net = 400m, entry = 5001.25m, effectiveExecutions = 2 },
+                firstAfterStatistics = firstAfterStats,
                 passed = correct,
                 authority = "Actual AccountCenter, AccountsView statistics/trades and TradingView marks/links; owned journal facts only, no provider orders or model calls",
             }, new JsonSerializerOptions { WriteIndented = true });
@@ -288,7 +304,21 @@ internal static class LiveFinancialScene
             chart.Strategies.Add(cs);
             model.Strategies.Add(cs.Overlay);
             model.CenterOn(entryAt, exitAt);
-            pump(0.6);
+            // The chart redraws strategy overlays from its timer, so read the displayed values once that redraw lands.
+            bool Displayed(Func<bool> condition)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                while (DateTime.UtcNow < deadline)
+                {
+                    if (condition()) return true;
+                    pump(0.01);
+                }
+                return condition();
+            }
+            bool Settled(decimal price, decimal net) => Displayed(() =>
+                cs.Overlay.Signals.Count(signal => signal.Entry) == 1 && cs.Overlay.Links.Count == 1 &&
+                cs.Overlay.Signals.Single(signal => signal.Entry).Price == price && cs.Overlay.Links.Single().Pnl == net);
+            Settled(entryPrice, 94m);
             decimal beforeEntry = cs.Overlay.Signals.Single(signal => signal.Entry).Price;
             decimal beforeNet = cs.Overlay.Links.Single().Pnl;
             if (beforeEntry != entryPrice || beforeNet != 94m)
@@ -296,13 +326,14 @@ internal static class LiveFinancialScene
 
             if (LiveStore.AppendFill(key, entry with { Price = correctedPrice, Fees = new[] { new ExecutionFee(4m, "USD") } }) is { } correctionError)
                 throw new IOException(correctionError);
-            pump(0.6);
+            Settled(correctedPrice, 53m);
             decimal afterEntry = cs.Overlay.Signals.Single(signal => signal.Entry).Price;
             decimal afterNet = cs.Overlay.Links.Single().Pnl;
             if (LiveStore.AppendFill(key, entry with
                 { Price = correctedPrice, Fees = Array.Empty<ExecutionFee>(), FeesComplete = false }) is { } pendingError)
                 throw new IOException(pendingError);
-            pump(0.6);
+            Displayed(() => cs.SavedLedger is { HasPendingFinancials: true } && cs.Overlay.Links.Count == 0 &&
+                cs.Overlay.Signals.Count(signal => signal.Entry) == 1 && cs.Overlay.Signals.Count(signal => !signal.Entry) == 1);
             var pendingEntry = cs.Overlay.Signals.Single(signal => signal.Entry);
             var pendingExit = cs.Overlay.Signals.Single(signal => !signal.Entry);
             bool pendingLabelIsNumeric = decimal.TryParse(pendingExit.Label, NumberStyles.Any, CultureInfo.InvariantCulture, out _);
@@ -323,7 +354,7 @@ internal static class LiveFinancialScene
                 pendingFrame.Save(Path.Combine(output, "live_stopped_chart_pending.png"));
             if (LiveStore.AppendFill(key, entry with { Price = correctedPrice, Fees = new[] { new ExecutionFee(4m, "USD") } }) is { } recoveryError)
                 throw new IOException(recoveryError);
-            pump(0.6);
+            Settled(correctedPrice, 53m);
             decimal recoveredNet = cs.Overlay.Links.Single().Pnl;
             using var frame = window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Restored chart did not render.");
             frame.Save(Path.Combine(output, "live_stopped_chart_revision.png"));

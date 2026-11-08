@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Claude en Trading Hub
 
@@ -10,7 +10,7 @@ funciona igual; solo te quedás sin el asistente, el laboratorio y el agente de 
 |---|---|
 | **Backtesting → Código**, panel de Claude | Escribe, explica y corrige estrategias e indicadores |
 | El mismo panel con **Laboratorio** | Además corre backtests, optimizaciones, walk-forward y Monte Carlo, y deja un reporte con veredicto |
-| **En vivo → Portafolios** | El agente de riesgo de cada portafolio (ver [En vivo](en-vivo.md#el-agente-de-riesgo)) |
+| **En vivo → Portafolios** | El agente de riesgo de cada portafolio (ver [En vivo](./en-vivo.md#el-agente-de-riesgo)) |
 | **En vivo → Propuestas** | «Pedir análisis a Claude»: el laboratorio revisa la cartera en vivo y propone tamaños |
 
 ## Cómo encuentra Claude Code
@@ -19,7 +19,7 @@ Trading Hub busca el ejecutable `claude` en `/usr/local/bin`, `/opt/homebrew/bin
 `~/.npm-global/bin`, en cada carpeta de tu `PATH` y en la copia que trae la app de escritorio de Claude
 (`~/Library/Application Support/Claude/claude-code/…`). Si encuentra varias, usa la de versión más nueva. Con la
 variable `TRADINGHUB_CLAUDE_CLI` podés indicarle otra ruta. Cómo instalarlo está en
-[Instalación](instalacion.md#claude-code-opcional).
+[Instalación](./instalacion.md#claude-code-opcional).
 
 - El panel de Claude muestra arriba «Claude Code *versión* · tu suscripción», o avisa si no lo encontró.
 - Si Claude Code pide iniciar sesión, aparece **Iniciar sesión en Claude Code**: abre la Terminal con `claude /login`
@@ -53,8 +53,8 @@ variable `TRADINGHUB_CLAUDE_CLI` podés indicarle otra ruta. Cómo instalarlo es
    o qué falla.
 
 Con cada pedido Trading Hub le pasa el archivo abierto, la carpeta de indicadores y los errores de compilación del
-momento. Sus instrucciones traen la API completa de estrategias y de indicadores (la de [Estrategias](estrategias.md)
-y la de [Indicadores](indicadores.md)) y estas reglas: código C# que compile sin paquetes externos, sin archivos, red,
+momento. Sus instrucciones traen la API completa de estrategias y de indicadores (la de [Estrategias](./estrategias.md)
+y la de [Indicadores](./indicadores.md)) y estas reglas: código C# que compile sin paquetes externos, sin archivos, red,
 hilos ni `Random` sin semilla, comentarios cortos en español y, al final, 2 a 5 líneas de explicación.
 
 Las conversaciones se guardan en `~/Library/Application Support/Trading Hub/Chats`. Con el botón de historial retomás
@@ -121,4 +121,4 @@ veredicto, el resumen, el análisis, los riesgos y los próximos pasos.
 Lo que escribís, los archivos que lee (tus estrategias e indicadores) y lo que devuelven las herramientas (métricas,
 operaciones, resúmenes de datos, imágenes del gráfico y, si se lo pedís, el estado de la cartera en vivo) viajan a
 Anthropic a través de tu Claude Code, con tu cuenta. Las claves de tus conexiones están en el Llavero y ninguna
-herramienta las expone. Más en [Privacidad](privacidad.md).
+herramienta las expone. Más en [Privacidad](./privacidad.md).

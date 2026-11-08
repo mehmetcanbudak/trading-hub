@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Trading
 
@@ -10,10 +10,13 @@ Choose **Account** in Chart Trader. The selection is remembered per chart.
 
 | Chart | Available accounts |
 |---|---|
-| Any | Simulated account. |
+| Normal venue chart | Simulated account, plus applicable connected broker accounts below. |
 | Binance Futures / Spot | That profile's Binance account, marked testnet or **REAL**. |
+| Bybit linear | That profile's one-way UTA account, marked Demo, Testnet or **REAL**. |
 | Rithmic futures | Connected Rithmic practice or **REAL** accounts. |
 | Rithmic / Tradovate CME futures | Connected Tradovate demo or **REAL** accounts. |
+| Composite crypto | No executable account, including the shared simulator. Its composite price is not a venue. |
+| Isolated practice replay | Only the replay's own simulated account and balance. No shared simulator or live account. |
 
 Rithmic accounts appear after the order session connects; until then, the ticket explains the wait. Selecting a real account displays an orange **REAL ACCOUNT** warning.
 
@@ -117,7 +120,7 @@ For simulation, change **Initial balance** or **Reset simulated account**. Reset
 
 ## Safety
 
-- **No real trading by default.** Each profile's real-order permission starts disabled. Without it, the real account is unavailable for submission; see [Connections](conexiones.md#real-and-test-accounts).
+- **No real trading by default.** Each profile's real-order permission starts disabled. Without it, the real account is unavailable for submission; see [Connections](./conexiones.md#real-and-test-accounts).
 - **Permission is checked when an order is sent.** Disabling a connection or its real orders takes effect immediately, including for charts, Chart Trader and live strategies that still use the account: an order that would open, add to or reverse a position is blocked with an **Order blocked** message (strategies log it and keep managing their exits). Cancels and orders that only reduce a position (close, partial exit, stop/target moves) stay available behind the usual confirmation.
 - **No confirmation on test accounts.** Simulation, demo, practice and testnet clicks submit immediately.
 - **Real-order confirmation.** By default a **Confirm REAL order** dialog identifies action and account. This also covers changes, closes, reversals, cancellations, partial exits and breakeven through manual controls. To disable it where supported, both the profile's per-real-order confirmation and **Settings → Trading → Confirm real orders** must be off. Tradovate has no profile switch for bypassing this, so its real orders still require confirmation. Accounts Close/Cancel also confirm for real accounts.

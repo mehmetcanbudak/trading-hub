@@ -490,5 +490,20 @@ public sealed class OperationsStorageFixture : IDisposable
         Assert.Equal("public class SavedStrategy {}", File.ReadAllText(Path.Combine(ScriptsRoot, "Estrategias", "SavedStrategy.cs")));
         Assert.True(Directory.Exists(Path.Combine(ScriptsRoot, "Indicadores", "EmptyFolder")));
     }
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose()
+    {
+        RemoveDirectoryLinks(new DirectoryInfo(_root));
+        Directory.Delete(_root, recursive: true);
+    }
+
+    // Windows recursive delete treats a junction as a volume mount point and fails with ERROR_INVALID_PARAMETER.
+    // Removing each link entry first leaves its target untouched on every platform.
+    private static void RemoveDirectoryLinks(DirectoryInfo directory)
+    {
+        foreach (var child in directory.EnumerateDirectories())
+        {
+            if (child.Attributes.HasFlag(FileAttributes.ReparsePoint)) child.Delete();
+            else RemoveDirectoryLinks(child);
+        }
+    }
 }

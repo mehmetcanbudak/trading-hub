@@ -14,6 +14,13 @@ public sealed record NativeOrderIdentity(string Kind, string Id);
 public sealed record NativeWorkingOrder(NativeOrderIdentity Parent, NativeOrderIdentity Child, OrderTypes Type,
     string NativeInstrument, string NativeExchange);
 public sealed record NativeOrderTerminal(NativeOrderIdentity Native, decimal CumulativeQuantity);
+public sealed record NativeOrderAmendment(NativeOrderIdentity Native, string ClientOrderId, decimal TotalQuantity, decimal Price);
+
+internal readonly record struct NativeAmendmentDispatch(int TotalQuantity, decimal PredecessorFilled)
+{
+    internal decimal RemainingQuantity => TotalQuantity - PredecessorFilled;
+}
+
 public enum OrderOwnerKind { Manual, Strategy }
 public sealed record OrderOwner(string Id, string? LedgerKey = null, Guid LedgerGeneration = default, OrderOwnerKind Kind = OrderOwnerKind.Manual);
 public sealed record OrderRequest(string Instrument, OrderDirections Direction, OrderTypes Type, decimal Quantity,
@@ -27,6 +34,8 @@ public sealed class PreparedOrderIntent
     private int _attempted;
     internal bool Attempted => Volatile.Read(ref _attempted) != 0;
     internal bool TryAttempt() => Interlocked.Exchange(ref _attempted, 1) == 0;
+    // Only for a send-slot refusal proven to precede any durable dispatch record or transport send.
+    internal void ReleaseAttempt() => Volatile.Write(ref _attempted, 0);
     internal PreparedOrderIntent(OrderContext context, OwnedOrderIntent data, string? error = null)
     { Context = context; Data = data; Error = error; }
     internal OrderContext Context { get; }
@@ -66,7 +75,11 @@ public sealed record OwnedOrderIntent(string Id, string LogicalOrderId, string C
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     ExecutionIdentity[]? OwnedPriorExecutions = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    ExecutionIdentity[]? ImportedPriorExecutions = null);
+    ExecutionIdentity[]? ImportedPriorExecutions = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    NativePositionClose? PositionClose = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    NativeOrderAmendment? AcceptedNativeAmendment = null);
 public sealed record ExecutionReceipt(string Id, ExecutionCursor Cursor, ExecutionReport Report)
 {
     public static ExecutionReceipt Create(ExecutionCursor cursor, ExecutionReport report) =>
@@ -79,7 +92,7 @@ public sealed record OwnedOrderQuantity(OwnedOrderIntent Intent, DateTime Time, 
 
 /// <summary>Account-lifetime ownership. Disk lookup is by exact scoped ID, not by timestamps, comments or price.
 /// Ephemeral mode is exclusively for a simulator with no external transport; native accounts require an explicit root.</summary>
-public sealed class OrderContext
+public sealed partial class OrderContext
 {
     private static readonly OrderTypes[] EmergencyTypes = { OrderTypes.Market, OrderTypes.Stop, OrderTypes.Limit };
     private readonly object _gate = new();
@@ -95,8 +108,10 @@ public sealed class OrderContext
     private bool _storageFault, _identityFault;
     private bool _configurationFrozen;
     private readonly Dictionary<string, string> _bindingFailures = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _releasedCloseDenials = new(StringComparer.Ordinal);
     private OrderOwnershipJournal? _journal;
     private Func<OrderRequest, string?>? _permission;
+    private Func<OrderRequest, decimal, string?>? _nativePermission;
     public AccountContextDescriptor Descriptor { get; private set; }
     public IExecutionSource Executions { get; }
     public string? StorageRoot { get; private set; }
@@ -151,7 +166,8 @@ public sealed class OrderContext
     public static OrderContext EphemeralSimulation(string account) => new(new(Guid.NewGuid().ToString("N"),
         "simulator", "paper", "local simulation", account, Guid.NewGuid().ToString("N"), account));
 
-    public void Configure(AccountContextDescriptor descriptor, string? root, Func<OrderRequest, string?>? permission = null)
+    public void Configure(AccountContextDescriptor descriptor, string? root, Func<OrderRequest, string?>? permission = null,
+        Func<OrderRequest, decimal, string?>? nativePermission = null)
     {
         lock (_gate)
         {
@@ -163,6 +179,7 @@ public sealed class OrderContext
                 if (Descriptor != descriptor || StorageRoot != full)
                     throw new InvalidOperationException("A configured account's identity, generation and ownership root cannot change.");
                 _permission = permission;
+                _nativePermission = nativePermission;
                 return;
             }
             // Validate and durably bind the candidate before exposing any of its routing authority.
@@ -171,6 +188,7 @@ public sealed class OrderContext
             _journal = journal;
             StorageRoot = full;
             _permission = permission;
+            _nativePermission = nativePermission;
             _configurationFrozen = true;
         }
     }
@@ -285,7 +303,7 @@ public sealed class OrderContext
     }
 
     /// <summary>Non-consuming authorization between a definitive predecessor cancel and child dispatch.</summary>
-    public string? CheckDispatch(PreparedOrderIntent intent, decimal? actualQuantity = null)
+    public string? CheckDispatch(PreparedOrderIntent intent, decimal? actualQuantity = null, decimal? reconciledPosition = null)
     {
         lock (_gate)
         {
@@ -301,7 +319,8 @@ public sealed class OrderContext
             if (intent.Data.Emergency && (!intent.Request.ReduceOnly || quantity > intent.Data.MaximumReduction))
                 return "The emergency reduction exceeds its durable quantity/side authority.";
             var request = quantity == intent.Request.Quantity ? intent.Request : intent.Request with { Quantity = quantity };
-            return _permission?.Invoke(request);
+            return _nativePermission != null && reconciledPosition is { } position
+                ? _nativePermission(request, position) : _permission?.Invoke(request);
         }
     }
 
@@ -381,11 +400,31 @@ public sealed class OrderContext
     }
 
     public string? StartDispatch(PreparedOrderIntent intent, string nativeInstrument, string nativeExchange = "",
-        decimal? actualQuantity = null, decimal? actualPrice = null)
+        decimal? actualQuantity = null, decimal? actualPrice = null, decimal? reconciledPosition = null) =>
+        StartDispatchCore(intent, nativeInstrument, nativeExchange, actualQuantity, actualPrice, reconciledPosition, null, null);
+
+    internal string? StartDispatch(PreparedOrderIntent intent, string nativeInstrument, string nativeExchange,
+        decimal actualQuantity, decimal actualPrice, decimal reconciledPosition,
+        Func<OwnedOrderIntent, string?> currentCloseAdmission)
+    {
+        ArgumentNullException.ThrowIfNull(currentCloseAdmission);
+        return StartDispatchCore(intent, nativeInstrument, nativeExchange, actualQuantity, actualPrice, reconciledPosition, currentCloseAdmission, null);
+    }
+
+    internal string? StartNativeAmendmentDispatch(PreparedOrderIntent intent, string nativeInstrument, string nativeExchange,
+        in NativeAmendmentDispatch dispatch, decimal actualPrice, decimal reconciledPosition) =>
+        StartDispatchCore(intent, nativeInstrument, nativeExchange, dispatch.RemainingQuantity, actualPrice,
+            reconciledPosition, null, dispatch.PredecessorFilled);
+
+    private string? StartDispatchCore(PreparedOrderIntent intent, string nativeInstrument, string nativeExchange,
+        decimal? actualQuantity, decimal? actualPrice, decimal? reconciledPosition,
+        Func<OwnedOrderIntent, string?>? currentCloseAdmission, decimal? capturedPredecessorFilled)
     {
         lock (_gate)
         {
-            if (CheckDispatch(intent, actualQuantity) is { } denied) return denied;
+            if (_nativePermission != null && reconciledPosition == null)
+                return "Native order admission requires the current reconciled account position.";
+            if (CheckDispatch(intent, actualQuantity, reconciledPosition) is { } denied) return denied;
             if (string.IsNullOrEmpty(nativeInstrument)) return "The native routed instrument is not resolved.";
             if (intent.Data.Emergency && (intent.Data.NativeInstrument != nativeInstrument || intent.Data.NativeExchange != nativeExchange))
                 return "The emergency reduction does not match its durable native routed instrument.";
@@ -399,17 +438,36 @@ public sealed class OrderContext
                 if (!intent.Data.Emergency)
                 {
                     EnsureEmergencyPlan(intent, nativeInstrument, nativeExchange, actualQuantity ?? intent.Request.Quantity);
-                    Save(intent.Data with { DispatchUncertain = true, NativeInstrument = nativeInstrument, NativeExchange = nativeExchange,
+                    var dispatch = intent.Data with { DispatchUncertain = true, NativeInstrument = nativeInstrument, NativeExchange = nativeExchange,
                         DispatchQuantity = actualQuantity ?? intent.Request.Quantity, DispatchPrice = actualPrice ?? intent.Request.Price,
-                        PredecessorFilled = intent.IsReplacement ? intent.BoundOrder?.Filled : null });
+                        PositionClose = saved?.PositionClose ?? intent.Data.PositionClose,
+                        PredecessorFilled = intent.IsReplacement ? capturedPredecessorFilled ?? intent.BoundOrder?.Filled : null };
+                    if (dispatch.PositionClose != null && _journal != null)
+                        Remember(_journal.StartPositionCloseDispatch(dispatch, currentCloseAdmission));
+                    else Save(dispatch);
                 }
                 TrackEmergencyExposure(intent, nativeInstrument, nativeExchange, actualQuantity ?? intent.Request.Quantity);
+                if (_releasedCloseDenials.Remove(intent.Id, out var releasedDenial) && _lastError == releasedDenial) _lastError = null;
                 return null;
+            }
+            catch (PositionCloseAdmissionDeniedException ex)
+            {
+                // The current-close check refused before the dispatch record was written, so nothing was sent.
+                intent.ReleaseAttempt();
+                return _releasedCloseDenials[intent.Id] = LastError = "Could not commit dispatch ownership: " + ex.Message;
+            }
+            catch (PositionCloseAdmissionUnresolvedException ex)
+            {
+                if (currentCloseAdmission != null) throw;
+                return LastError = "Could not commit dispatch ownership: " + ex.Message;
             }
             catch (Exception ex)
             {
-                _storageFault = ex is IOException or UnauthorizedAccessException;
-                return LastError = "Could not commit dispatch ownership: " + ex.Message;
+                bool storageFault = ex is IOException or UnauthorizedAccessException;
+                if (storageFault) _storageFault = true;
+                LastError = "Could not commit dispatch ownership: " + ex.Message;
+                if (storageFault && currentCloseAdmission != null) throw;
+                return LastError;
             }
         }
     }
@@ -581,7 +639,7 @@ public sealed class OrderContext
                 if (!(data.NativeOrders ?? Array.Empty<NativeOrderIdentity>()).Contains(native))
                 {
                     data = data with { NativeOrders = (data.NativeOrders ?? Array.Empty<NativeOrderIdentity>()).Append(native).ToArray() };
-                    Save(data);
+                    data = Save(data);
                 }
                 if (_journal != null) _journal.Bind(native, data);
                 else
@@ -636,12 +694,8 @@ public sealed class OrderContext
         (intent != null && !intent.Adopted && intent.DispatchUncertain &&
             intent.Rejection == null && intent.NativeOrders is not { Length: > 0 });
 
-    /// <summary>Recover an accepted identity from its exact durable native claim or uncertain client dispatch; never resend it.
-    /// Claim-only recovery lets a provider validate an existing adoption before considering original wire-type rules.</summary>
-    public PreparedOrderIntent? RecoverNativeOrder(Order order, string clientOrderId, NativeOrderIdentity native,
-        string instrument, string nativeInstrument, string nativeExchange = "", bool notify = true, bool allowClientRecovery = true)
+    internal OwnedOrderIntent? FindNativeSubmission(string clientOrderId, NativeOrderIdentity native, bool allowClientRecovery = true)
     {
-        PreparedOrderIntent ticket;
         lock (_gate)
         {
             var ids = _journal?.FindNative(native) ??
@@ -649,18 +703,45 @@ public sealed class OrderContext
             var claim = ids is { Count: > 0 } ? Find(ids[^1]) : null;
             if (claim == null && !allowClientRecovery) return null;
             var client = string.IsNullOrEmpty(clientOrderId) ? null : _journal?.FindClient(clientOrderId);
-            // Client IDs may be reused after settlement. Only a still-uncertain, unacknowledged
-            // local dispatch is client-only recovery authority; accepted claims require their native identity.
             if (claim == null && !CanRecoverNativeIdentity(client, native)) return null;
-            // A native adoption is an existing accepted claim, not an uncertain original submission.
-            // An exact subsequent operation may share that native identity, but never override another owner.
-            var data = claim != null && client != null && client.Owner == claim.Owner &&
+            if (Descriptor.Provider == "Rithmic" && claim?.AcceptedNativeAmendment?.Native == native) return claim;
+            return claim != null && client != null && client.Owner == claim.Owner &&
                 client.LogicalOrderId == claim.LogicalOrderId && client.NativeOrders?.Contains(native) == true
                 ? client : claim ?? client;
+        }
+    }
+
+    /// <summary>Recover an accepted identity from its exact durable native claim or uncertain client dispatch; never resend it.
+    /// Claim-only recovery lets a provider validate an existing adoption before considering original wire-type rules.</summary>
+    public PreparedOrderIntent? RecoverNativeOrder(Order order, string clientOrderId, NativeOrderIdentity native,
+        string instrument, string nativeInstrument, string nativeExchange = "", bool notify = true, bool allowClientRecovery = true,
+        NativeOrderAmendment? nativeAmendmentEvidence = null)
+    {
+        PreparedOrderIntent ticket;
+        lock (_gate)
+        {
+            var data = FindNativeSubmission(clientOrderId, native, allowClientRecovery);
             if (data == null) return null;
+            if (Descriptor.Provider == "Rithmic" && data.Request.Instrument != instrument &&
+                data.NativeInstrument == nativeInstrument && data.NativeExchange == nativeExchange) return null;
+            if (Descriptor.Provider == "Rithmic" && _journal != null)
+            {
+                var evidence = nativeAmendmentEvidence ?? new NativeOrderAmendment(native, clientOrderId,
+                    order.QuantityToFill, order.Type == OrderTypes.Stop ? order.TriggerPrice : order.Price);
+                if (evidence.Native == native && evidence.ClientOrderId == clientOrderId)
+                {
+                    data = _journal.ResolveNativeAmendment(data, evidence, allowNewAcceptance: nativeAmendmentEvidence != null);
+                    Remember(data);
+                }
+            }
             bool workingChild = data.WorkingOrder is { } working && working.Child == native &&
                 working.NativeInstrument == nativeInstrument && working.NativeExchange == nativeExchange;
-            bool nativeReductionModeKnown = Descriptor.Provider != "Binance" || Descriptor.Product != "spot";
+            bool nativeReductionModeKnown = Descriptor.Provider != "Rithmic" && (Descriptor.Provider != "Binance" || Descriptor.Product != "spot");
+            string expectedClient = Descriptor.Provider == "Rithmic" && data.AcceptedNativeAmendment is { } amendment && amendment.Native == native
+                ? amendment.ClientOrderId : data.ClientOrderId;
+            if (Descriptor.Provider == "Rithmic" && data.DispatchQuantity is { } dispatched &&
+                order.QuantityToFill != dispatched + (data.PredecessorFilled ?? 0))
+                throw new InvalidOperationException("Rithmic replay quantity disagrees with the original dispatched quantity.");
             if (data.ContextId != Descriptor.Id || data.Generation != Descriptor.Generation || data.EphemeralPreparation ||
                 (!data.Adopted && !data.DispatchUncertain) || data.Rejection != null || data.Emergency ||
                 data.Request.Instrument != instrument ||
@@ -669,11 +750,11 @@ public sealed class OrderContext
                 data.Request.Direction != order.Direction ||
                 (workingChild ? data.WorkingOrder!.Type : data.Request.Type) != order.Type ||
                 (nativeReductionModeKnown && data.Request.ReduceOnly != order.ReduceOnly) ||
-                (!workingChild && data.ClientOrderId != clientOrderId) ||
+                (!workingChild && expectedClient != clientOrderId) ||
                 (data.NativeOrders is { Length: > 0 } && !data.NativeOrders.Contains(native)) ||
                 (order.NativeIdentity != null && order.NativeIdentity != native) ||
                 (order.ContextId != null && order.ContextId != Descriptor.Id) ||
-                (!string.IsNullOrEmpty(order.ClientOrderId) && order.ClientOrderId != clientOrderId) ||
+                (!string.IsNullOrEmpty(order.ClientOrderId) && order.ClientOrderId != clientOrderId && order.ClientOrderId != data.ClientOrderId) ||
                 (!string.IsNullOrEmpty(order.OwnerId) && (order.OwnerId != data.Owner.Id ||
                     order.LogicalOrderId != data.LogicalOrderId || order.IntentId != data.Id)))
                 throw new InvalidOperationException("Native client recovery disagrees with its frozen durable dispatch.");
@@ -687,6 +768,29 @@ public sealed class OrderContext
         }
         if (notify) NotifyOwnershipChanged();
         return ticket;
+    }
+
+    internal string? RecordAcceptedNativeAmendment(PreparedOrderIntent intent, NativeOrderIdentity native,
+        string clientOrderId, decimal totalQuantity, decimal price)
+    {
+        lock (_gate)
+        {
+            try
+            {
+                if (!ReferenceEquals(intent.Context, this) || Descriptor.Provider != "Rithmic" || _journal == null)
+                    throw new InvalidOperationException("An accepted native amendment requires its exact durable routing context.");
+                var accepted = _journal.AcceptNativeAmendment(intent.Id, new(native, clientOrderId, totalQuantity, price));
+                Remember(accepted);
+                _bindingFailures.Remove(intent.Id);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                string error = LastError = "Could not persist accepted native amendment: " + ex.Message;
+                _bindingFailures[intent.Id] = error;
+                return error;
+            }
+        }
     }
 
     /// <summary>Persist the broker's conditional-parent/working-child evidence separately from its immutable request.</summary>
@@ -1094,10 +1198,11 @@ public sealed class OrderContext
         }
     }
 
-    private void Save(OwnedOrderIntent data)
+    private OwnedOrderIntent Save(OwnedOrderIntent data)
     {
-        _journal?.SaveIntent(data);
+        data = _journal?.SaveIntent(data) ?? data;
         Remember(data);
+        return data;
     }
     private void Remember(OwnedOrderIntent data)
     {
@@ -1147,7 +1252,7 @@ public sealed class OrderContext
 
 /// <summary>Small, scoped durable records and exact-ID indexes. Atomic replacement retains the previous complete
 /// record until publication. Supported flush/sync failures propagate; no filesystem lease crosses a broker await.</summary>
-internal sealed class OrderOwnershipJournal
+internal sealed partial class OrderOwnershipJournal
 {
     private readonly string _root;
     private readonly AccountContextDescriptor _descriptor;
@@ -1170,9 +1275,34 @@ internal sealed class OrderOwnershipJournal
         if (existing == null) Write(path, descriptor);
     }
 
-    public void SaveIntent(OwnedOrderIntent intent)
+    public OwnedOrderIntent SaveIntent(OwnedOrderIntent intent)
     {
         using var lease = Acquire();
+        if (intent.PositionClose != null)
+        {
+            var current = ReadIntent(intent.Id);
+            if (current?.PositionClose == null) throw new IOException("The bounded close identity is unavailable.");
+            var nativeOrders = current.NativeOrders == null ? intent.NativeOrders :
+                intent.NativeOrders == null || current.NativeOrders.AsSpan().SequenceEqual(intent.NativeOrders) ? current.NativeOrders :
+                current.NativeOrders.Union(intent.NativeOrders).ToArray();
+            var terminal = intent.TerminalOrder;
+            if (current.TerminalOrder is { } knownTerminal && (terminal == null ||
+                terminal.Native == knownTerminal.Native && terminal.CumulativeQuantity < knownTerminal.CumulativeQuantity))
+                terminal = knownTerminal;
+            intent = intent with
+            {
+                PositionClose = MergePositionCloseFacts(current.PositionClose, current.PositionClose, current.DispatchUncertain),
+                DispatchUncertain = current.DispatchUncertain, NativeInstrument = current.NativeInstrument,
+                NativeExchange = current.NativeExchange, DispatchQuantity = current.DispatchQuantity, DispatchPrice = current.DispatchPrice,
+                NativeOrders = nativeOrders, TerminalOrder = terminal, Rejection = intent.Rejection ?? current.Rejection,
+            };
+        }
+        SaveIntentLeased(intent);
+        return intent;
+    }
+
+    private void SaveIntentLeased(OwnedOrderIntent intent)
+    {
         if (intent.ContextId != _descriptor.Id || intent.Generation != _descriptor.Generation)
             throw new IOException("An intent cannot cross account context generations.");
         Write(IntentPath(intent.Id), intent);
@@ -1260,6 +1390,130 @@ internal sealed class OrderOwnershipJournal
             return; // Same logical owner: operation lineage lives in each intent, not an ever-growing native lookup array.
         }
         Write(path, new NativeBinding(native, ids.Append(intent.Id).ToArray()));
+    }
+
+    public OwnedOrderIntent AcceptNativeAmendment(string id, NativeOrderAmendment amendment)
+    {
+        using var lease = Acquire();
+        return AcceptNativeAmendmentLeased(id, amendment);
+    }
+
+    private OwnedOrderIntent AcceptNativeAmendmentLeased(string id, NativeOrderAmendment amendment)
+    {
+        var data = ReadIntent(id) ?? throw new IOException("The accepted amendment identity is unavailable.");
+        string path = Path.Combine(_root, "native", OrderContext.NativeKey(amendment.Native) + ".json");
+        var binding = Read<NativeBinding>(path);
+        if (binding == null || binding.Native != amendment.Native || binding.Intents.Length == 0)
+            throw new IOException("The accepted amendment has no exact native predecessor claim.");
+        var current = ReadIntent(binding.Intents[^1]) ?? throw new IOException("The native predecessor identity is unavailable.");
+        if (!data.DispatchUncertain || data.PredecessorId == null || data.PredecessorFilled == null || data.Rejection != null || data.Emergency ||
+            data.Owner != current.Owner || data.LogicalOrderId != current.LogicalOrderId ||
+            (data.NativeInstrument != current.NativeInstrument && !(current.Adopted && current.NativeInstrument == null &&
+                current.NativeOrders?.Contains(amendment.Native) == true)) ||
+            (data.NativeExchange != current.NativeExchange && !(current.Adopted && current.NativeExchange == null &&
+                current.NativeOrders?.Contains(amendment.Native) == true)) ||
+            data.Request.Instrument != current.Request.Instrument || data.Request.Direction != current.Request.Direction ||
+            data.Request.Type != current.Request.Type || data.Request.ReduceOnly != current.Request.ReduceOnly ||
+            data.DispatchQuantity + (data.PredecessorFilled ?? 0) != amendment.TotalQuantity ||
+            data.DispatchPrice != amendment.Price ||
+            amendment.ClientOrderId != (current.AcceptedNativeAmendment?.ClientOrderId ?? current.ClientOrderId))
+            throw new IOException("The accepted native amendment disagrees with its dispatched lineage.");
+        if (current.Id != data.Id)
+        {
+            var ancestor = data;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            while (ancestor.Id != current.Id)
+            {
+                if (!seen.Add(ancestor.Id) || ancestor.PredecessorId == null ||
+                    ReadIntent(ancestor.PredecessorId) is not { } predecessor ||
+                    predecessor.Owner != data.Owner || predecessor.LogicalOrderId != data.LogicalOrderId)
+                    throw new IOException("The accepted amendment is not a successor of the current native claim.");
+                ancestor = predecessor;
+            }
+        }
+        if (data.AcceptedNativeAmendment != null && data.AcceptedNativeAmendment != amendment)
+            throw new IOException("The accepted amendment evidence cannot change.");
+        if (current.Id == data.Id && data.AcceptedNativeAmendment == amendment && data.NativeOrders?.Contains(amendment.Native) == true)
+            return data;
+        data = data with { AcceptedNativeAmendment = amendment,
+            NativeOrders = data.NativeOrders?.Contains(amendment.Native) == true ? data.NativeOrders :
+                (data.NativeOrders ?? Array.Empty<NativeOrderIdentity>()).Append(amendment.Native).ToArray() };
+        SaveIntentLeased(data);
+        if (current.Id != data.Id)
+        {
+            var claims = (string[])binding.Intents.Clone();
+            claims[^1] = data.Id;
+            Write(path, new NativeBinding(amendment.Native, claims));
+        }
+        return data;
+    }
+
+    public OwnedOrderIntent ResolveNativeAmendment(OwnedOrderIntent claim, NativeOrderAmendment evidence, bool allowNewAcceptance)
+    {
+        using var lease = Acquire();
+        List<OwnedOrderIntent>? persisted = null, attempted = null;
+        foreach (string path in Directory.EnumerateFiles(Path.Combine(_root, "intent"), "*.json"))
+        {
+            var data = Read<OwnedOrderIntent>(path) ?? throw new IOException("An amendment identity disappeared during recovery.");
+            if (data.ContextId != _descriptor.Id || data.Generation != _descriptor.Generation || IntentPath(data.Id) != path)
+                throw new IOException("Corrupt or incorrectly scoped amendment ownership.");
+            if (data.PredecessorId == null || data.PredecessorFilled == null || !data.DispatchUncertain || data.Rejection != null || data.Emergency ||
+                data.Owner != claim.Owner || data.LogicalOrderId != claim.LogicalOrderId ||
+                (data.NativeInstrument != claim.NativeInstrument && !(claim.Adopted && claim.NativeInstrument == null &&
+                    claim.NativeOrders?.Contains(evidence.Native) == true)) ||
+                (data.NativeExchange != claim.NativeExchange && !(claim.Adopted && claim.NativeExchange == null &&
+                    claim.NativeOrders?.Contains(evidence.Native) == true)) ||
+                data.Request.Instrument != claim.Request.Instrument || data.Request.Direction != claim.Request.Direction ||
+                data.Request.Type != claim.Request.Type || data.Request.ReduceOnly != claim.Request.ReduceOnly ||
+                data.NativeOrders is { Length: > 0 } && !data.NativeOrders.Contains(evidence.Native) ||
+                evidence.ClientOrderId != (claim.AcceptedNativeAmendment?.ClientOrderId ?? claim.ClientOrderId)) continue;
+            if (data.AcceptedNativeAmendment is { } accepted)
+            {
+                if (accepted.Native != evidence.Native || accepted.ClientOrderId != evidence.ClientOrderId ||
+                    data.NativeOrders?.Contains(evidence.Native) != true ||
+                    data.DispatchQuantity + data.PredecessorFilled != accepted.TotalQuantity || data.DispatchPrice != accepted.Price) continue;
+                (persisted ??= new()).Add(data);
+            }
+            else if (allowNewAcceptance && data.DispatchQuantity + data.PredecessorFilled == evidence.TotalQuantity &&
+                data.DispatchPrice == evidence.Price)
+                (attempted ??= new()).Add(data);
+        }
+        var durable = LatestNativeSuccessor(persisted, claim);
+        if (durable?.AcceptedNativeAmendment is { } acceptance)
+            claim = AcceptNativeAmendmentLeased(durable.Id, acceptance);
+        if (!allowNewAcceptance || claim.DispatchQuantity + (claim.PredecessorFilled ?? 0) == evidence.TotalQuantity &&
+            claim.DispatchPrice == evidence.Price) return claim;
+        var selected = LatestNativeSuccessor(attempted, claim);
+        return selected == null ? claim : AcceptNativeAmendmentLeased(selected.Id, evidence);
+    }
+
+    private OwnedOrderIntent? LatestNativeSuccessor(IReadOnlyList<OwnedOrderIntent>? candidates, OwnedOrderIntent ancestor)
+    {
+        if (candidates == null) return null;
+        OwnedOrderIntent? selected = null;
+        foreach (var candidate in candidates)
+        {
+            if (!IsNativeSuccessor(candidate, ancestor)) continue;
+            bool superseded = false;
+            foreach (var other in candidates)
+                if (other.Id != candidate.Id && IsNativeSuccessor(other, candidate)) { superseded = true; break; }
+            if (superseded) continue;
+            if (selected != null) throw new IOException("Rithmic amendment replay has competing dispatched lineages.");
+            selected = candidate;
+        }
+        return selected;
+    }
+
+    private bool IsNativeSuccessor(OwnedOrderIntent data, OwnedOrderIntent ancestor)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (data.Id != ancestor.Id)
+        {
+            if (!seen.Add(data.Id) || data.PredecessorId == null || ReadIntent(data.PredecessorId) is not { } previous ||
+                previous.Owner != ancestor.Owner || previous.LogicalOrderId != ancestor.LogicalOrderId) return false;
+            data = previous;
+        }
+        return true;
     }
     public IReadOnlyList<string>? FindNative(NativeOrderIdentity native)
     {
@@ -1418,7 +1672,7 @@ public static class OrderActions
         account.Replace(order, account.OrderContext.PreparePriceUpdate(order, price));
     public static void Flatten(ITradingAccount account)
     {
-        if (account is ICoordinatedPositionOperations coordinated)
+        if (account is ICoordinatedPositionClose coordinated)
         {
             coordinated.Flatten();
             return;

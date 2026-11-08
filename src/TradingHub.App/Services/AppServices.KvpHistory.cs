@@ -24,17 +24,7 @@ public sealed partial class AppServices
         {
             if (_historyArchiveStop.IsCancellationRequested) throw new InvalidOperationException("History archival is closing down.");
             var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _historyArchiveStop.Token);
-            var task = Task.Run(() =>
-            {
-                int completed = 0;
-                foreach (var day in selected)
-                {
-                    linked.Token.ThrowIfCancellationRequested();
-                    TickArchive.ArchiveDay(root, instrument, day, linked.Token);
-                    progress?.Report(++completed / (double)selected.Length);
-                }
-                return completed;
-            }, linked.Token);
+            var task = Task.Run(() => TickArchive.ArchiveDays(root, instrument, selected, progress, linked.Token), linked.Token);
             _historyArchiveTasks.Add(task);
             _ = task.ContinueWith(completed =>
             {

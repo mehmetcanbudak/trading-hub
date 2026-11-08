@@ -149,23 +149,24 @@ public sealed class EquityChart : SkiaView
 
         if (_points.Count >= 2)
         {
-            long t0 = _points[0].Time.Ticks, t1 = _points[^1].Time.Ticks;
+            long t0 = (_points[0].AvailableAt ?? _points[0].Time).Ticks, t1 = (_points[^1].AvailableAt ?? _points[^1].Time).Ticks;
             if (t1 == t0) t1 = t0 + 1;
             float X(DateTime t) => left + plotW * (float)((t.Ticks - t0) / (double)(t1 - t0));
+            float PointX(EquityPoint p) => X(p.AvailableAt ?? p.Time);
 
             // área bajo la curva
             using var line = new SKPath();
             using var area = new SKPath();
-            area.MoveTo(X(_points[0].Time), Y(min));
+            area.MoveTo(PointX(_points[0]), Y(min));
             for (int i = 0; i < _points.Count; i++)
             {
-                float x = X(_points[i].Time), y = Y(_points[i].Equity);
+                float x = PointX(_points[i]), y = Y(_points[i].Equity);
                 if (i == 0) line.MoveTo(x, y);
                 else line.LineTo(x, y);
                 area.LineTo(x, y);
             }
 
-            area.LineTo(X(_points[^1].Time), Y(min));
+            area.LineTo(PointX(_points[^1]), Y(min));
             area.Close();
             bool positive = _points[^1].Equity >= _capital;
             var color = positive ? Up : Down;
@@ -193,9 +194,9 @@ public sealed class EquityChart : SkiaView
             if (maxDd > 0 && ddH > 10)
             {
                 using var dd = new SKPath();
-                dd.MoveTo(X(_points[0].Time), ddTop);
-                foreach (var p in _points) dd.LineTo(X(p.Time), ddTop + (float)(p.Drawdown / maxDd) * ddH);
-                dd.LineTo(X(_points[^1].Time), ddTop);
+                dd.MoveTo(PointX(_points[0]), ddTop);
+                foreach (var p in _points) dd.LineTo(PointX(p), ddTop + (float)(p.Drawdown / maxDd) * ddH);
+                dd.LineTo(PointX(_points[^1]), ddTop);
                 dd.Close();
                 using var ddFill = new SKPaint { IsAntialias = true, Color = Down.WithAlpha(90) };
                 canvas.DrawPath(dd, ddFill);
@@ -222,12 +223,12 @@ public sealed class EquityChart : SkiaView
                 while (lo < hi)
                 {
                     int mid = (lo + hi) / 2;
-                    if (_points[mid].Time.Ticks < target) lo = mid + 1;
+                    if ((_points[mid].AvailableAt ?? _points[mid].Time).Ticks < target) lo = mid + 1;
                     else hi = mid;
                 }
 
                 var p = _points[lo];
-                float x = X(p.Time), y = Y(p.Equity);
+                float x = PointX(p), y = Y(p.Equity);
                 using var cross = new SKPaint { Color = Strong.WithAlpha(60), StrokeWidth = 1 };
                 canvas.DrawLine(x, top, x, height - bottom, cross);
                 using var dot = new SKPaint { IsAntialias = true, Color = Accent };

@@ -1,8 +1,8 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Installation
 
-This fork is built locally from the repository. On macOS, the build script assembles `Trading Hub.app`, signs it and optionally copies it to Applications. Windows x64/ARM64 self-contained builds and per-user NSIS installers are also implemented; see [Windows installation](portar-a-windows.md). The first build takes a few minutes while NuGet dependencies download. No published fork installer or completed native Windows certification is claimed.
+This fork is built locally from the repository. On macOS, the build script assembles `Trading Hub.app`, signs it and optionally copies it to Applications. Windows x64/ARM64 self-contained builds and per-user NSIS installers are also implemented; see [Windows installation](./portar-a-windows.md). The first build takes a few minutes while NuGet dependencies download. No published fork installer or completed native Windows certification is claimed.
 
 For this fork's consolidated English-first C# version, use **`memoshi`**, not the historical `main` branch:
 
@@ -89,7 +89,7 @@ Without a developer certificate the script signs ad hoc. The locally built app n
 
 Use 64-bit Windows 10/11 (x64 or ARM64), Git, .NET SDK 10 and NSIS. From this fork's checkout, run `.\build-windows.ps1` after installing NSIS (`winget install NSIS.NSIS`). On macOS with NSIS (`brew install makensis`), `./build-windows.sh` builds both architectures. Outputs: `dist/TradingHub-Setup-x64.exe` and `dist/TradingHub-Setup-arm64.exe`. End users of these self-contained packages do not need .NET installed.
 
-The installer defaults to `%LOCALAPPDATA%\Programs\Trading Hub`, requires no administrator elevation and adds Start/Desktop shortcuts. Fully quit before updating or uninstalling; installer Retry/Cancel waits for the process rather than force-killing it. Install over the prior app to update; uninstall through Windows Settings → Apps. Application removal intentionally retains `%APPDATA%\Trading Hub`, Documents scripts/reports and Credential Manager entries. Verify the artifact's source/signature before running it. The original author's upstream installers are not this fork's binaries and cannot be assumed to include fork-only safety corrections. See the [Windows guide](portar-a-windows.md#validation-and-release-gates) for uncompleted native gates.
+The installer defaults to `%LOCALAPPDATA%\Programs\Trading Hub`, requires no administrator elevation and adds Start/Desktop shortcuts. Fully quit before updating or uninstalling; installer Retry/Cancel waits for the process rather than force-killing it. Install over the prior app to update; uninstall through Windows Settings → Apps. Application removal intentionally retains `%APPDATA%\Trading Hub`, Documents scripts/reports and Credential Manager entries. Verify the artifact's source/signature before running it. The original author's upstream installers are not this fork's binaries and cannot be assumed to include fork-only safety corrections. See the [Windows guide](./portar-a-windows.md#validation-and-release-gates) for uncompleted native gates.
 
 
 ## Claude Code (optional)
@@ -144,7 +144,7 @@ Spanish folder names are compatibility identifiers, not untranslated UI. Do not 
 
 The first launch creates the Documents folders, including `DeltaPercentageExample.cs`. Example strategies are created when the strategy folder is empty. Existing user files are not overwritten merely to translate them.
 
-At first startup, a fresh installation chooses Spanish or Simplified Chinese for those OS languages and English otherwise. Existing English-fork settings lacking `Language` remain English. Change it in **Settings → General → Language**, then reopen or use **Restart now**. Restart uses the protection-aware quit flow; canceling quit does not spawn a replacement. Reports/assistant prose follow the UI choice; generated C# and sample identifiers stay English. See [Settings](ajustes.md#language-and-regional-display).
+At first startup, a fresh installation chooses Spanish or Simplified Chinese for those OS languages and English otherwise. Existing English-fork settings lacking `Language` remain English. Change it in **Settings → General → Language**, then reopen or use **Restart now**. Restart uses the protection-aware quit flow; canceling quit does not spawn a replacement. Reports/assistant prose follow the UI choice; generated C# and sample identifiers stay English. See [Settings](./ajustes.md#language-and-regional-display).
 
 
 Open folders using **File → Open data folder**, **Code → Open indicators folder**, **Code → Open strategies folder**, or the **Open** buttons under **Settings → Data**.

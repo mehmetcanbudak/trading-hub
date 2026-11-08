@@ -4383,6 +4383,10 @@
     "es": "Estadísticas completas de apertura y cierre no disponibles: se desconoce la base de costos de apertura completa.",
     "zh-CN": "完整开平仓统计不可用：完整的开仓成本基础未知。"
   },
+  "Futures quantity must be a whole number of contracts between 1 and 2147483647.": {
+    "es": "La cantidad de futuros debe ser un número entero de contratos entre 1 y 2147483647.",
+    "zh-CN": "期货数量必须是 1 到 2147483647 之间的整数张合约。"
+  },
   "HHmm": {
     "es": "HHmm",
     "zh-CN": "HHmm"
@@ -7030,6 +7034,10 @@
   "Order protection": {
     "es": "Protección de órdenes",
     "zh-CN": "订单保护"
+  },
+  "Order quantity exceeds this connection's configured maximum.": {
+    "es": "La cantidad de la orden supera el máximo configurado para esta conexión.",
+    "zh-CN": "订单数量超过此连接配置的上限。"
   },
   "Order snapshot unavailable": {
     "es": "Instantánea de órdenes no disponible",
@@ -12550,5 +12558,1033 @@
   "★ My indicators": {
     "es": "★ Mis indicadores",
     "zh-CN": "★ 我的指标"
+  },
+  "\nAccounting policy {0}. Attribution policy {1}. CPCV policy {2}.": {
+    "es": "\nPolítica contable {0}. Política de atribución {1}. Política CPCV {2}.",
+    "zh-CN": "\n会计政策 {0}。归属政策 {1}。CPCV 政策 {2}。"
+  },
+  "\nAvailable OOS {0} to {1}. {2} of {3} windows complete. ": {
+    "es": "\nCobertura fuera de muestra disponible del {0} al {1}. {2} de {3} ventanas completadas. ",
+    "zh-CN": "\n可用样本外区间 {0} 至 {1}。已完成 {2} / {3} 个窗口。 "
+  },
+  "\nAvailable OOS {0} to {1}. {2} of {3} windows complete. {4}\nAccounting policy {5}. Attribution policy {6}. CPCV policy {7}.": {
+    "es": "\nCobertura fuera de muestra disponible del {0} al {1}. {2} de {3} ventanas completadas. {4}\nPolítica contable {5}. Política de atribución {6}. Política CPCV {7}.",
+    "zh-CN": "\n可用样本外区间 {0} 至 {1}。已完成 {2} / {3} 个窗口。 {4}\n会计政策 {5}。归属政策 {6}。CPCV 政策 {7}。"
+  },
+  "\nIncludes closing-fill contributions and final boundary valuations from a warm mark-to-market research splice. This combination is not an executable portfolio.": {
+    "es": "\nIncluye contribuciones de ejecuciones de cierre y valoraciones a mercado al final de cada ventana de un empalme de investigación con estado precalentado y valoración a mercado. Esta combinación no es un portafolio ejecutable.",
+    "zh-CN": "\n包含保留预热状态、按盯市估值串联的研究结果中的平仓成交贡献与窗口末端盯市估值。此组合并非可执行的投资组合。"
+  },
+  " {0} rows retained.": {
+    "es": " {0} filas conservadas.",
+    "zh-CN": " 保留 {0} 行。"
+  },
+  " · Rithmic": {
+    "es": " · Rithmic",
+    "zh-CN": " · Rithmic"
+  },
+  " · net {0} · PF {1}": {
+    "es": " · neto {0} · PF {1}",
+    "zh-CN": " · 净盈亏 {0} · PF {1}"
+  },
+  "### Boundary equity": {
+    "es": "### Capital en los límites de ventana",
+    "zh-CN": "### 窗口边界资金"
+  },
+  "### Component input evidence": {
+    "es": "### Evidencia de entrada de los componentes",
+    "zh-CN": "### 分项输入证据"
+  },
+  "### Contribution amounts": {
+    "es": "### Importes de las contribuciones",
+    "zh-CN": "### 贡献金额"
+  },
+  "### Contribution boundaries": {
+    "es": "### Límites de las contribuciones",
+    "zh-CN": "### 贡献边界"
+  },
+  "### Recommended combination": {
+    "es": "### Combinación recomendada",
+    "zh-CN": "### 推荐组合"
+  },
+  "### Retrospective CPCV": {
+    "es": "### CPCV retrospectiva",
+    "zh-CN": "### 回溯 CPCV"
+  },
+  "**Best parameters**": {
+    "es": "**Mejores parámetros**",
+    "zh-CN": "**最佳参数**"
+  },
+  "0 of {0} paths available. No eligible retrospective CPCV path is available.": {
+    "es": "0 de {0} rutas disponibles. No hay rutas aptas disponibles para la CPCV retrospectiva.",
+    "zh-CN": "可用路径 0 / {0}。没有符合条件的可用回溯 CPCV 路径。"
+  },
+  "A bounded Rithmic close already reserves this native account and contract in another ownership context.": {
+    "es": "Un cierre acotado de Rithmic ya reserva esta cuenta nativa y este contrato en otro contexto de titularidad.",
+    "zh-CN": "另一个归属上下文中的有界 Rithmic 平仓已预留此原生账户和合约."
+  },
+  "A bounded Rithmic close reserves this native contract; new exposure is disabled.": {
+    "es": "Un cierre acotado de Rithmic reserva este contrato nativo; la nueva exposición está deshabilitada.",
+    "zh-CN": "有界 Rithmic 平仓已预留此原生合约; 已禁用新增敞口."
+  },
+  "A bounded close cannot change its captured route or widen its authorization.": {
+    "es": "Un cierre acotado no puede cambiar su ruta capturada ni ampliar su autorización.",
+    "zh-CN": "有界平仓不能更改其已捕获的路由或扩大其授权范围."
+  },
+  "A close ownership record disappeared during recovery.": {
+    "es": "Un registro de titularidad del cierre desapareció durante la recuperación.",
+    "zh-CN": "恢复期间一条平仓归属记录消失."
+  },
+  "A late fill changed the completed Rithmic close; its remaining position inclusion is unresolved.": {
+    "es": "Una ejecución tardía cambió el cierre de Rithmic ya completado; la inclusión de esa ejecución en la posición restante sigue sin resolverse.",
+    "zh-CN": "一笔延迟成交改变了已完成的 Rithmic 平仓; 该成交是否已计入剩余持仓仍未确定."
+  },
+  "A late reducing fill changed the completed Rithmic close; its remaining position inclusion is unresolved.": {
+    "es": "Una ejecución tardía que reduce la posición cambió el cierre de Rithmic ya completado; la inclusión de esa ejecución en la posición restante sigue sin resolverse.",
+    "zh-CN": "一笔延迟的减仓成交改变了已完成的 Rithmic 平仓; 该成交是否已计入剩余持仓仍未确定."
+  },
+  "A marked research component has an internal unavailable gap. The portfolio cannot represent that coverage without inventing returns.": {
+    "es": "Un componente de investigación valorado a mercado tiene un tramo interno no disponible. El portafolio no puede representar esa cobertura sin inventar rendimientos.",
+    "zh-CN": "一个按盯市估值计算的研究分项内部存在不可用的缺口。不虚构收益，就无法用组合表示该覆盖范围。"
+  },
+  "A marked research component has an invalid out-of-sample interval.": {
+    "es": "Un componente de investigación valorado a mercado tiene un intervalo fuera de muestra no válido.",
+    "zh-CN": "一个按盯市估值计算的研究分项包含无效的样本外区间。"
+  },
+  "A split has no eligible training configuration or its selected test range is incomplete.": {
+    "es": "Una partición no tiene una configuración de entrenamiento apta o su intervalo de prueba seleccionado está incompleto.",
+    "zh-CN": "某个划分没有符合条件的训练配置，或其选定测试区间不完整。"
+  },
+  "Accounting policy": {
+    "es": "Política contable",
+    "zh-CN": "会计政策"
+  },
+  "Accounting policy {0}. Attribution policy {1}. ": {
+    "es": "Política contable {0}. Política de atribución {1}. ",
+    "zh-CN": "会计政策 {0}。归属政策 {1}。 "
+  },
+  "Accounting policy {0}. Attribution policy {1}. CPCV policy {2}.": {
+    "es": "Política contable {0}. Política de atribución {1}. Política CPCV {2}.",
+    "zh-CN": "会计政策 {0}。归属政策 {1}。CPCV 政策 {2}。"
+  },
+  "Accounting policy {0}. Attribution policy {1}. Warm mark-to-market research splice, not an executable portfolio. Positions are not transferred between configurations. Sizing does not use stitched capital, and deployment turnover is not charged. Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Only actual closing fills count for eligibility. CPCV policy {2}. Retrospective validation uses only available paths for shares and medians.": {
+    "es": "Política contable {0}. Política de atribución {1}. Empalme de investigación con estado precalentado y valoración a mercado, no un portafolio ejecutable. No se transfieren posiciones entre configuraciones. El tamaño de las posiciones no usa el capital encadenado y no se cargan los costos de rotación del despliegue. El profit factor, el acierto y la expectativa usan contribuciones de ejecuciones de cierre y valoraciones a mercado al final de cada ventana. Para cumplir los requisitos solo cuentan las ejecuciones reales de cierre. Política CPCV {2}. La validación retrospectiva usa solo rutas disponibles para las proporciones y las medianas.",
+    "zh-CN": "会计政策 {0}。归属政策 {1}。保留预热状态、按盯市估值串联的研究结果，并非可执行的投资组合。配置之间不转移持仓。仓位规模不依据串联资金计算，也不计入部署切换的换仓成本。盈利因子、胜率和期望值使用平仓成交贡献与窗口末端盯市估值计算。资格判定仅统计实际平仓成交。CPCV 政策 {2}。回溯验证仅使用可用路径计算占比与中位数。"
+  },
+  "Actual closing fill": {
+    "es": "Ejecución real de cierre",
+    "zh-CN": "实际平仓成交"
+  },
+  "Actual closing fills": {
+    "es": "Ejecuciones reales de cierre",
+    "zh-CN": "实际平仓成交数"
+  },
+  "Actual closing fills {0}. {1}": {
+    "es": "Ejecuciones reales de cierre {0}. {1}",
+    "zh-CN": "实际平仓成交数 {0}。 {1}"
+  },
+  "Actual entry": {
+    "es": "Entrada real",
+    "zh-CN": "实际入场"
+  },
+  "Actual out-of-sample closing fills": {
+    "es": "Ejecuciones reales de cierre fuera de muestra",
+    "zh-CN": "样本外实际平仓成交数"
+  },
+  "All out-of-sample windows are complete.": {
+    "es": "Todas las ventanas fuera de muestra están completas.",
+    "zh-CN": "所有样本外窗口均已完成。"
+  },
+  "An earlier out-of-sample segment is unavailable.": {
+    "es": "Un tramo anterior fuera de muestra no está disponible.",
+    "zh-CN": "较早的一个样本外区段不可用。"
+  },
+  "An owned bounded close reserves this Rithmic contract; uncoordinated native dispatch is disabled.": {
+    "es": "Un cierre acotado con titularidad reserva este contrato de Rithmic; los envíos nativos no coordinados están deshabilitados.",
+    "zh-CN": "已有归属的有界平仓已预留此 Rithmic 合约; 已禁用未经协调的原生派发."
+  },
+  "An unresolved Rithmic close retains its original session; reconfigure a separate session instead.": {
+    "es": "Un cierre de Rithmic sin resolver conserva su sesión original; reconfigura una sesión distinta en su lugar.",
+    "zh-CN": "尚未解决的 Rithmic 平仓保留其原始会话; 请改为重新配置一个独立会话."
+  },
+  "At least one accounting cutoff is required.": {
+    "es": "Se requiere al menos un corte temporal contable.",
+    "zh-CN": "至少需要一个会计截点。"
+  },
+  "Attribution": {
+    "es": "Atribución",
+    "zh-CN": "归属"
+  },
+  "Attribution net": {
+    "es": "Neto atribuido",
+    "zh-CN": "归属净盈亏"
+  },
+  "Attribution policy": {
+    "es": "Política de atribución",
+    "zh-CN": "归属政策"
+  },
+  "Attribution samples": {
+    "es": "Muestras de atribución",
+    "zh-CN": "归属样本数"
+  },
+  "Attribution unit": {
+    "es": "Unidad de atribución",
+    "zh-CN": "归属单位"
+  },
+  "Attribution {0}. Actual entry {1}. Window {2} to {3}. Opening mark {4}. Closing mark {5}. Carry net credit {6}. Carry commission credit {7}.": {
+    "es": "Atribución {0}. Entrada real {1}. Ventana de {2} a {3}. Precio de valoración a mercado inicial {4}. Precio de valoración a mercado final {5}. Abono neto por arrastre {6}. Abono de comisiones por arrastre {7}.",
+    "zh-CN": "归属 {0}。实际入场 {1}。窗口 {2} 至 {3}。期初盯市价格 {4}。期末盯市价格 {5}。结转净盈亏抵记额 {6}。结转手续费抵记额 {7}。"
+  },
+  "Available": {
+    "es": "Disponible",
+    "zh-CN": "可用"
+  },
+  "Available from": {
+    "es": "Disponible desde",
+    "zh-CN": "可用起点"
+  },
+  "Available paths": {
+    "es": "Rutas disponibles",
+    "zh-CN": "可用路径"
+  },
+  "Available to": {
+    "es": "Disponible hasta",
+    "zh-CN": "可用终点"
+  },
+  "Average of all measured combinations at each value. A broad plateau suggests robustness; an isolated peak suggests overfitting.": {
+    "es": "Promedio de todas las combinaciones medidas en cada valor. Una meseta amplia sugiere robustez. Un pico aislado sugiere sobreajuste.",
+    "zh-CN": "对每个参数取值下的所有实测组合求平均。较宽的参数高原意味着结果可能稳健。孤立的峰值意味着可能过拟合。"
+  },
+  "Average per contribution": {
+    "es": "Promedio por contribución",
+    "zh-CN": "每项贡献的平均值"
+  },
+  "Boundary valuation": {
+    "es": "Valoración a mercado en el límite de la ventana",
+    "zh-CN": "窗口边界盯市估值"
+  },
+  "Bounded close ownership could not be persisted; the existing bounded emergency reduction identity remains available.": {
+    "es": "No se pudo persistir la titularidad del cierre acotado; el identificador existente de reducción acotada de emergencia sigue disponible.",
+    "zh-CN": "无法持久化有界平仓的归属; 现有的有界紧急减仓标识仍可用."
+  },
+  "CPCV policy": {
+    "es": "Política CPCV",
+    "zh-CN": "CPCV 政策"
+  },
+  "CPCV policy {0}. Retrospective validation uses only available paths for shares and medians.": {
+    "es": "Política CPCV {0}. La validación retrospectiva usa solo rutas disponibles para las proporciones y las medianas.",
+    "zh-CN": "CPCV 政策 {0}。回溯验证仅使用可用路径计算占比与中位数。"
+  },
+  "Cancellation for the bounded Rithmic close superseded this amendment.": {
+    "es": "La solicitud de cancelación para el cierre acotado de Rithmic dejó sin efecto esta modificación.",
+    "zh-CN": "有界 Rithmic 平仓的撤单请求已取代此改单."
+  },
+  "Cancellation or native terminal evidence superseded the amendment.": {
+    "es": "La solicitud de cancelación o la evidencia nativa de estado terminal dejó sin efecto la modificación.",
+    "zh-CN": "撤单请求或原生终态证据已取代该改单."
+  },
+  "Captured from the run input": {
+    "es": "Capturada de los datos de entrada de la corrida",
+    "zh-CN": "从运行输入中捕获"
+  },
+  "Carry commission credit": {
+    "es": "Abono de comisiones por arrastre",
+    "zh-CN": "结转手续费抵记额"
+  },
+  "Carry net credit": {
+    "es": "Abono neto por arrastre",
+    "zh-CN": "结转净盈亏抵记额"
+  },
+  "Closing mark": {
+    "es": "Precio de valoración a mercado final",
+    "zh-CN": "期末盯市价格"
+  },
+  "Closing-fill contribution": {
+    "es": "Contribución de ejecución de cierre",
+    "zh-CN": "平仓成交贡献"
+  },
+  "Closing-fill contributions and final boundary valuations": {
+    "es": "Contribuciones de ejecuciones de cierre y valoraciones a mercado al final de cada ventana",
+    "zh-CN": "平仓成交贡献与窗口末端盯市估值"
+  },
+  "Closing-fill contributions and final boundary valuations are not independent completed trades. Trade-only confidence, duration and excursion diagnostics are unavailable.": {
+    "es": "Las contribuciones de ejecuciones de cierre y las valoraciones a mercado al final de cada ventana no son operaciones completas independientes. La confianza basada solo en operaciones completas y los diagnósticos de duración y excursiones adversas o favorables no están disponibles.",
+    "zh-CN": "平仓成交贡献与窗口末端盯市估值并非独立的完整交易。仅基于完整交易的置信度、持仓时长和有利/不利偏移诊断不可用。"
+  },
+  "Code version": {
+    "es": "Versión del código",
+    "zh-CN": "代码版本"
+  },
+  "Competing bounded close identities require reconciliation.": {
+    "es": "Los identificadores de cierre acotado en competencia requieren conciliación.",
+    "zh-CN": "相互竞争的有界平仓标识需要核对."
+  },
+  "Complete": {
+    "es": "Completa",
+    "zh-CN": "完整"
+  },
+  "Complete measured population": {
+    "es": "Población completa de combinaciones medidas",
+    "zh-CN": "全部实测组合"
+  },
+  "Complete research coverage.": {
+    "es": "Cobertura de investigación completa.",
+    "zh-CN": "研究覆盖完整。"
+  },
+  "Complete-population sensitivity is unavailable for this truncated legacy run.": {
+    "es": "La sensibilidad de la población completa no está disponible para esta corrida truncada de una versión anterior.",
+    "zh-CN": "此次截断的旧版运行没有可用的完整总体敏感性分析。"
+  },
+  "Complete-population statistics are unavailable for this truncated legacy run.": {
+    "es": "Las estadísticas de la población completa no están disponibles para esta corrida truncada de una versión anterior.",
+    "zh-CN": "此次截断的旧版运行没有可用的完整总体统计数据。"
+  },
+  "Completed prefix net PnL": {
+    "es": "Resultado neto del tramo inicial completado",
+    "zh-CN": "已完成连续前段的净盈亏"
+  },
+  "Completed prefix only": {
+    "es": "Solo el tramo inicial completado",
+    "zh-CN": "仅已完成的连续前段"
+  },
+  "Completed windows": {
+    "es": "Ventanas completadas",
+    "zh-CN": "已完成窗口"
+  },
+  "Component": {
+    "es": "Componente",
+    "zh-CN": "分项"
+  },
+  "Content identity": {
+    "es": "Identidad del contenido",
+    "zh-CN": "内容标识"
+  },
+  "Correction revision": {
+    "es": "Revisión de corrección",
+    "zh-CN": "修正版本"
+  },
+  "Correction revision {0}. Known availability No. Content identity {1}.": {
+    "es": "Revisión de corrección {0}. Disponibilidad temporal conocida No. Identidad del contenido {1}.",
+    "zh-CN": "修正版本 {0}。可用时间已知 否。内容标识 {1}。"
+  },
+  "Correction revision {0}. Known availability Yes. Content identity {1}.": {
+    "es": "Revisión de corrección {0}. Disponibilidad temporal conocida Sí. Identidad del contenido {1}.",
+    "zh-CN": "修正版本 {0}。可用时间已知 是。内容标识 {1}。"
+  },
+  "Corrupt or incorrectly scoped close ownership.": {
+    "es": "La titularidad del cierre está dañada o tiene un ámbito incorrecto.",
+    "zh-CN": "平仓归属信息已损坏或作用域不正确."
+  },
+  "Could not persist bounded close ownership: ": {
+    "es": "No se pudo persistir la titularidad del cierre acotado: ",
+    "zh-CN": "无法持久化有界平仓的归属: "
+  },
+  "Could not persist bounded close ownership: {0}": {
+    "es": "No se pudo persistir la titularidad del cierre acotado: {0}",
+    "zh-CN": "无法持久化有界平仓的归属: {0}"
+  },
+  "Could not read strategy source: ": {
+    "es": "No se pudo leer el código fuente de la estrategia: ",
+    "zh-CN": "无法读取策略源代码： "
+  },
+  "Could not read strategy source: {0}": {
+    "es": "No se pudo leer el código fuente de la estrategia: {0}",
+    "zh-CN": "无法读取策略源代码：{0}"
+  },
+  "Coverage": {
+    "es": "Cobertura",
+    "zh-CN": "覆盖范围"
+  },
+  "Coverage and attribution in details": {
+    "es": "Cobertura y atribución en los detalles",
+    "zh-CN": "覆盖范围与归属见详情"
+  },
+  "Embargo days": {
+    "es": "Días de embargo",
+    "zh-CN": "隔离期天数"
+  },
+  "Error closing Rithmic trading session": {
+    "es": "Error al cerrar la sesión de trading de Rithmic",
+    "zh-CN": "关闭 Rithmic 交易会话时出错"
+  },
+  "Error closing ordinary work": {
+    "es": "Error al cerrar las tareas ordinarias",
+    "zh-CN": "关闭常规任务时出错"
+  },
+  "Error closing recorded history": {
+    "es": "Error al cerrar el registro del historial",
+    "zh-CN": "关闭历史记录任务时出错"
+  },
+  "Expectancy per contribution": {
+    "es": "Expectativa por contribución",
+    "zh-CN": "每项贡献的期望值"
+  },
+  "Gross PnL": {
+    "es": "Resultado bruto",
+    "zh-CN": "毛盈亏"
+  },
+  "Groups": {
+    "es": "Grupos",
+    "zh-CN": "分组"
+  },
+  "History is in use by another writer: ": {
+    "es": "Otro escritor está usando el historial: ",
+    "zh-CN": "历史数据正由另一写入者使用： "
+  },
+  "History is in use by another writer: {0}": {
+    "es": "Otro escritor está usando el historial: {0}",
+    "zh-CN": "历史数据正由另一写入者使用：{0}"
+  },
+  "History ownership belongs to another physical instrument.": {
+    "es": "La titularidad del historial corresponde a otro instrumento físico.",
+    "zh-CN": "历史数据的所有权属于另一个物理品种。"
+  },
+  "IB history identity belongs to its snapshot.": {
+    "es": "La identidad del historial de IB corresponde a su instantánea.",
+    "zh-CN": "IB 历史数据的标识归属于其快照。"
+  },
+  "IB history reads belong to its snapshot.": {
+    "es": "Las lecturas del historial de IB corresponden a su instantánea.",
+    "zh-CN": "IB 历史数据的读取归属于其快照。"
+  },
+  "Includes warm mark-to-market research contributions, not an executable portfolio. Only common available OOS coverage is combined. Partial components retain their completed prefix.": {
+    "es": "Incluye contribuciones de investigación con estado precalentado y valoración a mercado, no un portafolio ejecutable. Solo se combina la cobertura común disponible fuera de muestra. Los componentes parciales conservan su tramo inicial completado.",
+    "zh-CN": "包含保留预热状态、按盯市估值计算的研究贡献，并非可执行的投资组合。仅合并共同可用的样本外覆盖范围。不完整的分项保留其已完成的连续前段。"
+  },
+  "Incomplete coverage": {
+    "es": "Cobertura incompleta",
+    "zh-CN": "覆盖不完整"
+  },
+  "Input evidence": {
+    "es": "Evidencia de entrada",
+    "zh-CN": "输入证据"
+  },
+  "Input evidence is unknown for this legacy run.": {
+    "es": "La evidencia de entrada de esta corrida de una versión anterior es desconocida.",
+    "zh-CN": "此次旧版运行的输入证据未知。"
+  },
+  "Input quality": {
+    "es": "Calidad de entrada",
+    "zh-CN": "输入质量"
+  },
+  "Input quality {0}. Resolution {1} s. Source {2}. ": {
+    "es": "Calidad de entrada {0}. Resolución {1} s. Fuente {2}. ",
+    "zh-CN": "输入质量 {0}。分辨率 {1} s。数据源 {2}。 "
+  },
+  "Input quality {0}. Resolution {1} s. Source {2}. Correction revision {3}. Known availability {4}. Content identity {5}.{6}": {
+    "es": "Calidad de entrada {0}. Resolución {1} s. Fuente {2}. Revisión de corrección {3}. Disponibilidad temporal conocida {4}. Identidad del contenido {5}.{6}",
+    "zh-CN": "输入质量 {0}。分辨率 {1} s。数据源 {2}。修正版本 {3}。可用时间已知 {4}。内容标识 {5}。{6}"
+  },
+  "Known availability": {
+    "es": "Disponibilidad temporal conocida",
+    "zh-CN": "可用时间已知"
+  },
+  "Known reducing fills exhausted the confirmed Rithmic close ceiling; remaining exposure is unresolved.": {
+    "es": "Las ejecuciones conocidas que reducen la posición agotaron el límite confirmado del cierre de Rithmic; la exposición restante sigue sin resolverse.",
+    "zh-CN": "已知的减仓成交已耗尽经确认的 Rithmic 平仓数量上限; 剩余敞口仍未确定."
+  },
+  "Marked research components require saved walk-forward coverage.": {
+    "es": "Los componentes de investigación valorados a mercado requieren cobertura walk-forward guardada.",
+    "zh-CN": "按盯市估值计算的研究分项需要已保存的滚动前推覆盖范围。"
+  },
+  "Marked window contributions are not independent completed trades.": {
+    "es": "Las contribuciones de ventanas valoradas a mercado no son operaciones completas independientes.",
+    "zh-CN": "按盯市估值计算的窗口贡献并非独立的完整交易。"
+  },
+  "Measured combinations": {
+    "es": "Combinaciones medidas",
+    "zh-CN": "实测组合数"
+  },
+  "Median path net PnL": {
+    "es": "Mediana del resultado neto de las rutas",
+    "zh-CN": "路径净盈亏中位数"
+  },
+  "Monte Carlo is unavailable.": {
+    "es": "Monte Carlo no está disponible.",
+    "zh-CN": "Monte Carlo 不可用。"
+  },
+  "Native Rithmic account evidence is unavailable for a reserved close; no competing dispatch was sent.": {
+    "es": "La evidencia de la cuenta nativa de Rithmic no está disponible para un cierre reservado; no se realizó ningún envío competidor.",
+    "zh-CN": "预留的平仓缺少可用的 Rithmic 原生账户证据; 未发送相互竞争的请求."
+  },
+  "No complete out-of-sample interval is available for this research component.": {
+    "es": "No hay ningún intervalo completo fuera de muestra disponible para este componente de investigación.",
+    "zh-CN": "此研究分项没有可用的完整样本外区间。"
+  },
+  "No complete out-of-sample window is available.": {
+    "es": "No hay ninguna ventana completa fuera de muestra disponible.",
+    "zh-CN": "没有可用的完整样本外窗口。"
+  },
+  "No complete training configuration satisfies the actual closing-fill minimum.": {
+    "es": "Ninguna configuración de entrenamiento completa cumple el mínimo de ejecuciones reales de cierre.",
+    "zh-CN": "没有完整的训练配置满足实际平仓成交数的最低要求。"
+  },
+  "No eligible retrospective CPCV path is available.": {
+    "es": "No hay rutas aptas disponibles para la CPCV retrospectiva.",
+    "zh-CN": "没有符合条件的可用回溯 CPCV 路径。"
+  },
+  "Not an independent completed-trade estimate": {
+    "es": "No es una estimación basada en operaciones completas independientes",
+    "zh-CN": "并非基于独立完整交易的估计"
+  },
+  "Only the completed out-of-sample prefix is reported.": {
+    "es": "Solo se informa el tramo inicial completado fuera de muestra.",
+    "zh-CN": "仅报告样本外已完成的连续前段。"
+  },
+  "Open details for completed results": {
+    "es": "Abrir detalles de los resultados completados",
+    "zh-CN": "打开已完成结果的详情"
+  },
+  "Opening mark": {
+    "es": "Precio de valoración a mercado inicial",
+    "zh-CN": "期初盯市价格"
+  },
+  "Owned operations did not complete cleanly.": {
+    "es": "Las operaciones propias no finalizaron correctamente.",
+    "zh-CN": "受管操作未能正常完成。"
+  },
+  "Path": {
+    "es": "Ruta",
+    "zh-CN": "路径"
+  },
+  "Portfolio unavailable": {
+    "es": "Portafolio no disponible",
+    "zh-CN": "组合不可用"
+  },
+  "Profit factor per contribution": {
+    "es": "Profit factor basado en contribuciones",
+    "zh-CN": "按贡献计算的盈利因子"
+  },
+  "Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Eligibility counts only actual closing fills. Boundary marks are not executions or independent completed trades.": {
+    "es": "El profit factor, el acierto y la expectativa usan contribuciones de ejecuciones de cierre y valoraciones a mercado al final de cada ventana. Para cumplir los requisitos solo cuentan las ejecuciones reales de cierre. Las valoraciones a mercado en los límites de ventana no son ejecuciones ni operaciones completas independientes.",
+    "zh-CN": "盈利因子、胜率和期望值使用平仓成交贡献与窗口末端盯市估值计算。资格判定仅统计实际平仓成交。窗口边界盯市估值既不是成交，也不是独立的完整交易。"
+  },
+  "Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Only actual closing fills count for eligibility. ": {
+    "es": "El profit factor, el acierto y la expectativa usan contribuciones de ejecuciones de cierre y valoraciones a mercado al final de cada ventana. Para cumplir los requisitos solo cuentan las ejecuciones reales de cierre. ",
+    "zh-CN": "盈利因子、胜率和期望值使用平仓成交贡献与窗口末端盯市估值计算。资格判定仅统计实际平仓成交。 "
+  },
+  "Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Sample eligibility counts only actual closing fills. The warm mark-to-market splice is not an executable portfolio.": {
+    "es": "El profit factor, el acierto y la expectativa usan contribuciones de ejecuciones de cierre y valoraciones a mercado al final de cada ventana. Para que una muestra cumpla los requisitos solo cuentan las ejecuciones reales de cierre. El empalme con estado precalentado y valoración a mercado no es un portafolio ejecutable.",
+    "zh-CN": "盈利因子、胜率和期望值使用平仓成交贡献与窗口末端盯市估值计算。样本资格判定仅统计实际平仓成交。保留预热状态、按盯市估值串联的结果并非可执行的投资组合。"
+  },
+  "Profitable path share": {
+    "es": "Proporción de rutas rentables",
+    "zh-CN": "盈利路径占比"
+  },
+  "Profitable paths": {
+    "es": "Rutas rentables",
+    "zh-CN": "盈利路径"
+  },
+  "Profitable share is unavailable because no combination was measured.": {
+    "es": "La proporción de combinaciones rentables no está disponible porque no se midió ninguna combinación.",
+    "zh-CN": "由于未实测任何组合，盈利占比不可用。"
+  },
+  "Recommended parameters": {
+    "es": "Parámetros recomendados",
+    "zh-CN": "推荐参数"
+  },
+  "Research components have no common available out-of-sample interval. The portfolio cannot fill unavailable coverage with zero returns.": {
+    "es": "Los componentes de investigación no tienen ningún intervalo común disponible fuera de muestra. El portafolio no puede rellenar la cobertura no disponible con rendimientos de cero.",
+    "zh-CN": "研究分项之间没有共同可用的样本外区间。组合不能用零收益填补不可用的覆盖范围。"
+  },
+  "Resolution (seconds)": {
+    "es": "Resolución (segundos)",
+    "zh-CN": "分辨率 (秒)"
+  },
+  "Retained rows": {
+    "es": "Filas conservadas",
+    "zh-CN": "保留行数"
+  },
+  "Retrospective CPCV has {0} of {1} paths available. Shares and medians use only available paths.": {
+    "es": "La CPCV retrospectiva tiene {0} de {1} rutas disponibles. Las proporciones y las medianas usan solo rutas disponibles.",
+    "zh-CN": "回溯 CPCV 的可用路径为 {0} / {1} 条。占比与中位数只使用可用路径。"
+  },
+  "Retrospective purged cross-validation of warm marked ranges is not a forward-only executable handoff. Shares and medians use only available paths.": {
+    "es": "La validación cruzada retrospectiva con purga de intervalos con estado precalentado y valoración a mercado no equivale a un traspaso ejecutable estrictamente hacia adelante. Las proporciones y las medianas usan solo rutas disponibles.",
+    "zh-CN": "对保留预热状态并按盯市估值计算的区间进行回溯式净化交叉验证，并不是可执行的纯前向交接流程。占比与中位数只使用可用路径。"
+  },
+  "Rithmic close has conflicting native basket identities; its outcome remains unresolved.": {
+    "es": "El cierre de Rithmic tiene identificadores nativos de basket en conflicto; su resultado sigue sin resolverse.",
+    "zh-CN": "Rithmic 平仓存在相互冲突的原生 basket 标识; 其结果仍未确定."
+  },
+  "Rithmic close is terminal but position/fill inclusion remains unresolved; no new close identity was created.": {
+    "es": "El cierre de Rithmic está en estado terminal pero la inclusión posición/ejecuciones sigue sin resolverse; no se creó ningún identificador de cierre nuevo.",
+    "zh-CN": "Rithmic 平仓已处于终态但持仓/成交的计入关系仍未确定; 未创建新的平仓标识."
+  },
+  "Rithmic close outcome is unknown; the original identity remains reserved and will not be resent. ": {
+    "es": "El resultado del cierre de Rithmic es desconocido; el identificador original sigue reservado y no se reenviará. ",
+    "zh-CN": "Rithmic 平仓结果未知; 原始标识仍被预留且不会重新发送. "
+  },
+  "Rithmic close outcome is unknown; the original identity remains reserved and will not be resent. {0}": {
+    "es": "El resultado del cierre de Rithmic es desconocido; el identificador original sigue reservado y no se reenviará. {0}",
+    "zh-CN": "Rithmic 平仓结果未知; 原始标识仍被预留且不会重新发送. {0}"
+  },
+  "Rithmic close ownership is unresolved: ": {
+    "es": "La titularidad del cierre de Rithmic sigue sin resolverse: ",
+    "zh-CN": "Rithmic 平仓归属仍未解决: "
+  },
+  "Rithmic close ownership is unresolved: {0}": {
+    "es": "La titularidad del cierre de Rithmic sigue sin resolverse: {0}",
+    "zh-CN": "Rithmic 平仓归属仍未解决: {0}"
+  },
+  "Rithmic close remains tracked; check its original order and position. No second submission was sent.": {
+    "es": "El cierre de Rithmic sigue registrado; revisa su orden y su posición originales. No se realizó un segundo envío.",
+    "zh-CN": "Rithmic 平仓仍在跟踪中; 请检查其原始订单和持仓. 未进行第二次提交."
+  },
+  "Rithmic close replay disagrees with its original dispatched side, type or quantity.": {
+    "es": "El replay del cierre de Rithmic no coincide con el lado, el tipo o la cantidad de su envío original.",
+    "zh-CN": "Rithmic 平仓回放与其最初派发的方向, 类型或数量不一致."
+  },
+  "Rithmic recovery is unresolved: ": {
+    "es": "La recuperación de Rithmic sigue sin resolverse: ",
+    "zh-CN": "Rithmic 恢复仍未解决: "
+  },
+  "Rithmic recovery is unresolved: {0}": {
+    "es": "La recuperación de Rithmic sigue sin resolverse: {0}",
+    "zh-CN": "Rithmic 恢复仍未解决: {0}"
+  },
+  "Rithmic reducing-order cumulative quantity is unavailable; competing reducing capacity remains unresolved.": {
+    "es": "La cantidad acumulada de las órdenes de Rithmic que reducen la posición no está disponible; la capacidad de reducción para órdenes competidoras sigue sin resolverse.",
+    "zh-CN": "Rithmic 减仓订单的累计数量不可用; 可供竞争订单使用的减仓容量仍未确定."
+  },
+  "Rithmic reducing-order cumulative quantity is unavailable; position inclusion remains unresolved.": {
+    "es": "La cantidad acumulada de las órdenes de Rithmic que reducen la posición no está disponible; su inclusión en la posición sigue sin resolverse.",
+    "zh-CN": "Rithmic 减仓订单的累计数量不可用; 是否已计入持仓仍未确定."
+  },
+  "Rithmic rejected the tracked close: ": {
+    "es": "Rithmic rechazó el cierre registrado: ",
+    "zh-CN": "Rithmic 拒绝了所跟踪的平仓: "
+  },
+  "Rithmic rejected the tracked close: {0}": {
+    "es": "Rithmic rechazó el cierre registrado: {0}",
+    "zh-CN": "Rithmic 拒绝了所跟踪的平仓: {0}"
+  },
+  "Rithmic replay is incomplete at native admission.": {
+    "es": "El replay de Rithmic está incompleto en la admisión nativa.",
+    "zh-CN": "原生准入时 Rithmic 回放尚未完成."
+  },
+  "Rithmic replay is incomplete; the close must await a known position.": {
+    "es": "El replay de Rithmic está incompleto; el cierre debe esperar a que se conozca la posición.",
+    "zh-CN": "Rithmic 回放尚未完成; 平仓必须等待持仓状态确定."
+  },
+  "Rithmic replay or cancellation is unresolved at the send slot; no close was sent.": {
+    "es": "El replay o la cancelación de Rithmic sigue sin resolverse en el turno de envío; no se envió ningún cierre.",
+    "zh-CN": "轮到发送时 Rithmic 回放或撤单仍未解决; 未发送平仓请求."
+  },
+  "Rithmic replay quantity disagrees with the original dispatched quantity.": {
+    "es": "La cantidad del replay de Rithmic no coincide con la cantidad enviada originalmente.",
+    "zh-CN": "Rithmic 回放数量与最初发送的数量不一致。"
+  },
+  "Rithmic reported execution after definitive rejection; the original close requires reconciliation.": {
+    "es": "Rithmic informó una ejecución después de un rechazo definitivo; el cierre original requiere conciliación.",
+    "zh-CN": "Rithmic 在明确拒绝后报告了成交; 原始平仓需要核对."
+  },
+  "Run": {
+    "es": "Corrida",
+    "zh-CN": "运行"
+  },
+  "Run kind": {
+    "es": "Tipo de corrida",
+    "zh-CN": "运行类型"
+  },
+  "Runs each combination once with warm strategy state and selects a parameter plateau at each causal cutoff. ": {
+    "es": "Ejecuta cada combinación una sola vez con el estado de la estrategia precalentado y selecciona una meseta de parámetros en cada corte temporal causal. ",
+    "zh-CN": "每个组合仅运行一次，保留策略的预热状态，并在每个因果时间截点选择参数高原。 "
+  },
+  "Runs each combination once with warm strategy state and selects a parameter plateau at each causal cutoff. The mark-to-market research splice is not an executable portfolio. CPCV is retrospective validation.": {
+    "es": "Ejecuta cada combinación una sola vez con el estado de la estrategia precalentado y selecciona una meseta de parámetros en cada corte temporal causal. El empalme de investigación valorado a mercado no es un portafolio ejecutable. CPCV es una validación retrospectiva.",
+    "zh-CN": "每个组合仅运行一次，保留策略的预热状态，并在每个因果时间截点选择参数高原。按盯市估值串联的研究结果并非可执行的投资组合。CPCV 是回溯验证。"
+  },
+  "Saved strategy source does not match its content digest.": {
+    "es": "El código fuente guardado de la estrategia no coincide con su resumen de comprobación de contenido.",
+    "zh-CN": "已保存的策略源代码与其内容摘要不一致。"
+  },
+  "Some retrospective CPCV paths are unavailable because selection or test coverage is incomplete.": {
+    "es": "Algunas rutas de la CPCV retrospectiva no están disponibles porque la selección o la cobertura de prueba está incompleta.",
+    "zh-CN": "部分回溯 CPCV 路径不可用，因为选择过程或测试覆盖不完整。"
+  },
+  "Source book equity belongs to each warm configuration. Stitched equity rebases its measured change onto the completed prefix. Amounts below retain their exact decimals.": {
+    "es": "El capital del libro de origen corresponde a cada configuración con estado precalentado. El capital encadenado aplica la variación medida al capital base del tramo inicial completado. Los importes siguientes conservan sus decimales exactos.",
+    "zh-CN": "源账簿资金属于各个保留预热状态的配置。串联资金将测得的变动重新设定基准后接续到已完成的连续前段。以下金额保留精确的小数。"
+  },
+  "Source identity": {
+    "es": "Identidad de la fuente",
+    "zh-CN": "数据源标识"
+  },
+  "Stitched closing": {
+    "es": "Capital encadenado final",
+    "zh-CN": "串联期末资金"
+  },
+  "Stitched opening": {
+    "es": "Capital encadenado inicial",
+    "zh-CN": "串联期初资金"
+  },
+  "Test source closing": {
+    "es": "Capital de origen al cierre de la prueba",
+    "zh-CN": "测试期末源资金"
+  },
+  "Test source opening": {
+    "es": "Capital de origen al inicio de la prueba",
+    "zh-CN": "测试期初源资金"
+  },
+  "The Rithmic close reached reported flat; known cancellation-time fills remain reserved because their position inclusion is unresolved.": {
+    "es": "El cierre de Rithmic alcanzó un estado informado de posición cero; las ejecuciones conocidas durante el proceso de cancelación siguen reservadas porque su inclusión en la posición sigue sin resolverse.",
+    "zh-CN": "Rithmic 平仓已达到所报告的空仓状态; 撤单期间的已知成交因是否已计入持仓仍未确定而继续被预留."
+  },
+  "The bounded Rithmic close already reserves the available reducing capacity.": {
+    "es": "El cierre acotado de Rithmic ya reserva la capacidad de reducción disponible.",
+    "zh-CN": "有界 Rithmic 平仓已预留可用的减仓容量."
+  },
+  "The bounded close identity is unavailable.": {
+    "es": "El identificador del cierre acotado no está disponible.",
+    "zh-CN": "有界平仓标识不可用."
+  },
+  "The captured Rithmic native account changed at the send slot; no close was sent.": {
+    "es": "La cuenta nativa capturada de Rithmic cambió en el turno de envío; no se envió ningún cierre.",
+    "zh-CN": "已捕获的 Rithmic 原生账户在轮到发送时已更改; 未发送平仓请求."
+  },
+  "The captured Rithmic native account is unavailable or changed; no close was sent.": {
+    "es": "La cuenta nativa capturada de Rithmic no está disponible o cambió; no se envió ningún cierre.",
+    "zh-CN": "已捕获的 Rithmic 原生账户不可用或已更改; 未发送平仓请求."
+  },
+  "The captured Rithmic native account is unavailable; no close or protection cancellation was sent.": {
+    "es": "La cuenta nativa capturada de Rithmic no está disponible; no se envió ningún cierre ni solicitud de cancelación de protección.",
+    "zh-CN": "已捕获的 Rithmic 原生账户不可用; 未发送平仓或保护订单撤单请求."
+  },
+  "The confirmed Rithmic position became flat or changed side; no close was sent.": {
+    "es": "La posición confirmada de Rithmic pasó a cero o cambió de lado; no se envió ningún cierre.",
+    "zh-CN": "经确认的 Rithmic 持仓已归零或改变方向; 未发送平仓请求."
+  },
+  "The exact recommended combination is unavailable.": {
+    "es": "La combinación exacta recomendada no está disponible.",
+    "zh-CN": "确切的推荐组合不可用。"
+  },
+  "The identity is not a bounded position close.": {
+    "es": "El identificador no corresponde a un cierre acotado de posición.",
+    "zh-CN": "该标识并非持仓的有界平仓标识."
+  },
+  "The mark-to-market research splice is not an executable portfolio. CPCV is retrospective validation.": {
+    "es": "El empalme de investigación valorado a mercado no es un portafolio ejecutable. CPCV es una validación retrospectiva.",
+    "zh-CN": "按盯市估值串联的研究结果并非可执行的投资组合。CPCV 是回溯验证。"
+  },
+  "The native Rithmic contract is not resolved.": {
+    "es": "No se ha resuelto el contrato nativo de Rithmic.",
+    "zh-CN": "尚未解析出 Rithmic 原生合约."
+  },
+  "The original Rithmic close account no longer matches this transport.": {
+    "es": "La cuenta original del cierre de Rithmic ya no coincide con este transporte.",
+    "zh-CN": "原始 Rithmic 平仓账户不再与此传输连接匹配."
+  },
+  "The original Rithmic close is complete; confirm the newly reported position before closing again.": {
+    "es": "El cierre original de Rithmic está completo; confirma la posición recién informada antes de volver a cerrar.",
+    "zh-CN": "原始 Rithmic 平仓已完成; 再次平仓前请确认新报告的持仓."
+  },
+  "The original Rithmic close session is unavailable after configuration change; its original identity remains unresolved and will not be resent.": {
+    "es": "La sesión original del cierre de Rithmic no está disponible tras el cambio de configuración; su identificador original sigue sin resolverse y no se reenviará.",
+    "zh-CN": "配置更改后原始 Rithmic 平仓会话不可用; 其原始标识仍未解决且不会重新发送."
+  },
+  "The original Rithmic close session is unavailable.": {
+    "es": "La sesión original del cierre de Rithmic no está disponible.",
+    "zh-CN": "原始 Rithmic 平仓会话不可用."
+  },
+  "The original Rithmic close session is unavailable; its outcome remains unresolved.": {
+    "es": "La sesión original del cierre de Rithmic no está disponible; su resultado sigue sin resolverse.",
+    "zh-CN": "原始 Rithmic 平仓会话不可用; 其结果仍未确定."
+  },
+  "The original Rithmic session cannot resolve this chart contract after reconfiguration; use its captured Accounts position.": {
+    "es": "La sesión original de Rithmic no puede resolver el contrato de este gráfico tras la reconfiguración; usa la posición de esa sesión capturada en Cuentas.",
+    "zh-CN": "原始 Rithmic 会话在重新配置后无法解析此图表合约; 请使用该会话在账户中捕获的持仓."
+  },
+  "The out-of-sample research splice is incomplete.": {
+    "es": "El empalme de investigación fuera de muestra está incompleto.",
+    "zh-CN": "样本外研究结果串联不完整。"
+  },
+  "The physical history day is not owned by this operation.": {
+    "es": "Este día de historial físico no pertenece a esta operación.",
+    "zh-CN": "该物理历史数据日不归此操作所有。"
+  },
+  "The selected test range is incomplete.": {
+    "es": "El intervalo de prueba seleccionado está incompleto.",
+    "zh-CN": "选定的测试区间不完整。"
+  },
+  "The source timing window is invalid.": {
+    "es": "La ventana temporal de la fuente no es válida.",
+    "zh-CN": "数据源时间窗口无效。"
+  },
+  "The terminal Rithmic close has no complete observed cumulative quantity; its original identity remains reserved.": {
+    "es": "El cierre de Rithmic en estado terminal no tiene una cantidad acumulada observada completa; su identificador original sigue reservado.",
+    "zh-CN": "已处于终态的 Rithmic 平仓没有完整观测到的累计数量; 其原始标识仍被预留."
+  },
+  "This warm mark-to-market research splice is not an executable portfolio. Selected configurations retain their own warm state, positions and capital. The splice does not transfer outgoing positions or charge deployment turnover.": {
+    "es": "Este empalme de investigación con estado precalentado y valoración a mercado no es un portafolio ejecutable. Las configuraciones seleccionadas conservan su propio estado precalentado, sus posiciones y su capital. El empalme no transfiere las posiciones de la configuración saliente ni carga los costos de rotación del despliegue.",
+    "zh-CN": "此保留预热状态、按盯市估值串联的研究结果并非可执行的投资组合。选定的配置各自保留自身的预热状态、持仓与资金。串联过程不转移退出配置中的持仓，也不计入部署切换的换仓成本。"
+  },
+  "Tick prefix changed while being read: ": {
+    "es": "El prefijo de ticks cambió durante la lectura: ",
+    "zh-CN": "逐笔数据前缀在读取过程中发生了变化： "
+  },
+  "Tick prefix changed while being read: {0}": {
+    "es": "El prefijo de ticks cambió durante la lectura: {0}",
+    "zh-CN": "逐笔数据前缀在读取过程中发生了变化：{0}"
+  },
+  "Tick recording could not reserve incoming history: ": {
+    "es": "La grabación de ticks no pudo reservar el historial entrante: ",
+    "zh-CN": "逐笔记录无法预留传入的历史数据： "
+  },
+  "Tick recording could not reserve incoming history: {0}": {
+    "es": "La grabación de ticks no pudo reservar el historial entrante: {0}",
+    "zh-CN": "逐笔记录无法预留传入的历史数据：{0}"
+  },
+  "Trade-only confidence": {
+    "es": "Confianza basada solo en operaciones completas",
+    "zh-CN": "仅基于完整交易的置信度"
+  },
+  "Trade-only confidence, decay and regime diagnostics are unavailable for marked window contributions.": {
+    "es": "La confianza basada solo en operaciones completas y los diagnósticos de deterioro y régimen de mercado no están disponibles para las contribuciones de ventanas valoradas a mercado.",
+    "zh-CN": "对于按盯市估值计算的窗口贡献，仅基于完整交易的置信度、衰减和市场状态诊断不可用。"
+  },
+  "Training closing": {
+    "es": "Capital al cierre del entrenamiento",
+    "zh-CN": "训练期末资金"
+  },
+  "Training opening": {
+    "es": "Capital al inicio del entrenamiento",
+    "zh-CN": "训练期初资金"
+  },
+  "Training source equity {0} to {1}. Test source equity {2} to {3}. Stitched equity {4} to {5}.": {
+    "es": "Capital de origen del entrenamiento de {0} a {1}. Capital de origen de la prueba de {2} a {3}. Capital encadenado de {4} a {5}.",
+    "zh-CN": "训练源资金 {0} 至 {1}。测试源资金 {2} 至 {3}。串联资金 {4} 至 {5}。"
+  },
+  "Unavailable for marked window contributions": {
+    "es": "No disponible para las contribuciones de ventanas valoradas a mercado",
+    "zh-CN": "对按盯市估值计算的窗口贡献不可用"
+  },
+  "Unavailable reason": {
+    "es": "Motivo de no disponibilidad",
+    "zh-CN": "不可用原因"
+  },
+  "Unknown legacy input evidence": {
+    "es": "Evidencia de entrada desconocida de una corrida de una versión anterior",
+    "zh-CN": "旧版运行的输入证据未知"
+  },
+  "Unknown trade attribution.": {
+    "es": "Atribución desconocida de la operación.",
+    "zh-CN": "交易归属未知。"
+  },
+  "Use recommended parameters": {
+    "es": "Usar los parámetros recomendados",
+    "zh-CN": "使用推荐参数"
+  },
+  "Warm mark-to-market research splice, not an executable portfolio. Positions are not transferred between configurations. Sizing does not use stitched capital, and deployment turnover is not charged. ": {
+    "es": "Empalme de investigación con estado precalentado y valoración a mercado, no un portafolio ejecutable. No se transfieren posiciones entre configuraciones. El tamaño de las posiciones no usa el capital encadenado y no se cargan los costos de rotación del despliegue. ",
+    "zh-CN": "保留预热状态、按盯市估值串联的研究结果，并非可执行的投资组合。配置之间不转移持仓。仓位规模不依据串联资金计算，也不计入部署切换的换仓成本。 "
+  },
+  "Warm mark-to-market research splice, not an executable portfolio. Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Only actual closing fills count for eligibility. Trade-only confidence is unavailable.": {
+    "es": "Empalme de investigación con estado precalentado y valoración a mercado, no un portafolio ejecutable. El profit factor, el acierto y la expectativa usan contribuciones de ejecuciones de cierre y valoraciones a mercado al final de cada ventana. Para cumplir los requisitos solo cuentan las ejecuciones reales de cierre. La confianza basada solo en operaciones completas no está disponible.",
+    "zh-CN": "保留预热状态、按盯市估值串联的研究结果，并非可执行的投资组合。盈利因子、胜率和期望值使用平仓成交贡献与窗口末端盯市估值计算。资格判定仅统计实际平仓成交。仅基于完整交易的置信度不可用。"
+  },
+  "Win rate per contribution": {
+    "es": "Acierto basado en contribuciones",
+    "zh-CN": "按贡献计算的胜率"
+  },
+  "Window boundary valuation": {
+    "es": "Valoración a mercado en el límite de la ventana",
+    "zh-CN": "窗口边界盯市估值"
+  },
+  "Window from": {
+    "es": "Inicio de la ventana",
+    "zh-CN": "窗口起点"
+  },
+  "Window to": {
+    "es": "Fin de la ventana",
+    "zh-CN": "窗口终点"
+  },
+  "Window {0}. Training {1}. Test {2}. ": {
+    "es": "Ventana {0}. Entrenamiento {1}. Prueba {2}. ",
+    "zh-CN": "窗口 {0}。训练 {1}。测试 {2}。 "
+  },
+  "Window {0}. Training {1}. Test {2}. Actual closing fills {3}. {4}": {
+    "es": "Ventana {0}. Entrenamiento {1}. Prueba {2}. Ejecuciones reales de cierre {3}. {4}",
+    "zh-CN": "窗口 {0}。训练 {1}。测试 {2}。实际平仓成交数 {3}。 {4}"
+  },
+  "Winning / losing contributions": {
+    "es": "Contribuciones ganadoras / perdedoras",
+    "zh-CN": "盈利 / 亏损贡献"
+  },
+  "Working replay absence does not resolve the tracked Rithmic market close; its original identity remains reserved.": {
+    "es": "La ausencia en el replay de órdenes activas no resuelve el cierre de mercado de Rithmic registrado; su identificador original sigue reservado.",
+    "zh-CN": "活动订单回放中的缺失不能确定所跟踪的 Rithmic 市价平仓的结果; 其原始标识仍被预留."
+  },
+  "daily PnL outside / inside sample · completed windows only": {
+    "es": "Resultado diario fuera / dentro de muestra · solo ventanas completadas",
+    "zh-CN": "样本外 / 样本内日盈亏 · 仅含已完成窗口"
+  },
+  "profitable · median {0} · {1} of {2} paths available": {
+    "es": "rentables · mediana {0} · {1} de {2} rutas disponibles",
+    "zh-CN": "盈利 · 中位数 {0} · 可用路径 {1} / {2}"
+  },
+  "{0} % · {1} actual closing fills · {2} contributions": {
+    "es": "{0} % · {1} ejecuciones reales de cierre · {2} contribuciones",
+    "zh-CN": "{0} % · {1} 次实际平仓成交 · {2} 项贡献"
+  },
+  "{0} actual closing fills · {1} contributions": {
+    "es": "{0} ejecuciones reales de cierre · {1} contribuciones",
+    "zh-CN": "{0} 次实际平仓成交 · {1} 项贡献"
+  },
+  "{0} actual out-of-sample closing fills (minimum {1}); boundary valuations are not trades": {
+    "es": "{0} ejecuciones reales de cierre fuera de muestra (mínimo {1}); las valoraciones a mercado en los límites de ventana no son operaciones",
+    "zh-CN": "{0} 次样本外实际平仓成交 (最少 {1})；窗口边界盯市估值不是交易"
+  },
+  "{0} is already flat: nothing needed closing.": {
+    "es": "{0} ya está sin posición: no había nada que cerrar.",
+    "zh-CN": "{0} 已为空仓: 没有需要平仓的持仓."
+  },
+  "{0} measured combinations. ": {
+    "es": "{0} combinaciones medidas. ",
+    "zh-CN": "{0} 个实测组合。 "
+  },
+  "{0} measured combinations. {1} {2} rows retained.": {
+    "es": "{0} combinaciones medidas. {1} {2} filas conservadas.",
+    "zh-CN": "{0} 个实测组合。 {1} 保留 {2} 行。"
+  },
+  "{0} of {1} available paths are profitable. Median {2}.": {
+    "es": "{0} de {1} rutas disponibles son rentables. Mediana {2}.",
+    "zh-CN": "{0} / {1} 条可用路径盈利。中位数 {2}。"
+  },
+  "{0} of {1} completed windows": {
+    "es": "{0} de {1} ventanas completadas",
+    "zh-CN": "{0} / {1} 个已完成窗口"
+  },
+  "{0} of {1} contributions": {
+    "es": "{0} de {1} contribuciones",
+    "zh-CN": "{0} / {1} 项贡献"
+  },
+  "{0} of {1} windows complete in {2} s · search {3}: {4} of {5} combinations, each run once": {
+    "es": "{0} de {1} ventanas completadas en {2} s · búsqueda {3}, {4} de {5} combinaciones, cada una ejecutada una sola vez",
+    "zh-CN": "已完成 {0} / {1} 个窗口，用时 {2} 秒 · 搜索 {3}，{4} / {5} 个组合，每个仅运行一次"
+  },
+  "{0} of {1} windows complete in {2} s · search {3}: {4} of {5} combinations, each run once{6} · saved to history": {
+    "es": "{0} de {1} ventanas completadas en {2} s · búsqueda {3}: {4} de {5} combinaciones, cada una ejecutada una sola vez{6} · guardado en el historial",
+    "zh-CN": "已完成 {0} / {1} 个窗口，用时 {2} 秒 · 搜索 {3}，{4} / {5} 个组合，每个仅运行一次{6} · 已保存到历史记录"
+  },
+  "{0} of {1} windows complete.": {
+    "es": "{0} de {1} ventanas completadas.",
+    "zh-CN": "已完成 {0} / {1} 个窗口。"
+  },
+  "{0} {1} · {2}–{3}\nNet {4} · Sharpe {5} · DD {6} · ": {
+    "es": "{0} {1} · {2}–{3}\nNeto {4} · Sharpe {5} · DD {6} · ",
+    "zh-CN": "{0} {1} · {2}–{3}\n净盈亏 {4} · Sharpe {5} · 回撤 {6} · "
+  },
+  "{0} {1} · {2}–{3}\nNet {4} · Sharpe {5} · DD {6} · {7}": {
+    "es": "{0} {1} · {2}–{3}\nNeto {4} · Sharpe {5} · DD {6} · {7}",
+    "zh-CN": "{0} {1} · {2}–{3}\n净盈亏 {4} · Sharpe {5} · 回撤 {6} · {7}"
+  },
+  "{0} · Rithmic": {
+    "es": "{0} · Rithmic",
+    "zh-CN": "{0} · Rithmic"
+  },
+  "{0} · net {1} · PF {2}": {
+    "es": "{0} · neto {1} · PF {2}",
+    "zh-CN": "{0} · 净盈亏 {1} · PF {2}"
+  },
+  "{0}% profitable completed windows": {
+    "es": "{0}% de las ventanas completadas son rentables",
+    "zh-CN": "{0}% 的已完成窗口盈利"
+  },
+  "{0}% profitable.": {
+    "es": "{0}% rentables.",
+    "zh-CN": "{0}% 盈利。"
+  },
+  "A bounded close order fact changed side.": {
+    "es": "Una observación de orden del cierre acotado cambió de lado.",
+    "zh-CN": "有界平仓的一项订单事实改变了买卖方向."
+  },
+  "An accepted native amendment requires its exact durable routing context.": {
+    "es": "Una modificación nativa aceptada requiere su contexto exacto de enrutamiento persistente.",
+    "zh-CN": "已接受的原生改单需要完全匹配的持久化路由上下文."
+  },
+  "An amendment identity disappeared during recovery.": {
+    "es": "Una identidad de modificación desapareció durante la recuperación.",
+    "zh-CN": "恢复期间有一个改单标识消失."
+  },
+  "Corrupt or incorrectly scoped amendment ownership.": {
+    "es": "La titularidad de la modificación está dañada o tiene un ámbito incorrecto.",
+    "zh-CN": "改单归属已损坏或作用域不正确."
+  },
+  "Could not persist accepted native amendment: ": {
+    "es": "No se pudo persistir la modificación nativa aceptada: ",
+    "zh-CN": "无法持久化已接受的原生改单: "
+  },
+  "Could not persist accepted native amendment: {0}": {
+    "es": "No se pudo persistir la modificación nativa aceptada: {0}",
+    "zh-CN": "无法持久化已接受的原生改单: {0}"
+  },
+  "Native order admission requires the current reconciled account position.": {
+    "es": "La admisión de órdenes nativas requiere la posición actual conciliada de la cuenta.",
+    "zh-CN": "原生订单准入需要账户当前已核对的仓位."
+  },
+  "Rithmic amendment replay has competing dispatched lineages.": {
+    "es": "La reproducción de modificaciones de Rithmic contiene cadenas de envío en conflicto.",
+    "zh-CN": "Rithmic 改单回放存在互相冲突的已发送订单继承链."
+  },
+  "Rithmic amendment state differs across equivalent sessions; wait for matching working replay before repricing.": {
+    "es": "El estado de la modificación de Rithmic difiere entre sesiones equivalentes; espere una reproducción coincidente de órdenes activas antes de cambiar el precio.",
+    "zh-CN": "等价会话之间的 Rithmic 改单状态不一致; 重新定价前请等待活动订单回放一致."
+  },
+  "The accepted amendment evidence cannot change.": {
+    "es": "La evidencia de la modificación aceptada no puede cambiar.",
+    "zh-CN": "已接受的改单证据不能更改."
+  },
+  "The accepted amendment has no exact native predecessor claim.": {
+    "es": "No hay una asignación exacta de titularidad nativa previa para la modificación aceptada.",
+    "zh-CN": "已接受的改单没有完全匹配的原生前序归属声明."
+  },
+  "The accepted amendment identity is unavailable.": {
+    "es": "La identidad de la modificación aceptada no está disponible.",
+    "zh-CN": "已接受的改单标识不可用."
+  },
+  "The accepted amendment is not a successor of the current native claim.": {
+    "es": "La modificación aceptada no es sucesora de la asignación de titularidad nativa actual.",
+    "zh-CN": "已接受的改单不是当前原生归属声明的后继."
+  },
+  "The accepted native amendment disagrees with its dispatched lineage.": {
+    "es": "La modificación nativa aceptada no coincide con su cadena de envío.",
+    "zh-CN": "已接受的原生改单与其已发送订单的继承链不一致."
+  },
+  "The bounded close dispatch exceeds its persisted route or remaining ceiling.": {
+    "es": "El envío del cierre acotado excede su ruta persistida o el límite restante.",
+    "zh-CN": "有界平仓发送超出了持久化路由或剩余额度."
+  },
+  "The bounded close identity changed before dispatch.": {
+    "es": "La identidad del cierre acotado cambió antes del envío.",
+    "zh-CN": "有界平仓的标识在发送前发生了变化."
+  },
+  "The bounded close's persisted reconciliation or cancellation evidence changed before dispatch.": {
+    "es": "La evidencia persistida de conciliación o cancelación del cierre acotado cambió antes del envío.",
+    "zh-CN": "有界平仓的持久化核对或撤单证据在发送前发生了变化."
+  },
+  "The native predecessor identity is unavailable.": {
+    "es": "La identidad nativa predecesora no está disponible.",
+    "zh-CN": "原生前序订单标识不可用."
+  },
+  "The captured Rithmic session environment changed; no close or protection cancellation was sent.": {
+    "es": "El entorno de la sesión de Rithmic capturada cambió; no se envió ningún cierre ni cancelación de protección.",
+    "zh-CN": "已捕获的 Rithmic 会话环境已发生变化；未发送平仓或保护单撤销请求。"
+  },
+  "The common portfolio interval cuts through a marked out-of-sample window. Whole measured windows are required because their contributions cannot be rebased.": {
+    "es": "El intervalo común del portafolio corta una ventana marcada fuera de muestra. Se requieren ventanas medidas completas porque sus contribuciones no se pueden reasignar a un intervalo parcial.",
+    "zh-CN": "组合的共同区间截断了按市价计值的样本外窗口。必须使用完整的已计量窗口，因为无法将其收益贡献重新归属到较短区间。"
+  },
+  "Trading Hub is shutting down; new Rithmic account contexts are not admitted.": {
+    "es": "Trading Hub se está cerrando; no se admiten nuevos contextos de cuenta de Rithmic.",
+    "zh-CN": "Trading Hub 正在退出；不接受新的 Rithmic 账户上下文。"
+  },
+  "Rithmic current order evidence is unavailable; the original close remains unresolved and was not sent.": {
+    "es": "La información actual de las órdenes de Rithmic no está disponible; el cierre original sigue sin resolverse y no se ha enviado.",
+    "zh-CN": "Rithmic 当前订单信息不可用；原平仓操作仍未解决，且未发送。"
+  },
+  "Not canceled: the stop already triggered at Binance and its order is executing.": {
+    "es": "No cancelada: el stop ya se activó en Binance y su orden se está ejecutando.",
+    "zh-CN": "未取消：止损单已在 Binance 触发，其订单正在执行。"
   }
 }

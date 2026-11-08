@@ -19,12 +19,12 @@ internal sealed partial class StrategiesView
     private bool _chatBusy;
     private ChatTurn? _activeChatTurn;
     private bool _chatTornDown;
-    private sealed class ChatTurn(IStrategyChatBridge bridge, long binding, ChatConversation conversation)
+    private sealed class ChatTurn(IStrategyChatBridge bridge, long binding, ChatConversation conversation, CancellationToken cancellation)
     {
         public IStrategyChatBridge Bridge { get; } = bridge;
         public long Binding { get; } = binding;
         public ChatConversation Conversation { get; } = conversation;
-        public CancellationTokenSource Cancellation { get; } = new();
+        public CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
     private bool _selectingEngine;
@@ -167,13 +167,25 @@ internal sealed partial class StrategiesView
     {
         try
         {
-            if (!IsCurrentChatTurn(turn)) return;
+            if (!IsCurrentChatTurn(turn))
+            {
+                turn.Conversation.SessionId = turn.Bridge.SessionId ?? turn.Conversation.SessionId;
+                if (result.IsError)
+                    turn.Conversation.Messages.Add(new ChatMessage { Role = "note", Text = result.Text.Length > 400 ? result.Text[..400] + "…" : result.Text });
+                ChatHistory.Save(turn.Conversation);
+                return;
+            }
             _stopButton2.IsVisible = false;
             await OnClaudeFinishedAsync(result, turn);
         }
         catch (Exception ex)
         {
-            if (IsCurrentChatTurn(turn)) AddNote(MaterialIconKind.AlertCircleOutline, "Could not finish assistant response: " + ex.Message, Ui.Down);
+            if (_svc.Work.IsStopping) turn.Completion.TrySetException(ex);
+            else
+            {
+                if (IsCurrentChatTurn(turn)) AddNote(MaterialIconKind.AlertCircleOutline, "Could not finish assistant response: " + ex.Message, Ui.Down);
+                CrashLog.Write(ex);
+            }
         }
         finally { turn.Completion.TrySetResult(true); }
     }
@@ -185,14 +197,8 @@ internal sealed partial class StrategiesView
         ++_chatBinding;
         _unhookChat?.Invoke();
         if (_activeChatTurn is not { } turn) return;
-        turn.Conversation.SessionId = turn.Bridge.SessionId ?? turn.Conversation.SessionId;
-        ChatHistory.Save(turn.Conversation);
-        try
-        {
-            turn.Cancellation.Cancel();
-            turn.Bridge.Cancel();
-        }
-        finally { turn.Completion.TrySetResult(true); }
+        turn.Cancellation.Cancel();
+        turn.Bridge.Cancel();
     }
 
 
@@ -243,13 +249,20 @@ internal sealed partial class StrategiesView
         _ = DetectClaudeAsync();
     }
 
-    private async Task ImportPineAsync()
+    private Task ImportPineAsync() => RunViewOperationAsync(ImportPineOwnedAsync);
+
+    private async Task ImportPineOwnedAsync(CancellationToken cancellation)
     {
         if (_chatBusy || TopLevel.GetTopLevel(this) is not Window owner) return;
         try
         {
-            if (await PineImports.PickAsync(owner, AppPaths.UserIndicators) is { } source) await ReviewPineAsync(source);
+            if (await PineImports.PickAsync(owner, AppPaths.UserIndicators) is { } source)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                await ReviewPineAsync(source);
+            }
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex) { AddNote(MaterialIconKind.AlertCircleOutline, "Could not import Pine source: " + ex.Message, Ui.Down); }
     }
 
@@ -360,23 +373,27 @@ internal sealed partial class StrategiesView
 
     private void ScrollChatToEnd() => Dispatcher.UIThread.Post(() => _chatScroll.ScrollToEnd(), DispatcherPriority.Background);
 
-    private async Task SendToClaudeAsync(string text)
+    private Task SendToClaudeAsync(string text) => RunViewOperationAsync(cancellation => SendToClaudeOwnedAsync(text, cancellation));
+
+
+    private async Task SendToClaudeOwnedAsync(string text, CancellationToken cancellation)
     {
         text = text.Trim();
         if (text.Length == 0 || _chatBusy || _chatTornDown) return;
-        var turn = new ChatTurn(_claude, _chatBinding, _conv);
+        var turn = new ChatTurn(_claude, _chatBinding, _conv, cancellation);
         _activeChatTurn = turn;
         try
         {
             await SendChatRequestAsync(text, turn);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!cancellation.IsCancellationRequested)
         {
             if (IsCurrentChatTurn(turn))
             {
                 RemoveWorkingNote();
                 AddNote(MaterialIconKind.AlertCircleOutline, "Could not prepare assistant request: " + ex.Message, Ui.Down);
             }
+            CrashLog.Write(ex);
         }
         finally
         {
@@ -444,12 +461,9 @@ internal sealed partial class StrategiesView
             ClaudeCodeBridge.StrategySystemPrompt + ClaudeCodeBridge.IndicatorSystemPrompt + (lab ? ClaudeCodeBridge.LabSystemPrompt : ""), lab,
             new[] { AppPaths.UserIndicators, Directory.CreateDirectory(Lab.LabServer.CapturesDir).FullName },
             _chatModel.Text, _chatEffort.Text, TradingViewResearchService.Default.CaptureAccess()), turn.Cancellation.Token);
-        if (IsCurrentChatTurn(turn))
-        {
-            // Queue after all streamed events, then await the actual editor/compiler consumer, not just CLI exit.
-            Dispatcher.UIThread.Post(() => _ = CompleteChatTurnAsync(turn, result));
-            await turn.Completion.Task;
-        }
+        // This callback is queued even after cancellation so earlier stream/Finished callbacks and the final save stay owned.
+        Dispatcher.UIThread.Post(() => _ = CompleteChatTurnAsync(turn, result));
+        await turn.Completion.Task;
     }
 
     /// <summary>Las capturas del gráfico que miró Claude en este pedido, en el chat (tocás una y se abre grande).</summary>
@@ -613,26 +627,27 @@ internal sealed partial class StrategiesView
         _catalog.Refresh();
         var created = Directory.EnumerateFiles(AppPaths.Strategies, "*.cs").Where(f => !_filesBefore.ContainsKey(f)).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
         var target = created != null ? _catalog.Files.FirstOrDefault(f => f.Path == created) : _current;
-        if (target != null && !ReferenceEquals(target, _current)) await SelectAsync(target);
+        if (target != null && !ReferenceEquals(target, _current)) await SelectOwnedAsync(target, turn.Cancellation.Token);
         else
         {
             ReloadIfChangedOnDisk();
-            await CompileAsync(silent: true);
+            await CompileOwnedAsync(turn.Cancellation.Token, silent: true);
         }
         if (!IsCurrentChatTurn(turn)) return;
 
         var res = _current?.LastCompile;
         int errors = res?.Diagnostics.Count(d => d.Severity == "error") ?? 0;
-        if (res?.Success == true && _current?.Type != null)
+        if (res?.Success == true && _generation != null)
         {
-            var test = Ui.Button("Test in backtest", MaterialIconKind.PlayOutline, () =>
+            var test = Ui.Button("Test in backtest", MaterialIconKind.PlayOutline, () => _ = RunViewOperationAsync(async stopping =>
             {
+                stopping.ThrowIfCancellationRequested();
                 _tabs.Select("backtest");
                 ShowTab("backtest");
-                _ = RunBacktestAsync();
-            });
+                await RunBacktestOwnedAsync(stopping);
+            }));
             test.Padding = new Thickness(10, 4);
-            _chat.Children.Add(Ui.V(8, Ui.H(8, Ui.Icon(MaterialIconKind.CheckCircle, 15, Ui.Up), new TextBlock { Text = $"{_current.DisplayName} compiles without errors", Classes = { "small" }, Foreground = Ui.Up, TextWrapping = TextWrapping.Wrap, MaxWidth = 320 }), test));
+            _chat.Children.Add(Ui.V(8, Ui.H(8, Ui.Icon(MaterialIconKind.CheckCircle, 15, Ui.Up), new TextBlock { Text = $"{_generation.DisplayName} compiles without errors", Classes = { "small" }, Foreground = Ui.Up, TextWrapping = TextWrapping.Wrap, MaxWidth = 320 }), test));
         }
         else if (errors > 0)
         {

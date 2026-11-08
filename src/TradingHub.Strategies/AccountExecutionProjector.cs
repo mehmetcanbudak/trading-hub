@@ -21,6 +21,9 @@ public sealed class AccountExecutionProjector
     private readonly record struct CommittedFinancialFact(string Path, Guid Generation, LiveFill Fill);
     private static readonly ConcurrentQueue<CommittedFinancialFact> CommittedFinancialFacts = new();
     private static int _financialDrainScheduled, _financialDraining;
+    // Counts queued and running projection work so storage owners can wait for it before removing ledgers.
+    private static int _backgroundWork;
+    internal static bool BackgroundWorkIdle => Volatile.Read(ref _backgroundWork) == 0;
     private readonly OrderContext _context;
     private readonly WeakReference<AccountExecutionProjector> _weakSelf;
     private volatile string? _root;
@@ -193,6 +196,7 @@ public sealed class AccountExecutionProjector
     private static void ScheduleFinancialNotifications()
     {
         if (Interlocked.CompareExchange(ref _financialDrainScheduled, 1, 0) != 0) return;
+        Interlocked.Increment(ref _backgroundWork);
         ThreadPool.UnsafeQueueUserWorkItem(static _ =>
         {
             try { DrainCommittedFinancialFacts(); }
@@ -201,6 +205,7 @@ public sealed class AccountExecutionProjector
                 Volatile.Write(ref _financialDrainScheduled, 0);
                 if (!CommittedFinancialFacts.IsEmpty && Volatile.Read(ref _financialDraining) == 0)
                     ScheduleFinancialNotifications();
+                Interlocked.Decrement(ref _backgroundWork);
             }
         }, 0, preferLocal: false);
     }
@@ -253,11 +258,16 @@ public sealed class AccountExecutionProjector
     private void ScheduleSynchronization()
     {
         if (Interlocked.CompareExchange(ref _synchronizationScheduled, 1, 0) != 0) return;
+        Interlocked.Increment(ref _backgroundWork);
         ThreadPool.UnsafeQueueUserWorkItem(static weak =>
         {
-            if (!weak.TryGetTarget(out var projector)) return;
-            Volatile.Write(ref projector._synchronizationScheduled, 0);
-            projector.Synchronize();
+            try
+            {
+                if (!weak.TryGetTarget(out var projector)) return;
+                Volatile.Write(ref projector._synchronizationScheduled, 0);
+                projector.Synchronize();
+            }
+            finally { Interlocked.Decrement(ref _backgroundWork); }
         }, _weakSelf, preferLocal: false);
     }
 
@@ -315,15 +325,20 @@ public sealed class AccountExecutionProjector
         lock (LedgersGate)
             if (_foreignNotifications.Count == 0) return;
         if (Interlocked.CompareExchange(ref _foreignDrainScheduled, 1, 0) != 0) return;
+        Interlocked.Increment(ref _backgroundWork);
         ThreadPool.UnsafeQueueUserWorkItem(static weak =>
         {
-            if (!weak.TryGetTarget(out var projector)) return;
-            try { projector.NotifyCommittedFacts(); }
-            finally
+            try
             {
-                Volatile.Write(ref projector._foreignDrainScheduled, 0);
-                projector.ScheduleForeignNotifications();
+                if (!weak.TryGetTarget(out var projector)) return;
+                try { projector.NotifyCommittedFacts(); }
+                finally
+                {
+                    Volatile.Write(ref projector._foreignDrainScheduled, 0);
+                    projector.ScheduleForeignNotifications();
+                }
             }
+            finally { Interlocked.Decrement(ref _backgroundWork); }
         }, _weakSelf, preferLocal: false);
     }
 
@@ -332,6 +347,7 @@ public sealed class AccountExecutionProjector
     internal bool TryResetOwner(OrderOwner owner, ProjectionSubscription? current, decimal pointValue, Action reset)
     {
         if (Interlocked.CompareExchange(ref _processing, 1, 0) != 0) return false;
+        Interlocked.Increment(ref _backgroundWork);
         try
         {
             var snapshot = _source.Capture(_cursor);
@@ -371,6 +387,7 @@ public sealed class AccountExecutionProjector
         {
             Volatile.Write(ref _processing, 0);
             Synchronize();
+            Interlocked.Decrement(ref _backgroundWork);
         }
     }
 
@@ -401,6 +418,7 @@ public sealed class AccountExecutionProjector
             return;
         }
         if (Interlocked.CompareExchange(ref _processing, 1, 0) != 0) return;
+        Interlocked.Increment(ref _backgroundWork);
         try
         {
             DrainCommittedFinancialFacts();
@@ -456,6 +474,7 @@ public sealed class AccountExecutionProjector
             NotifyCommittedFacts();
             Volatile.Write(ref _processing, 0);
             if (Volatile.Read(ref _requested) != 0) Synchronize();
+            Interlocked.Decrement(ref _backgroundWork);
         }
     }
 

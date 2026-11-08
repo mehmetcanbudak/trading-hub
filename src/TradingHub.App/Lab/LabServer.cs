@@ -24,7 +24,7 @@ internal static class LabServer
     private static string? _ticksKey;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    public static async Task<int> RunAsync()
+    public static async Task<int> RunAsync(CancellationToken ct = default)
     {
         var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
         // cualquier Console.WriteLine de otra parte va a stderr: stdout es solo del protocolo
@@ -33,7 +33,7 @@ internal static class LabServer
         StrategyStore.Root = StoreRoot;
 
         string? line;
-        while ((line = await stdin.ReadLineAsync()) != null)
+        while ((line = await stdin.ReadLineAsync(ct)) != null)
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
             JsonNode? msg;
@@ -66,7 +66,7 @@ internal static class LabServer
                         result = new JsonObject { ["tools"] = Tools() };
                         break;
                     case "tools/call":
-                        result = await CallAsync(msg!["params"]);
+                        result = await CallAsync(msg!["params"], ct);
                         break;
                     default:
                         error = (-32601, $"Unknown method: {method}");
@@ -140,7 +140,7 @@ internal static class LabServer
         {
             ("ranges", "object", "Ranges {Parameter: {min, max, step}}; defaults to the strategy's [Optimize] attributes", false),
             ("metric", "string", "Metric to maximize: NetProfit, ProfitFactor, Sharpe, Sortino, RecoveryFactor, NetProfitOverDrawdown, WinRate, Expectancy (default NetProfitOverDrawdown)", false),
-            ("min_trades", "integer", "Minimum trades for a combination to qualify (10)", false),
+            ("min_trades", "integer", "Minimum actual closing fills for a combination to qualify (10); boundary valuations are not trades", false),
         }).ToArray();
 
         return new JsonArray
@@ -178,7 +178,7 @@ internal static class LabServer
             Tool("run_walk_forward", "Walk-forward: each window selects parameters using only that window, then tests them out of sample in the next. Runs each combination once " +
                                      "over the entire history (repeated ticks combined, indicators warmed as in live execution) and slices by window. Searches the full grid for ≤ 300 combinations " +
                                      "or uses Bayesian optimization (TPE) otherwise; selects the best plateau, not the highest peak, and measures overfitting with PBO and purged " +
-                                     "combinatorial cross-validation (CPCV) paths. Returns stitched out-of-sample results. Repeating an identical request waits for the existing run; do not relaunch it.",
+                                     "combinatorial cross-validation (CPCV) paths. Returns a warm mark-to-market research splice, not an executable portfolio. CPCV is retrospective. Repeating an identical request waits for the existing run; do not relaunch it.",
                 Schema(optimizeProps.Concat(new[]
                 {
                     ("in_sample_days", "integer", "Days per optimization window", true),
@@ -219,7 +219,7 @@ internal static class LabServer
         };
     }
 
-    private static async Task<JsonNode> CallAsync(JsonNode? p)
+    internal static async Task<JsonNode> CallAsync(JsonNode? p, CancellationToken ct = default)
     {
         string name = p?["name"]?.GetValue<string>() ?? "";
         var args = p?["arguments"] as JsonObject ?? new JsonObject();
@@ -229,14 +229,14 @@ internal static class LabServer
             {
                 "list_strategies" => ListStrategies(),
                 "compile_strategy" => CompileStrategy(Str(args, "file")),
-                "chart_snapshot" => await ChartSnapshotAsync(args),
+                "chart_snapshot" => await ChartSnapshotAsync(args, ct),
                 "list_indicators" => ListIndicators(),
                 "compile_indicator" => CompileIndicator(Str(args, "file")),
                 "list_data" => ListData(),
-                "download_data" => await DownloadDataAsync(args),
-                "run_backtest" => await RunBacktestAsync(args),
-                "run_optimization" => await RunOptimizationAsync(args),
-                "run_walk_forward" => await RunWalkForwardAsync(args),
+                "download_data" => await DownloadDataAsync(args, ct),
+                "run_backtest" => await RunBacktestAsync(args, ct),
+                "run_optimization" => await RunOptimizationAsync(args, ct),
+                "run_walk_forward" => await RunWalkForwardAsync(args, ct),
                 "list_runs" => ListRuns(args),
                 "analyze_portfolio" => AnalyzePortfolio(args),
                 "live_portfolio" => LivePortfolio(args),
@@ -322,20 +322,20 @@ internal static class LabServer
         }
     }
 
-    private static StrategyFile FileOf(string file)
+    private static CompiledStrategyGeneration FileOf(string file)
     {
         Catalog.Refresh();
         file = Path.GetFileNameWithoutExtension(file);
         var f = Catalog.Files.FirstOrDefault(x => x.FileName.Equals(file, StringComparison.OrdinalIgnoreCase))
                 ?? throw new ArgumentException($"Strategy not found: «{file}». Use list_strategies.");
         var res = Catalog.Compile(f);
-        if (!res.Success || f.Type == null)
+        if (res.Generation == null)
         {
             var errs = res.Diagnostics.Where(d => d.Severity == "error").Take(10).Select(d => $"line {d.Line}: {d.Message}");
             throw new ArgumentException($"«{file}» does not compile: {string.Join(" | ", errs)}");
         }
 
-        return f;
+        return res.Generation;
     }
 
     private static JsonArray ParametersOf(Type t)
@@ -395,16 +395,16 @@ internal static class LabServer
             var o = new JsonObject
             {
                 ["file"] = f.FileName,
-                ["name"] = f.DisplayName,
-                ["compiles"] = res.Success && f.Type != null,
+                ["name"] = res.Generation?.DisplayName ?? f.FileName,
+                ["compiles"] = res.Success,
                 ["errors"] = res.Diagnostics.Count(d => d.Severity == "error"),
             };
-            if (f.Type != null)
+            if (res.Generation is { } generation)
             {
-                o["description"] = Strategy.Description(f.Type);
-                o["parameters"] = ParametersOf(f.Type);
-                o["warmup"] = WarmupOf(f.Type);
-                o["runs"] = StrategyStore.List(f.Id).Count;
+                o["description"] = Strategy.Description(generation.Type);
+                o["parameters"] = ParametersOf(generation.Type);
+                o["warmup"] = WarmupOf(generation.Type);
+                o["runs"] = StrategyStore.List(generation.Id).Count;
             }
 
             arr.Add(o);
@@ -422,11 +422,11 @@ internal static class LabServer
         var res = Catalog.Compile(f, force: true);
         var errors = new JsonArray(res.Diagnostics.Where(d => d.Severity == "error").Take(30)
             .Select(d => (JsonNode)new JsonObject { ["line"] = d.Line, ["column"] = d.Column, ["id"] = d.Id, ["message"] = d.Message }).ToArray());
-        var o = new JsonObject { ["file"] = f.FileName, ["ok"] = res.Success && f.Type != null, ["errors"] = errors };
-        if (f.Type != null)
+        var o = new JsonObject { ["file"] = f.FileName, ["ok"] = res.Success, ["errors"] = errors };
+        if (res.Generation is { } generation)
         {
-            o["parameters"] = ParametersOf(f.Type);
-            o["warmup"] = WarmupOf(f.Type);
+            o["parameters"] = ParametersOf(generation.Type);
+            o["warmup"] = WarmupOf(generation.Type);
         }
 
         return o;
@@ -450,9 +450,11 @@ internal static class LabServer
     /// Corre la estrategia en el rango (con días previos para los indicadores), arma el gráfico con sus operaciones, dibujos
     /// y líneas, lo guarda como imagen y devuelve lo que pasó vela a vela (hora local).
     /// </summary>
-    internal static async Task<JsonNode> ChartSnapshotAsync(JsonObject a)
+    internal static async Task<JsonNode> ChartSnapshotAsync(JsonObject a, CancellationToken ct = default)
     {
+        a = (JsonObject)a.DeepClone();
         var file = FileOf(Str(a, "file"));
+        var parameters = ParamsFor(a, PinnedFor(file.FileName));
         string tzId = a["timezone"] is { } tzNode ? tzNode.GetValue<string>() : AppSettings.Load().TimeZoneId ?? TimeZoneInfo.Local.Id;
         TimeZoneInfo tz;
         try { tz = TimeZoneInfo.FindSystemTimeZoneById(tzId); }
@@ -463,19 +465,20 @@ internal static class LabServer
         var toUtc = LocalArg(a, "to", tz, true);
         if (toUtc <= fromUtc) throw new ArgumentException("to must be later than from.");
         double warmDays = Num(a, "warmup_days", period.IsTimeBased && period.ApproxDuration >= TimeSpan.FromHours(1) ? 15 : 3);
-        var inst = await ResolveInstrumentAsync(Str(a, "feed"), Str(a, "symbol").ToUpperInvariant());
-        var ticks = await Task.Run(() => TickData.Load(AppPaths.Ticks, inst, fromUtc.AddDays(-warmDays), toUtc, null, CancellationToken.None));
+        var inst = await ResolveInstrumentAsync(Str(a, "feed"), Str(a, "symbol").ToUpperInvariant(), ct: ct);
+        var ticks = await Task.Run(() => TickData.Load(AppPaths.Ticks, inst, fromUtc.AddDays(-warmDays), toUtc, null, ct), ct);
         if (ticks.Count == 0) throw new ArgumentException($"No saved ticks for {inst.Symbol} ({inst.FeedId}) in this range. See list_data or download days with download_data.");
 
         // la estrategia sobre todo lo cargado (como en el gráfico: sin costos y sin cerrar al final)
         var strategy = file.Create();
-        strategy.SetParameters(ParamsFor(a, file));
+        strategy.SetParameters(parameters);
         var settings = new BacktestSettings
         {
             FeedId = inst.FeedId, Symbol = inst.Symbol, FromUtc = ticks.FirstTime, ToUtc = ticks.LastTime.AddSeconds(1), Period = periodCode,
             CommissionPercent = 0, SlippageTicks = 0, TimeZoneId = tz.Id, CloseAtEnd = false, InitialCapital = 10_000,
         };
-        var result = await Task.Run(() => new BacktestEngine(strategy, ticks, settings) { ContextHistory = MarketConditions.HourlyBefore(inst.FeedId, inst.Symbol, ticks.FirstTime) }.Run(CancellationToken.None));
+        var result = await Task.Run(() => new BacktestEngine(strategy, ticks, settings) { ContextHistory = MarketConditions.HourlyBefore(inst.FeedId, inst.Symbol, ticks.FirstTime, ct) }.Run(ct), ct);
+        ct.ThrowIfCancellationRequested();
         if (!result.Ok) throw new InvalidOperationException("Strategy failed: " + result.Error);
 
         // el gráfico, igual que en la app
@@ -510,7 +513,7 @@ internal static class LabServer
         string path = Path.Combine(CapturesDir, string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)));
         using (var image = surface.Snapshot())
         using (var png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 92))
-            await File.WriteAllBytesAsync(path, png.ToArray());
+            await File.WriteAllBytesAsync(path, png.ToArray(), ct);
         foreach (var old in new DirectoryInfo(CapturesDir).GetFiles("*.png").OrderByDescending(f => f.LastWriteTimeUtc).Skip(60)) old.Delete();
 
         // lo que pasó en el rango, con hora local
@@ -557,6 +560,7 @@ internal static class LabServer
         return new JsonObject
         {
             ["image"] = path,
+            ["input_evidence"] = InputEvidenceJson(RunInputEvidence.Capture(result, ticks)),
             ["timezone"] = tz.Id,
             ["note"] = "Read the PNG image with Read. Bar timestamps indicate opening time; a market order submitted at a bar close fills in the next bar.",
             ["bars"] = bars,
@@ -647,7 +651,7 @@ internal static class LabServer
         };
     }
 
-    private static async Task<JsonNode> DownloadDataAsync(JsonObject a)
+    private static async Task<JsonNode> DownloadDataAsync(JsonObject a, CancellationToken ct)
     {
         string feed = Str(a, "feed"), symbol = Str(a, "symbol").ToUpperInvariant();
         if (!PublicArchives.Supports(feed)) throw new ArgumentException("Public archives are only available for binance-futures, binance-spot and bybit-linear.");
@@ -656,36 +660,45 @@ internal static class LabServer
         if (to.DayNumber - from.DayNumber > 61) throw new ArgumentException("Maximum 62 days per call.");
         var network = new AppNetworkProxy(AppSettings.Load(), Keychain.Store).CreateFactory();
         using var archiveHttp = network.CreateHttpClient(TimeSpan.FromMinutes(10));
-        var inst = await ResolveInstrumentAsync(feed, symbol, preferExchange: true, network: network);
+        var inst = await ResolveInstrumentAsync(feed, symbol, preferExchange: true, network: network, ct: ct);
         int ok = 0, skipped = 0, missing = 0;
         long trades = 0;
-        for (var d = from; d <= to; d = d.AddDays(1))
+        try
         {
-            if (HistoricalData.HasDay(AppPaths.Ticks, feed, symbol, d))
+            for (var d = from; d <= to; d = d.AddDays(1))
             {
-                skipped++;
-                continue;
-            }
+                ct.ThrowIfCancellationRequested();
+                if (HistoricalData.HasDay(AppPaths.Ticks, feed, symbol, d))
+                {
+                    skipped++;
+                    continue;
+                }
 
-            var list = await PublicArchives.DownloadDayAsync(inst, d, null, CancellationToken.None, http: archiveHttp);
-            if (list == null)
-            {
-                missing++;
-                continue;
-            }
+                var list = await PublicArchives.DownloadDayAsync(inst, d, null, ct, http: archiveHttp);
+                if (list == null)
+                {
+                    missing++;
+                    continue;
+                }
 
-            HistoricalData.WriteDay(AppPaths.Ticks, inst, d, list);
-            trades += list.Count;
-            ok++;
+                ct.ThrowIfCancellationRequested();
+                HistoricalData.WriteDay(AppPaths.Ticks, inst, d, list);
+                trades += list.Count;
+                ok++;
+            }
+        }
+        finally
+        {
+            if (ok > 0) _ticks = null;
         }
 
-        _ticks = null;
         return new JsonObject { ["downloaded_days"] = ok, ["already_had"] = skipped, ["not_published"] = missing, ["trades"] = trades };
     }
 
     /// <summary>Instrumento con su tick y valor del punto (del exchange si se puede; si no, del archivo).</summary>
-    private static async Task<Instrument> ResolveInstrumentAsync(string feed, string symbol, bool preferExchange = false, ProxyHandlerFactory? network = null)
+    private static async Task<Instrument> ResolveInstrumentAsync(string feed, string symbol, bool preferExchange = false, ProxyHandlerFactory? network = null, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         if (preferExchange || feed.StartsWith("binance") || feed.StartsWith("bybit"))
         {
             try
@@ -704,13 +717,14 @@ internal static class LabServer
                 if (f != null)
                 {
                     using var ownedFeed = f;
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    cts.CancelAfter(TimeSpan.FromSeconds(15));
                     var list = await f.GetInstrumentsAsync(cts.Token);
                     var inst = list.FirstOrDefault(i => i.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
                     if (inst != null) return inst;
                 }
             }
-            catch
+            catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 // sin red: se arma con el archivo
             }
@@ -730,7 +744,7 @@ internal static class LabServer
         };
     }
 
-    private static async Task<(BacktestSettings Settings, TickData Data)> PrepareAsync(JsonObject a, bool compress = false)
+    private static BacktestSettings SettingsFor(JsonObject a)
     {
         var settings = new BacktestSettings
         {
@@ -748,53 +762,144 @@ internal static class LabServer
         };
         if (!ChartPeriod.TryParse(settings.Period, out _)) throw new ArgumentException($"Invalid period: {settings.Period}");
         if (settings.ToUtc <= settings.FromUtc) throw new ArgumentException("to must be later than from.");
+        return settings;
+    }
+
+    private static async Task<TickData> PrepareAsync(BacktestSettings settings, bool compress = false, CancellationToken ct = default)
+    {
 
         // comprimidos (ticks repetidos juntados) para optimizar y validar: la misma historia con muchos menos eventos
         string root = AppPaths.Ticks;
         string key = $"{root}|{settings.FeedId}|{settings.Symbol}|{settings.FromUtc:O}|{settings.ToUtc:O}|{(compress ? "c" : "")}";
         TickData? cached = _ticks;
-        if (cached != null && _ticksKey == key)
-        {
-            if (settings.FeedId != IbBarImport.FeedId) return (settings, cached);
-            if (cached.StorageStamp is { } captured &&
-                captured == await Task.Run(() => IbBarStore.GetStamp(root, settings.Symbol, settings.FromUtc, settings.ToUtc)))
-                return (settings, cached);
-        }
+        if (cached != null && _ticksKey == key && await Task.Run(() => cached.IsCurrent(root, settings.FromUtc, settings.ToUtc, ct), ct))
+            return cached;
 
         cached = null; // Do not retain the previous range across the replacement allocation.
         _ticks = null;
         GC.Collect();
-        var inst = await ResolveInstrumentAsync(settings.FeedId, settings.Symbol);
-        var data = await Task.Run(() => TickData.Load(root, inst, settings.FromUtc, settings.ToUtc, null, CancellationToken.None, compress));
+        var inst = await ResolveInstrumentAsync(settings.FeedId, settings.Symbol, ct: ct);
+        var data = await Task.Run(() => TickData.Load(root, inst, settings.FromUtc, settings.ToUtc, null, ct, compress), ct);
         if (data.Count == 0)
             throw new ArgumentException($"No saved ticks for {settings.Symbol} ({settings.FeedId}) in this range. See list_data or download days with download_data.");
         _ticks = data;
         _ticksKey = key;
-        return (settings, data);
+        return data;
     }
 
     // ===================================================================== corridas
 
-    private static JsonObject MetricsJson(PerformanceMetrics m) => new()
+    internal static JsonObject MetricsJson(PerformanceMetrics m) => new()
     {
-        ["net_profit"] = Math.Round(m.NetProfit, 2),
-        ["return_percent"] = Math.Round(m.ReturnPercent, 2),
-        ["profit_factor"] = Math.Round(m.ProfitFactor, 2),
+        ["net_profit"] = m.NetProfit,
+        ["return_percent"] = m.ReturnPercent,
+        ["profit_factor"] = m.ProfitFactor,
         ["trades"] = m.TotalTrades,
-        ["win_rate"] = Math.Round(m.WinRate, 1),
-        ["average_trade"] = Math.Round(m.AverageTrade, 2),
-        ["payoff_ratio"] = Math.Round(m.PayoffRatio, 2),
-        ["expectancy"] = Math.Round(m.Expectancy, 2),
-        ["max_drawdown"] = Math.Round(m.MaxDrawdown, 2),
-        ["max_drawdown_percent"] = Math.Round(m.MaxDrawdownPercent, 2),
-        ["recovery_factor"] = Math.Round(m.RecoveryFactor, 2),
+        ["attribution_samples"] = m.AttributionSamples,
+        ["attribution_unit"] = m.AttributionUnit.ToString(),
+        ["win_rate"] = m.WinRate,
+        ["average_trade"] = m.AverageTrade,
+        ["payoff_ratio"] = m.PayoffRatio,
+        ["expectancy"] = m.Expectancy,
+        ["max_drawdown"] = m.MaxDrawdown,
+        ["max_drawdown_percent"] = m.MaxDrawdownPercent,
+        ["recovery_factor"] = m.RecoveryFactor,
         ["sharpe"] = Math.Round(m.SharpeRatio, 2),
         ["sortino"] = Math.Round(m.SortinoRatio, 2),
-        ["long_net_profit"] = Math.Round(m.LongNetProfit, 2),
-        ["short_net_profit"] = Math.Round(m.ShortNetProfit, 2),
+        ["long_net_profit"] = m.LongNetProfit,
+        ["short_net_profit"] = m.ShortNetProfit,
         ["max_consecutive_losses"] = m.MaxConsecutiveLosses,
-        ["exposure_percent"] = Math.Round(m.ExposurePercent, 1),
-        ["commission"] = Math.Round(m.Commission, 2),
+        ["exposure_percent"] = m.ExposurePercent,
+        ["commission"] = m.Commission,
+    };
+
+    internal static JsonObject InputEvidenceJson(RunInputEvidence? evidence) => new()
+    {
+        ["known"] = evidence != null,
+        ["data_quality"] = evidence?.DataQuality.ToString(),
+        ["resolution_seconds"] = evidence?.ResolutionSeconds,
+        ["source_identity"] = evidence?.SourceIdentity,
+        ["correction_revision"] = evidence?.CorrectionRevision,
+        ["has_known_availability"] = evidence?.HasKnownAvailability,
+        ["data_warning"] = evidence?.DataWarning,
+        ["content_identity"] = evidence?.ContentIdentity,
+    };
+
+    internal static JsonObject? RecommendationJson(OptimizationResult? result) => result?.Recommended is { } row ? new()
+    {
+        ["parameters"] = ParamsJson(row.Parameters),
+        ["metrics"] = MetricsJson(row.Metrics),
+        ["fitness"] = double.IsFinite(row.Fitness) ? row.Fitness : null,
+        ["note"] = "The best plateau (average with neighboring grid combinations), not the highest peak: the recommended selection.",
+    } : null;
+
+    internal static JsonObject OptimizationPopulationJson(OptimizationResult result)
+    {
+        var population = result.GetPopulation();
+        return new()
+        {
+            ["available"] = population != null,
+            ["measured_combinations"] = population?.MeasuredCombinations,
+            ["profitable_combinations_percent"] = population?.ProfitablePercent,
+            ["retained_rows"] = result.Rows.Count,
+            ["unavailable_reason"] = population == null ? "Complete-population statistics are unavailable for this truncated legacy run." : null,
+            ["parameter_marginals"] = population == null ? null : new JsonArray(population.Parameters.Select(parameter => (JsonNode)new JsonObject
+            {
+                ["parameter"] = parameter.Name,
+                ["values"] = new JsonArray(parameter.Values.Select(value => (JsonNode)new JsonObject
+                {
+                    ["value"] = value.Value,
+                    ["combinations"] = value.Combinations,
+                    ["profitable_combinations_percent"] = value.ProfitablePercent,
+                    ["average_net_profit"] = value.AverageNetProfit,
+                    ["average_sharpe"] = value.AverageSharpe,
+                }).ToArray()),
+            }).ToArray()),
+        };
+    }
+
+    internal static JsonObject MonteCarloJson(MonteCarloResult mc) => new()
+    {
+        ["available"] = mc.Available,
+        ["unavailable_reason"] = mc.UnavailableReason,
+        ["runs"] = mc.Runs,
+        ["net_profit"] = mc.Available ? mc.NetProfit : null,
+        ["drawdown_p50"] = mc.Available ? mc.DrawdownP50 : null,
+        ["drawdown_p95"] = mc.Available ? mc.DrawdownP95 : null,
+        ["drawdown_p99"] = mc.Available ? mc.DrawdownP99 : null,
+        ["worst_drawdown"] = mc.Available ? mc.WorstDrawdown : null,
+        ["ruin_probability_percent"] = mc.Available ? mc.RuinProbabilityPercent : null,
+    };
+
+    private static JsonObject ContributionJson(ClosedTrade t) => new()
+    {
+        ["number"] = t.Number,
+        ["side"] = t.IsLong ? "long" : "short",
+        ["entry"] = t.EntryTime,
+        ["entry_price"] = t.EntryPrice,
+        ["exit"] = t.ExitTime,
+        ["exit_price"] = t.ExitPrice,
+        ["quantity"] = t.Quantity,
+        ["pnl"] = t.Pnl,
+        ["commission"] = t.Commission,
+        ["net_pnl"] = t.NetPnl,
+        ["attribution"] = t.Attribution switch
+        {
+            TradeAttribution.Execution => "execution",
+            TradeAttribution.WindowClosingFill => "window_closing_fill",
+            TradeAttribution.WindowBoundaryValuation => "window_boundary_valuation",
+            _ => throw new ArgumentOutOfRangeException(nameof(t.Attribution), t.Attribution, "Unknown trade attribution."),
+        },
+        ["attribution_net"] = t.AttributionNet,
+        ["actual_entry_time"] = t.ActualEntryTime,
+        ["window_from"] = t.WindowFrom,
+        ["window_to"] = t.WindowTo,
+        ["opening_mark"] = t.OpeningMark,
+        ["closing_mark"] = t.ClosingMark,
+        ["carry_net_credit"] = t.CarryNetCredit,
+        ["carry_commission_credit"] = t.CarryCommissionCredit,
+        ["is_actual_closing_fill"] = t.IsActualClosingFill,
+        ["has_complete_trade_evidence"] = t.HasCompleteTradeEvidence,
     };
 
     private static JsonObject ParamsJson(IReadOnlyDictionary<string, object?> p)
@@ -804,24 +909,24 @@ internal static class LabServer
         return o;
     }
 
-    private static void Save(StrategyRun run, StrategyFile file)
+    private static void Save(StrategyRun run, CompiledStrategyGeneration generation)
     {
         run.Notes = string.IsNullOrEmpty(run.Notes) ? "Claude laboratory" : run.Notes;
-        StrategyStore.Save(run, File.ReadAllText(file.Path));
+        StrategyStore.Save(run, generation.Source.Text);
     }
 
     /// <summary>Archivo con los parámetros fijos de una estrategia mientras se valida (el filtro de una variante).</summary>
     internal static string PinsPath => Path.Combine(AppPaths.Root, "lab-parametros-fijos.json");
 
     /// <summary>Parámetros fijos de esta estrategia (no se pueden cambiar ni optimizar).</summary>
-    internal static Dictionary<string, object?> PinnedFor(StrategyFile file)
+    internal static Dictionary<string, object?> PinnedFor(string fileName)
     {
         var res = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         try
         {
             if (!File.Exists(PinsPath)) return res;
             using var doc = JsonDocument.Parse(File.ReadAllText(PinsPath));
-            if (!doc.RootElement.TryGetProperty(file.FileName, out var pins) || pins.ValueKind != JsonValueKind.Object) return res;
+            if (!doc.RootElement.TryGetProperty(fileName, out var pins) || pins.ValueKind != JsonValueKind.Object) return res;
             foreach (var p in pins.EnumerateObject()) res[p.Name] = p.Value.Clone();
         }
         catch (Exception)
@@ -833,21 +938,25 @@ internal static class LabServer
     }
 
     /// <summary>Los parámetros del pedido con los fijos encima.</summary>
-    private static Dictionary<string, object?> ParamsFor(JsonObject a, StrategyFile file)
+    private static Dictionary<string, object?> ParamsFor(JsonObject a, IReadOnlyDictionary<string, object?> pinned)
     {
         var res = Params(a);
-        foreach (var (k, v) in PinnedFor(file)) res[k] = v;
+        foreach (var (k, v) in pinned) res[k] = v;
         return res;
     }
 
-    private static async Task<JsonNode> RunBacktestAsync(JsonObject a)
+    private static async Task<JsonNode> RunBacktestAsync(JsonObject a, CancellationToken ct)
     {
+        a = (JsonObject)a.DeepClone();
         var file = FileOf(Str(a, "file"));
-        var (settings, data) = await PrepareAsync(a);
+        var parameters = ParamsFor(a, PinnedFor(file.FileName));
+        var settings = SettingsFor(a);
+        var data = await PrepareAsync(settings, ct: ct);
         var strategy = file.Create();
-        strategy.SetParameters(ParamsFor(a, file));
+        strategy.SetParameters(parameters);
         // el contexto de mercado arranca con el mes anterior, como en vivo
-        var res = await Task.Run(() => new BacktestEngine(strategy, data, settings) { ContextHistory = MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc) }.Run(CancellationToken.None));
+        var res = await Task.Run(() => new BacktestEngine(strategy, data, settings) { ContextHistory = MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc, ct) }.Run(ct), ct);
+        ct.ThrowIfCancellationRequested();
         if (!res.Ok) throw new InvalidOperationException("Strategy failed: " + res.Error);
         var run = new StrategyRun
         {
@@ -862,6 +971,7 @@ internal static class LabServer
             Ticks = res.Ticks,
             Bars = res.Bars,
             Seconds = res.Seconds,
+            InputEvidence = RunInputEvidence.Capture(res, data),
         };
 
         var o = new JsonObject
@@ -874,6 +984,7 @@ internal static class LabServer
             ["seconds"] = Math.Round(res.Seconds, 1),
             ["data_from"] = data.FirstTime.ToString("yyyy-MM-dd HH:mm", Inv),
             ["data_to"] = data.LastTime.ToString("yyyy-MM-dd HH:mm", Inv),
+            ["input_evidence"] = InputEvidenceJson(run.InputEvidence),
         };
 
         int mcRuns = (int)Num(a, "monte_carlo_runs", 0);
@@ -881,15 +992,7 @@ internal static class LabServer
         {
             var mc = Optimizer.MonteCarlo(res.Trades, settings.InitialCapital, Math.Clamp(mcRuns, 100, 20000));
             run.MonteCarlo = mc;
-            o["monte_carlo"] = new JsonObject
-            {
-                ["runs"] = mc.Runs,
-                ["drawdown_p50"] = Math.Round(mc.DrawdownP50, 2),
-                ["drawdown_p95"] = Math.Round(mc.DrawdownP95, 2),
-                ["drawdown_p99"] = Math.Round(mc.DrawdownP99, 2),
-                ["worst_drawdown"] = Math.Round(mc.WorstDrawdown, 2),
-                ["ruin_probability_percent"] = Math.Round(mc.RuinProbabilityPercent, 2),
-            };
+            o["monte_carlo"] = MonteCarloJson(mc);
         }
 
         if (Bool(a, "include_trades", false))
@@ -898,13 +1001,14 @@ internal static class LabServer
             o["sample_trades"] = JsonSerializer.SerializeToNode(sample);
         }
 
+        ct.ThrowIfCancellationRequested();
         Save(run, file);
         return o;
     }
 
-    private static List<ParameterRange> Ranges(JsonObject a, StrategyFile file)
+    private static List<ParameterRange> Ranges(JsonObject a, CompiledStrategyGeneration generation, IReadOnlyDictionary<string, object?> pinned)
     {
-        var ranges = ParameterRange.FromStrategy(file.Type!, file.Create());
+        var ranges = ParameterRange.FromStrategy(generation.Type, generation.Create());
         if (a["ranges"] is JsonObject custom)
         {
             foreach (var r in ranges) r.Enabled = false;
@@ -921,7 +1025,6 @@ internal static class LabServer
         }
 
         // los fijos no se optimizan
-        var pinned = PinnedFor(file);
         foreach (var r in ranges.Where(r => pinned.ContainsKey(r.Name))) r.Enabled = false;
         if (!ranges.Any(r => r.Enabled)) throw new ArgumentException("No optimization parameters: provide ranges or mark parameters with [Optimize].");
         return ranges;
@@ -930,19 +1033,29 @@ internal static class LabServer
     private static FitnessMetric Metric(JsonObject a) =>
         Enum.TryParse<FitnessMetric>(Str(a, "metric", nameof(FitnessMetric.NetProfitOverDrawdown)), true, out var m) ? m : FitnessMetric.NetProfitOverDrawdown;
 
-    private static async Task<JsonNode> RunOptimizationAsync(JsonObject a)
+    private static async Task<JsonNode> RunOptimizationAsync(JsonObject a, CancellationToken ct)
     {
+        a = (JsonObject)a.DeepClone();
         var file = FileOf(Str(a, "file"));
-        var ranges = Ranges(a, file);
+        var pinned = PinnedFor(file.FileName);
+        var ranges = Ranges(a, file, pinned);
         long combos = Optimizer.Combinations(ranges.Where(r => r.Enabled));
         long max = (long)Num(a, "max_combinations", 5000);
         if (combos > max) throw new ArgumentException($"There are {combos:N0} combinations (limit {max:N0}). Narrow the ranges or increase step sizes.");
-        var (settings, data) = await PrepareAsync(a, Optimizer.CanCompress(file.Type!, Str(a, "period", "M5")));
         var metric = Metric(a);
         int minTrades = (int)Num(a, "min_trades", 10);
-        var baseParams = ParamsFor(a, file);
-        var res = await Task.Run(() => Optimizer.Optimize(file.Create, baseParams, ranges, data, settings, metric, minTrades, null, CancellationToken.None,
-            contextHistory: MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc)));
+        var baseParams = ParamsFor(a, pinned);
+        var settings = SettingsFor(a);
+        var periods = new ParameterSpace(ranges, file.Type).Periods;
+        bool compress = (periods.Count > 0 ? periods : new[] { settings.Period }).All(period => Optimizer.CanCompress(file.Type, period));
+        var data = await PrepareAsync(settings, compress, ct);
+        var (res, evidence) = await Task.Run(() =>
+        {
+            var result = Optimizer.Optimize(file.Create, baseParams, ranges, data, settings, metric, minTrades, null, ct,
+                contextHistory: MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc, ct));
+            return (result.WithCapturedPopulation(), RunInputEvidence.Capture(data));
+        }, ct);
+        ct.ThrowIfCancellationRequested();
         int top = (int)Num(a, "top", 10);
         var run = new StrategyRun
         {
@@ -952,11 +1065,9 @@ internal static class LabServer
             Settings = settings,
             Parameters = res.Best?.Parameters ?? new(),
             Metrics = res.Best?.Metrics,
-            Optimization = new OptimizationResult
-            {
-                Metric = res.Metric, Ranges = res.Ranges, Rows = res.Rows.Take(2000).ToList(), Combinations = res.Combinations, Seconds = res.Seconds,
-                RecommendedIndex = res.RecommendedIndex < 2000 ? res.RecommendedIndex : -1,
-            },
+            Optimization = res,
+            Ticks = data.Count,
+            InputEvidence = evidence,
             Seconds = res.Seconds,
         };
         Save(run, file);
@@ -966,37 +1077,41 @@ internal static class LabServer
             ["combinations"] = res.Combinations,
             ["seconds"] = Math.Round(res.Seconds, 1),
             ["metric"] = metric.ToString(),
+            ["input_evidence"] = InputEvidenceJson(evidence),
+            ["population"] = OptimizationPopulationJson(res),
             ["top"] = new JsonArray(res.Rows.Take(top).Select(r => (JsonNode)new JsonObject
             {
                 ["parameters"] = ParamsJson(r.Parameters),
                 ["fitness"] = double.IsFinite(r.Fitness) ? Math.Round(r.Fitness, 4) : null,
                 ["metrics"] = MetricsJson(r.Metrics),
             }).ToArray()),
-            ["profitable_combinations_percent"] = res.Rows.Count > 0 ? Math.Round(100.0 * res.Rows.Count(r => r.Metrics.NetProfit > 0) / res.Rows.Count, 1) : 0,
-            ["recommended"] = res.Recommended is { } rec ? new JsonObject
-            {
-                ["parameters"] = ParamsJson(rec.Parameters),
-                ["metrics"] = MetricsJson(rec.Metrics),
-                ["note"] = "The best plateau (average with neighboring grid combinations), not the highest peak: the recommended selection.",
-            } : null,
+            ["profitable_combinations_percent"] = res.GetPopulation()?.ProfitablePercent,
+            ["recommended"] = RecommendationJson(res),
         };
     }
 
     /// <summary>Walk-forwards que están corriendo (el mismo pedido otra vez espera al que corre, no arranca otro).</summary>
-    private static readonly ConcurrentDictionary<string, Task<JsonNode>> RunningWalkForwards = new();
+    private static readonly ConcurrentDictionary<string, Lazy<Task<JsonNode>>> RunningWalkForwards = new();
 
-    private static async Task<JsonNode> RunWalkForwardAsync(JsonObject a)
+    private static async Task<JsonNode> RunWalkForwardAsync(JsonObject a, CancellationToken ct)
     {
-        if (Bool(a, "estimate_only", false)) return await EstimateWalkForwardAsync(a);
-        string key = a.ToJsonString();
-        var task = RunningWalkForwards.GetOrAdd(key, _ => Task.Run(() => WalkForwardCoreAsync(a)));
+        a = (JsonObject)a.DeepClone();
+        if (Bool(a, "estimate_only", false)) return await EstimateWalkForwardAsync(a, ct);
+        var generation = FileOf(Str(a, "file"));
+        var pinned = PinnedFor(generation.FileName);
+        var ranges = Ranges(a, generation, pinned);
+        var parameters = ParamsFor(a, pinned);
+        var settings = SettingsFor(a);
+        string key = generation.SourceDigest + "|" + ParamsJson(parameters).ToJsonString() + "|" + a.ToJsonString();
+        var operation = RunningWalkForwards.GetOrAdd(key, _ => new Lazy<Task<JsonNode>>(() => WalkForwardCoreAsync(a, generation, ranges, parameters, settings, ct)));
+        var task = operation.Value;
         try
         {
             return await task;
         }
         finally
         {
-            RunningWalkForwards.TryRemove(new KeyValuePair<string, Task<JsonNode>>(key, task));
+            RunningWalkForwards.TryRemove(new KeyValuePair<string, Lazy<Task<JsonNode>>>(key, operation));
         }
     }
 
@@ -1008,13 +1123,16 @@ internal static class LabServer
     };
 
     /// <summary>Cuánto va a tardar: corre una combinación sobre todo el rango y multiplica por las que hay que correr.</summary>
-    private static async Task<JsonNode> EstimateWalkForwardAsync(JsonObject a)
+    private static async Task<JsonNode> EstimateWalkForwardAsync(JsonObject a, CancellationToken ct)
     {
+        a = (JsonObject)a.DeepClone();
         var file = FileOf(Str(a, "file"));
-        var ranges = Ranges(a, file);
-        bool compress = Optimizer.CanCompress(file.Type!, Str(a, "period", "M5"));
-        var (settings, data) = await PrepareAsync(a, compress);
-        var space = new ParameterSpace(ranges, file.Type!);
+        var pinned = PinnedFor(file.FileName);
+        var ranges = Ranges(a, file, pinned);
+        var parameters = ParamsFor(a, pinned);
+        var settings = SettingsFor(a);
+        bool compress = Optimizer.CanCompress(file.Type, settings.Period);
+        var space = new ParameterSpace(ranges, file.Type);
         int inDays = Math.Max(1, (int)Num(a, "in_sample_days", 30)), outDays = Math.Max(1, (int)Num(a, "out_sample_days", 10));
         double total = (settings.ToUtc - settings.FromUtc).TotalDays;
         int windows = Math.Max(1, (int)Math.Ceiling((total - inDays) / outDays));
@@ -1022,10 +1140,11 @@ internal static class LabServer
         bool grid = mode == SearchMode.Grid || (mode == SearchMode.Auto && space.Size <= Optimizer.GridLimit);
         int budget = (int)Num(a, "budget", Optimizer.DefaultBudget);
         long configs = grid ? space.Size : Math.Min(space.Size, (long)budget * windows / 2 + budget);
+        var data = await PrepareAsync(settings, compress, ct);
         var s = file.Create();
-        s.SetParameters(ParamsFor(a, file));
+        s.SetParameters(parameters);
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await Task.Run(() => new BacktestEngine(s, data, settings) { ContextHistory = MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc) }.Run());
+        await Task.Run(() => new BacktestEngine(s, data, settings) { ContextHistory = MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc, ct) }.Run(ct), ct);
         double one = sw.Elapsed.TotalSeconds;
         int cores = Math.Max(1, Environment.ProcessorCount - 1);
         double estimate = one * configs / Math.Min(cores, Math.Max(1, configs)) * 1.15 + 3;
@@ -1043,22 +1162,21 @@ internal static class LabServer
         };
     }
 
-    private static async Task<JsonNode> WalkForwardCoreAsync(JsonObject a)
+    private static async Task<JsonNode> WalkForwardCoreAsync(JsonObject a, CompiledStrategyGeneration file,
+        List<ParameterRange> ranges, Dictionary<string, object?> baseParams, BacktestSettings settings, CancellationToken ct)
     {
-        var file = FileOf(Str(a, "file"));
-        var ranges = Ranges(a, file);
-        var (settings, data) = await PrepareAsync(a, Optimizer.CanCompress(file.Type!, Str(a, "period", "M5")));
         var metric = Metric(a);
         int inDays = (int)Num(a, "in_sample_days", 0), outDays = (int)Num(a, "out_sample_days", 0);
         if (inDays <= 0 || outDays <= 0) throw new ArgumentException("in_sample_days and out_sample_days must be greater than zero.");
         int minTrades = (int)Num(a, "min_trades", 5);
-        var baseParams = ParamsFor(a, file);
+        var data = await PrepareAsync(settings, Optimizer.CanCompress(file.Type, settings.Period), ct);
         bool anchored = Bool(a, "anchored", false);
         var search = SearchOf(a);
         int budget = (int)Num(a, "budget", 0);
         // cada ventana arranca su contexto de mercado con lo anterior a ella (incluido el mes antes del rango), como en vivo
-        var res = await Task.Run(() => Optimizer.WalkForward(file.Create, baseParams, ranges, data, settings, metric, inDays, outDays, anchored, minTrades, null, CancellationToken.None,
-            MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc), search, budget));
+        var res = await Task.Run(() => Optimizer.WalkForward(file.Create, baseParams, ranges, data, settings, metric, inDays, outDays, anchored, minTrades, null, ct,
+            MarketConditions.HourlyBefore(settings.FeedId, settings.Symbol, settings.FromUtc, ct), search, budget), ct);
+        ct.ThrowIfCancellationRequested();
         var run = new StrategyRun
         {
             StrategyId = file.Id,
@@ -1071,25 +1189,58 @@ internal static class LabServer
             Equity = BacktestResult.Downsample(res.OutSampleEquity, 2000),
             WalkForward = res,
             Seconds = res.Seconds,
+            Ticks = data.Count,
+            InputEvidence = RunInputEvidence.Capture(data),
         };
         Save(run, file);
+        return WalkForwardJson(res, run.Id, run.InputEvidence);
+    }
+
+    internal static JsonObject WalkForwardJson(WalkForwardResult res, string runId, RunInputEvidence? inputEvidence = null)
+    {
+        int completed = res.Windows.Count(w => w.InSampleAvailable && w.InSample != null && w.OutSampleAvailable && w.OutSample != null);
+        var paths = res.CpcvPaths.Where(p => p.Available && p.Net.HasValue && p.Sharpe.HasValue && p.MaxDrawdown.HasValue).OrderBy(p => p.Net).ToList();
+        bool tradeEvidence = res.AccountingPolicy == null && res.OutSampleTrades.All(t => t.HasCompleteTradeEvidence);
         return new JsonObject
         {
-            ["run_id"] = run.Id,
+            ["run_id"] = runId,
+            ["input_evidence"] = InputEvidenceJson(inputEvidence),
+            ["is_complete"] = res.IsComplete,
+            ["completed_windows"] = completed,
+            ["total_windows"] = res.Windows.Count,
+            ["accounting_policy"] = res.AccountingPolicy,
+            ["attribution_policy"] = res.AttributionPolicy,
+            ["cpcv_policy"] = res.CpcvPolicy,
+            ["trade_evidence_available"] = tradeEvidence,
+            ["trade_evidence_unavailable_reason"] = tradeEvidence ? null : "Trade-only confidence, decay and regime diagnostics are unavailable for marked window contributions.",
+            ["accounting_note"] = res.AccountingPolicy == null ? null
+                : "Warm mark-to-market research splice, not an executable portfolio. Positions are not transferred between configurations. Sizing does not use stitched capital, and deployment turnover is not charged. Profit factor, win rate and expectancy use closing-fill contributions and final boundary valuations. Eligibility counts only actual closing fills.",
             ["windows"] = new JsonArray(res.Windows.Select(w => (JsonNode)new JsonObject
             {
                 ["n"] = w.Number,
                 ["in_sample"] = $"{w.InSampleFrom:yyyy-MM-dd} → {w.InSampleTo:yyyy-MM-dd}",
                 ["out_sample"] = $"{w.OutSampleFrom:yyyy-MM-dd} → {w.OutSampleTo:yyyy-MM-dd}",
+                ["in_sample_available"] = w.InSampleAvailable && w.InSample != null,
+                ["out_sample_available"] = w.OutSampleAvailable && w.OutSample != null,
+                ["unavailable_reason"] = w.UnavailableReason,
                 ["best_parameters"] = ParamsJson(w.BestParameters),
-                ["in_sample_net"] = Math.Round(w.InSample.NetProfit, 2),
-                ["out_sample_net"] = Math.Round(w.OutSample.NetProfit, 2),
-                ["out_sample_trades"] = w.OutSample.TotalTrades,
-                ["efficiency"] = Math.Round(w.Efficiency, 2),
+                ["in_sample_net"] = w.InSampleAvailable ? w.InSample?.NetProfit : null,
+                ["out_sample_net"] = w.OutSampleAvailable ? w.OutSample?.NetProfit : null,
+                ["out_sample_trades"] = w.OutSampleAvailable ? w.OutSample?.TotalTrades : null,
+                ["in_sample_metrics"] = w.InSampleAvailable && w.InSample is { } im ? MetricsJson(im) : null,
+                ["out_sample_metrics"] = w.OutSampleAvailable && w.OutSample is { } om ? MetricsJson(om) : null,
+                ["efficiency"] = w.InSampleAvailable && w.OutSampleAvailable ? w.Efficiency : null,
+                ["in_sample_opening_equity"] = w.InSampleOpeningEquity,
+                ["in_sample_closing_equity"] = w.InSampleClosingEquity,
+                ["out_sample_opening_equity"] = w.OutSampleOpeningEquity,
+                ["out_sample_closing_equity"] = w.OutSampleClosingEquity,
+                ["out_sample_stitched_opening_equity"] = w.OutSampleStitchedOpeningEquity,
+                ["out_sample_stitched_closing_equity"] = w.OutSampleStitchedClosingEquity,
             }).ToArray()),
-            ["out_of_sample_metrics"] = MetricsJson(res.OutSampleMetrics),
-            ["walk_forward_efficiency"] = Math.Round(res.WalkForwardEfficiency, 2),
-            ["profitable_windows_percent"] = Math.Round(res.ProfitableWindowsPercent, 1),
+            ["out_of_sample_metrics"] = completed > 0 ? MetricsJson(res.OutSampleMetrics) : null,
+            ["out_of_sample_contributions"] = new JsonArray(res.OutSampleTrades.Select(t => (JsonNode)ContributionJson(t)).ToArray()),
+            ["walk_forward_efficiency"] = completed > 0 ? res.WalkForwardEfficiency : (double?)null,
+            ["profitable_windows_percent"] = completed > 0 ? res.ProfitableWindowsPercent : (double?)null,
             ["search"] = res.Search == "grilla" ? "grid" : "bayesian",
             ["combinations_run"] = res.Evaluated,
             ["combinations_in_space"] = res.SpaceSize,
@@ -1102,13 +1253,30 @@ internal static class LabServer
                 ["note"] = "Selects the best combination on half the history and evaluates it on the other half, across all possible splits. best_loses_out_of_sample is the fraction that lost money " +
                            "(< 0.2 is good; ≥ 0.5 suggests overfitting); pbo is the fraction ranked in the bottom half (high PBO with all combinations profitable can indicate a plateau, not a problem).",
             } : null,
-            ["cpcv_paths"] = res.CpcvPaths.Count > 0 ? new JsonArray(res.CpcvPaths.Select(p => (JsonNode)new JsonObject
+            ["cpcv_paths"] = new JsonArray(res.CpcvPaths.Select(p => (JsonNode)new JsonObject
             {
                 ["n"] = p.Number,
-                ["net"] = Math.Round(p.Net, 2),
-                ["sharpe"] = Math.Round(p.Sharpe, 2),
-                ["max_drawdown"] = Math.Round(p.MaxDrawdown, 2),
-            }).ToArray()) : null,
+                ["available"] = p.Available,
+                ["unavailable_reason"] = p.UnavailableReason,
+                ["net"] = p.Available ? p.Net : null,
+                ["sharpe"] = p.Available ? p.Sharpe : null,
+                ["max_drawdown"] = p.Available ? p.MaxDrawdown : null,
+                ["actual_closing_fills"] = p.Available ? p.ActualClosingFills : null,
+                ["days"] = p.Days,
+            }).ToArray()),
+            ["cpcv_summary"] = new JsonObject
+            {
+                ["available_paths"] = paths.Count,
+                ["total_paths"] = res.CpcvPaths.Count,
+                ["profitable_paths"] = paths.Count > 0 ? paths.Count(p => p.Net > 0) : (int?)null,
+                ["profitable_share"] = paths.Count > 0 ? (double)paths.Count(p => p.Net > 0) / paths.Count : (double?)null,
+                ["median_net"] = paths.Count > 0 ? paths[paths.Count / 2].Net : null,
+                ["worst_net"] = paths.Count > 0 ? paths[0].Net : null,
+                ["groups"] = res.CpcvGroups,
+                ["embargo_days"] = res.EmbargoDays,
+                ["unavailable_reason"] = paths.Count > 0 ? null : "No eligible retrospective CPCV path is available.",
+                ["note"] = "Retrospective purged cross-validation of warm marked ranges, not a forward-only executable handoff. Shares and medians use only available paths.",
+            },
             ["seconds"] = Math.Round(res.Seconds, 1),
         };
     }
@@ -1119,28 +1287,49 @@ internal static class LabServer
         int limit = (int)Num(a, "limit", 20);
         return new JsonObject
         {
-            ["runs"] = new JsonArray(StrategyStore.List(file.Id).Take(limit).Select(r => (JsonNode)new JsonObject
+            ["runs"] = new JsonArray(StrategyStore.List(file.Id).Take(limit).Select(r =>
             {
-                ["run_id"] = r.Id,
-                ["kind"] = r.Kind.ToString(),
-                ["created"] = r.CreatedUtc.ToString("yyyy-MM-dd HH:mm", Inv),
-                ["data"] = $"{r.FeedId} {r.Symbol} {r.Period} {r.FromUtc:yyyy-MM-dd} → {r.ToUtc:yyyy-MM-dd}",
-                ["net_profit"] = Math.Round(r.NetProfit, 2),
-                ["profit_factor"] = Math.Round(r.ProfitFactor, 2),
-                ["max_drawdown"] = Math.Round(r.MaxDrawdown, 2),
-                ["trades"] = r.Trades,
-                ["win_rate"] = Math.Round(r.WinRate, 1),
-                ["sharpe"] = Math.Round(r.Sharpe, 2),
-                ["efficiency"] = r.Efficiency is double e ? Math.Round(e, 2) : null,
-                ["parameters"] = r.ParametersText,
-                ["notes"] = r.Notes,
+                var run = r.Kind is RunKind.WalkForward or RunKind.Optimization ? StrategyStore.Load(file.Id, r.Id) : null;
+                var wf = run?.WalkForward;
+                int? completed = wf?.Windows.Count(w => w.InSampleAvailable && w.InSample != null && w.OutSampleAvailable && w.OutSample != null);
+                bool available = r.Kind != RunKind.WalkForward || completed > 0;
+                var metrics = run?.Metrics ?? wf?.OutSampleMetrics;
+                return (JsonNode)new JsonObject
+                {
+                    ["run_id"] = r.Id,
+                    ["kind"] = r.Kind.ToString(),
+                    ["created"] = r.CreatedUtc.ToString("yyyy-MM-dd HH:mm", Inv),
+                    ["data"] = $"{r.FeedId} {r.Symbol} {r.Period} {r.FromUtc:yyyy-MM-dd} → {r.ToUtc:yyyy-MM-dd}",
+                    ["input_evidence"] = InputEvidenceJson(run?.InputEvidence ?? r.InputEvidence),
+                    ["code_hash"] = r.CodeHash,
+                    ["population"] = run?.Optimization is { } optimization ? OptimizationPopulationJson(optimization) : null,
+                    ["recommended"] = RecommendationJson(run?.Optimization),
+                    ["net_profit"] = !available ? null : metrics?.NetProfit ?? r.NetProfit,
+                    ["profit_factor"] = !available ? null : metrics?.ProfitFactor ?? r.ProfitFactor,
+                    ["max_drawdown"] = !available ? null : metrics?.MaxDrawdown ?? r.MaxDrawdown,
+                    ["trades"] = !available ? null : metrics?.TotalTrades ?? r.Trades,
+                    ["win_rate"] = !available ? null : metrics?.WinRate ?? r.WinRate,
+                    ["sharpe"] = !available ? null : metrics?.SharpeRatio ?? Math.Round(r.Sharpe, 2),
+                    ["efficiency"] = !available ? null : r.Efficiency is double e ? Math.Round(e, 2) : null,
+                    ["is_complete"] = wf?.IsComplete,
+                    ["completed_windows"] = completed,
+                    ["total_windows"] = wf?.Windows.Count,
+                    ["accounting_policy"] = wf?.AccountingPolicy,
+                    ["attribution_policy"] = wf?.AttributionPolicy,
+                    ["cpcv_policy"] = wf?.CpcvPolicy,
+                    ["attribution_samples"] = available ? metrics?.AttributionSamples : null,
+                    ["attribution_unit"] = metrics?.AttributionUnit.ToString(),
+                    ["unavailable_reason"] = !available ? "No complete out-of-sample window is available." : null,
+                    ["parameters"] = r.ParametersText,
+                    ["notes"] = r.Notes,
+                };
             }).ToArray()),
         };
     }
 
     // ===================================================================== reportes
 
-    private static StrategyRun? LoadRun(StrategyFile file, string? runId, RunKind kind)
+    private static StrategyRun? LoadRun(CompiledStrategyGeneration file, string? runId, RunKind kind)
     {
         if (!string.IsNullOrWhiteSpace(runId))
             return StrategyStore.Load(file.Id, runId) ?? throw new ArgumentException($"Run not found: {runId} of {file.FileName}. Use list_runs.");
@@ -1164,9 +1353,23 @@ internal static class LabServer
         return res;
     }
 
-    private static JsonObject PortfolioJson(PortfolioResult r)
+    private static JsonObject? ResearchCoverageJson(PortfolioResearchCoverage? coverage) => coverage == null ? null : new()
+    {
+        ["from"] = coverage.From,
+        ["to"] = coverage.To,
+        ["is_complete"] = coverage.IsComplete,
+        ["completed_windows"] = coverage.CompletedWindows,
+        ["total_windows"] = coverage.TotalWindows,
+        ["accounting_policy"] = coverage.AccountingPolicy,
+        ["attribution_policy"] = coverage.AttributionPolicy,
+        ["cpcv_policy"] = coverage.CpcvPolicy,
+        ["note"] = coverage.IsComplete ? "Complete research coverage." : "Only the completed out-of-sample prefix is reported.",
+    };
+
+    internal static JsonObject PortfolioJson(PortfolioResult r)
     {
         int n = r.Components.Count;
+        bool tradeEvidence = r.Trades.All(t => t.HasCompleteTradeEvidence) && r.Components.All(c => c.ResearchCoverage == null);
         var matrix = new JsonArray();
         for (int i = 0; i < n; i++)
         {
@@ -1187,12 +1390,22 @@ internal static class LabServer
                 ["label"] = c.Label,
                 ["weight"] = c.Weight,
                 ["metrics_in_common_period"] = MetricsJson(r.ComponentMetrics[i]),
+                ["research_coverage"] = ResearchCoverageJson(c.ResearchCoverage),
+                ["input_evidence"] = InputEvidenceJson(c.InputEvidence),
+                ["code_hash"] = c.CodeHash,
+                ["kind"] = c.Kind?.ToString(),
             }).ToArray()),
             ["portfolio_metrics"] = MetricsJson(r.Metrics),
+            ["trade_evidence_available"] = tradeEvidence,
+            ["trade_evidence_unavailable_reason"] = tradeEvidence ? null : "Trade-only confidence, decay and regime diagnostics are unavailable for marked window contributions.",
+            ["attributed_contributions"] = r.Metrics.AttributionUnit == PerformanceAttributionUnit.WindowClosingFillAndBoundaryValuation
+                ? new JsonArray(r.Trades.Select(t => (JsonNode)ContributionJson(t)).ToArray()) : null,
+            ["research_note"] = r.Components.Any(c => c.ResearchCoverage != null)
+                ? "Includes warm mark-to-market research contributions, not an executable portfolio. Only common available OOS coverage is combined. Partial components retain their completed prefix." : null,
             ["correlation_matrix"] = matrix,
             ["average_correlation"] = Math.Round(r.AverageCorrelation, 3),
             ["max_correlation"] = Math.Round(r.MaxCorrelation, 3),
-            ["sum_of_component_drawdowns"] = Math.Round(r.SumOfComponentDrawdowns, 2),
+            ["sum_of_component_drawdowns"] = r.SumOfComponentDrawdowns,
             ["drawdown_reduction_percent"] = Math.Round(r.DrawdownReductionPercent, 1),
             ["average_component_sharpe"] = Math.Round(r.AverageComponentSharpe, 2),
         };
@@ -1212,12 +1425,12 @@ internal static class LabServer
         var candidates = new List<PortfolioComponent>();
         foreach (var f in Catalog.Files)
         {
-            if (!Catalog.Compile(f).Success || f.Type == null) continue;
+            if (!Catalog.Compile(f).Success) continue;
             // el último backtest de cada instrumento y período
             foreach (var g in StrategyStore.List(f.Id).Where(r => r.Kind == RunKind.Backtest).GroupBy(r => (r.Symbol, r.Period)))
             {
                 var run = StrategyStore.Load(f.Id, g.OrderByDescending(r => r.CreatedUtc).First().Id);
-                if (run?.Trades is { Count: >= 5 }) candidates.Add(PortfolioComponent.FromRun(run));
+                if (run?.Trades != null && run.Trades.Count(t => t.IsActualClosingFill) >= 5) candidates.Add(PortfolioComponent.FromRun(run));
             }
         }
 
@@ -1369,14 +1582,13 @@ internal static class LabServer
     {
         string title = Str(a, "title").Trim();
         string verdict = (a["verdict"]?.GetValue<string>() ?? "").Trim().ToLowerInvariant();
-        StrategyFile? file = a["file"] is { } fn ? FileOf(fn.GetValue<string>()) : null;
+        CompiledStrategyGeneration? file = a["file"] is { } fn ? FileOf(fn.GetValue<string>()) : null;
         var input = new ReportInput
         {
             Title = title,
             Verdict = ReportStore.Verdicts.FirstOrDefault(v => verdict.StartsWith(v[..5])) ?? "",
             StrategyFile = file?.FileName,
             StrategyName = file?.DisplayName,
-            Description = file?.Type != null ? Strategy.Description(file.Type) : null,
             Summary = a["summary"]?.GetValue<string>() ?? "",
             Analysis = a["analysis"]?.GetValue<string>() ?? a["markdown"]?.GetValue<string>() ?? "",
             Risks = a["risks"]?.GetValue<string>() ?? "",
@@ -1389,11 +1601,13 @@ internal static class LabServer
             input.Backtest = LoadRun(file, a["backtest_run_id"]?.GetValue<string>(), RunKind.Backtest);
             input.Optimization = LoadRun(file, a["optimization_run_id"]?.GetValue<string>(), RunKind.Optimization);
             input.WalkForward = LoadRun(file, a["walk_forward_run_id"]?.GetValue<string>(), RunKind.WalkForward);
+            var main = input.Backtest ?? input.WalkForward ?? input.Optimization;
+            if (main != null) input.StrategyName = main.StrategyName;
         }
 
         if (a["portfolio"] is JsonArray pl && pl.Count > 0) input.Portfolio = PortfolioAnalyzer.Analyze(Components(pl), input.PortfolioCapital);
-        if (input.Backtest == null && input.Portfolio == null && input.WalkForward == null)
-            throw new ArgumentException("No runs for the report: run run_backtest or provide a portfolio before save_report.");
+        if (input.Backtest == null && input.Portfolio == null && input.WalkForward == null && input.Optimization == null)
+            throw new ArgumentException("No runs for the report. Run a backtest, optimization or walk-forward, or provide a portfolio before save_report.");
         var (markdown, images) = ReportBuilder.Build(input);
         var report = ReportStore.Save(title, markdown, file?.FileName, input.Verdict, images);
         return new JsonObject { ["saved"] = report.Path, ["verdict"] = report.Verdict, ["charts"] = images.Count };

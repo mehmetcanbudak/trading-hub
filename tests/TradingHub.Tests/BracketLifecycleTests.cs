@@ -623,6 +623,105 @@ public class BracketLifecycleTests
         Assert.Equal(3m, account.Position.Volume);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Position_report_leading_a_stop_execution_never_cancels_the_executing_stop(bool trackedAmendment)
+    {
+        Account account = trackedAmendment
+            ? new AmendingAccount { OptimisticQuantity = true }
+            : new Account();
+        using var brackets = new BracketManager(account);
+        brackets.SetStopLoss(90);
+        brackets.AddTarget(120);
+        var stop = brackets.StopLoss!;
+        SettleTarget(account, brackets);
+
+        // The stop triggered: the venue placed a reduce-only MARKET child, which executes one unit with the position.
+        TriggerExecutingChild(account, stop);
+        account.Fill(stop, 1, marketPrice: 90);
+        Assert.Equal(3m, account.Position.Volume);
+        SettleTarget(account, brackets);
+        Assert.Equal(3m, brackets.Targets.Single().Unfilled);
+
+        // Two more units execute. The position report arrives before the stop's execution report.
+        account.Position.Volume = 1;
+        account.Publish();
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal(3m, stop.Unfilled);
+        account.Fill(stop, 2, marketPrice: 90, updatePosition: false);
+
+        // That execution was already reflected by the position: the executing child protects the last unit.
+        Assert.DoesNotContain(stop, account.CancelRequests);
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal((OrderStates.Active, 1m), (stop.State, stop.Unfilled));
+        SettleTarget(account, brackets);
+        Assert.Equal(1m, brackets.Targets.Single().Unfilled);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal(1m, stop.Unfilled);
+
+        account.Fill(stop, 1, marketPrice: 90);
+        Assert.Equal(0m, account.Position.Volume);
+        Assert.Equal(OrderStatus.Filled, stop.Status);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Plain_stop_execution_after_unowned_reduction_cancels_the_oversized_remainder(bool trackedAmendment)
+    {
+        Account account = trackedAmendment
+            ? new AmendingAccount { OptimisticQuantity = true }
+            : new Account();
+        using var brackets = new BracketManager(account);
+        brackets.SetStopLoss(90);
+        brackets.AddTarget(120);
+        var stop = brackets.StopLoss!;
+        SettleTarget(account, brackets);
+
+        // An unowned manual close of two units: the stop is sized down to two, behind the pending target change.
+        account.Position.Volume = 2;
+        account.Publish();
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal((OrderTypes.Stop, 4m), (stop.Type, stop.Unfilled));
+        Assert.DoesNotContain(stop, account.CancelRequests);
+
+        // The plain stop then executes two of four, reported before the position: the account is flat.
+        account.Fill(stop, 2, marketPrice: 90, updatePosition: false);
+        Assert.Equal((OrderStates.Active, 2m), (stop.State, stop.Unfilled));
+
+        // Without native reduce-only, the oversized remainder could open a short. Its cancel is requested at once.
+        Assert.Contains(stop, account.CancelRequests);
+    }
+
+    // Mirrors a venue conditional order that triggered: the handle follows its reduce-only MARKET child.
+    private static void TriggerExecutingChild(Account account, Order stop)
+    {
+        var context = account.OrderContext;
+        var claim = Assert.IsType<OwnedOrderIntent>(context.Find(stop.IntentId));
+        stop.Security = new Security { SecurityId = claim.Request.Instrument };
+        var parent = new NativeOrderIdentity("test:conditional", stop.ExchangeOrderId);
+        Assert.Null(context.BindNative(stop, parent, notify: false));
+        var child = new NativeOrderIdentity("test:order", "child-" + stop.ExchangeOrderId);
+        stop.NativeIdentity = child;
+        Assert.Null(context.RecordNativeWorkingType(stop, parent, child, OrderTypes.Market, claim.Request.Instrument, account.Instrument.Symbol, notify: false));
+        stop.ExchangeOrderId = child.Id;
+        stop.Type = OrderTypes.Market;
+        stop.Price = 0;
+        Assert.Equal(claim.Id, context.FindExecutingProtection(stop, context.ManualOwner)?.Id);
+    }
+
+    private static void SettleTarget(Account account, BracketManager brackets)
+    {
+        foreach (var target in brackets.Targets.ToList())
+        {
+            if (account is AmendingAccount native && native.IsReplacementPending(target)) native.Confirm(target);
+            else if (account.CancelRequests.Contains(target) && target.State == OrderStates.Active) account.AcknowledgeCancel(target);
+        }
+    }
+
     private sealed class AmendingAccount : Account, ITradingAccount, ITrackedOrderReplacement
     {
         private sealed record Amendment(decimal OldPrice, decimal OldTotal, decimal Price, decimal Total);

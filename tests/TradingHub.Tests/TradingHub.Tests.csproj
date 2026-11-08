@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="../../tools/TradingHub.I18n/provenance.json" Link="i18n-provenance.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\TradingHub.Core\TradingHub.Core.csproj" />
     <ProjectReference Include="..\..\src\TradingHub.Strategies\TradingHub.Strategies.csproj" />
     <ProjectReference Include="..\..\src\TradingHub.Sdk\TradingHub.Sdk.csproj" />

@@ -1,14 +1,14 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # First steps
 
-A tour of the main window. Start with [Installation](instalacion.md) if the app is not installed yet.
+A tour of the main window. Start with [Installation](./instalacion.md) if the app is not installed yet.
 
 ## First launch
 
 Trading opens with a five-minute `SIM-BTC` footprint chart, Big Trades and Delta indicators. This comes from **Simulator**, an offline practice market.
 
-Orders initially use the **simulated account**. No real money is involved until you explicitly enable it for an appropriate profile in [Connections](conexiones.md).
+Orders initially use the **simulated account**. No real money is involved until you explicitly enable it for an appropriate profile in [Connections](./conexiones.md).
 
 The interface supports English, Spanish and Simplified Chinese. New installations follow the OS (Spanish/Chinese, otherwise English); existing English-fork settings without a language remain English. Set **Settings → General → Language** and reopen, or use **Restart now**, which first follows the same protection-aware quit flow. Reports and Claude prose follow the choice; generated C# and stable identifiers stay English.
 
@@ -63,13 +63,13 @@ The bottom-left area shows the latest order, history, alert or error notice. Hov
 
 ![Trading with charts, Chart Trader, DOM and tape](img/trading.png)
 
-1. **Chart toolbar:** instrument, history, period, style, indicators, footprint, colors, strategies, templates, layout, panels, detach and new tab. See [Charts](graficos.md).
+1. **Chart toolbar:** instrument, history, period, style, indicators, footprint, colors, strategies, templates, layout, panels, detach and new tab. See [Charts](./graficos.md).
 2. **Tabs:** visible when more than one exists; each holds one to six charts.
 3. **Chart:** drawing tools on the left and its own collapsible Chart Trader on the right.
 4. **Right panel:** Chart Trader, DOM and tape. Drag the edge for width and dividers for height. Each section can be hidden or detached.
-5. **Replay controls:** appear below when the active chart is a replay. See [Data](datos.md#replay).
+5. **Replay controls:** appear below when the active chart is a replay. See [Data](./datos.md#replay).
 
-For orders, see [Trading](operar.md).
+For orders, see [Trading](./operar.md).
 
 ## Simulated account
 
@@ -88,7 +88,7 @@ For orders, see [Trading](operar.md).
 
 Opening a chart loads the connection's configured recent history. Use the history menu for more. **⌘T** or **+** creates a tab copied from the active chart unless a default new-tab template is configured. **⌘W** closes the active chart; at least one tab remains.
 
-Add account-backed markets in [Connections](conexiones.md).
+Add account-backed markets in [Connections](./conexiones.md).
 
 ## macOS application menus
 
@@ -115,7 +115,7 @@ The live panel updates strategies and positions in real time and offers the same
 On Windows the equivalent icon is in the **system tray beside the clock**, possibly under the hidden-icons arrow. Clicking opens the live panel; right-click opens its menu. The background setting is named **Keep running in system tray after closing window**. Use Alt+F4 or **Quit Trading Hub** to exit rather than assuming the X button stopped strategies. A second launch requests the existing window for that data root rather than a second writer.
 
 
-**Closing is not quitting.** By default the window close button hides the window while strategies keep running. This is controlled by **Settings → Live strategies → Keep running in menu bar/system tray after closing window**. Disabling it makes window closure use explicit quit. Use **⌘Q** on macOS, **Alt+F4** on Windows, or **Quit Trading Hub** to exit completely. Clicking the Dock icon reopens a hidden Mac window. With live positions, quit asks whether to retain broker stops, cancel them while leaving positions open, close at market, or not quit. Outstanding close/cancel acknowledgments can time out with a warning: check broker state, not just local status. See [Live quit/restart](en-vivo.md#closing-the-window-and-reopening).
+**Closing is not quitting.** By default the window close button hides the window while strategies keep running. This is controlled by **Settings → Live strategies → Keep running in menu bar/system tray after closing window**. Disabling it makes window closure use explicit quit. Use **⌘Q** on macOS, **Alt+F4** on Windows, or **Quit Trading Hub** to exit completely. Clicking the Dock icon reopens a hidden Mac window. With live positions, quit asks whether to retain broker stops, cancel them while leaving positions open, close at market, or not quit. Outstanding close/cancel acknowledgments can time out with a warning: check broker state, not just local status. See [Live quit/restart](./en-vivo.md#closing-the-window-and-reopening).
 
 ## Keyboard shortcuts
 
@@ -128,7 +128,7 @@ On Windows the equivalent icon is in the **system tray beside the clock**, possi
 | ⌥T | Toggle the chart's Chart Trader. |
 | ⌃Tab / ⌃⇧Tab | Next / previous tab. |
 
-Order actions—buy, sell, close, reverse, cancel, partial exits, breakeven and others—are intentionally **unassigned**. See [Trading shortcuts](operar.md#trading-shortcuts).
+Order actions—buy, sell, close, reverse, cancel, partial exits, breakeven and others—are intentionally **unassigned**. See [Trading shortcuts](./operar.md#trading-shortcuts).
 
 | Chart key | Action |
 |---|---|
@@ -141,14 +141,14 @@ Order actions—buy, sell, close, reverse, cancel, partial exits, breakeven and 
 ## Settings worth reviewing
 
 - **General:** language, theme, chart time zone and alert sounds.
-- **Trading:** confirm real orders; see [Safety](operar.md#safety).
+- **Trading:** confirm real orders; see [Safety](./operar.md#safety).
 - **Live strategies:** menu-bar/system-tray behavior, startup resumption and automatic mini/micro contract selection.
 - **Keep awake:** prevent idle sleep while strategies run; macOS optionally supports a privileged closed-lid helper, while Windows follows its own lid power settings.
 - **Data:** record incoming live data and open local folders.
 
 ## Next steps
 
-- [Connections](conexiones.md): markets and brokers.
-- [Charts](graficos.md): periods, footprint, drawings, indicators and templates.
-- [Trading](operar.md): orders, brackets and account history.
-- [Data](datos.md): stored history, downloads, imports, Databento and replay.
+- [Connections](./conexiones.md): markets and brokers.
+- [Charts](./graficos.md): periods, footprint, drawings, indicators and templates.
+- [Trading](./operar.md): orders, brackets and account history.
+- [Data](./datos.md): stored history, downloads, imports, Databento and replay.

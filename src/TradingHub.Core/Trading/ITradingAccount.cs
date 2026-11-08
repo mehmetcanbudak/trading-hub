@@ -44,11 +44,15 @@ public interface ITradingAccount
 
 }
 
-/// <summary>Provider-owned account operations that reconcile cancellation and native position before dispatch.
-/// Implementations retain prepared ownership and transport permission checks; accepting a request is not completion.</summary>
-public interface ICoordinatedPositionOperations
+/// <summary>Client-coordinated close. Acceptance is not native reduction enforcement or completion.</summary>
+public interface ICoordinatedPositionClose
 {
     void Flatten();
+}
+
+/// <summary>Provider-owned position operations retaining prepared ownership and final transport admission.</summary>
+public interface ICoordinatedPositionOperations : ICoordinatedPositionClose
+{
     void Reverse();
 }
 

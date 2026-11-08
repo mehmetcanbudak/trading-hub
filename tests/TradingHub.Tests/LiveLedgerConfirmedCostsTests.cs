@@ -323,7 +323,8 @@ public sealed class LiveLedgerConfirmedCostsTests
                 Assert.NotEqual(owner.LedgerGeneration, generation);
                 var freshOwner = context.LedgerOwner(key, generation);
                 var head = ScopedHead(context, freshOwner, "late-fresh-head", true);
-                using var fresh = projector.Subscribe(freshOwner, () => { });
+                var freshChanged = new ManualResetEventSlim(); // Not disposed: a late pass may still notify it.
+                using var fresh = projector.Subscribe(freshOwner, freshChanged.Set);
                 Assert.False(fresh.Retired);
                 var intent = Assert.IsType<OwnedOrderIntent>(context.Find(head.OrderId));
                 source.Publish(new(Assert.IsType<ExecutionIdentity>(head.ExecutionId), 1, Assert.IsType<string>(head.Symbol), head.Time,
@@ -332,6 +333,9 @@ public sealed class LiveLedgerConfirmedCostsTests
                     ContextId = context.Descriptor.Id, IntentId = intent.Id, ClientOrderId = intent.ClientOrderId,
                 });
                 projector.Synchronize();
+                // Synchronize coalesces into an in-flight pass, such as the one scheduled when the late owner retired,
+                // and can return before that pass captures this execution. The owner is notified after its durable commit.
+                AwaitExecution(fresh, freshChanged, head.ExecutionId!);
                 var booked = LiveStore.LoadLedger(root, key, 1);
                 Assert.Equal(1m, booked.Position);
                 var actual = Assert.Single(booked.Fills);
@@ -700,6 +704,16 @@ public sealed class LiveLedgerConfirmedCostsTests
             ContextId = context.Descriptor.Id, OwnerId = owner.Id, OwnerGeneration = owner.LedgerGeneration,
             Fees = Array.Empty<ExecutionFee>(), FeesComplete = true, Currency = "USD",
         };
+    }
+
+    private static void AwaitExecution(AccountExecutionProjector.ProjectionSubscription subscription,
+        ManualResetEventSlim changed, ExecutionIdentity execution)
+    {
+        while (!subscription.Drain().Any(update => update.Report.Identity == execution))
+        {
+            Assert.True(changed.Wait(TimeSpan.FromSeconds(10)), "The subscribed owner was not notified of its execution.");
+            changed.Reset();
+        }
     }
 
     private sealed class CaptureActionSource : IExecutionSource

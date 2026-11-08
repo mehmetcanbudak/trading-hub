@@ -16,7 +16,8 @@ public enum AccountKind
 
 /// <summary>Una cuenta para la sección Cuenta.</summary>
 /// <param name="CanTrade">New orders allowed (always on simulated, practice and demo accounts); cancel and close never need it.</param>
-public sealed record AccountEntry(string Id, string Name, AccountKind Kind, bool IsReal, bool CanTrade, ConnectionProfile? Profile = null, string RithmicAccount = "", string BybitContextIdentity = "");
+public sealed record AccountEntry(string Id, string Name, AccountKind Kind, bool IsReal, bool CanTrade, ConnectionProfile? Profile = null, string RithmicAccount = "", string BybitContextIdentity = "",
+    string RithmicContextIdentity = "", RithmicTradingSession? RithmicSession = null);
 
 /// <summary>Posición de un contrato (las que quedaron planas hoy también figuran).</summary>
 public sealed record PositionLine(string Key, string Symbol, decimal Net, decimal AvgPrice, decimal OpenPnl, decimal ClosedPnl, object? Ref = null, bool ClosedPnlKnown = true);
@@ -94,12 +95,14 @@ public sealed class AccountCenter
         var list = new List<AccountEntry> { new(SimId, "Simulated account", AccountKind.Sim, false, true) };
         foreach (var p in _svc.Connections.Enabled.Where(p => p.IsRithmic && !string.IsNullOrWhiteSpace(p.RithmicUser)))
         {
-            var session = _svc.RithmicSessionFor(p);
+            var session = _svc.DiscoverRithmicSession(p);
+            if (session == null) continue;
             foreach (var a in session.Accounts)
             {
                 bool real = !session.IsPractice;
                 list.Add(new AccountEntry(AppServices.RithmicAccountId(p, a.AccountId), $"{a.AccountId} · {p.Name}{(real ? " — REAL" : " (practice)")}",
-                    AccountKind.Rithmic, real, !real || p.AllowRealOrders, p, a.AccountId));
+                    AccountKind.Rithmic, real, !real || p.AllowRealOrders, p, a.AccountId,
+                    RithmicContextIdentity: _svc.RithmicContextFor(p, session, a.AccountId).Descriptor.Id, RithmicSession: session));
             }
         }
 
@@ -265,12 +268,18 @@ public sealed class AccountCenter
 
     private void FillRithmic(AccountSnapshot s, decimal realizedToday)
     {
-        var session = _svc.RithmicSessionFor(s.Account.Profile!);
+        var session = s.Account.RithmicSession ?? _svc.RithmicSessionFor(s.Account.Profile!);
         string acc = s.Account.RithmicAccount;
         s.Connected = session.IsConnected;
         s.Status = session.IsConnected ? $"Connected to Rithmic ({session.System})" : session.StatusText;
         foreach (var (sym, ex, p) in session.PositionsOf(acc))
-            s.Positions.Add(new PositionLine(sym + "|" + ex, sym, p.Net, p.AvgPrice, p.OpenPnl, p.ClosedPnl, (sym, ex)));
+        {
+            var broker = _svc.RithmicBrokerForPosition(s.Account.Profile!, session, acc, sym, ex);
+            var confirmation = broker.CapturePositionClose(p.Net);
+            s.Positions.Add(new PositionLine(sym + "|" + ex, sym, p.Net, p.AvgPrice, p.OpenPnl, p.ClosedPnl,
+                new RithmicPositionTarget(broker, confirmation)));
+        }
+        if (session.PositionCloseRecoveryStatus is { } recovery) s.Status += "; " + recovery;
 
         foreach (var o in session.OrdersOf(acc))
         {
@@ -281,7 +290,7 @@ public sealed class AccountCenter
                 : o.Cancelled ? o.Filled > 0 ? "Canceled (partial)" : "Canceled"
                 : "Filled";
             s.Orders.Add(new OrderLine(o.BasketId, o.Time, o.Symbol, o.IsBuy, type, o.Quantity, o.PriceType is 3 or 4 ? o.Trigger : o.Price,
-                o.Filled, o.AvgFillPrice, status, !o.Done, o));
+                o.Filled, o.AvgFillPrice, status, !o.Done, new RithmicOrderTarget(session, acc, o.BasketId)));
         }
 
         var sum = session.SummaryFor(acc);
@@ -394,8 +403,8 @@ public sealed class AccountCenter
             return;
         }
 
-        if (a.Kind == AccountKind.Rithmic)
-            await _svc.RithmicSessionFor(a.Profile!).CancelAsync(a.RithmicAccount, o.Key, CancellationToken.None).ConfigureAwait(false);
+        if (a.Kind == AccountKind.Rithmic && o.Ref is RithmicOrderTarget rithmic)
+            await rithmic.Session.CancelAsync(rithmic.Account, rithmic.Basket, CancellationToken.None).ConfigureAwait(false);
         else if (a.Kind == AccountKind.Tradovate && o.Ref is TradingHub.Feeds.Tradovate.TradovateOrderState tv)
             await _svc.TradovateSessionFor(a.Profile!).CancelAsync(tv.Id, CancellationToken.None).ConfigureAwait(false);
     }
@@ -437,24 +446,8 @@ public sealed class AccountCenter
             return null;
         }
 
-        if (a.Kind == AccountKind.Rithmic && p.Ref is (string sym, string ex))
-        {
-            var session = _svc.RithmicSessionFor(a.Profile!);
-            int canceled = 0;
-            foreach (var o in session.OrdersOf(a.RithmicAccount).Where(o => !o.Done && o.Symbol == sym && o.Exchange == ex))
-            {
-                await session.CancelAsync(a.RithmicAccount, o.BasketId, CancellationToken.None).ConfigureAwait(false);
-                canceled++;
-            }
-
-            // what is open now, after the cancels (the row can be a moment old): a close never opens the other side
-            decimal net = session.PositionFor(a.RithmicAccount, sym, ex)?.Net ?? 0;
-            if (net == 0) return NothingToClose(sym, canceled);
-            if (Math.Sign(net) != Math.Sign(p.Net))
-                return $"{sym} changed side before the close was sent (now {(net > 0 ? "long" : "short")} {Math.Abs(net):0.####}): nothing was sent; check the position and close it again.";
-            int qty = (int)Math.Abs(net);
-            await session.PlaceAsync(a.RithmicAccount, sym, ex, net < 0, 2, qty, 0, 0, "th-cerrar-" + DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture), CancellationToken.None).ConfigureAwait(false);
-        }
+        if (a.Kind == AccountKind.Rithmic && p.Ref is RithmicPositionTarget rithmic)
+            return await rithmic.Broker.ClosePositionAsync(rithmic.Confirmation).ConfigureAwait(false);
 
         return null;
     }

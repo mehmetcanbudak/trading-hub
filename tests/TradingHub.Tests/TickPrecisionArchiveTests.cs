@@ -22,10 +22,10 @@ public sealed class TickPrecisionArchiveTests : IDisposable
         {
             writer.Write(original);
             writer.Flush();
-            byte[] before = File.ReadAllBytes(RawPath);
+            byte[] before = ReadWhileWriterOpen(RawPath);
             Assert.Throws<InvalidOperationException>(() => writer.Write(new Trade(42, Start.AddTicks(1), 100.5m, 1, TradeSide.Sell)));
             writer.Flush();
-            Assert.Equal(before, File.ReadAllBytes(RawPath));
+            Assert.Equal(before, ReadWhileWriterOpen(RawPath));
         }
         using (var reopened = new TickFile.Writer(RawPath, _instrument))
         {
@@ -129,7 +129,7 @@ public sealed class TickPrecisionArchiveTests : IDisposable
         {
             writer.Write(new Trade(1, Start, 100, 1, TradeSide.Buy, new TradeProvenance(DataQuality.Raw, SourceEventId: "retained")));
             writer.Flush();
-            byte[] before = File.ReadAllBytes(RawPath);
+            byte[] before = ReadWhileWriterOpen(RawPath);
             Assert.Throws<InvalidDataException>(() => writer.Write(new Trade(2, Start.AddSeconds(1), 100, 1, TradeSide.Buy,
                 new TradeProvenance(DataQuality.Raw, SourceEventId: new string('é', 8193)))));
             string unpaired = new((char)0xD800, 1);
@@ -138,7 +138,7 @@ public sealed class TickPrecisionArchiveTests : IDisposable
             Assert.Throws<System.Text.EncoderFallbackException>(() => writer.Write(new Trade(2, Start.AddSeconds(1), 100, 1, TradeSide.Buy,
                 new TradeProvenance(DataQuality.Raw, SourceIdentity: unpaired, SourceEventId: "unpaired-source"))));
             writer.Flush();
-            Assert.Equal(before, File.ReadAllBytes(RawPath));
+            Assert.Equal(before, ReadWhileWriterOpen(RawPath));
             writer.Write(new Trade(2, Start.AddSeconds(1), 100, 3, TradeSide.Sell, new TradeProvenance(DataQuality.Raw, SourceEventId: "accepted")));
         }
         var read = TickFile.Read(RawPath, out _, requireComplete: true);
@@ -855,7 +855,14 @@ public sealed class TickPrecisionArchiveTests : IDisposable
         Assert.Equal(expected.Select(t => (t.Id, t.Time, t.Price, t.Volume, t.Side, t.Provenance)),
             actual.Select(t => (t.Id, t.Time, t.Price, t.Volume, t.Side, t.Provenance)));
     }
-
+    // A recording writer keeps write access, so readers must share writes like TickFile.Read does.
+    private static byte[] ReadWhileWriterOpen(string path)
+    {
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var bytes = new byte[file.Length];
+        file.ReadExactly(bytes);
+        return bytes;
+    }
 
     public void Dispose()
     {

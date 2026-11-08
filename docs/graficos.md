@@ -1,4 +1,4 @@
-[← Volver al índice](README.md)
+[← Volver al índice](./README.md)
 
 # Gráficos
 
@@ -30,7 +30,7 @@ de 24 horas y volumen. Enter abre en el gráfico activo y ⌘Enter en una pesta�
 
 El botón de historia ofrece desde 30 minutos hasta 5 años, «Todo el historial» y «Desde una fecha…». Lo reciente se
 carga tick a tick, con footprint. Lo más viejo llega en velas de la conexión (de 1 minuto; en rangos de más de 400
-días, de 5 o 15 minutos) y esas velas no tienen footprint. Lo que bajaste en [Datos](datos.md) se usa tick a tick.
+días, de 5 o 15 minutos) y esas velas no tienen footprint. Lo que bajaste en [Datos](./datos.md) se usa tick a tick.
 Al terminar, la barra de estado dice desde cuándo hay footprint.
 
 ## Períodos
@@ -100,7 +100,7 @@ ven en el gráfico al momento.
 | Arrastrar el eje de tiempo / doble clic | Cambia el ancho de las velas / vuelve a lo último |
 | Botón de abajo a la derecha | Aparece si te corriste hacia atrás: vuelve a lo último |
 
-También sirven las teclas de [Primeros pasos](primeros-pasos.md#atajos-de-teclado) y, en el menú Gráfico,
+También sirven las teclas de [Primeros pasos](./primeros-pasos.md#atajos-de-teclado) y, en el menú Gráfico,
 «Escala automática» (⌥⌘A) e «Ir al último precio» (⌘Fin).
 
 ## Varios gráficos
@@ -188,7 +188,7 @@ automático, «Doble clic para operar», el tamaño desde el que se resalta el l
 
 La **Cinta de operaciones** lista las operaciones a medida que llegan; las ejecuciones de una misma orden agresiva
 (mismo milisegundo y lado) se suman en una fila. Con la rueda vas hacia atrás y la lista se queda quieta; un clic en
-el encabezado vuelve a lo último. Cómo se opera con el DOM está en [Operar](operar.md#operar-con-el-dom).
+el encabezado vuelve a lo último. Cómo se opera con el DOM está en [Operar](./operar.md#operar-con-el-dom).
 
 ## Perfil de volumen
 
@@ -198,13 +198,13 @@ el encabezado vuelve a lo último. Cómo se opera con el DOM está en [Operar](o
 
 ## Replay
 
-Desde [Datos](datos.md#replay) podés reproducir días guardados en una pestaña nueva, con velocidad, pausa y saltos, y
+Desde [Datos](./datos.md#replay) podés reproducir días guardados en una pestaña nueva, con velocidad, pausa y saltos, y
 operar con la cuenta simulada como si fuera en vivo.
 
 ## Estrategias en el gráfico
 
 El ícono del robot pone en el gráfico una estrategia de las que tenés en Backtesting (cómo se escriben, en
-[Estrategias](estrategias.md)). Marca dónde entra y sale, sobre la historia y en vivo, y puede quedarse solo como marca
+[Estrategias](./estrategias.md)). Marca dónde entra y sale, sobre la historia y en vivo, y puede quedarse solo como marca
 visual o ejecutar en una cuenta. Se configura o se quita desde la leyenda del gráfico.
 
 Abajo de la configuración, **En la historia del gráfico** muestra cómo le fue en lo que tiene cargado el gráfico:

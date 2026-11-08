@@ -14,9 +14,17 @@ public static class TickArchive
 
     public static string? Resolve(string rawPath) => File.Exists(rawPath) ? rawPath : File.Exists(PathFor(rawPath)) ? PathFor(rawPath) : null;
 
-    /// <summary>Restore an archive-only day byte-for-byte before append. The caller must hold the instrument writer lease.</summary>
     internal static void EnsureRawDay(string rawPath, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+        if (File.Exists(rawPath) || !File.Exists(PathFor(rawPath))) return;
+        using var ownership = HistoryWriteOwnership.AcquirePath(rawPath);
+        EnsureRawDay(rawPath, ownership, ct);
+    }
+
+    internal static void EnsureRawDay(string rawPath, HistoryWriteOwnership ownership, CancellationToken ct = default)
+    {
+        ownership.RequirePath(rawPath);
         ct.ThrowIfCancellationRequested();
         if (File.Exists(rawPath)) return;
         string archive = PathFor(rawPath);
@@ -49,9 +57,34 @@ public static class TickArchive
         }
     }
 
+    public static int ArchiveDays(string root, Instrument instrument, IEnumerable<DateOnly> days,
+        IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        if (instrument.FeedId == IbBarImport.FeedId) throw new NotSupportedException("IB history uses its own atomic publication catalog and must not be archived independently.");
+        ct.ThrowIfCancellationRequested();
+        var selected = days.Distinct().Order().ToArray();
+        if (selected.Length == 0) return 0;
+        using var ownership = HistoryWriteOwnership.AcquireDays(root, instrument.FeedId, instrument.Symbol, selected);
+        int completed = 0;
+        foreach (var day in selected)
+        {
+            ArchiveDay(root, instrument, day, ownership, ct);
+            completed++;
+            progress?.Report(completed / (double)selected.Length);
+        }
+        return completed;
+    }
+
     public static string ArchiveDay(string root, Instrument instrument, DateOnly day, CancellationToken ct = default)
     {
         if (instrument.FeedId == IbBarImport.FeedId) throw new NotSupportedException("IB history uses its own atomic publication catalog and must not be archived independently.");
+        using var ownership = HistoryWriteOwnership.AcquireDays(root, instrument.FeedId, instrument.Symbol, [day]);
+        return ArchiveDay(root, instrument, day, ownership, ct);
+    }
+
+    internal static string ArchiveDay(string root, Instrument instrument, DateOnly day, HistoryWriteOwnership ownership, CancellationToken ct = default)
+    {
+        ownership.RequirePath(TickFile.DayPath(root, instrument.FeedId, instrument.Symbol, day));
         ct.ThrowIfCancellationRequested();
         var source = TickFile.DayPath(root, instrument.FeedId, instrument.Symbol, day);
         if (!File.Exists(source)) throw new FileNotFoundException("The raw day is unavailable.", source);

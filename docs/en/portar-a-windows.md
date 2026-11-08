@@ -1,8 +1,8 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Windows installation and platform integration
 
-Windows support introduced upstream in v1.1 and the v1.2 runtime languages are implemented in this source integration. The platform code is no longer just a porting plan. **Implementation and cross-platform builds do not certify native desktop behavior or brokerage execution.** Consult the [validation dashboard](TRANSLATION_STATUS.md) for actual evidence, not a release promise.
+Windows support introduced upstream in v1.1 and the v1.2 runtime languages are implemented in this source integration. The platform code is no longer just a porting plan. **Implementation and cross-platform builds do not certify native desktop behavior or brokerage execution.** Consult the [validation dashboard](./TRANSLATION_STATUS.md) for actual evidence, not a release promise.
 
 ## Install or build
 
@@ -32,7 +32,7 @@ Both scripts publish `src/TradingHub.App/TradingHub.App.csproj` in Release with 
 ## Per-user installation, updates and uninstall
 
 - Default application directory: `%LOCALAPPDATA%\Programs\Trading Hub`; no administrator elevation. Start-menu/Desktop shortcuts and an HKCU uninstall entry are created.
-- The installer supports English, Spanish and Simplified Chinese, following Windows with English fallback. Runtime language is selected separately in [Settings](ajustes.md#language-and-regional-display).
+- The installer supports English, Spanish and Simplified Chinese, following Windows with English fallback. Runtime language is selected separately in [Settings](./ajustes.md#language-and-regional-display).
 - Fully quit Trading Hub before update/uninstall, using **Quit Trading Hub** in the tray or **Alt+F4**. A normal window close can merely hide it. Resolve the protection-aware quit dialog first; never force-kill a process managing orders to satisfy an installer.
 - The installer waits for `TradingHub.exe` to stop and offers Retry/Cancel rather than forcibly terminating it. Updates replace application files only. Uninstall through Windows Settings → Apps → Trading Hub; user data and stored credentials are intentionally retained.
 - First startup provides a simulated account; do not enable real-order permissions to test installation.
@@ -59,7 +59,7 @@ The product identity `Trading Hub`, Spanish subdirectory names, saved JSON/CSV f
 | Input/window | Ctrl-based command shortcuts, native caption area, platform wording and DPI-aware tray placement. | Command shortcuts and Mac title bar. |
 | Text | Windows monospace fallbacks Cascadia Mono/Consolas; Segoe UI chart/report text and multilingual glyph fallback/shaping. | Menlo/SF Mono and Helvetica Neue with fallback/shaping. |
 
-Windows cannot override a laptop's lid-close policy. If choosing “Do nothing” in Windows Power Options, understand ventilation/battery risks; never put a running closed-lid laptop in a bag. See [Settings](ajustes.md#keep-awake).
+Windows cannot override a laptop's lid-close policy. If choosing “Do nothing” in Windows Power Options, understand ventilation/battery risks; never put a running closed-lid laptop in a bag. See [Settings](./ajustes.md#keep-awake).
 
 ## Validation and release gates
 
@@ -73,11 +73,11 @@ Shared-runtime tests, headless scenes and cross-publishing are distinct from nat
 6. Idle sleep/release, display sleep, laptop lid behavior and application lifecycle on real hardware; separately retain macOS lifecycle/power checks.
 7. Simulated/fake-provider partial fills, pending cancels, reconnect/replay, inherited protection and quit/restart acknowledgment paths; then separately authorized demo-provider scenarios. A demo session is not evidence of real-money certification.
 
-Build/test/UI commands and temporary-root rules are in [Development](desarrollo.md). Never use real history, credentials, orders or paid calls as test fixtures. A cancel/close request is not confirmation; reconcile uncertain exposure and working orders in the broker's own tools before retrying.
+Build/test/UI commands and temporary-root rules are in [Development](./desarrollo.md). Never use real history, credentials, orders or paid calls as test fixtures. A cancel/close request is not confirmation; reconcile uncertain exposure and working orders in the broker's own tools before retrying.
 
 ## Maintaining platform parity
 
-Use a new isolated worktree for platform updates and preserve the existing protection-aware order/quit behavior; [the sync guide](upstream-sync.md) records the integration sequence. Keep native APIs behind their existing platform seams, report credential/startup failures, and retain unresolved order contexts rather than inferring a flat account. New UI source, generators and C# examples stay English; runtime catalogs supply Spanish/Chinese display text without renaming persistent identities.
+Use a new isolated worktree for platform updates and preserve the existing protection-aware order/quit behavior; [the sync guide](./upstream-sync.md) records the integration sequence. Keep native APIs behind their existing platform seams, report credential/startup failures, and retain unresolved order contexts rather than inferring a flat account. New UI source, generators and C# examples stay English; runtime catalogs supply Spanish/Chinese display text without renaming persistent identities.
 
 Rust/Swift references require a separate reviewed decision; a C# merge or successful package build does not advance their pinned source. Linux still needs native secret/power/shell implementations and validation. Do not describe a Windows source integration as a Linux release or a native-hardware certification.
 

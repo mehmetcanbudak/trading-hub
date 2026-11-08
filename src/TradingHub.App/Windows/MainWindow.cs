@@ -15,8 +15,7 @@ using TradingHub.Market;
 
 namespace TradingHub.App.Windows;
 
-/// <summary>Página de la ventana principal (Trading, Estrategias, Datos…).</summary>
-internal sealed record Page(string Id, string Title, MaterialIconKind Icon, Func<Control> Create, KeyGesture? Gesture);
+internal sealed record Page(string Id, string Title, MaterialIconKind Icon, Func<MainWindow, Control> Create, KeyGesture? Gesture);
 
 /// <summary>
 /// Ventana principal: barra superior propia (integrada con los botones de macOS), barra lateral
@@ -30,7 +29,23 @@ public sealed class MainWindow : Window
     private readonly StackPanel _toasts = new();
     private readonly Dictionary<string, Control> _pages = new();
     private readonly Dictionary<string, ToggleButton> _navButtons = new();
-    private readonly List<Page> _pageDefs;
+    private static readonly Page[] _pageDefs =
+    [
+        new("trading", "Trading", MaterialIconKind.ChartBoxOutline, static window => window.Trading, new KeyGesture(Key.D1, Keys.Command)),
+        new("accounts", "Account", MaterialIconKind.WalletOutline, static window => new AccountsView(window._svc, window.SetStatus, window), new KeyGesture(Key.D5, Keys.Command)),
+        new("strategies", "Backtesting", MaterialIconKind.FlaskOutline, static window => new StrategiesView(window._svc, window.SetStatus), new KeyGesture(Key.D2, Keys.Command)),
+        new("live", "Live", MaterialIconKind.AccessPoint, static window => new LiveView(window._svc, window.SetStatus, window), new KeyGesture(Key.D7, Keys.Command)),
+        new("data", "Data", MaterialIconKind.DatabaseOutline, static window => new DataView(window._svc, window.SetStatus, window), new KeyGesture(Key.D3, Keys.Command)),
+        new("connections", "Connections", MaterialIconKind.LanConnect, static window => new ConnectionsView(window._svc, window.SetStatus), new KeyGesture(Key.D4, Keys.Command)),
+        new("settings", "Settings", MaterialIconKind.CogOutline, static window => new SettingsView(window._svc, window.SetStatus), new KeyGesture(Key.OemComma, Keys.Command)),
+    ];
+
+    internal static bool HasPageId(string id)
+    {
+        foreach (var page in _pageDefs)
+            if (page.Id == id) return true;
+        return false;
+    }
     private readonly TextBlock _statusText = new() { VerticalAlignment = VerticalAlignment.Center, Classes = { "muted", "small" }, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock _infoText = new() { VerticalAlignment = VerticalAlignment.Center, Classes = { "faint", "small" } };
     private readonly TextBlock _pnlText = new() { VerticalAlignment = VerticalAlignment.Center, FontSize = 11.5, FontWeight = FontWeight.SemiBold };
@@ -67,16 +82,6 @@ public sealed class MainWindow : Window
         };
         svc.ReviewPineSource = reviewPine;
         svc.Live.Notice += text => Dispatcher.UIThread.Post(() => SetStatus(text));
-        _pageDefs = new List<Page>
-        {
-            new("trading", "Trading", MaterialIconKind.ChartBoxOutline, () => Trading, new KeyGesture(Key.D1, Keys.Command)),
-            new("accounts", "Account", MaterialIconKind.WalletOutline, () => new AccountsView(svc, SetStatus, this), new KeyGesture(Key.D5, Keys.Command)),
-            new("strategies", "Backtesting", MaterialIconKind.FlaskOutline, () => new StrategiesView(svc, SetStatus), new KeyGesture(Key.D2, Keys.Command)),
-            new("live", "Live", MaterialIconKind.AccessPoint, () => new LiveView(svc, SetStatus, this), new KeyGesture(Key.D7, Keys.Command)),
-            new("data", "Data", MaterialIconKind.DatabaseOutline, () => new DataView(svc, SetStatus, this), new KeyGesture(Key.D3, Keys.Command)),
-            new("connections", "Connections", MaterialIconKind.LanConnect, () => new ConnectionsView(svc, SetStatus), new KeyGesture(Key.D4, Keys.Command)),
-            new("settings", "Settings", MaterialIconKind.CogOutline, () => new SettingsView(svc, SetStatus), new KeyGesture(Key.OemComma, Keys.Command)),
-        };
 
         Content = BuildLayout();
         BuildMenu();
@@ -380,7 +385,7 @@ public sealed class MainWindow : Window
         {
             try
             {
-                page = def.Create();
+                page = def.Create(this);
             }
             catch (Exception ex)
             {

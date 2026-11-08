@@ -1,4 +1,4 @@
-[← Documentation index](README.md)
+[← Documentation index](./README.md)
 
 # Data
 
@@ -21,6 +21,10 @@ An instrument shows connection, day count and disk usage. Selecting it lists day
 
 The **Lossless archive** action accepts up to 31 selected closed UTC days. It captures their stored metadata locally, provides progress/cancellation and creates lossless archives without deleting/replacing the original raw files. Copy/read/codec failures remain visible. Day/replay/delete selection is frozen while that owned operation settles; true Quit cancels/drains it before shared history resources leave.
 Each archived day has a bounded **512 MiB** input limit. An oversized/changed/unreadable day is a visible failure with the original still authoritative, not a partial success or permission to remove raw history.
+
+Non-IB downloads, replacements, deletion and archival coordinate physical-day ownership with recording. A conflict refuses before changing the affected files. An already-owned CSV publication reuses its ownership rather than trying to acquire it again. This does not forbid legitimate closed-day downloads or replace IB's publication coordinator.
+
+True Quit closes recording admission and awaits the actual writer, accepted queue tail, flush and physical lease release. It retains that completion even if an instrument stopped, reconnected or left an ordinarily disposed hub. Ordinary view/feed disposal remains bounded. Cancellation cannot force a blocked filesystem write to finish, and a recording failure is not a successful saved-tail claim.
 
 ### Delete days
 
@@ -97,7 +101,7 @@ CFDs do not have centralized exchange execution volume. Quote observations retai
 
 Databento supplies paid historical CME ticks, including aggressor side, beyond Rithmic's retained range. Signup credits, availability and prices vary. The app estimates cost and requires confirmation before downloading.
 
-Add a Databento API key in [Connections](conexiones.md#databento), or use the card's Connections button.
+Add a Databento API key in [Connections](./conexiones.md#databento), or use the card's Connections button.
 
 1. Choose a volume-based continuous contract: NQ, ES, MNQ, MES, YM, RTY, CL, GC, MCL, MGC, ZN or 6E.
 2. Choose From/To; the default is approximately three months.
@@ -125,7 +129,7 @@ The same applies to Tradovate + Databento / Only Tradovate / Databento. Combined
 
 ## File locations
 
-History is under `~/Library/Application Support/Trading Hub/Ticks`, then connection (`rithmic`, `databento`, `importado`, etc.), instrument and day. **Open folder** opens Finder. See [Storage](instalacion.md#where-your-data-lives).
+History is under `~/Library/Application Support/Trading Hub/Ticks`, then connection (`rithmic`, `databento`, `importado`, etc.), instrument and day. **Open folder** opens Finder. See [Storage](./instalacion.md#where-your-data-lives).
 
 Compatibility headers and feed IDs are intentionally retained, including recognized Spanish CSV column aliases and the historical live-trade CSV export column names. Translating identifiers would break existing consumers; new report prose and UI are English.
 
@@ -186,7 +190,7 @@ dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --import-ib /absolu
 dotnet src/TradingHub.App/bin/Release/net10.0/TradingHub.dll --import-ib /absolute/path/to/csv-folder MNQ --replace
 ```
 
-The symbol is optional where the input supplies it. Only `--preview` and `--replace` are accepted import switches; unknown arguments and invalid input print `IB import failed: …` and exit 2. Preview exits 0 without publication. See [Development](desarrollo.md#selected-non-kvp-reproduction) before running: never point a fixture import at personal history.
+The symbol is optional where the input supplies it. Only `--preview` and `--replace` are accepted import switches; unknown arguments and invalid input print `IB import failed: …` and exit 2. Preview exits 0 without publication. See [Development](./desarrollo.md#selected-non-kvp-reproduction) before running: never point a fixture import at personal history.
 
 ## Open-interest observation fidelity
 
