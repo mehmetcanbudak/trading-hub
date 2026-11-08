@@ -736,7 +736,7 @@ public sealed class BracketManager : IDisposable
                 var intent = owned.Intent;
                 decimal remaining = Math.Max(0, intent.Quantity - delta);
                 // A triggered stop's executing child is sized from the position. A position report that led this
-                // execution already shrank it; counting the execution again must not cancel the order closing the position.
+                // execution already shrank the stop's intent; counting the execution again must not release the order closing the position.
                 // Plain stops keep the full decrement: a broker without native reduce-only must cancel an oversized remainder.
                 if (ReferenceEquals(intent.Current, owned) && !Terminal(order) && ExecutingStopChild(intent, order))
                     remaining = Math.Max(remaining, Math.Min(intent.Quantity, order.Unfilled));
