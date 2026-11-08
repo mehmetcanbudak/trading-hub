@@ -1110,7 +1110,8 @@ public sealed class BinanceNativeExecutionFactsTests
                 await Until(() => first.OrdersReady && first.PositionReady &&
                     first.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, first, fake);
                 var opening = OrderActions.Place(first, owner, OrderTypes.Limit, OrderDirections.Buy, 5m, 103m);
-                await Until(() => opening.ExchangeOrderId.Length > 0 && fake.Placed.Count == 1, first, fake);
+                // Binding publishes the exchange number before persisting and publishing the native identity.
+                await Until(() => opening.ExchangeOrderId.Length > 0 && opening.NativeIdentity != null && fake.Placed.Count == 1, first, fake);
                 long parentId = long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture);
                 parentIntentId = Assert.IsType<string>(opening.IntentId);
                 logicalId = Assert.IsType<string>(opening.LogicalOrderId);
