@@ -696,6 +696,117 @@ public class BracketLifecycleTests
         Assert.Contains(stop, account.CancelRequests);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Position_report_leading_an_executing_stop_child_never_shrinks_it(bool trackedAmendment)
+    {
+        Account account = trackedAmendment
+            ? new AmendingAccount { OptimisticQuantity = true }
+            : new Account();
+        using var brackets = new BracketManager(account);
+        brackets.SetStopLoss(90);
+        var stop = brackets.StopLoss!;
+
+        // The stop triggered: its reduce-only MARKET child executes one unit with the position. No target is pending.
+        TriggerExecutingChild(account, stop);
+        account.Fill(stop, 1, marketPrice: 90);
+        Assert.Equal((3m, 3m), (account.Position.Volume, stop.Unfilled));
+
+        // Two more units execute. The position report arrives first and alone.
+        account.Position.Volume = 1;
+        account.Publish();
+
+        // A size amendment from the stale fill count (filled 1 + position 1 = 2 of 4, while the venue executed 3)
+        // would cancel the MARKET child at the venue and leave the last unit unprotected.
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal((OrderStates.Active, 3m), (stop.State, stop.Unfilled));
+
+        account.Fill(stop, 2, marketPrice: 90, updatePosition: false);
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal((OrderStates.Active, 1m), (stop.State, stop.Unfilled));
+
+        account.Fill(stop, 1, marketPrice: 90);
+        Assert.Equal(0m, account.Position.Volume);
+        Assert.Equal(OrderStatus.Filled, stop.Status);
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Split_execution_reports_behind_the_position_never_shrink_the_executing_stop_child(bool trackedAmendment)
+    {
+        Account account = trackedAmendment
+            ? new AmendingAccount { OptimisticQuantity = true }
+            : new Account();
+        using var brackets = new BracketManager(account);
+        brackets.SetStopLoss(90);
+        var stop = brackets.StopLoss!;
+        TriggerExecutingChild(account, stop);
+        account.Fill(stop, 1, marketPrice: 90);
+        Assert.Equal((3m, 3m), (account.Position.Volume, stop.Unfilled));
+
+        // One execution of two units is reported as two fills. The position already shows both; only the first fill is in.
+        account.Position.Volume = 1;
+        account.Fill(stop, 1, marketPrice: 90, updatePosition: false);
+
+        // The executing child must keep its two unfilled units: the venue has already executed one of them.
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal((OrderStates.Active, 2m), (stop.State, stop.Unfilled));
+
+        account.Fill(stop, 1, marketPrice: 90, updatePosition: false);
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+        Assert.Same(stop, brackets.StopLoss);
+        Assert.Equal((OrderStates.Active, 1m), (stop.State, stop.Unfilled));
+
+        account.Fill(stop, 1, marketPrice: 90);
+        Assert.Equal(0m, account.Position.Volume);
+        Assert.Equal(OrderStatus.Filled, stop.Status);
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+        Assert.DoesNotContain(stop, account.CancelRequests);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Executing_stop_child_behind_the_position_is_still_cancelled_on_close_or_user_cancel(bool trackedAmendment, bool userCancel)
+    {
+        Account account = trackedAmendment
+            ? new AmendingAccount { OptimisticQuantity = true }
+            : new Account();
+        using var brackets = new BracketManager(account);
+        brackets.SetStopLoss(90);
+        var stop = brackets.StopLoss!;
+        TriggerExecutingChild(account, stop);
+        account.Fill(stop, 1, marketPrice: 90);
+        account.Position.Volume = 1;
+        account.Publish();
+        Assert.Equal((OrderStates.Active, 3m), (stop.State, stop.Unfilled));
+        Assert.DoesNotContain(stop, account.CancelRequests);
+
+        if (userCancel) brackets.CancelBracket(stop);
+        else
+        {
+            account.Position.Volume = 0;
+            account.Publish();
+        }
+
+        // Neither a closed position nor an explicit cancel leaves the executing child working.
+        Assert.Contains(stop, account.CancelRequests);
+        Assert.DoesNotContain(stop, account.ReplaceRequests);
+    }
+
     // Mirrors a venue conditional order that triggered: the handle follows its reduce-only MARKET child.
     private static void TriggerExecutingChild(Account account, Order stop)
     {
@@ -739,6 +850,7 @@ public class BracketLifecycleTests
             decimal price = intent.Request.Price, quantity = intent.Request.Quantity;
             OrderContext.BindOrder(order, intent);
             _amendments.Add(order, new Amendment(BracketManager.PriceOf(order), order.QuantityToFill, price, order.Filled + quantity));
+            ReplaceRequests.Add(order);
             if (OptimisticQuantity)
             {
                 order.QuantityToFill = order.Filled + quantity;
@@ -776,6 +888,7 @@ public class BracketLifecycleTests
         public List<Order> Submitted { get; } = new();
         public List<Order> Working { get; } = new();
         public List<Order> CancelRequests { get; } = new();
+        public List<Order> ReplaceRequests { get; } = new();
         public IEnumerable<Order> ActiveOrders => Working.ToArray();
         public bool PositionReady { get; set; } = true;
         public bool OrdersReady { get; set; } = true;
