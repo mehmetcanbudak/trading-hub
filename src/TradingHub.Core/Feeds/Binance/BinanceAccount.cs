@@ -1575,18 +1575,27 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 (s.Type is "LIMIT" or "MARKET") && s.Side == (o.Direction == OrderDirections.Buy ? "BUY" : "SELL") &&
                 s.ReduceOnly == o.ReduceOnly && !string.IsNullOrEmpty(o.OwnerId))
             {
-                var child = new NativeOrderIdentity("binance:order", s.Symbol + ":" + s.OrderId.ToString(CultureInfo.InvariantCulture));
-                var workingType = s.Type == "MARKET" ? OrderTypes.Market : OrderTypes.Limit;
-                var error = OrderContext.RecordNativeWorkingType(o, parent, child, workingType,
-                    Instrument.Key, s.Symbol, notify: false);
-                if (error == null)
+                // Working-type evidence belongs to an owned conditional request. A foreign stop-limit adopted only after
+                // it triggered (for example by dragging its LIMIT) owns the LIMIT it became: it has nothing to record.
+                if (OrderContext.Find(o.IntentId)?.Request.Type != OrderTypes.Stop)
                 {
                     t.ConditionalParent = null;
-                    _ownershipChanged = true;
-                    o.Type = workingType;
-                    o.Price = s.Price;
                 }
-                else _ownershipFault = "Binance working order type remains unresolved: " + error;
+                else
+                {
+                    var child = new NativeOrderIdentity("binance:order", s.Symbol + ":" + s.OrderId.ToString(CultureInfo.InvariantCulture));
+                    var workingType = s.Type == "MARKET" ? OrderTypes.Market : OrderTypes.Limit;
+                    var error = OrderContext.RecordNativeWorkingType(o, parent, child, workingType,
+                        Instrument.Key, s.Symbol, notify: false);
+                    if (error == null)
+                    {
+                        t.ConditionalParent = null;
+                        _ownershipChanged = true;
+                        o.Type = workingType;
+                        o.Price = s.Price;
+                    }
+                    else _ownershipFault = "Binance working order type remains unresolved: " + error;
+                }
             }
 
             if (s.Quantity > 0) o.QuantityToFill = t.FilledBefore + s.Quantity;

@@ -378,7 +378,7 @@ public sealed partial class OrderContext
                     (!accepted.DispatchUncertain && !accepted.Adopted) || accepted.Rejection != null ||
                     predecessor.NativeIdentity is not { } native || accepted.NativeOrders?.Contains(native) != true ||
                     order.NativeIdentity != native || order.ExchangeOrderId != predecessor.ExchangeOrderId ||
-                    predecessor.ClientOrderId != accepted.ClientOrderId || order.ClientOrderId != successor.ClientOrderId ||
+                    (predecessor.ClientOrderId ?? "") != accepted.ClientOrderId || order.ClientOrderId != successor.ClientOrderId ||
                     accepted.Request.Instrument != predecessor.Security.SecurityId ||
                     successor.Request.Instrument != accepted.Request.Instrument ||
                     order.Security.SecurityId != accepted.Request.Instrument ||
