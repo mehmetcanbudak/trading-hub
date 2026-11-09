@@ -745,6 +745,62 @@ public class BinanceBrokerTests : IDisposable
         Assert.Same(entry, Assert.Single(broker.ActiveOrders));
     }
 
+    [Fact]
+    public async Task A_protection_read_skipped_by_another_poll_error_is_not_clean_for_a_later_resolved_submission()
+    {
+        using var fake = new FakeBinance(true) { UnknownPosts = 1, HideOwnedOrders = true };
+        var settings = fake.Settings;
+        settings.RequestTimeout = TimeSpan.FromSeconds(2); // only the held algo listing times out
+        using var broker = _orders.Binance(new InstrumentData(BtcUsdt, new SimulatedFeed()), settings, "Binance stale protection read");
+        await Until(() => broker.OrdersReady && broker.PositionReady &&
+            broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready); // clean protection reads
+
+        // Poll N+1: the unknown submission's lookup finds nothing and the algo listing fails, so protection is not read.
+        // Polls N+2 and later: only the unknown outcome remains. Then the lookup finds it and the binding resolves it.
+        var algoHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAlgo = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resolvingHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseResolving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int algoHolds = 0, resolvingHolds = 0;
+        fake.BeforeGetReply = (r, ct) =>
+        {
+            if (r.Route != "/fapi/v1/openAlgoOrders") return Task.CompletedTask;
+            var lookups = fake.ClientLookups;
+            if (lookups.Any(lookup => lookup.Status == 200))
+            {
+                if (Interlocked.Exchange(ref resolvingHolds, 1) != 0) return Task.CompletedTask;
+                resolvingHeld.TrySetResult();
+                return releaseResolving.Task.WaitAsync(ct);
+            }
+            if (lookups.Count(lookup => lookup.Status == 400) == 1 && Interlocked.Exchange(ref algoHolds, 1) == 0)
+            {
+                algoHeld.TrySetResult();
+                return releaseAlgo.Task.WaitAsync(ct); // outlives the request timeout: this poll's algo listing fails
+            }
+            return Task.CompletedTask;
+        };
+        try
+        {
+            var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1m, 50000m);
+            await algoHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+            await Until(() => fake.ClientLookups.Count(lookup => lookup.Status == 400) >= 3); // submission-only polls followed
+            Assert.Equal(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+            fake.HideOwnedOrders = false;
+            await resolvingHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+            Assert.Equal(order.ExchangeOrderId, Assert.Single(fake.Sent).ExchangeId); // bound by the resolving poll
+            // No protection read has been clean since the failed poll: resolving the submission must not end unavailability.
+            Assert.Equal(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+        }
+        finally
+        {
+            fake.BeforeGetReply = null;
+            releaseAlgo.TrySetResult();
+            releaseResolving.TrySetResult();
+        }
+        await Until(() => broker.OrdersReady &&
+            broker.Executions.Capture(ExecutionCursor.Start).Availability != ExecutionAvailability.Unavailable);
+    }
+
     [Theory]
     [InlineData(false, false, 503, -1007)]
     [InlineData(true, false, 503, -1007)]
