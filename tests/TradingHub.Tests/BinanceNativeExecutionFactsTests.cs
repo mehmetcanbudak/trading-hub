@@ -2616,6 +2616,109 @@ public sealed class BinanceNativeExecutionFactsTests
         });
     }
 
+    [Theory]
+    [InlineData(503)] // the poll's child lookup fails transiently
+    [InlineData(-2013)] // the poll's child lookup does not find it yet
+    public async Task Poll_following_a_triggered_stop_whose_child_lookup_fails_does_not_cancel_executing_market_child(int childLookupFailure)
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Poll follows a triggered stop", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m, broker, fake);
+            using var brackets = new BracketManager(broker);
+            brackets.SetStopLoss(59000m);
+            brackets.AddTarget(61000m);
+            await ConditionalState(() => broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
+                order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var stop = Assert.IsType<Order>(brackets.StopLoss);
+            var target = Assert.Single(brackets.Targets);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            var originalParent = Assert.IsType<NativeOrderIdentity>(stop.NativeIdentity);
+            long parentId = Assert.Single(fake.PlacedAlgo).AlgoId;
+
+            var releaseTrades = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var targetCancelHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseTargetCancel = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fake.BeforeTradeReply = ct => releaseTrades.Task.WaitAsync(ct); // only the poll looks the child up
+            fake.BeforeDeleteReply = ct =>
+            {
+                targetCancelHeld.TrySetResult();
+                return releaseTargetCancel.Task.WaitAsync(ct);
+            };
+            string child = "";
+            int childLookups = 0;
+            // Binance's lists lag: the regular list does not show the child yet, and the lookup of it fails once.
+            fake.OverrideGetReply = request =>
+                request.Route == "/fapi/v1/openOrders" ? (200, "[]")
+                : request.Route != "/fapi/v1/order" || request.Query("orderId") != Volatile.Read(ref child) ||
+                    Interlocked.Increment(ref childLookups) != 1 ? null
+                : childLookupFailure == -2013 ? (400, "{\"code\":-2013,\"msg\":\"Order does not exist.\"}")
+                : (childLookupFailure, "{\"code\":-1001,\"msg\":\"Internal error; unable to process your request.\"}");
+            long childId;
+            try
+            {
+                // The stop triggers and its MARKET child executes two of three, while open algo lists still show it working.
+                childId = fake.Trigger(parentId, fill: 2m, staleListings: int.MaxValue);
+                Volatile.Write(ref child, childId.ToString(CultureInfo.InvariantCulture));
+                // The position report leads: the target's resize is held at Binance, so the stop waits for it.
+                await targetCancelHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                await ConditionalState(() => broker.Position.Volume == 1m && broker.IsReplacementPending(target), broker, fake);
+                Assert.Equal((OrderTypes.Stop, 3m, 0m), (stop.Type, stop.Unfilled, stop.Filled));
+
+                // A poll then follows the triggered stop to its child, but cannot read the child itself.
+                fake.SetStaleListings(parentId, 0);
+                await ConditionalState(() => stop.ExchangeOrderId == Volatile.Read(ref child) && Volatile.Read(ref childLookups) >= 1, broker, fake);
+                await ConditionalPolls(fake, broker);
+            }
+            finally
+            {
+                fake.OverrideGetReply = null;
+                fake.BeforeTradeReply = null;
+                fake.BeforeDeleteReply = null;
+                releaseTargetCancel.TrySetResult();
+                releaseTrades.TrySetResult();
+            }
+
+            await ConditionalState(() => stop.Type == OrderTypes.Market && !broker.IsReplacementPending(stop) &&
+                target.Unfilled == 1m && !broker.IsReplacementPending(target), broker, fake);
+            await ConditionalPolls(fake, broker);
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+            // The triggered child keeps executing the exit; its two executed units are booked once, through it.
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 2m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Same(stop, brackets.StopLoss);
+            Assert.Equal((OrderTypes.Market, childNative, originalIntent, OrderStates.Active, 2m, 1m),
+                (stop.Type, stop.NativeIdentity, stop.IntentId, stop.State, stop.Filled, stop.Unfilled));
+            Assert.False(stop.Canceled);
+            Assert.Equal(new NativeWorkingOrder(originalParent, childNative, OrderTypes.Market, "BTCUSDT", ""),
+                Assert.IsType<OwnedOrderIntent>(context.Find(originalIntent)).WorkingOrder);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Equal(1m, broker.Position.Volume);
+
+            fake.Fill(childId, 1m);
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any(), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "FILLED", 3m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Empty(broker.ActiveOrders);
+            decimal identified = broker.Executions.Capture(ExecutionCursor.Start).Changes
+                .Where(report => report.NativeOrder == childNative).Sum(report => report.Quantity);
+            Assert.Equal(3m, identified);
+        });
+    }
+
     [Fact]
     public async Task Runner_public_reprice_market_successor_survives_partial_execution()
     {

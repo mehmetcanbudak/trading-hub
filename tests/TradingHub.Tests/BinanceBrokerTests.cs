@@ -2186,6 +2186,12 @@ internal sealed class FakeBinance : IDisposable
         }
     }
 
+    /// <summary>Ends (0) or extends the lagging untriggered copy that open algo-order lists show.</summary>
+    public void SetStaleListings(long algoId, int staleListings)
+    {
+        lock (_gate) _algo[algoId].StaleListings = staleListings;
+    }
+
     /// <summary>The matching engine refuses the conditional order when it triggers (for example a failed margin check).</summary>
     public void RejectAtTrigger(long algoId)
     {
