@@ -577,11 +577,15 @@ public sealed class BybitRunnerExecutionTests
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
-    [InlineData(false, true)]
-    public async Task Owned_bybit_stop_triggered_before_a_restart_recovers_as_its_executing_exit(bool keepTriggerPrice, bool triggeredWhileWatched)
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    [InlineData(false, false, true)]
+    public async Task Owned_bybit_stop_triggered_before_a_restart_recovers_as_its_executing_exit(bool keepTriggerPrice, bool triggeredWhileWatched, bool amendedFirst)
     {
         string previous = LiveStore.Root;
         string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-restart-stop-" + Guid.NewGuid().ToString("N"));
@@ -592,7 +596,7 @@ public sealed class BybitRunnerExecutionTests
         {
             using var data = new InstrumentData(Btc, new SimulatedFeed());
             data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime.AddMinutes(-1), 109, 1, TradeSide.Buy));
-            string stopId, intentId;
+            string stopId, intentId, logicalId;
             using (var firstHttp = new HttpClient(protocol, disposeHandler: false))
             {
                 await using var first = new BybitTradingSession(protocol.Settings, state, firstHttp, clock: new ProviderClock(), executionRoot: LiveStore.Root);
@@ -601,7 +605,14 @@ public sealed class BybitRunnerExecutionTests
                 await RefreshUntil(first, () => first.OrdersReady && first.PositionReady && firstBroker.Position.Volume == 2);
                 var placed = OrderActions.Manual(firstBroker, OrderTypes.Stop, OrderDirections.Sell, 2, 90, "SL", reduceOnly: true);
                 await RefreshUntil(first, () => placed.ExchangeOrderId.Length > 0 && first.OrdersReady);
-                (stopId, intentId) = (placed.ExchangeOrderId, Assert.IsType<string>(placed.IntentId));
+                (stopId, logicalId) = (placed.ExchangeOrderId, Assert.IsType<string>(placed.LogicalOrderId));
+                if (amendedFirst)
+                {
+                    // An in-place native amendment adds an operation to the lineage before the trigger.
+                    firstBroker.Modify(placed, 91);
+                    await RefreshUntil(first, () => !firstBroker.IsReplacementPending(placed) && placed.TriggerPrice == 91 && first.OrdersReady);
+                }
+                intentId = Assert.IsType<string>(placed.IntentId);
                 if (triggeredWhileWatched)
                 {
                     // The running session records the MARKET working type before the app restarts.
@@ -628,12 +639,14 @@ public sealed class BybitRunnerExecutionTests
             await RefreshUntil(session, () => session.OrdersReady && session.PositionReady && broker.ActiveOrders.Any(order => order.Filled == 1));
             var stop = Assert.Single(broker.ActiveOrders);
             Assert.Null(session.LastError);
-            Assert.Equal((stopId, intentId, OrderTypes.Market, 1m), (stop.ExchangeOrderId, stop.IntentId, stop.Type, stop.Unfilled));
-            var claim = Assert.IsType<OwnedOrderIntent>(session.OrderContext.Find(intentId));
+            Assert.Equal((stopId, logicalId, OrderTypes.Market, 1m), (stop.ExchangeOrderId, stop.LogicalOrderId, stop.Type, stop.Unfilled));
+            if (!amendedFirst) Assert.Equal(intentId, stop.IntentId);
+            var claim = Assert.IsType<OwnedOrderIntent>(session.OrderContext.Find(stop.IntentId));
             Assert.Equal(OrderTypes.Stop, claim.Request.Type);
             Assert.Equal(OrderTypes.Market, Assert.IsType<NativeWorkingOrder>(claim.WorkingOrder).Type);
-            Assert.Equal(intentId, session.OrderContext.FindExecutingProtection(stop, session.OrderContext.ManualOwner)?.Id);
-            Assert.DoesNotContain(protocol.Requests, request => request.Path is "/v5/order/cancel" or "/v5/order/amend");
+            Assert.Equal(stop.IntentId, session.OrderContext.FindExecutingProtection(stop, session.OrderContext.ManualOwner)?.Id);
+            Assert.DoesNotContain(protocol.Requests, request => request.Path == "/v5/order/cancel");
+            Assert.Equal(amendedFirst ? 1 : 0, protocol.Requests.Count(request => request.Path == "/v5/order/amend"));
             Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create");
         }
         finally
