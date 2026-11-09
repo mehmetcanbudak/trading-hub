@@ -651,7 +651,7 @@ public sealed partial class AppServices
     /// <summary>The ownership context of a Binance account: its id keys the persisted intents, executions and native bindings.</summary>
     internal OrderContext BinanceContext(ConnectionProfile p, string accountId, BinanceAccountSettings settings) =>
         TradingContext(p, accountId, "Binance", settings.Futures ? "usd-m-futures" : "spot",
-            (settings.Testnet ? "testnet|" : "live|") + PublicEndpoint(settings.RestBase), null);
+            (settings.Testnet ? "testnet|" : "live|") + PublicEndpoint(settings.ContextEndpoint), null);
 
     /// <summary>
     /// How a real broker was built: from which connection, whether it traded real money then, and the connection settings

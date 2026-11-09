@@ -33,11 +33,26 @@ public sealed class BinanceAccountSettings
         ? BaseUrl!.TrimEnd('/')
         : (Futures, Testnet) switch
         {
-            (true, true) => "https://testnet.binancefuture.com",
+            (true, true) => "https://" + FuturesDemoHost,
             (true, false) => "https://fapi.binance.com",
             (false, true) => "https://testnet.binance.vision",
             _ => "https://api.binance.com",
         };
+
+    /// <summary>Binance's documented USDⓈ-M testnet (demo trading) REST host.</summary>
+    private const string FuturesDemoHost = "demo-fapi.binance.com";
+
+    /// <summary>The earlier default USDⓈ-M testnet host, an alias of <see cref="FuturesDemoHost"/>.</summary>
+    private const string FuturesTestnetAliasHost = "testnet.binancefuture.com";
+
+    /// <summary>
+    /// <see cref="RestBase"/> as account-context identity. The demo host names the same service as its earlier alias, so it
+    /// keeps the identity persisted under the alias: owned intents, executions and native bindings stay recovered.
+    /// </summary>
+    public string ContextEndpoint =>
+        Uri.TryCreate(RestBase, UriKind.Absolute, out var uri) && uri.Host.Equals(FuturesDemoHost, StringComparison.OrdinalIgnoreCase)
+            ? new UriBuilder(uri) { Host = FuturesTestnetAliasHost }.Uri.ToString()
+            : RestBase;
 
     public bool HasKeys => !string.IsNullOrWhiteSpace(ApiKey) && !string.IsNullOrWhiteSpace(ApiSecret);
 }

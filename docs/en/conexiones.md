@@ -54,7 +54,7 @@ Offline order book and trade simulation with SIM-BTC, SIM-ETH, SIM-ES and SIM-NQ
 Public charts, DOM, tape and history need no account. For trading:
 
 1. Choose **Testnet** (default) or **Real account**.
-2. Enter API key and secret. Grant trading permissions only; **do not grant withdrawals**. The API-key help link follows the selected testnet/live environment.
+2. Enter API key and secret. Grant trading permissions only; **do not grant withdrawals**. The API-key help link follows the selected testnet/live environment. Futures testnet orders go to Binance's demo trading service (`demo-fapi.binance.com`), so create those keys in [demo trading API management](https://demo.binance.com/en/my/settings/api-management); Spot testnet uses `testnet.binance.vision` and its own keys.
 3. For real trading, enable **Allow REAL orders from Trading Hub**. Otherwise it stays read-only and is not offered as a trading destination.
 4. Review per-real-order confirmation, enabled by default, and maximum order quantity. **0 means unlimited.**
 
