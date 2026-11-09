@@ -1739,6 +1739,38 @@ public class BinanceBrokerTests : IDisposable
         Assert.Empty(fake.Open);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Manual_stop_limit_triggered_into_a_resting_limit_can_be_modified(bool resizeRemaining)
+    {
+        // A stop-limit placed on Binance's website triggers into a LIMIT that rests in the book. It is not an executing
+        // exit: dragging that limit must cancel and replace it as for any other resting limit.
+        using var fake = new FakeBinance(futures: true);
+        long algoId = fake.AddExternalAlgo("BUY", "STOP", 3m, triggerPrice: 61000m, price: 61100m);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any());
+        var order = Assert.Single(broker.ActiveOrders);
+        long childId = fake.Trigger(algoId, fill: 1m);
+        await Observed(broker, fake, () => order.ExchangeOrderId == childId.ToString(Inv) &&
+            order.Type == OrderTypes.Limit && order.Filled == 1m && order.Unfilled == 2m);
+        await Polls(fake, 2);
+
+        decimal remaining = resizeRemaining ? 1m : 2m;
+        if (resizeRemaining) OrderActions.Replace(broker, order, 61200m, remaining);
+        else OrderActions.Reprice(broker, order, 61200m);
+        Assert.False(broker.LastError?.StartsWith("Not modified", StringComparison.Ordinal) == true, broker.LastError);
+        await Observed(broker, fake, () => fake.Placed.Count == 1 &&
+            order.ExchangeOrderId != childId.ToString(Inv) && order.ExchangeOrderId.Length > 0 &&
+            !broker.IsReplacementPending(order));
+        var replacement = Assert.Single(fake.OpenOrders);
+        Assert.Equal(("BUY", "LIMIT", remaining, 61200m), (replacement.Side, replacement.Type, replacement.Qty, replacement.Price));
+        Assert.Equal("CANCELED", fake.Order(childId).Status);
+        Assert.Empty(fake.PlacedAlgo);
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+        Assert.Equal((OrderTypes.Limit, 1m, remaining, 61200m), (order.Type, order.Filled, order.Unfilled, order.Price));
+    }
+
     [Fact]
     public async Task Orders_reach_terminal_states_while_the_futures_position_read_keeps_failing()
     {
@@ -2097,6 +2129,9 @@ internal sealed class FakeBinance : IDisposable
     /// <summary>Hold a selected GET response after snapshotting its body, outside the matching-engine lock.</summary>
     public Func<FakeRequest, CancellationToken, Task>? BeforeGetReply { get; set; }
 
+    /// <summary>Replace a selected GET response (for example a transient failure) instead of the venue's answer.</summary>
+    public Func<FakeRequest, (int Status, string Body)?>? OverrideGetReply { get; set; }
+
     /// <summary>Hold a successful single-order DELETE reply after the venue mutation, outside the matching-engine lock.</summary>
     public Func<CancellationToken, Task>? BeforeDeleteReply { get; set; }
 
@@ -2289,6 +2324,12 @@ internal sealed class FakeBinance : IDisposable
             a.StaleListings = staleListings;
             return TriggerLocked(a, fill);
         }
+    }
+
+    /// <summary>Ends (0) or extends the lagging untriggered copy that open algo-order lists show.</summary>
+    public void SetStaleListings(long algoId, int staleListings)
+    {
+        lock (_gate) _algo[algoId].StaleListings = staleListings;
     }
 
     /// <summary>The matching engine refuses the conditional order when it triggers (for example a failed margin check).</summary>
@@ -2509,6 +2550,8 @@ internal sealed class FakeBinance : IDisposable
             await beforeTradeReply(ct).ConfigureAwait(false);
         if (r.Method == "GET" && BeforeGetReply is { } beforeGetReply)
             await beforeGetReply(r, ct).ConfigureAwait(false);
+        if (r.Method == "GET" && OverrideGetReply?.Invoke(r) is { } overridden)
+            answer = overridden;
         if (r.Method == "DELETE" && answer.Status == 200 &&
             (r.Route is "/api/v3/order" or "/fapi/v1/order" or "/fapi/v1/algoOrder") && BeforeDeleteReply is { } beforeDeleteReply)
             await beforeDeleteReply(ct).ConfigureAwait(false);
