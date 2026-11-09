@@ -744,6 +744,48 @@ public sealed class BybitRunnerExecutionTests
         }
     }
 
+    [Fact]
+    public async Task Queued_trigger_move_is_dropped_when_the_stop_limit_triggers_before_it_is_sent()
+    {
+        string previous = LiveStore.Root;
+        string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-queued-trigger-move-" + Guid.NewGuid().ToString("N"));
+        LiveStore.Root = Path.Combine(root, "live");
+        using var protocol = new FakeBybitProtocol { NetPosition = 1, ApplyAmendImmediately = false };
+        using var http = new HttpClient(protocol);
+        try
+        {
+            await using var session = new BybitTradingSession(protocol.Settings, Path.Combine(root, "native", "orders.json"), http,
+                clock: new ProviderClock(), executionRoot: LiveStore.Root);
+            using var data = new InstrumentData(Btc, new SimulatedFeed());
+            data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime.AddMinutes(-1), 109, 1, TradeSide.Buy));
+            using var broker = new BybitBroker(data, session, "Queued trigger move");
+            string nativeId = protocol.AddExternalConditional("Sell", 1, 95, limitPrice: 94.5m, reduceOnly: true);
+            await RefreshUntil(session, () => session.OrdersReady && session.PositionReady && broker.ActiveOrders.Any());
+            var order = Assert.Single(broker.ActiveOrders);
+            Assert.Equal(OrderTypes.Stop, order.Type);
+
+            // The first trigger move is sent and awaits Bybit's report; the second one queues behind it.
+            broker.Modify(order, 96);
+            await protocol.AmendReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            broker.Modify(order, 97);
+            Assert.Contains("\"triggerPrice\":\"96\"", Assert.Single(protocol.Requests, request => request.Path == "/v5/order/amend").Body);
+
+            // The stop-limit triggers before the queued move is sent: it now rests as a limit at 94.5.
+            protocol.TriggerStop(nativeId);
+            await RefreshUntil(session, () => order.Type == OrderTypes.Limit && !broker.IsReplacementPending(order) && session.OrdersReady);
+            await session.RefreshAsync();
+
+            // A trigger move must never be sent as a price move of the resting limit.
+            Assert.Single(protocol.Requests, request => request.Path == "/v5/order/amend");
+            Assert.Equal((OrderStates.Active, OrderTypes.Limit, 94.5m), (order.State, order.Type, order.Price));
+        }
+        finally
+        {
+            LiveStore.Root = previous;
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(false, false, false, false)]
     [InlineData(true, false, false, false)]
