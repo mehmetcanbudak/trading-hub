@@ -78,6 +78,36 @@ public sealed class SimulatorContextRetentionTests : IDisposable
         Assert.Equal("not an ownership record", File.ReadAllText(Path.Combine(unreadable, "context.json")));
     }
 
+    [Fact]
+    public void Interrupted_removal_leftovers_are_removed_but_any_other_descriptorless_folder_is_kept()
+    {
+        string state = Path.Combine(Live, "execution-state");
+        string Folder(string name, params string[] files)
+        {
+            string path = Path.Combine(state, name);
+            Directory.CreateDirectory(path);
+            foreach (string file in files) File.WriteAllText(Path.Combine(path, file), "");
+            return path;
+        }
+        // Leftovers of a removal interrupted after context.json was deleted (Finder may add .DS_Store).
+        Folder("leftover-lease-owner", ".lease", ".owner");
+        Folder("leftover-lease", ".lease");
+        Folder("leftover-empty");
+        Folder("leftover-finder", ".lease", ".DS_Store");
+        // Anything else without a readable descriptor is not provably a simulator leftover.
+        Folder("kept-record", ".lease", "native-account.json");
+        Folder("kept-temporary", ".lease", "context.json.0123.tmp");
+        Directory.CreateDirectory(Path.Combine(Folder("kept-intent", ".lease"), "intent"));
+        string held = Folder("kept-held", ".lease");
+        using var owner = new FileStream(Path.Combine(held, ".owner"), FileMode.OpenOrCreate, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+
+        var current = OrderContext.ProcessSimulation("SIM-1", Live);
+        Assert.Equal(Sorted("kept-record", "kept-temporary", "kept-intent", "kept-held", OrderContext.Hash(current.Descriptor.Id)), Contexts());
+        Assert.True(Directory.Exists(Path.Combine(state, "kept-intent", "intent")));
+        Assert.True(File.Exists(Path.Combine(state, "kept-record", "native-account.json")));
+    }
+
     private string[] Contexts()
     {
         string directory = Path.Combine(Live, "execution-state");
