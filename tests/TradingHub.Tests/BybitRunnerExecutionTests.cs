@@ -209,7 +209,8 @@ public sealed class BybitRunnerExecutionTests
             protocol.NetPosition = .4m;
             protocol.AveragePositionPrice = 101;
             clock.Now = FakeBybitProtocol.Now.AddSeconds(30);
-            await session.RefreshAsync();
+            // The runner applies session changes through its captured synchronization context, so wait for the ledger it consumes.
+            await RefreshUntil(session, () => runner.Ledger.Position == .4m);
             Assert.False(session.ExecutionsReady);
             Assert.Equal(.4m, Assert.Single(session.Orders, order => order.ExchangeOrderId == "exchange-1").Filled);
             Assert.Equal(.4m, runner.Ledger.Position);
@@ -255,6 +256,9 @@ public sealed class BybitRunnerExecutionTests
             await RefreshUntil(session, () => runner.Ledger.Position == 1 &&
                 broker.ActiveOrders.Count(order => order.Type == OrderTypes.Stop) == 1 &&
                 broker.ActiveOrders.Any(order => order.Type == OrderTypes.Stop && order.TriggerPrice == 97.2m && order.Unfilled == 1));
+            // A placed stop is active before its create request reaches the venue: count creates only after it is acknowledged.
+            await RefreshUntil(session, () => session.OrdersReady &&
+                broker.ActiveOrders.Any(order => order.Type == OrderTypes.Stop && order.TriggerPrice == 97.2m && order.ExchangeOrderId.Length > 0));
             Assert.Equal(102.2m, runner.Ledger.AveragePrice);
             Assert.False(runner.Ledger.CostsComplete);
             Assert.Equal(.02m, runner.Ledger.Fees);
