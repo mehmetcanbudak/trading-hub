@@ -909,10 +909,11 @@ internal sealed class FakeBybitProtocol : HttpMessageHandler
         order["updatedTime"] = (Math.Max(prior, (observedAt ?? Now).ToUnixTimeMilliseconds()) + ++_version).ToString(CultureInfo.InvariantCulture);
     }
     public void ConfirmCancel() { lock (_gate) { _order!["orderStatus"] = "Cancelled"; Stamp(); } }
-    /// <summary>Bybit triggers a conditional under the same order id. The report keeps its triggerPrice and stopOrderType;
-    /// orderType is the type it works as after the trigger (live capture: ccxt test/static/response/bybit.json, a Filled
-    /// triggered order with "triggerPrice": "1.9407", "orderType": "Market").</summary>
-    public void TriggerStop(string orderId)
+    /// <summary>Bybit triggers a conditional under the same order id and it then works as its orderType (v5 docs: orderType
+    /// "is the order type after the order was triggered"). By default the report keeps its triggerPrice: a live Bybit capture
+    /// (ccxt test/static/response/bybit.json) shows a Filled triggered spot BidirectionalTpslOrder still carrying
+    /// "triggerPrice": "1.9407". Linear conditionals keeping it is inferred, so tests also cover a cleared triggerPrice.</summary>
+    public void TriggerStop(string orderId, bool keepTriggerPrice = true)
     {
         lock (_gate)
         {
@@ -920,9 +921,24 @@ internal sealed class FakeBybitProtocol : HttpMessageHandler
             if (!order.ContainsKey("triggerPrice") || decimal.Parse(order["triggerPrice"]!.GetValue<string>(), CultureInfo.InvariantCulture) <= 0 ||
                 order["orderStatus"]!.GetValue<string>() != "Untriggered")
                 throw new InvalidOperationException("The native fixture order is not a waiting conditional stop.");
-            order["orderType"] = "Market";
+            if (!keepTriggerPrice) order["triggerPrice"] = "0";
             order["orderStatus"] = "New";
             Stamp(order);
+        }
+    }
+    /// <summary>A conditional placed outside Trading Hub (no client link id), waiting at Bybit.</summary>
+    public string AddExternalConditional(string side, decimal quantity, decimal triggerPrice, decimal? limitPrice = null, bool reduceOnly = false)
+    {
+        lock (_gate)
+        {
+            string orderId = "exchange-" + (_orders.Count + 1).ToString(CultureInfo.InvariantCulture);
+            var order = new JsonObject { ["orderId"] = orderId, ["orderLinkId"] = "", ["symbol"] = "BTCUSDT", ["side"] = side,
+                ["orderType"] = limitPrice.HasValue ? "Limit" : "Market", ["price"] = F(limitPrice ?? 0), ["triggerPrice"] = F(triggerPrice),
+                ["qty"] = F(quantity), ["cumExecQty"] = "0", ["leavesQty"] = F(quantity), ["avgPrice"] = "0", ["orderStatus"] = "Untriggered",
+                ["reduceOnly"] = reduceOnly, ["positionIdx"] = 0, ["createdTime"] = Now.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) };
+            _orders.Add(orderId, order);
+            Stamp(order);
+            return orderId;
         }
     }
     public void ConfirmAmend()

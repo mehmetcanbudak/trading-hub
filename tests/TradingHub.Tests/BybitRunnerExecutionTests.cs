@@ -503,8 +503,10 @@ public sealed class BybitRunnerExecutionTests
         }
     }
 
-    [Fact]
-    public async Task Position_report_leading_a_triggered_bybit_stop_never_cancels_or_shrinks_its_executing_exit()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Position_report_leading_a_triggered_bybit_stop_never_cancels_or_shrinks_its_executing_exit(bool keepTriggerPrice)
     {
         string previous = LiveStore.Root;
         string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-bracket-stop-" + Guid.NewGuid().ToString("N"));
@@ -533,7 +535,7 @@ public sealed class BybitRunnerExecutionTests
             Assert.Equal((OrderTypes.Stop, 4m, true), (stop.Type, stop.Unfilled, stop.ReduceOnly));
 
             // Bybit triggers the conditional under the same order id; its first unit executes with the position.
-            protocol.TriggerStop(stopId);
+            protocol.TriggerStop(stopId, keepTriggerPrice);
             protocol.Fill("bracket-stop-1", 1, 90, .1m, orderId: stopId, executionAt: FakeBybitProtocol.Now.AddSeconds(-20), closedQuantity: 1);
             protocol.NetPosition = 3;
             await RefreshUntil(session, () => broker.Position.Volume == 3 && stop.Filled == 1);
@@ -574,8 +576,12 @@ public sealed class BybitRunnerExecutionTests
         }
     }
 
-    [Fact]
-    public async Task Owned_bybit_stop_triggered_while_the_app_was_closed_recovers_as_its_executing_exit()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task Owned_bybit_stop_triggered_before_a_restart_recovers_as_its_executing_exit(bool keepTriggerPrice, bool triggeredWhileWatched)
     {
         string previous = LiveStore.Root;
         string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-restart-stop-" + Guid.NewGuid().ToString("N"));
@@ -596,12 +602,25 @@ public sealed class BybitRunnerExecutionTests
                 var placed = OrderActions.Manual(firstBroker, OrderTypes.Stop, OrderDirections.Sell, 2, 90, "SL", reduceOnly: true);
                 await RefreshUntil(first, () => placed.ExchangeOrderId.Length > 0 && first.OrdersReady);
                 (stopId, intentId) = (placed.ExchangeOrderId, Assert.IsType<string>(placed.IntentId));
+                if (triggeredWhileWatched)
+                {
+                    // The running session records the MARKET working type before the app restarts.
+                    protocol.TriggerStop(stopId, keepTriggerPrice);
+                    protocol.Fill("restart-stop-1", 1, 90, .1m, orderId: stopId, executionAt: FakeBybitProtocol.Now.AddSeconds(-5), closedQuantity: 1);
+                    protocol.NetPosition = 1;
+                    await RefreshUntil(first, () => placed.Filled == 1 && placed.Type == OrderTypes.Market &&
+                        first.OrderContext.Find(intentId)?.WorkingOrder is { Type: OrderTypes.Market });
+                    Assert.Equal(intentId, first.OrderContext.FindExecutingProtection(placed, first.OrderContext.ManualOwner)?.Id);
+                }
             }
 
-            // Bybit triggers the stop and executes one unit while no session observes the account.
-            protocol.TriggerStop(stopId);
-            protocol.Fill("restart-stop-1", 1, 90, .1m, orderId: stopId, executionAt: FakeBybitProtocol.Now.AddSeconds(-5), closedQuantity: 1);
-            protocol.NetPosition = 1;
+            if (!triggeredWhileWatched)
+            {
+                // Bybit triggers the stop and executes one unit while no session observes the account.
+                protocol.TriggerStop(stopId, keepTriggerPrice);
+                protocol.Fill("restart-stop-1", 1, 90, .1m, orderId: stopId, executionAt: FakeBybitProtocol.Now.AddSeconds(-5), closedQuantity: 1);
+                protocol.NetPosition = 1;
+            }
 
             using var http = new HttpClient(protocol, disposeHandler: false);
             await using var session = new BybitTradingSession(protocol.Settings, state, http, clock: new ProviderClock(), executionRoot: LiveStore.Root);
@@ -616,6 +635,49 @@ public sealed class BybitRunnerExecutionTests
             Assert.Equal(intentId, session.OrderContext.FindExecutingProtection(stop, session.OrderContext.ManualOwner)?.Id);
             Assert.DoesNotContain(protocol.Requests, request => request.Path is "/v5/order/cancel" or "/v5/order/amend");
             Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create");
+        }
+        finally
+        {
+            LiveStore.Root = previous;
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Triggered_external_bybit_stop_limit_price_amendment_is_confirmed_by_its_working_limit_price()
+    {
+        string previous = LiveStore.Root;
+        string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-stop-limit-" + Guid.NewGuid().ToString("N"));
+        LiveStore.Root = Path.Combine(root, "live");
+        using var protocol = new FakeBybitProtocol { NetPosition = 1 };
+        using var http = new HttpClient(protocol);
+        try
+        {
+            await using var session = new BybitTradingSession(protocol.Settings, Path.Combine(root, "native", "orders.json"), http,
+                clock: new ProviderClock(), executionRoot: LiveStore.Root);
+            using var data = new InstrumentData(Btc, new SimulatedFeed());
+            data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime.AddMinutes(-1), 109, 1, TradeSide.Buy));
+            using var broker = new BybitBroker(data, session, "External stop-limit");
+            string nativeId = protocol.AddExternalConditional("Sell", 1, 95, limitPrice: 94.5m, reduceOnly: true);
+            await RefreshUntil(session, () => session.OrdersReady && session.PositionReady && broker.ActiveOrders.Any());
+            var order = Assert.Single(broker.ActiveOrders);
+            Assert.Equal((nativeId, OrderTypes.Stop, 95m), (order.ExchangeOrderId, order.Type, order.TriggerPrice));
+
+            // Bybit triggers it: the same order now rests as a limit at 94.5 and keeps its triggerPrice.
+            protocol.TriggerStop(nativeId);
+            await RefreshUntil(session, () => order.Type == OrderTypes.Limit);
+            Assert.Equal(94.5m, order.Price);
+
+            broker.Modify(order, 96);
+            await protocol.AmendReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var amend = Assert.Single(protocol.Requests, request => request.Path == "/v5/order/amend");
+            Assert.Contains("\"price\":\"96\"", amend.Body);
+            Assert.DoesNotContain("triggerPrice", amend.Body);
+
+            // Bybit's working report shows the amended limit price: that alone confirms the amendment.
+            await RefreshUntil(session, () => !broker.IsReplacementPending(order) && session.OrdersReady);
+            Assert.Equal((OrderStates.Active, OrderTypes.Limit, 96m, 1m), (order.State, order.Type, order.Price, order.Unfilled));
+            Assert.Null(session.LastError);
         }
         finally
         {
