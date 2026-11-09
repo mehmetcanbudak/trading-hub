@@ -2174,6 +2174,16 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     private void StartReplacement(Tracked tracked, PreparedOrderIntent intent)
     {
         var order = tracked.Order;
+        // A conditional order that triggered is followed through the order it placed, which is executing the exit. An
+        // amendment (also a price update queued while it was pending) targeted the conditional order: like a cancel that
+        // arrives past the trigger, it must not cancel that order.
+        if ((tracked.ConditionalParent != null && tracked.AlgoId == 0) || intent.Request.Type != order.Type)
+        {
+            const string triggered = "Not modified: the stop already triggered at Binance and its order is executing.";
+            LastError = triggered;
+            RecordRejected(intent, triggered);
+            return;
+        }
         var predecessor = new Order
         {
             Security = order.Security, Portfolio = order.Portfolio, Direction = order.Direction, Type = order.Type,
@@ -2407,7 +2417,10 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     }
 
                     if (found != null) Apply(t, found); // still working (shown as it is at Binance again) or filled
-                    if (foundAlgo != null) ApplyAlgo(t, foundAlgo); // still working, or triggered: then the order it placed is followed
+                    // Without the triggered child's snapshot its executed quantity is not applied: it would appear on a
+                    // handle not yet known to be executing a stop. The child's own answer, at the next poll, books it.
+                    if (foundAlgo != null)
+                        ApplyAlgo(t, foundAlgo.ActualOrderId != 0 && foundChild == null ? foundAlgo with { ActualQuantity = 0 } : foundAlgo);
                     if (foundChild != null && t.AlgoId == 0 && t.Id == foundChild.OrderId && _byOrder.ContainsKey(order))
                         Apply(t, foundChild);
                 }
