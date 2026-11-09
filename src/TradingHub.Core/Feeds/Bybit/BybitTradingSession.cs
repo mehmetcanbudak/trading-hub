@@ -88,7 +88,8 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         public AccountExecutionSnapshot? CompleteSnapshot;
         public AccountExecutionSnapshot? PartialSnapshot;
     }
-    private sealed record Amendment(decimal Price, decimal Total, bool Sent = false, string? OwnershipIntentId = null);
+    /// <param name="Conditional">The amend sent triggerPrice (true) or price (false). Null only in state saved before this was recorded.</param>
+    private sealed record Amendment(decimal Price, decimal Total, bool Sent = false, string? OwnershipIntentId = null, bool? Conditional = null);
     private sealed record FlattenIntent(Instrument Instrument, string CloseLinkId);
     private sealed record SavedOrder(string Symbol, string LinkId, bool Own, string OrderId, OrderDirections Direction, OrderTypes Type,
         decimal Quantity, decimal Executed, decimal Price, decimal Trigger, bool ReduceOnly, OrderStates State, OrderStatus Status,
@@ -758,10 +759,14 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         {
             order.State = OrderStates.Active;
             order.Status = tracked.Executed > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
-            if (tracked.Amendment is { Sent: true } amendment && report.Quantity == amendment.Total &&
-                (order.Type == OrderTypes.Stop ? report.TriggerPrice : report.Price) == amendment.Price)
+            if (tracked.Amendment is { Sent: true } amendment)
             {
-                tracked.Amendment = null; // Only a matching authoritative working report confirms a native amendment.
+                bool triggerAmendment = amendment.Conditional ?? order.Type == OrderTypes.Stop;
+                // Only a matching authoritative working report confirms a native amendment. A trigger-price amendment
+                // overtaken by the trigger has no trigger left to confirm: this report already states what Bybit works.
+                if ((triggerAmendment && order.Type != OrderTypes.Stop) ||
+                    (report.Quantity == amendment.Total && (triggerAmendment ? report.TriggerPrice : report.Price) == amendment.Price))
+                    tracked.Amendment = null;
             }
         }
     }
@@ -1005,7 +1010,8 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 string? denied = ticket == null ? "Bybit amendment ownership is unavailable; request the amendment again after reconciliation."
                     : OrderContext.CheckDispatch(ticket, Math.Abs(signed)) ?? Check(tracked.Symbol, signed, tracked.Order.ReduceOnly);
                 if (denied != null) { LastError = denied; Save(); continue; }
-                tracked.Amendment = requested with { Sent = true };
+                bool conditional = tracked.Order.Type == OrderTypes.Stop; // The field this amend sends, fixed at dispatch.
+                tracked.Amendment = requested with { Sent = true, Conditional = conditional };
                 tracked.OperationBusy = true;
                 if (!Save() && !tracked.Order.ReduceOnly) { tracked.Amendment = null; tracked.OperationBusy = false; continue; }
                 RunOperation(async () =>
@@ -1019,7 +1025,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                             if (permission != null) throw new BybitApiException(-1, permission);
                             _mutationVersion++; PositionReady = false;
                         }
-                        await _client.AmendOrderAsync(tracked.Symbol, tracked.Order.ExchangeOrderId, requested.Total, requested.Price, tracked.Order.Type == OrderTypes.Stop, _cts.Token,
+                        await _client.AmendOrderAsync(tracked.Symbol, tracked.Order.ExchangeOrderId, requested.Total, requested.Price, conditional, _cts.Token,
                             () => OrderContext.CheckDispatch(ticket!, Math.Max(0, requested.Total - tracked.Executed)) ??
                                 AtTransport(tracked.Symbol, (tracked.Order.Direction == OrderDirections.Buy ? 1 : -1) *
                                 Math.Max(0, requested.Total - tracked.Executed), tracked.Order.ReduceOnly, amendmentGuard)).ConfigureAwait(false);
