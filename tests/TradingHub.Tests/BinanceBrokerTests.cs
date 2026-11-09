@@ -1664,6 +1664,56 @@ public class BinanceBrokerTests : IDisposable
     }
 
     [Fact]
+    public async Task Manual_triggered_limit_adopted_by_a_refused_modify_finishes_without_an_ownership_fault()
+    {
+        // A website stop-limit's LIMIT fills just before the user drags it: the drag adopts the limit, its cancel is
+        // refused (-2011, already filled), and the next poll books the fill on the adopted LIMIT handle.
+        using var fake = new FakeBinance(futures: true);
+        long algoId = fake.AddExternalAlgo("BUY", "STOP", 3m, triggerPrice: 61000m, price: 61100m);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any());
+        var order = Assert.Single(broker.ActiveOrders);
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        broker.Changed += () => { if (broker.LastError is { } e) errors.Enqueue(e); };
+        long childId = fake.Trigger(algoId, fill: 1m);
+        await Observed(broker, fake, () => order.ExchangeOrderId == childId.ToString(Inv) &&
+            order.Type == OrderTypes.Limit && order.Filled == 1m && order.Unfilled == 2m);
+        await Polls(fake, 2);
+        Assert.True(string.IsNullOrEmpty(order.OwnerId));
+
+        var releaseOrders = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            // Polls cannot observe the fill until the drag's cancel has been refused.
+            fake.BeforeGetReply = (request, ct) => request.Route is "/fapi/v1/openOrders" or "/fapi/v1/openAlgoOrders"
+                ? releaseOrders.Task.WaitAsync(ct) : Task.CompletedTask;
+            fake.Fill(childId, 2m);
+            OrderActions.Reprice(broker, order, 61200m);
+            Assert.False(string.IsNullOrEmpty(order.OwnerId)); // the drag adopted the limit
+            await Until(() => fake.Refused.Any(refused => refused.StartsWith("DELETE /fapi/v1/order", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            releaseOrders.TrySetResult();
+            fake.BeforeGetReply = null;
+        }
+
+        await Observed(broker, fake, () => order.State != OrderStates.Active && !broker.IsReplacementPending(order));
+        await Polls(fake, 2);
+        Assert.Equal((OrderStates.Done, OrderStatus.Filled, 3m, OrderTypes.Limit), (order.State, order.Status, order.Filled, order.Type));
+        Assert.Empty(fake.Sent);
+        Assert.Empty(fake.PlacedAlgo);
+        Assert.DoesNotContain(errors, e => e.Contains("working order type", StringComparison.Ordinal) ||
+            e.Contains("could not be restored", StringComparison.Ordinal) || e.Contains("terminal ownership", StringComparison.Ordinal));
+        Assert.False(broker.OrderContext.HasStorageFault);
+        await Observed(broker, fake, () => broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready);
+        var bound = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.IntentId!));
+        Assert.Equal(OrderTypes.Limit, bound.Request.Type);
+        Assert.Equal(order.NativeIdentity, bound.TerminalOrder?.Native);
+        Assert.Empty(broker.ActiveOrders);
+    }
+
+    [Fact]
     public async Task Orders_reach_terminal_states_while_the_futures_position_read_keeps_failing()
     {
         using var fake = new FakeBinance(futures: true);
