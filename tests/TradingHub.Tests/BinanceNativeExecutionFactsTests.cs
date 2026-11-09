@@ -1102,6 +1102,7 @@ public sealed class BinanceNativeExecutionFactsTests
             string parentIntentId, childIntentId, logicalId;
             NativeOrderIdentity parentNative, childNative;
             long childId;
+            var staleDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             using (var first = orders.Binance(data, settings, "Replacement cumulative recovery", context))
             {
                 var projector = AccountExecutionProjector.For(first.Executions, context);
@@ -1109,7 +1110,8 @@ public sealed class BinanceNativeExecutionFactsTests
                 await Until(() => first.OrdersReady && first.PositionReady &&
                     first.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, first, fake);
                 var opening = OrderActions.Place(first, owner, OrderTypes.Limit, OrderDirections.Buy, 5m, 103m);
-                await Until(() => opening.ExchangeOrderId.Length > 0 && fake.Placed.Count == 1, first, fake);
+                // Binding publishes the exchange number before persisting and publishing the native identity.
+                await Until(() => opening.ExchangeOrderId.Length > 0 && opening.NativeIdentity != null && fake.Placed.Count == 1, first, fake);
                 long parentId = long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture);
                 parentIntentId = Assert.IsType<string>(opening.IntentId);
                 logicalId = Assert.IsType<string>(opening.LogicalOrderId);
@@ -1128,6 +1130,16 @@ public sealed class BinanceNativeExecutionFactsTests
                 Assert.Equal(("CANCELED", 2m), (fake.Order(parentId).Status, fake.Order(parentId).Executed));
                 Assert.Equal(("BUY", 3m, 102m), (fake.Order(childId).Side, fake.Order(childId).Qty, fake.Order(childId).Price));
                 Assert.Equal(parentIntentId, Assert.IsType<OwnedOrderIntent>(context.Find(childIntentId)).PredecessorId);
+                // A disposed broker's last history request can reach the venue after the next hook is installed;
+                // hold one so its late delivery precedes the recovered broker's first native replay.
+                var staleArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                fake.BeforeTradeReply = async ct =>
+                {
+                    staleArrived.TrySetResult();
+                    await staleDelivery.Task.WaitAsync(ct);
+                    if (fake.BeforeTradeReply is { } late) await late(ct);
+                };
+                await staleArrived.Task.WaitAsync(TimeSpan.FromSeconds(12));
             }
             var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1136,6 +1148,7 @@ public sealed class BinanceNativeExecutionFactsTests
                 entered.TrySetResult();
                 return release.Task.WaitAsync(ct);
             };
+            staleDelivery.TrySetResult();
             try
             {
                 var loaded = new OrderContext(context.Descriptor, root);
@@ -1149,8 +1162,8 @@ public sealed class BinanceNativeExecutionFactsTests
                 var projector = AccountExecutionProjector.For(broker.Executions, loaded);
                 projector.Synchronize();
                 await entered.Task.WaitAsync(TimeSpan.FromSeconds(12));
-                Assert.True(broker.OrdersReady);
-                Assert.True(broker.PositionReady);
+                // A held history request proves only that some broker reached history, not that this one has replayed.
+                await Until(() => broker.OrdersReady && broker.PositionReady, broker, fake);
                 Assert.Equal(2m, broker.Position.Volume);
                 var recovered = Assert.Single(broker.ActiveOrders);
                 Assert.Equal((childId.ToString(CultureInfo.InvariantCulture), owner.Id, childIntentId, logicalId),
@@ -3096,7 +3109,7 @@ public sealed class BinanceNativeExecutionFactsTests
     }
 
     [Fact]
-    public async Task Bracket_reduction_retains_its_acknowledged_market_successor_without_price_drift_or_rearming()
+    public async Task Bracket_growth_retains_its_acknowledged_market_successor_without_price_drift_or_rearming()
     {
         await WithRecoveryRoot(async root =>
         {
@@ -3128,19 +3141,20 @@ public sealed class BinanceNativeExecutionFactsTests
             await ConditionalPolls(fake, broker);
             Assert.Equal("PARTIALLY_FILLED", fake.Order(childId).Status);
             var conditionalEvidence = Assert.IsType<NativeWorkingOrder>(context.Find(originalIntent)!.WorkingOrder);
-            var separateClose = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 1m, reduceOnly: true);
-            await ConditionalState(() => separateClose.ExchangeOrderId.Length > 0, broker, fake);
-            fake.Fill(long.Parse(separateClose.ExchangeOrderId, CultureInfo.InvariantCulture), 1m);
-            await ConditionalState(() => broker.Position.Volume == 1m && fake.Placed.Count(order => order.Type == "MARKET") >= 2 &&
+            // The position grows while the child executes: the bracket enlarges the exit through an explicit MARKET successor.
+            var addition = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1m, 59990m);
+            await ConditionalState(() => addition.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(addition.ExchangeOrderId, CultureInfo.InvariantCulture), 1m);
+            await ConditionalState(() => broker.Position.Volume == 3m && fake.Placed.Any(order => order.Type == "MARKET") &&
                 stop.ExchangeOrderId != childId.ToString(CultureInfo.InvariantCulture), broker, fake);
             await ConditionalPolls(fake, broker);
             Assert.Same(stop, brackets.StopLoss);
-            Assert.Equal((OrderTypes.Market, ownerId, logicalId, 1m, 0m),
+            Assert.Equal((OrderTypes.Market, ownerId, logicalId, 3m, 0m),
                 (stop.Type, stop.OwnerId, stop.LogicalOrderId, stop.Unfilled, stop.Price));
             Assert.False(broker.IsReplacementPending(stop));
             Assert.Equal("CANCELED", fake.Order(childId).Status);
             var nativeSuccessor = fake.Order(long.Parse(stop.ExchangeOrderId, CultureInfo.InvariantCulture));
-            Assert.Equal(("MARKET", "SELL", 1m, 0m, true),
+            Assert.Equal(("MARKET", "SELL", 3m, 0m, true),
                 (nativeSuccessor.Type, nativeSuccessor.Side, nativeSuccessor.Qty, nativeSuccessor.Price, nativeSuccessor.ReduceOnly));
             Assert.Equal(new NativeOrderIdentity("binance:order", "BTCUSDT:" + nativeSuccessor.Id.ToString(CultureInfo.InvariantCulture)),
                 stop.NativeIdentity);
@@ -3151,23 +3165,89 @@ public sealed class BinanceNativeExecutionFactsTests
             Assert.Contains(stop.NativeIdentity!, successor.NativeOrders!);
             // The successor is a new explicit dispatch, not a fabricated vendor conditional-child edge.
             Assert.Equal(conditionalEvidence, successor.WorkingOrder);
-            Assert.Equal(2, fake.Placed.Count(order => order.Type == "MARKET"));
+            Assert.Equal(1, fake.Placed.Count(order => order.Type == "MARKET"));
             Assert.Single(fake.PlacedAlgo);
             Assert.All(broker.ActiveOrders, order =>
             {
                 Assert.True(order.ReduceOnly);
-                Assert.Equal(1m, order.Unfilled);
+                Assert.Equal(3m, order.Unfilled);
             });
             Assert.Equal(OrderTypes.Limit, Assert.Single(brackets.Targets).Type);
             int dispatches = fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal));
             await ConditionalPolls(fake, broker);
             Assert.Equal(dispatches, fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal)));
-            Assert.Equal(1m, broker.Position.Volume);
-            fake.Fill(long.Parse(stop.ExchangeOrderId, CultureInfo.InvariantCulture), 1m);
+            Assert.Equal(3m, broker.Position.Volume);
+            fake.Fill(long.Parse(stop.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
             await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any(), broker, fake);
             await ConditionalPolls(fake, broker);
             Assert.Equal(0m, broker.Position.Volume);
             Assert.Empty(broker.ActiveOrders);
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Null(broker.LastError);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    [Fact]
+    public async Task Bracket_never_shrinks_an_executing_market_child_after_a_separate_close()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true) { HoldMarketExecution = true };
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Bracket executing child after separate close", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady, broker, fake);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m, broker, fake);
+            using var brackets = new BracketManager(broker);
+            brackets.SetStopLoss(59000m);
+            brackets.AddTarget(61000m);
+            await ConditionalState(() => broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
+                order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var stop = Assert.IsType<Order>(brackets.StopLoss);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+            string child = childId.ToString(CultureInfo.InvariantCulture);
+            await ConditionalState(() => broker.Position.Volume == 2m && stop.Type == OrderTypes.Market && stop.Unfilled == 2m &&
+                brackets.Targets.Count == 1 && brackets.Targets[0].Unfilled == 2m &&
+                !broker.IsReplacementPending(brackets.Targets[0]), broker, fake);
+            await ConditionalPolls(fake, broker);
+
+            // An unowned close leaves the executing child larger than the position. Reconciliation cannot tell this
+            // from the child's own unreported fills, so it neither shrinks nor cancels the child; only the target follows.
+            var separateClose = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 1m, reduceOnly: true);
+            await ConditionalState(() => separateClose.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(separateClose.ExchangeOrderId, CultureInfo.InvariantCulture), 1m);
+            await ConditionalState(() => broker.Position.Volume == 1m && brackets.Targets.Count == 1 &&
+                brackets.Targets[0].Unfilled == 1m && !broker.IsReplacementPending(brackets.Targets[0]), broker, fake);
+            await ConditionalPolls(fake, broker);
+            await ConditionalPolls(fake, broker);
+            Assert.Same(stop, brackets.StopLoss);
+            Assert.Equal((OrderTypes.Market, child, originalIntent, OrderStates.Active, 2m),
+                (stop.Type, stop.ExchangeOrderId, stop.IntentId, stop.State, stop.Unfilled));
+            Assert.False(broker.IsReplacementPending(stop));
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m, true),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed, fake.Order(childId).ReduceOnly));
+            Assert.Equal(1, fake.Placed.Count(order => order.Type == "MARKET"));
+            Assert.Single(fake.PlacedAlgo);
+
+            // The reduce-only child executes only what the position holds; the flat position ends its remainder.
+            fake.Fill(childId, 1m);
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any(), broker, fake);
+            int dispatches = fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal));
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(0m, broker.Position.Volume);
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Null(brackets.StopLoss);
+            Assert.Equal(("CANCELED", 2m), (fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Equal(dispatches, fake.Calls.Count(call => call.StartsWith("POST ", StringComparison.Ordinal)));
+            Assert.Equal(1, fake.Placed.Count(order => order.Type == "MARKET"));
             Assert.Single(fake.PlacedAlgo);
             Assert.Null(broker.LastError);
             Assert.Empty(fake.Refused);

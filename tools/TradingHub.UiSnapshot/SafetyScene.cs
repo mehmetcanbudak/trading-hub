@@ -174,7 +174,9 @@ internal static partial class SafetyScene
             void Select()
             {
                 HistoricalData.WriteDay(AppPaths.Ticks, fixture, day, new[] { new Trade(1, day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), 100, 1, TradeSide.Buy) }, replace: true);
-                data.GetType().GetMethod("Refresh", BindingFlags.Public | Private)!.Invoke(data, null);
+                // Await the page's own refresh: its scan applies asynchronously and rebuilds both lists, which would
+                // drop a selection made before it lands (the fixture symbol is already listed on the second attempt).
+                Wait((Task)Call(data, "RefreshAsync")!, 5);
                 var symbols = Field<ListBox>(data, "_symbols");
                 Until(() => symbols.Items.OfType<ListBoxItem>().Any(i =>
                     i.Tag is SymbolData s && s.FeedId == fixture.FeedId && s.Symbol == fixture.Symbol), 5);

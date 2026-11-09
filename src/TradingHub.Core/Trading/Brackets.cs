@@ -728,8 +728,7 @@ public sealed class BracketManager : IDisposable
         foreach (var owned in _owned)
         {
             var order = Current(owned);
-            decimal filled = Math.Max(0, order.Filled);
-            if (order.Status == OrderStatus.Filled) filled = Math.Max(filled, order.QuantityToFill);
+            decimal filled = Executed(order);
             decimal delta = Math.Max(0, filled - owned.Booked);
             if (delta > 0)
             {
@@ -737,7 +736,7 @@ public sealed class BracketManager : IDisposable
                 var intent = owned.Intent;
                 decimal remaining = Math.Max(0, intent.Quantity - delta);
                 // A triggered stop's executing child is sized from the position. A position report that led this
-                // execution already shrank it; counting the execution again must not cancel the order closing the position.
+                // execution already shrank the stop's intent; counting the execution again must not release the order closing the position.
                 // Plain stops keep the full decrement: a broker without native reduce-only must cancel an oversized remainder.
                 if (ReferenceEquals(intent.Current, owned) && !Terminal(order) && ExecutingStopChild(intent, order))
                     remaining = Math.Max(remaining, Math.Min(intent.Quantity, order.Unfilled));
@@ -872,6 +871,10 @@ public sealed class BracketManager : IDisposable
         exit.Side == Math.Sign(Volume) && order.Direction == ExitDirection &&
         Account.OrderContext.FindExecutingProtection(order, Account.OrderContext.ManualOwner) != null;
 
+    private static decimal Executed(Order order) => order.Status == OrderStatus.Filled
+        ? Math.Max(Math.Max(0, order.Filled), order.QuantityToFill)
+        : Math.Max(0, order.Filled);
+
     private void ReconcileExits(bool allowPlacement)
     {
         // Optional tracked replacements preserve native amendments and broker-owned cancel/replace sequencing.
@@ -881,9 +884,20 @@ public sealed class BracketManager : IDisposable
             if (intent.Current is not { } owned) continue;
             var order = Current(owned);
             if (Terminal(order)) continue;
+            // A broker thread may apply an execution after ObserveExits booked this order. Comparing the intent with it
+            // would read that fill as a resize request (an executing child would be enlarged or cancelled); book it first.
+            if (Executed(order) > owned.Booked)
+            {
+                _syncAgain = true;
+                continue;
+            }
             if (intent.Phase == ExitPhase.Replacing && intent.Quantity > 0) continue;
-            bool change = intent.Quantity != order.Unfilled ||
-                (intent.Price != PriceOf(order) && !ExecutingStopChild(intent, order));
+            // A triggered stop's executing child is reducing a same-side position. A position report can lead its fills, so
+            // a reduction would be computed from a stale fill count and cancel or shrink the order closing the position.
+            // Its venue order is reduce-only; a closed or flipped position, or an explicit cancel, ends the exemption.
+            bool executing = ExecutingStopChild(intent, order);
+            bool change = (intent.Quantity != order.Unfilled && !(executing && intent.Quantity < order.Unfilled)) ||
+                (intent.Price != PriceOf(order) && !executing);
             if (intent.Phase != ExitPhase.CancelPending && !change) continue;
             if (intent.Phase != ExitPhase.CancelPending)
             {
