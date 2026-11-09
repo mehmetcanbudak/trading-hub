@@ -730,7 +730,9 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     _nativeReplayReady = _nativeOrdersReady;
                     _lastError = null;
                     _nativeError = lookupError ?? protection.Error;
+                    // Only a submission-only poll may skip protection without voiding the last clean read.
                     if (lookupError == null) _protectionClean = protection.Error == null && protection.NativeComplete;
+                    else if (!_refreshSubmissionOnly) _protectionClean = false;
                     _nativeErrorIsSubmission = lookupError != null && _refreshSubmissionOnly && HasUnknownSubmission() && _protectionClean;
                     UpdateProducerAvailability();
                 }
