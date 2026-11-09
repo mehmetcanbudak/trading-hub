@@ -700,6 +700,22 @@ internal sealed class FakeRithmicServer : IDisposable
         await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture reconnect", _cts.Token);
     }
 
+    /// <summary>The order ends at the venue while no Trading Hub session is connected; nothing is notified.</summary>
+    public void EndOrderWithoutSession(string basket)
+    {
+        lock (_gate) Open.Remove(basket);
+    }
+
+    /// <summary>Another platform places a working order while no Trading Hub session is connected; only replay reports it.</summary>
+    public void OpenOrderWithoutSession(string basket, string tag, bool buy, int qty, double price, int type)
+    {
+        lock (_gate)
+        {
+            Open[basket] = (buy, qty, price, type, tag);
+            _orderContracts[basket] = ("ESZ6", "CME");
+        }
+    }
+
     public async Task RemoveOrderWhileDisconnected(string basket)
     {
         WebSocket? socket;
