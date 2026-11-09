@@ -712,13 +712,15 @@ public class BinanceBrokerTests : IDisposable
         Assert.False(runner.Paused);
 
         // Hold the poll that resolves the submission just after its exact client lookup, while the pass is still running.
+        // The fake records a lookup's reply before answering it, so a completed lookup that returned the order (200)
+        // identifies the resolving poll; its algo listing follows that lookup in the same poll.
         var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int resolved = 0, holds = 0;
+        int holds = 0;
         fake.BeforeGetReply = (r, ct) =>
         {
-            if (r.Route == "/fapi/v1/order" && r.Query("origClientOrderId").Length > 0) Interlocked.Exchange(ref resolved, 1);
-            else if (r.Route == "/fapi/v1/openAlgoOrders" && Volatile.Read(ref resolved) == 1 && Interlocked.Exchange(ref holds, 1) == 0)
+            if (r.Route == "/fapi/v1/openAlgoOrders" && fake.ClientLookups.Any(lookup => lookup.Status == 200) &&
+                Interlocked.Exchange(ref holds, 1) == 0)
             {
                 held.TrySetResult();
                 return release.Task.WaitAsync(ct);
