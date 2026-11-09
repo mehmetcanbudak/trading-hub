@@ -1989,6 +1989,9 @@ internal sealed class FakeBinance : IDisposable
     /// <summary>Hold a selected GET response after snapshotting its body, outside the matching-engine lock.</summary>
     public Func<FakeRequest, CancellationToken, Task>? BeforeGetReply { get; set; }
 
+    /// <summary>Replace a selected GET response (for example a transient failure) instead of the venue's answer.</summary>
+    public Func<FakeRequest, (int Status, string Body)?>? OverrideGetReply { get; set; }
+
     /// <summary>Hold a successful single-order DELETE reply after the venue mutation, outside the matching-engine lock.</summary>
     public Func<CancellationToken, Task>? BeforeDeleteReply { get; set; }
 
@@ -2401,6 +2404,8 @@ internal sealed class FakeBinance : IDisposable
             await beforeTradeReply(ct).ConfigureAwait(false);
         if (r.Method == "GET" && BeforeGetReply is { } beforeGetReply)
             await beforeGetReply(r, ct).ConfigureAwait(false);
+        if (r.Method == "GET" && OverrideGetReply?.Invoke(r) is { } overridden)
+            answer = overridden;
         if (r.Method == "DELETE" && answer.Status == 200 &&
             (r.Route is "/api/v3/order" or "/fapi/v1/order" or "/fapi/v1/algoOrder") && BeforeDeleteReply is { } beforeDeleteReply)
             await beforeDeleteReply(ct).ConfigureAwait(false);

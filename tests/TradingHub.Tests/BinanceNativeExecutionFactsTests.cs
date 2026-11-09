@@ -2390,8 +2390,11 @@ public sealed class BinanceNativeExecutionFactsTests
         });
     }
 
-    [Fact]
-    public async Task Bracket_stop_move_racing_trigger_with_position_leading_does_not_cancel_executing_market_child()
+    [Theory]
+    [InlineData(0)] // the child lookup answers
+    [InlineData(503)] // the child lookup fails transiently
+    [InlineData(-2013)] // the child lookup does not find it yet
+    public async Task Bracket_stop_move_racing_trigger_with_position_leading_does_not_cancel_executing_market_child(int childLookupFailure)
     {
         await WithRecoveryRoot(async root =>
         {
@@ -2423,7 +2426,9 @@ public sealed class BinanceNativeExecutionFactsTests
             var releaseLookup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             long childId;
             string moved;
-            fake.BeforeTradeReply = ct => releaseLookup.Task.WaitAsync(ct); // identified executions stay behind the race
+            var releaseTrades = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fake.BeforeTradeReply = ct => releaseTrades.Task.WaitAsync(ct); // identified executions stay behind the race
+            int childLookups = 0;
             fake.BeforeGetReply = (request, ct) =>
             {
                 if (request.Route == "/fapi/v1/openOrders" && !releasePoll.Task.IsCompleted)
@@ -2451,13 +2456,30 @@ public sealed class BinanceNativeExecutionFactsTests
                 Assert.True(broker.IsReplacementPending(stop));
                 Assert.Equal(("MARKET", "PARTIALLY_FILLED", 2m),
                     (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+                // The replacement's own lookup of the triggered child is the first request for it.
+                string child = childId.ToString(CultureInfo.InvariantCulture);
+                fake.OverrideGetReply = request =>
+                    request.Route != "/fapi/v1/order" || request.Query("orderId") != child ||
+                    Interlocked.Increment(ref childLookups) != 1 || childLookupFailure == 0 ? null
+                        : childLookupFailure == -2013 ? (400, "{\"code\":-2013,\"msg\":\"Order does not exist.\"}")
+                        : (childLookupFailure, "{\"code\":-1001,\"msg\":\"Internal error; unable to process your request.\"}");
+                fake.BeforeGetReply = null;
+                releaseLookup.TrySetResult();
+
+                await ConditionalState(() => stop.Type == OrderTypes.Market && !broker.IsReplacementPending(stop), broker, fake);
+                await ConditionalPolls(fake, broker);
+                // The execution is booked once, through the child that records the MARKET working type.
+                Assert.Equal((2m, 1m), (stop.Filled, stop.Unfilled));
+                Assert.True(Volatile.Read(ref childLookups) >= 1); // the replacement's lookup was answered as configured
             }
             finally
             {
                 fake.BeforeGetReply = null;
                 fake.BeforeTradeReply = null;
+                fake.OverrideGetReply = null;
                 releasePoll.TrySetResult();
                 releaseLookup.TrySetResult();
+                releaseTrades.TrySetResult();
             }
             Assert.StartsWith("Stop loss at", moved);
 
@@ -2484,7 +2506,113 @@ public sealed class BinanceNativeExecutionFactsTests
             Assert.Single(fake.PlacedAlgo);
             Assert.Empty(broker.ActiveOrders);
             Assert.Single(fake.Refused, refused => refused.StartsWith("DELETE /fapi/v1/algoOrder", StringComparison.Ordinal));
-            Assert.Single(fake.Refused);
+            Assert.Equal(childLookupFailure == 0 ? 1 : 2, fake.Refused.Count);
+            decimal identified = broker.Executions.Capture(ExecutionCursor.Start).Changes
+                .Where(report => report.NativeOrder == childNative).Sum(report => report.Quantity);
+            Assert.Equal(3m, identified);
+        });
+    }
+
+    [Fact]
+    public async Task Price_update_of_a_triggered_stop_before_its_child_is_resolved_does_not_replace_the_executing_child()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Queued reprice racing a trigger", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m, broker, fake);
+            var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 3m, 59000m, "Test: Stop loss", reduceOnly: true);
+            await ConditionalState(() => stop.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(stop), broker, fake);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            long parentId = Assert.Single(fake.PlacedAlgo).AlgoId;
+
+            var pollHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePoll = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var secondPollHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseSecondPoll = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int childLookupFailed = 0;
+            var releaseTrades = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fake.BeforeTradeReply = ct => releaseTrades.Task.WaitAsync(ct); // only the replacement looks the child up
+            fake.BeforeGetReply = (request, ct) =>
+            {
+                if (request.Route != "/fapi/v1/openOrders") return Task.CompletedTask;
+                if (!releasePoll.Task.IsCompleted)
+                {
+                    pollHeld.TrySetResult();
+                    return releasePoll.Task.WaitAsync(ct);
+                }
+                if (Volatile.Read(ref childLookupFailed) == 0) return Task.CompletedTask;
+                secondPollHeld.TrySetResult();
+                return releaseSecondPoll.Task.WaitAsync(ct);
+            };
+            long childId;
+            try
+            {
+                // While a poll is held the stop is modified: the replacement waits for native replay.
+                await pollHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                OrderActions.Replace(broker, stop, 59100m, 3m);
+                Assert.True(broker.IsReplacementPending(stop));
+                // Before its cancel reaches Binance the stop triggers and its MARKET child executes one unit. The cancel is
+                // refused, and the replacement's lookup of that child fails once, so it stays unresolved until a poll.
+                childId = fake.Trigger(parentId, fill: 1m);
+                string child = childId.ToString(CultureInfo.InvariantCulture);
+                fake.OverrideGetReply = request =>
+                    request.Route != "/fapi/v1/order" || request.Query("orderId") != child ||
+                    Interlocked.Exchange(ref childLookupFailed, 1) != 0 ? null
+                        : (503, "{\"code\":-1001,\"msg\":\"Internal error; unable to process your request.\"}");
+                releasePoll.TrySetResult();
+                await secondPollHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                // The handle follows the triggered child, whose working snapshot is not known yet.
+                await ConditionalState(() => stop.ExchangeOrderId == child && stop.Type == OrderTypes.Stop &&
+                    fake.Refused.Any(refused => refused.StartsWith("GET /fapi/v1/order", StringComparison.Ordinal)), broker, fake);
+                // A price update for the stop arrives in that window: it must not replace the executing child.
+                OrderActions.Reprice(broker, stop, 59200m);
+                Assert.False(broker.IsReplacementPending(stop));
+            }
+            finally
+            {
+                fake.BeforeGetReply = null;
+                fake.BeforeTradeReply = null;
+                releaseTrades.TrySetResult();
+                fake.OverrideGetReply = null;
+                releasePoll.TrySetResult();
+                releaseSecondPoll.TrySetResult();
+            }
+
+            await ConditionalState(() => stop.Type == OrderTypes.Market && !broker.IsReplacementPending(stop), broker, fake);
+            await ConditionalPolls(fake, broker);
+            await ConditionalPolls(fake, broker);
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+            // The price update targeted the conditional order, never the order its trigger placed.
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.All(fake.Placed, order => Assert.Equal("LIMIT", order.Type));
+            Assert.Equal((OrderTypes.Market, childNative, originalIntent, OrderStates.Active, 2m),
+                (stop.Type, stop.NativeIdentity, stop.IntentId, stop.State, stop.Unfilled));
+            Assert.False(stop.Canceled);
+            Assert.Equal(2m, broker.Position.Volume);
+
+            fake.Fill(childId, 2m);
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any(), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "FILLED", 3m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Equal(2, fake.Refused.Count);
+            Assert.Single(fake.Refused, refused => refused.StartsWith("DELETE /fapi/v1/algoOrder", StringComparison.Ordinal));
+            Assert.Single(fake.Refused, refused => refused.StartsWith("GET /fapi/v1/order", StringComparison.Ordinal));
         });
     }
 
