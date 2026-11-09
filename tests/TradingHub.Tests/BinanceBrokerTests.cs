@@ -1664,6 +1664,26 @@ public class BinanceBrokerTests : IDisposable
     }
 
     [Fact]
+    public async Task Triggered_stop_whose_bound_intent_is_missing_reports_the_working_type_fault()
+    {
+        // An owned stop whose handle names an intent the context does not know is unproven ownership: its triggered
+        // child must report the unresolved working type, not silently drop the conditional parent.
+        using var fake = new FakeBinance(futures: true);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.PositionReady);
+        var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 1m, 59000m, "Test: stop");
+        await Accepted(fake, stop);
+        Assert.False(string.IsNullOrEmpty(stop.OwnerId));
+        stop.IntentId = "missing-" + Guid.NewGuid().ToString("N"); // the bound intent cannot be found
+        Assert.Null(broker.OrderContext.Find(stop.IntentId));
+        long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId);
+        await Observed(broker, fake, () => stop.ExchangeOrderId == childId.ToString(Inv) &&
+            broker.LastError?.Contains("Binance working order type remains unresolved", StringComparison.Ordinal) == true);
+        Assert.Equal(OrderTypes.Stop, stop.Type);
+        Assert.Equal(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+    }
+
+    [Fact]
     public async Task Manual_triggered_limit_adopted_by_a_refused_modify_finishes_without_an_ownership_fault()
     {
         // A website stop-limit's LIMIT fills just before the user drags it: the drag adopts the limit, its cancel is
