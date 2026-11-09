@@ -2391,6 +2391,104 @@ public sealed class BinanceNativeExecutionFactsTests
     }
 
     [Fact]
+    public async Task Bracket_stop_move_racing_trigger_with_position_leading_does_not_cancel_executing_market_child()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Stop move racing a trigger", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m, broker, fake);
+            using var brackets = new BracketManager(broker);
+            brackets.SetStopLoss(59000m);
+            await ConditionalState(() => broker.ActiveOrders.Count() == 1 && broker.ActiveOrders.All(order =>
+                order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var stop = Assert.IsType<Order>(brackets.StopLoss);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            var originalParent = Assert.IsType<NativeOrderIdentity>(stop.NativeIdentity);
+            long parentId = Assert.Single(fake.PlacedAlgo).AlgoId;
+
+            var pollHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePoll = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var lookupHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseLookup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            long childId;
+            string moved;
+            fake.BeforeTradeReply = ct => releaseLookup.Task.WaitAsync(ct); // identified executions stay behind the race
+            fake.BeforeGetReply = (request, ct) =>
+            {
+                if (request.Route == "/fapi/v1/openOrders" && !releasePoll.Task.IsCompleted)
+                {
+                    pollHeld.TrySetResult();
+                    return releasePoll.Task.WaitAsync(ct);
+                }
+                if (request.Route != "/fapi/v1/algoOrder") return Task.CompletedTask;
+                lookupHeld.TrySetResult();
+                return releaseLookup.Task.WaitAsync(ct);
+            };
+            try
+            {
+                // While a poll is held the user moves the stop: the replacement waits for native replay.
+                await pollHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                moved = brackets.SetStopLoss(59100m);
+                Assert.True(broker.IsReplacementPending(stop));
+                // Before its cancel reaches Binance the stop triggers and its MARKET child executes two of three.
+                childId = fake.Trigger(parentId, fill: 2m);
+                releasePoll.TrySetResult();
+                // The cancel is refused (triggered); its lookup is held while a later poll reports the reduced position.
+                await lookupHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                await ConditionalState(() => broker.Position.Volume == 1m, broker, fake);
+                await ConditionalPolls(fake, broker);
+                Assert.True(broker.IsReplacementPending(stop));
+                Assert.Equal(("MARKET", "PARTIALLY_FILLED", 2m),
+                    (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            }
+            finally
+            {
+                fake.BeforeGetReply = null;
+                fake.BeforeTradeReply = null;
+                releasePoll.TrySetResult();
+                releaseLookup.TrySetResult();
+            }
+            Assert.StartsWith("Stop loss at", moved);
+
+            await ConditionalState(() => stop.Type == OrderTypes.Market && !broker.IsReplacementPending(stop), broker, fake);
+            await ConditionalPolls(fake, broker);
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+            // The stop triggered before the move's cancel arrived: its child keeps executing the exit.
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 2m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Same(stop, brackets.StopLoss);
+            Assert.Equal((OrderTypes.Market, childNative, originalIntent, OrderStates.Active, 1m),
+                (stop.Type, stop.NativeIdentity, stop.IntentId, stop.State, stop.Unfilled));
+            Assert.False(stop.Canceled);
+            Assert.Equal(new NativeWorkingOrder(originalParent, childNative, OrderTypes.Market, "BTCUSDT", ""),
+                Assert.IsType<OwnedOrderIntent>(context.Find(originalIntent)).WorkingOrder);
+            Assert.Equal(1m, broker.Position.Volume);
+
+            fake.Fill(childId, 1m);
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any(), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "FILLED", 3m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Empty(broker.ActiveOrders);
+            Assert.Single(fake.Refused, refused => refused.StartsWith("DELETE /fapi/v1/algoOrder", StringComparison.Ordinal));
+            Assert.Single(fake.Refused);
+        });
+    }
+
+    [Fact]
     public async Task Runner_public_reprice_market_successor_survives_partial_execution()
     {
         await WithRecoveryRoot(async root =>
