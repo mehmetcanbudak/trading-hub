@@ -1612,9 +1612,10 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
         if (a.ActualOrderId != 0)
         {
-            t.Executed = Math.Max(t.Executed, a.ActualQuantity);
-            o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
-            Follow(t, a.ActualOrderId); // triggered: the regular orders tell how the order it placed ends
+            // Triggered: the regular orders tell how the order it placed ends. Its execution is booked only through that
+            // order's own answer, which first records the MARKET working type: shown here, on a handle not yet known to be
+            // executing a stop, a position-led bracket would count it twice and cancel the order closing the position.
+            Follow(t, a.ActualOrderId);
             ObserveNativeQuantity(o, previousFilled, previousState, previousStatus);
             return;
         }
@@ -2417,10 +2418,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     }
 
                     if (found != null) Apply(t, found); // still working (shown as it is at Binance again) or filled
-                    // Without the triggered child's snapshot its executed quantity is not applied: it would appear on a
-                    // handle not yet known to be executing a stop. The child's own answer, at the next poll, books it.
-                    if (foundAlgo != null)
-                        ApplyAlgo(t, foundAlgo.ActualOrderId != 0 && foundChild == null ? foundAlgo with { ActualQuantity = 0 } : foundAlgo);
+                    if (foundAlgo != null) ApplyAlgo(t, foundAlgo); // still working, or triggered: then the order it placed is followed
                     if (foundChild != null && t.AlgoId == 0 && t.Id == foundChild.OrderId && _byOrder.ContainsKey(order))
                         Apply(t, foundChild);
                 }
