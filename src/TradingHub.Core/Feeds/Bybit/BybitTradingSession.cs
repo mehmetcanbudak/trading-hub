@@ -72,7 +72,6 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         public Amendment? QueuedAmendment;
         public Func<string?>? AmendmentViewGuard;
         public decimal Executed;
-        public bool Conditional; // Bybit reports this order as a conditional, waiting or triggered.
         public decimal ExecutionQuantity;
         public decimal AverageFill;
         public long UpdatedTimeMs;
@@ -164,10 +163,14 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 order.ClientOrderId = tracked.LinkId;
                 if (order.IntentId == null)
                 {
-                    // A conditional that triggered unobserved was dispatched as a stop: recover that exact claim,
-                    // then record its working type below.
+                    // Recover against the type the durable claim froze: a stop claim without working evidence for this
+                    // native order was dispatched as a stop, even if Bybit has since triggered it (with or without a kept
+                    // triggerPrice); one with that evidence recovers as its working type. The working type is recorded below.
                     var working = order.Type;
-                    if (tracked.Conditional) order.Type = OrderTypes.Stop;
+                    if (OrderContext.FindNativeSubmission(tracked.LinkId, native) is { Request.Type: OrderTypes.Stop } claim &&
+                        !(claim.WorkingOrder is { } evidence && evidence.Child == native &&
+                            evidence.NativeInstrument == instrument.Symbol && evidence.NativeExchange == instrument.Exchange))
+                        order.Type = OrderTypes.Stop;
                     try { OrderContext.RecoverNativeOrder(order, tracked.LinkId, native, instrument.Key, instrument.Symbol, instrument.Exchange, notify: false); }
                     finally { order.Type = working; }
                 }
@@ -736,7 +739,6 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         bool waiting = report.Conditional && (report.Status is "Untriggered" or "Deactivated" ||
             (report.Terminal && report.Executed == 0 && order.Type == OrderTypes.Stop));
         order.Type = waiting ? OrderTypes.Stop : report.IsLimit ? OrderTypes.Limit : OrderTypes.Market;
-        tracked.Conditional = report.Conditional;
         order.Price = report.Price;
         order.TriggerPrice = report.Conditional ? report.TriggerPrice : report.Price;
         order.QuantityToFill = Math.Max(report.Quantity, tracked.Executed);
@@ -757,7 +759,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             order.State = OrderStates.Active;
             order.Status = tracked.Executed > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
             if (tracked.Amendment is { Sent: true } amendment && report.Quantity == amendment.Total &&
-                (report.Conditional ? report.TriggerPrice : report.Price) == amendment.Price)
+                (order.Type == OrderTypes.Stop ? report.TriggerPrice : report.Price) == amendment.Price)
             {
                 tracked.Amendment = null; // Only a matching authoritative working report confirms a native amendment.
             }
