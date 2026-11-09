@@ -72,6 +72,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         public Amendment? QueuedAmendment;
         public Func<string?>? AmendmentViewGuard;
         public decimal Executed;
+        public bool Conditional; // Bybit reports this order as a conditional, waiting or triggered.
         public decimal ExecutionQuantity;
         public decimal AverageFill;
         public long UpdatedTimeMs;
@@ -162,7 +163,14 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 order.NativeIdentity = native;
                 order.ClientOrderId = tracked.LinkId;
                 if (order.IntentId == null)
-                    OrderContext.RecoverNativeOrder(order, tracked.LinkId, native, instrument.Key, instrument.Symbol, instrument.Exchange, notify: false);
+                {
+                    // A conditional that triggered unobserved was dispatched as a stop: recover that exact claim,
+                    // then record its working type below.
+                    var working = order.Type;
+                    if (tracked.Conditional) order.Type = OrderTypes.Stop;
+                    try { OrderContext.RecoverNativeOrder(order, tracked.LinkId, native, instrument.Key, instrument.Symbol, instrument.Exchange, notify: false); }
+                    finally { order.Type = working; }
+                }
                 if (order.IntentId == null) continue;
                 if (OrderContext.BindNative(order, native, notify: false) is { } bindingError) { LastError = bindingError; continue; }
                 if (OrderContext.Find(order.IntentId)?.Request.Type == OrderTypes.Stop && order.Type == OrderTypes.Market &&
@@ -723,7 +731,12 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         if (newReport) tracked.LastSeen = _clock.GetUtcNow().UtcDateTime;
         order.Security.Code = report.Symbol;
         order.Direction = report.Buy ? OrderDirections.Buy : OrderDirections.Sell;
-        order.Type = report.Conditional ? OrderTypes.Stop : report.IsLimit ? OrderTypes.Limit : OrderTypes.Market;
+        // A triggered conditional keeps its order id and triggerPrice and works as its orderType. Only Untriggered and
+        // Deactivated (canceled before the trigger) reports, or an unexecuted cancel/reject of a waiting stop, remain a stop.
+        bool waiting = report.Conditional && (report.Status is "Untriggered" or "Deactivated" ||
+            (report.Terminal && report.Executed == 0 && order.Type == OrderTypes.Stop));
+        order.Type = waiting ? OrderTypes.Stop : report.IsLimit ? OrderTypes.Limit : OrderTypes.Market;
+        tracked.Conditional = report.Conditional;
         order.Price = report.Price;
         order.TriggerPrice = report.Conditional ? report.TriggerPrice : report.Price;
         order.QuantityToFill = Math.Max(report.Quantity, tracked.Executed);
