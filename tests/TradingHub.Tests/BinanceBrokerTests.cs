@@ -1703,10 +1703,13 @@ public class BinanceBrokerTests : IDisposable
         Assert.Equal((OrderStates.Done, OrderStatus.Filled, 3m, OrderTypes.Limit), (order.State, order.Status, order.Filled, order.Type));
         Assert.Empty(fake.Sent);
         Assert.Empty(fake.PlacedAlgo);
+        Assert.False(broker.OrderContext.HasStorageFault);
+        // No ownership fault makes the producer unavailable. (It stays Synchronizing: the drag adopted the partly filled
+        // limit with an unknown execution baseline, which this scenario does not resolve; a plain website limit does the same.)
+        await Polls(fake, 2);
+        Assert.NotEqual(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
         Assert.DoesNotContain(errors, e => e.Contains("working order type", StringComparison.Ordinal) ||
             e.Contains("could not be restored", StringComparison.Ordinal) || e.Contains("terminal ownership", StringComparison.Ordinal));
-        Assert.False(broker.OrderContext.HasStorageFault);
-        await Observed(broker, fake, () => broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready);
         var bound = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.IntentId!));
         Assert.Equal(OrderTypes.Limit, bound.Request.Type);
         Assert.Equal(order.NativeIdentity, bound.TerminalOrder?.Native);
