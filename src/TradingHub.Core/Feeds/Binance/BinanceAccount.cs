@@ -2284,6 +2284,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         decimal? canceled = null; // once the old order is known to be canceled: what it had executed
         BinanceOpenOrder? found = null;
         BinanceAlgoOrder? foundAlgo = null;
+        BinanceOpenOrder? foundChild = null;
         Exception? cancelError = null;
         try
         {
@@ -2328,6 +2329,21 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             {
                 canceled = 0;
                 foundAlgo = null;
+            }
+        }
+
+        // A conditional order that triggered is followed through the order it placed. Read that order now, as a poll does
+        // before it publishes: its fills must not appear before it is known as the stop's executing child, or a position
+        // report that led them would count them twice and cancel the order closing the position.
+        if (foundAlgo is { ActualOrderId: not 0 } triggered && !_cts.IsCancellationRequested)
+        {
+            try
+            {
+                foundChild = await _client.GetOrderAsync(Instrument.Symbol, triggered.ActualOrderId, _cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // the next poll looks it up
             }
         }
 
@@ -2392,6 +2408,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
 
                     if (found != null) Apply(t, found); // still working (shown as it is at Binance again) or filled
                     if (foundAlgo != null) ApplyAlgo(t, foundAlgo); // still working, or triggered: then the order it placed is followed
+                    if (foundChild != null && t.AlgoId == 0 && t.Id == foundChild.OrderId && _byOrder.ContainsKey(order))
+                        Apply(t, foundChild);
                 }
             }
             else
