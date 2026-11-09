@@ -700,6 +700,51 @@ public sealed class BybitRunnerExecutionTests
     }
 
     [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task Trigger_price_amendment_overtaken_by_the_trigger_settles_and_the_session_returns_ready(bool amendApplied, bool keepTriggerPrice)
+    {
+        string previous = LiveStore.Root;
+        string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-overtaken-amend-" + Guid.NewGuid().ToString("N"));
+        LiveStore.Root = Path.Combine(root, "live");
+        using var protocol = new FakeBybitProtocol { NetPosition = 1, ApplyAmendImmediately = false };
+        using var http = new HttpClient(protocol);
+        try
+        {
+            await using var session = new BybitTradingSession(protocol.Settings, Path.Combine(root, "native", "orders.json"), http,
+                clock: new ProviderClock(), executionRoot: LiveStore.Root);
+            using var data = new InstrumentData(Btc, new SimulatedFeed());
+            data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime.AddMinutes(-1), 109, 1, TradeSide.Buy));
+            using var broker = new BybitBroker(data, session, "Overtaken trigger amendment");
+            await RefreshUntil(session, () => session.OrdersReady && session.PositionReady && broker.Position.Volume == 1);
+            var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 1, 90, "SL", reduceOnly: true);
+            await RefreshUntil(session, () => stop.ExchangeOrderId.Length > 0 && session.OrdersReady);
+
+            // Bybit accepts the trigger-price amendment; before the confirming poll the stop triggers.
+            broker.Modify(stop, 91);
+            await protocol.AmendReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var amend = Assert.Single(protocol.Requests, request => request.Path == "/v5/order/amend");
+            Assert.Contains("\"triggerPrice\":\"91\"", amend.Body);
+            if (amendApplied) protocol.ConfirmAmend();
+            protocol.TriggerStop(stop.ExchangeOrderId, keepTriggerPrice);
+
+            // A triggered order has no trigger left to confirm: Bybit's working report settles the amendment.
+            await RefreshUntil(session, () => stop.Type == OrderTypes.Market && !broker.IsReplacementPending(stop) && session.OrdersReady);
+            Assert.Equal((OrderStates.Active, 1m), (stop.State, stop.Unfilled));
+            Assert.Equal(stop.IntentId, session.OrderContext.FindExecutingProtection(stop, session.OrderContext.ManualOwner)?.Id);
+            Assert.Single(protocol.Requests, request => request.Path == "/v5/order/amend");
+            Assert.DoesNotContain(protocol.Requests, request => request.Path == "/v5/order/cancel");
+        }
+        finally
+        {
+            LiveStore.Root = previous;
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
     [InlineData(false, false, false, false)]
     [InlineData(true, false, false, false)]
     [InlineData(false, true, false, false)]
