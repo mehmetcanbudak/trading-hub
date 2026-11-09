@@ -30,6 +30,7 @@ internal static class Program
             Progress("operation " + args[1]);
             if (args[1] == "native-close-claim") return NativeCloseClaim(root);
             if (args[1] == "native-close-journal" && args.Length == 3) return NativeCloseJournal(root, args[2]);
+            if (args[1] == "simulator-context" && args.Length == 3) return SimulatorContext(args[2]);
             if (args[1].StartsWith("execution-", StringComparison.Ordinal)) return ExecutionRestart(args[1]);
             if (args[1] == "projection-recovery-batch") return RecoveryBatch();
             if (args[1] is "write" or "flat-write")
@@ -134,6 +135,26 @@ internal static class Program
         Console.Out.Flush();
         if (Console.ReadLine() != "continue") throw new IOException("The fixture checkpoint was not released.");
         Progress("checkpoint released");
+    }
+
+    private static int SimulatorContext(string mode)
+    {
+        // The shared simulator composition of AppServices.SimBrokerFor: process context, broker and projector.
+        var context = OrderContext.ProcessSimulation("SIM-1", LiveStore.Root);
+        var instrument = new Instrument { Symbol = "TEST", FeedId = "test", TickSize = 1m, VolumeStep = 1m, PointValue = 1m };
+        using var data = new InstrumentData(instrument, new SimulatedFeed());
+        using var broker = new SimBroker(data, new Portfolio { AccountID = "SIM-1" }, new TradingStatistics(), context);
+        AccountExecutionProjector.For(broker.Executions, broker.OrderContext).Synchronize();
+        if (mode == "intent")
+        {
+            var prepared = context.Prepare(context.ManualOwner, new OrderRequest(instrument.Key, OrderDirections.Buy, OrderTypes.Limit, 1, 90));
+            if (prepared.Error != null) throw new IOException(prepared.Error);
+        }
+        else if (mode is not ("exit" or "hold")) return 64;
+        Console.WriteLine(context.Descriptor.Id);
+        Console.Out.Flush();
+        if (mode == "hold") Pause();
+        return 0;
     }
 
     private static int NativeCloseClaim(string root)

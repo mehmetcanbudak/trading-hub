@@ -166,6 +166,16 @@ public sealed partial class OrderContext
     public static OrderContext EphemeralSimulation(string account) => new(new(Guid.NewGuid().ToString("N"),
         "simulator", "paper", "local simulation", account, Guid.NewGuid().ToString("N"), account));
 
+    /// <summary>The shared simulator's durable context for this process, under <paramref name="root"/>. The simulated
+    /// portfolio lives in memory, so a simulator context never spans processes: earlier processes' idle simulator contexts
+    /// are removed first, and this one is held until the process ends. <paramref name="report"/> receives each context
+    /// kept because it could not be read or removed.</summary>
+    public static OrderContext ProcessSimulation(string account, string root, Action<string>? report = null)
+    {
+        OrderOwnershipJournal.RemoveEndedSimulations(root, report);
+        return new(EphemeralSimulation(account).Descriptor, root);
+    }
+
     public void Configure(AccountContextDescriptor descriptor, string? root, Func<OrderRequest, string?>? permission = null,
         Func<OrderRequest, decimal, string?>? nativePermission = null)
     {
@@ -1257,6 +1267,10 @@ internal sealed partial class OrderOwnershipJournal
     private readonly string _root;
     private readonly AccountContextDescriptor _descriptor;
     private string? _verifiedNativeAccount;
+    private const string ProcessOwnerFile = ".owner";
+    // A per-process simulator context's liveness: held for the journal's lifetime and released by the OS when the
+    // process ends. Shared holders coexist; only RemoveEndedSimulations requests it exclusively.
+    private readonly FileStream? _processOwner;
     private sealed record Envelope<T>(int Version, T Value, string Digest);
     private sealed record NativeBinding(NativeOrderIdentity Native, string[] Intents);
 
@@ -1264,8 +1278,8 @@ internal sealed partial class OrderOwnershipJournal
     {
         _descriptor = descriptor;
         _root = Path.Combine(root, "execution-state", OrderContext.Hash(descriptor.OwnershipNamespace ?? descriptor.Id));
-        EnsureDirectory(_root);
-        using var lease = Acquire();
+        // Created under the lease, so a concurrent leftover removal can never delete a directory being constructed.
+        using var lease = Acquire(_root, create: true);
         string path = Path.Combine(_root, "context.json");
         var existing = Read<AccountContextDescriptor>(path);
         if (existing != null && (existing with { VerifiedNativeAccount = null }) != (descriptor with { VerifiedNativeAccount = null }))
@@ -1273,6 +1287,101 @@ internal sealed partial class OrderOwnershipJournal
         _verifiedNativeAccount = Read<string>(Path.Combine(_root, "native-account.json")) ?? existing?.VerifiedNativeAccount;
         if (descriptor.VerifiedNativeAccount != null) VerifyNativeAccountLeased(descriptor.VerifiedNativeAccount);
         if (existing == null) Write(path, descriptor);
+        if (IsProcessSimulation(descriptor))
+            _processOwner = new FileStream(Path.Combine(_root, ProcessOwnerFile), FileMode.OpenOrCreate, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+    }
+
+    /// <summary>The shape of <see cref="OrderContext.EphemeralSimulation"/>: a simulated, in-memory portfolio's context.</summary>
+    private static bool IsProcessSimulation(AccountContextDescriptor descriptor) =>
+        descriptor is { Provider: "simulator", Product: "paper", Environment: "local simulation", OwnershipNamespace: null } &&
+        descriptor.VerifiedNativeAccount == descriptor.LocalNamespace;
+
+    /// <summary>Removes earlier processes' idle simulator contexts. A simulator context is created per process for an
+    /// in-memory portfolio and no recovery path reads another process's simulator context. Only an exact simulator record
+    /// with no intent, receipt, projection or native index, whose owning process no longer holds it, is removed, as is
+    /// what an interrupted removal leaves; every other context, including an unreadable one, is kept.</summary>
+    internal static void RemoveEndedSimulations(string root, Action<string>? report)
+    {
+        string directory = Path.Combine(Path.GetFullPath(root), "execution-state");
+        if (!Directory.Exists(directory)) return;
+        foreach (string candidate in Directory.GetDirectories(directory))
+        {
+            try { RemoveEndedSimulation(Path.GetFullPath(candidate)); }
+            catch (DirectoryNotFoundException) { }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                report?.Invoke($"Kept ownership context {Path.GetFileName(candidate)}: {ex.Message}");
+            }
+        }
+    }
+
+    private static void RemoveEndedSimulation(string candidate)
+    {
+        string context = Path.Combine(candidate, "context.json");
+        if (!File.Exists(context))
+        {
+            RemoveInterruptedRemoval(candidate, context);
+            return;
+        }
+        // Leave every non-simulator or nonempty context untouched (including its lease file) without waiting for its lease.
+        if (Read<AccountContextDescriptor>(context) is not { } unleased || !IsProcessSimulation(unleased) || !OnlyIdleEntries(candidate)) return;
+        using var lease = Acquire(candidate);
+        var descriptor = Read<AccountContextDescriptor>(context);
+        if (descriptor == null || !IsProcessSimulation(descriptor) || Path.GetFileName(candidate) != OrderContext.Hash(descriptor.Id) ||
+            !OnlyIdleEntries(candidate)) return;
+        string nativeAccount = Path.Combine(candidate, "native-account.json"), ownerPath = Path.Combine(candidate, ProcessOwnerFile);
+        if (File.Exists(nativeAccount) && Read<string>(nativeAccount) != descriptor.VerifiedNativeAccount) return;
+        FileStream owner;
+        try { owner = new FileStream(ownerPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException) { return; } // its process still holds the context
+        using (owner)
+        {
+            File.Delete(nativeAccount);
+            owner.Dispose();
+            File.Delete(ownerPath);
+        }
+        // The descriptor goes last: until then an interrupted removal is still recognizably an idle simulator context;
+        // afterwards, RemoveInterruptedRemoval recognizes what remains.
+        File.Delete(context);
+        RemoveLeasedDirectory(candidate, lease);
+    }
+
+    private static bool OnlyIdleEntries(string candidate) => Directory.EnumerateFileSystemEntries(candidate)
+        .All(entry => Path.GetFileName(entry) is "context.json" or "native-account.json" or ".lease" or ProcessOwnerFile);
+
+    // Files an interrupted removal can leave after deleting context.json; .DS_Store is Finder metadata, never app data.
+    private static bool OnlyRemovalLeftovers(string candidate) => Directory.EnumerateFileSystemEntries(candidate)
+        .All(entry => Path.GetFileName(entry) is ".lease" or ProcessOwnerFile or ".DS_Store");
+
+    /// <summary>A directory without a descriptor that holds at most the lease, the liveness file and Finder metadata is
+    /// what remains of an interrupted removal. Journals create their directory and write the descriptor under the same
+    /// lease, so it holds no ownership; anything else without a descriptor is kept.</summary>
+    private static void RemoveInterruptedRemoval(string candidate, string context)
+    {
+        // Checked before leasing so that no lease file is created in any other descriptorless directory.
+        if (!OnlyRemovalLeftovers(candidate)) return;
+        using var lease = Acquire(candidate);
+        if (File.Exists(context) || !OnlyRemovalLeftovers(candidate)) return;
+        string ownerPath = Path.Combine(candidate, ProcessOwnerFile);
+        FileStream owner;
+        try { owner = new FileStream(ownerPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException) { return; } // a process still holds it
+        using (owner)
+        {
+            owner.Dispose();
+            File.Delete(ownerPath);
+        }
+        File.Delete(Path.Combine(candidate, ".DS_Store"));
+        RemoveLeasedDirectory(candidate, lease);
+    }
+
+    private static void RemoveLeasedDirectory(string candidate, JournalLease lease)
+    {
+        lease.ReleaseFile();
+        File.Delete(Path.Combine(candidate, ".lease"));
+        Directory.Delete(candidate);
+        StorageSync.SyncDirectory(Path.GetDirectoryName(candidate)!);
     }
 
     public OwnedOrderIntent SaveIntent(OwnedOrderIntent intent)
@@ -1575,16 +1684,18 @@ internal sealed partial class OrderOwnershipJournal
         _verifiedNativeAccount = nativeAccount;
     }
 
-    private JournalLease Acquire()
+    private JournalLease Acquire() => Acquire(_root);
+    private static JournalLease Acquire(string root, bool create = false)
     {
-        var mutex = new Mutex(false, "TradingHub.OrderOwnership." + OrderContext.Hash(Path.GetFullPath(_root)));
+        var mutex = new Mutex(false, "TradingHub.OrderOwnership." + OrderContext.Hash(Path.GetFullPath(root)));
         bool owned = false;
         try
         {
             try { mutex.WaitOne(); }
             catch (AbandonedMutexException) { }
             owned = true;
-            return new(mutex, new FileStream(Path.Combine(_root, ".lease"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
+            if (create) EnsureDirectory(root);
+            return new(mutex, new FileStream(Path.Combine(root, ".lease"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
         }
         catch
         {
@@ -1595,9 +1706,16 @@ internal sealed partial class OrderOwnershipJournal
     }
     private sealed class JournalLease(Mutex mutex, FileStream file) : IDisposable
     {
+        private FileStream? _file = file;
+        /// <summary>Closes the lease file early (so it can be deleted on Windows) while the mutex stays held.</summary>
+        public void ReleaseFile()
+        {
+            _file?.Dispose();
+            _file = null;
+        }
         public void Dispose()
         {
-            try { file.Dispose(); }
+            try { _file?.Dispose(); }
             finally { mutex.ReleaseMutex(); mutex.Dispose(); }
         }
     }
