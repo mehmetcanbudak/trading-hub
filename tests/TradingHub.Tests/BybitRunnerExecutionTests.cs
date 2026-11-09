@@ -574,6 +574,56 @@ public sealed class BybitRunnerExecutionTests
         }
     }
 
+    [Fact]
+    public async Task Owned_bybit_stop_triggered_while_the_app_was_closed_recovers_as_its_executing_exit()
+    {
+        string previous = LiveStore.Root;
+        string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-restart-stop-" + Guid.NewGuid().ToString("N"));
+        LiveStore.Root = Path.Combine(root, "live");
+        string state = Path.Combine(root, "native", "orders.json");
+        using var protocol = new FakeBybitProtocol();
+        try
+        {
+            using var data = new InstrumentData(Btc, new SimulatedFeed());
+            data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime.AddMinutes(-1), 109, 1, TradeSide.Buy));
+            string stopId, intentId;
+            using (var firstHttp = new HttpClient(protocol, disposeHandler: false))
+            {
+                await using var first = new BybitTradingSession(protocol.Settings, state, firstHttp, clock: new ProviderClock(), executionRoot: LiveStore.Root);
+                using var firstBroker = new BybitBroker(data, first, "Restarted stop");
+                protocol.NetPosition = 2;
+                await RefreshUntil(first, () => first.OrdersReady && first.PositionReady && firstBroker.Position.Volume == 2);
+                var placed = OrderActions.Manual(firstBroker, OrderTypes.Stop, OrderDirections.Sell, 2, 90, "SL", reduceOnly: true);
+                await RefreshUntil(first, () => placed.ExchangeOrderId.Length > 0 && first.OrdersReady);
+                (stopId, intentId) = (placed.ExchangeOrderId, Assert.IsType<string>(placed.IntentId));
+            }
+
+            // Bybit triggers the stop and executes one unit while no session observes the account.
+            protocol.TriggerStop(stopId);
+            protocol.Fill("restart-stop-1", 1, 90, .1m, orderId: stopId, executionAt: FakeBybitProtocol.Now.AddSeconds(-5), closedQuantity: 1);
+            protocol.NetPosition = 1;
+
+            using var http = new HttpClient(protocol, disposeHandler: false);
+            await using var session = new BybitTradingSession(protocol.Settings, state, http, clock: new ProviderClock(), executionRoot: LiveStore.Root);
+            using var broker = new BybitBroker(data, session, "Restarted stop");
+            await RefreshUntil(session, () => session.OrdersReady && session.PositionReady && broker.ActiveOrders.Any(order => order.Filled == 1));
+            var stop = Assert.Single(broker.ActiveOrders);
+            Assert.Null(session.LastError);
+            Assert.Equal((stopId, intentId, OrderTypes.Market, 1m), (stop.ExchangeOrderId, stop.IntentId, stop.Type, stop.Unfilled));
+            var claim = Assert.IsType<OwnedOrderIntent>(session.OrderContext.Find(intentId));
+            Assert.Equal(OrderTypes.Stop, claim.Request.Type);
+            Assert.Equal(OrderTypes.Market, Assert.IsType<NativeWorkingOrder>(claim.WorkingOrder).Type);
+            Assert.Equal(intentId, session.OrderContext.FindExecutingProtection(stop, session.OrderContext.ManualOwner)?.Id);
+            Assert.DoesNotContain(protocol.Requests, request => request.Path is "/v5/order/cancel" or "/v5/order/amend");
+            Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create");
+        }
+        finally
+        {
+            LiveStore.Root = previous;
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(false, false, false, false)]
     [InlineData(true, false, false, false)]
