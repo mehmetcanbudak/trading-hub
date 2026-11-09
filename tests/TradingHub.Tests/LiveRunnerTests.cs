@@ -1289,4 +1289,73 @@ public class LiveRunnerTests : IDisposable
         Assert.Equal(-2m, smae);
         Assert.Equal(10m, smfe);
     }
+
+    /// <summary>
+    /// A projector pass in flight keeps its last captured availability until it captures again. The account's next change
+    /// can reach the runner first: an unprojected partial fill with that cached Unavailable must not pause the strategy or
+    /// cancel its working entry when the source is already available, but a source that is still unavailable must.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Unprojected_fill_pauses_only_for_a_source_unavailable_now_not_a_projector_pass_in_flight(bool sourceRecovered)
+    {
+        var (_, broker, r) = Setup();
+        var source = (ExecutionLog)broker.Executions;
+        var projector = AccountExecutionProjector.For(broker.Executions, broker.OrderContext);
+        var producer = new object();
+        source.SetProducerAvailability(producer, ExecutionAvailability.Unavailable);
+        Assert.Equal(ExecutionAvailability.Unavailable, projector.Availability);
+        Assert.False(r.Paused); // Unavailable alone, with no pending facts, does not pause.
+
+        r.Submit(OrderSide.Buy, StrategyOrderType.Limit, 2m, 99m, "entry");
+        var entry = Assert.Single(broker.ActiveOrders);
+
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int armed = 1;
+        projector.BeforeSourceCapture = () =>
+        {
+            if (Interlocked.Exchange(ref armed, 0) == 0) return;
+            held.Set();
+            release.Wait(TimeSpan.FromSeconds(30));
+        };
+        var pass = Task.Run(projector.Synchronize);
+        try
+        {
+            Assert.True(held.Wait(TimeSpan.FromSeconds(10)), "The projector pass did not reach its source capture.");
+            if (sourceRecovered) source.SetProducerAvailability(producer, ExecutionAvailability.Ready);
+            Assert.Equal(sourceRecovered ? ExecutionAvailability.Ready : ExecutionAvailability.Unavailable,
+                source.Capture(ExecutionCursor.Start).Availability);
+            Assert.Equal(ExecutionAvailability.Unavailable, projector.Availability); // the pass in flight has not captured yet
+
+            Tick(99); // one of two units fills; the account change reaches the runner while the pass is held
+            Assert.Equal(1m, entry.Filled);
+            Assert.Empty(r.Ledger.Fills); // native quantity is known, but no execution is booked before its projection
+            Assert.True(r.Ledger.HasPendingPrices);
+            if (sourceRecovered)
+            {
+                Assert.False(r.Paused, string.Join(" | ", r.LogLines));
+                Assert.Same(entry, Assert.Single(broker.ActiveOrders));
+                Assert.Equal(1m, entry.Unfilled);
+            }
+            else
+            {
+                Assert.True(r.Paused, string.Join(" | ", r.LogLines));
+                Assert.Empty(broker.ActiveOrders);
+                Assert.True(entry.Canceled);
+            }
+        }
+        finally
+        {
+            projector.BeforeSourceCapture = null;
+            release.Set();
+            Assert.True(pass.Wait(TimeSpan.FromSeconds(10)));
+        }
+        Assert.True(SpinWait.SpinUntil(() => r.Ledger.Fills.Count == 1 && !r.Ledger.HasPendingPrices, TimeSpan.FromSeconds(10)),
+            string.Join(" | ", r.LogLines));
+        Assert.Equal(1m, r.Ledger.Position);
+        Assert.Equal(!sourceRecovered, r.Paused);
+        Assert.Equal(sourceRecovered ? 1 : 0, broker.ActiveOrders.Count());
+    }
 }

@@ -36,6 +36,8 @@ public sealed class AccountExecutionProjector
     public ExecutionAvailability Availability => (ExecutionAvailability)Volatile.Read(ref _availability);
     private ExecutionCursor _cursor;
     private int _processing, _requested;
+    /// <summary>Test seam: runs on the synchronizing thread immediately before a pass captures its source.</summary>
+    internal Action? BeforeSourceCapture;
 
     private AccountExecutionProjector(IExecutionSource source, OrderContext context)
     {
@@ -433,6 +435,7 @@ public sealed class AccountExecutionProjector
                 bool healthy = quantitiesHealthy;
                 if (_root != null)
                     foreach (var pending in _context.PendingReceipts()) healthy &= Project(pending.Report, pending.Cursor, pending);
+                BeforeSourceCapture?.Invoke();
                 var snapshot = _source.Capture(_cursor);
                 var availability = (ExecutionAvailability)Interlocked.Exchange(ref _availability, (int)snapshot.Availability);
                 if (availability != snapshot.Availability)
