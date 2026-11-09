@@ -8,7 +8,7 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:647 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:619 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:859 TradingHub.Core/Trading/OrderContext.cs:1155 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:739",
+    "locations": "TradingHub.App/Services/AppServices.cs:653 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:644 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:892 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Fee": {
@@ -36,7 +36,7 @@
     "reason": "Persisted IB recovery-journal schema-version property. It is not user-facing prose."
   },
   "local simulation": {
-    "locations": "TradingHub.Core/Trading/OrderContext.cs:167",
+    "locations": "TradingHub.Core/Trading/OrderContext.cs:1297 TradingHub.Core/Trading/OrderContext.cs:167",
     "reason": "Simulation account-context environment identity. Preserve it rather than translating routing metadata."
   },
   "rithmic-position|{0}|{1}|{2}": {
@@ -48,11 +48,11 @@
     "reason": "Private per-session fallback native-account admission partition when proven native account identity is unavailable. It is not a display label and must not merge unproven sessions by translation."
   },
   "symbol={0}&fromId={1}&limit=1000": {
-    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:241",
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:256",
     "reason": "Signed Binance trade-history query template. Payload keys and interpolation positions are broker protocol, not display text."
   },
   "unresolved endpoint": {
-    "locations": "TradingHub.App/Services/AppServices.cs:698",
+    "locations": "TradingHub.App/Services/AppServices.cs:701",
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
   }
 }
