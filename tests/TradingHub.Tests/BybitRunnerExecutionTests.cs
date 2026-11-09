@@ -503,6 +503,77 @@ public sealed class BybitRunnerExecutionTests
         }
     }
 
+    [Fact]
+    public async Task Position_report_leading_a_triggered_bybit_stop_never_cancels_or_shrinks_its_executing_exit()
+    {
+        string previous = LiveStore.Root;
+        string root = Path.Combine(Path.GetTempPath(), "tradinghub-bybit-bracket-stop-" + Guid.NewGuid().ToString("N"));
+        LiveStore.Root = Path.Combine(root, "live");
+        using var protocol = new FakeBybitProtocol();
+        using var http = new HttpClient(protocol);
+        try
+        {
+            await using var session = new BybitTradingSession(protocol.Settings, Path.Combine(root, "native", "orders.json"), http,
+                clock: new ProviderClock(), executionRoot: LiveStore.Root);
+            using var data = new InstrumentData(Btc, new SimulatedFeed());
+            data.Trades.Add(new Trade(1, FakeBybitProtocol.Now.UtcDateTime.AddMinutes(-1), 109, 1, TradeSide.Buy));
+            using var broker = new BybitBroker(data, session, "Bracket triggered stop");
+            await RefreshUntil(session, () => session.OrdersReady && session.PositionReady);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 4, 105);
+            await RefreshUntil(session, () => opening.ExchangeOrderId.Length > 0 && session.OrdersReady);
+            protocol.Fill("bracket-entry", 4, 105, .1m, orderId: opening.ExchangeOrderId,
+                executionAt: FakeBybitProtocol.Now.AddSeconds(-30), closedQuantity: 0);
+            protocol.NetPosition = 4;
+            await RefreshUntil(session, () => broker.Position.Volume == 4 && opening.Status == OrderStatus.Filled);
+            using var brackets = new BracketManager(broker);
+            brackets.SetStopLoss(90);
+            await RefreshUntil(session, () => brackets.StopLoss is { ExchangeOrderId.Length: > 0 } placed && !broker.IsReplacementPending(placed));
+            var stop = brackets.StopLoss!;
+            string stopId = stop.ExchangeOrderId;
+            Assert.Equal((OrderTypes.Stop, 4m, true), (stop.Type, stop.Unfilled, stop.ReduceOnly));
+
+            // Bybit triggers the conditional under the same order id; its first unit executes with the position.
+            protocol.TriggerStop(stopId);
+            protocol.Fill("bracket-stop-1", 1, 90, .1m, orderId: stopId, executionAt: FakeBybitProtocol.Now.AddSeconds(-20), closedQuantity: 1);
+            protocol.NetPosition = 3;
+            await RefreshUntil(session, () => broker.Position.Volume == 3 && stop.Filled == 1);
+            await session.RefreshAsync();
+            Assert.Same(stop, brackets.StopLoss);
+            Assert.Equal((OrderStates.Active, 3m), (stop.State, stop.Unfilled));
+            string[] Mutations() => protocol.Requests.Where(request => request.Path is "/v5/order/cancel" or "/v5/order/amend")
+                .Select(request => request.Path + " " + request.Body).ToArray();
+            Assert.Empty(Mutations());
+
+            // Two more units execute. The position report arrives before the stop's execution report.
+            protocol.NetPosition = 1;
+            await RefreshUntil(session, () => broker.Position.Volume == 1);
+            await session.RefreshAsync();
+            Assert.Empty(Mutations());
+            Assert.Same(stop, brackets.StopLoss);
+            Assert.Equal((OrderStates.Active, 3m), (stop.State, stop.Unfilled));
+
+            protocol.Fill("bracket-stop-2", 2, 90, .2m, orderId: stopId, executionAt: FakeBybitProtocol.Now.AddSeconds(-10), closedQuantity: 2);
+            await RefreshUntil(session, () => stop.Filled == 3);
+            await session.RefreshAsync();
+
+            // That execution was already reflected by the position: the executing exit still protects the last unit.
+            Assert.Empty(Mutations());
+            Assert.Same(stop, brackets.StopLoss);
+            Assert.Equal((OrderStates.Active, 1m, stopId), (stop.State, stop.Unfilled, stop.ExchangeOrderId));
+
+            protocol.Fill("bracket-stop-3", 1, 90, .1m, orderId: stopId, executionAt: FakeBybitProtocol.Now.AddSeconds(-5), closedQuantity: 1);
+            protocol.NetPosition = 0;
+            await RefreshUntil(session, () => broker.Position.Volume == 0 && stop.Status == OrderStatus.Filled);
+            Assert.Empty(Mutations());
+            Assert.Equal(2, protocol.Requests.Count(request => request.Path == "/v5/order/create"));
+        }
+        finally
+        {
+            LiveStore.Root = previous;
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(false, false, false, false)]
     [InlineData(true, false, false, false)]

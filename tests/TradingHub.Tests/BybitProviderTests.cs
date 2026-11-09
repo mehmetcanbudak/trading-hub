@@ -909,14 +909,17 @@ internal sealed class FakeBybitProtocol : HttpMessageHandler
         order["updatedTime"] = (Math.Max(prior, (observedAt ?? Now).ToUnixTimeMilliseconds()) + ++_version).ToString(CultureInfo.InvariantCulture);
     }
     public void ConfirmCancel() { lock (_gate) { _order!["orderStatus"] = "Cancelled"; Stamp(); } }
+    /// <summary>Bybit triggers a conditional under the same order id. The report keeps its triggerPrice and stopOrderType;
+    /// orderType is the type it works as after the trigger (live capture: ccxt test/static/response/bybit.json, a Filled
+    /// triggered order with "triggerPrice": "1.9407", "orderType": "Market").</summary>
     public void TriggerStop(string orderId)
     {
         lock (_gate)
         {
             var order = _orders[orderId];
-            if (!order.ContainsKey("triggerPrice") || decimal.Parse(order["triggerPrice"]!.GetValue<string>(), CultureInfo.InvariantCulture) <= 0)
+            if (!order.ContainsKey("triggerPrice") || decimal.Parse(order["triggerPrice"]!.GetValue<string>(), CultureInfo.InvariantCulture) <= 0 ||
+                order["orderStatus"]!.GetValue<string>() != "Untriggered")
                 throw new InvalidOperationException("The native fixture order is not a waiting conditional stop.");
-            order["triggerPrice"] = "0";
             order["orderType"] = "Market";
             order["orderStatus"] = "New";
             Stamp(order);
