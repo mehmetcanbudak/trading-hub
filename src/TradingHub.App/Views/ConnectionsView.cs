@@ -445,7 +445,7 @@ internal sealed class ConnectionsView : UserControl, IPage
 
         var help = new Button { Content = "How do I create an API key?", Classes = { "ghost" }, Padding = new Thickness(0), FontSize = 12, Foreground = Ui.Focus };
         help.Click += (_, _) => Shell.Open(testnet.IsChecked == true
-            ? (p.Kind == ConnectionKind.BinanceFutures ? "https://testnet.binancefuture.com" : "https://testnet.binance.vision")
+            ? (p.Kind == ConnectionKind.BinanceFutures ? "https://demo.binance.com/en/my/settings/api-management" : "https://testnet.binance.vision")
             : "https://www.binance.com/en/my/settings/api-management");
 
         return Ui.V(14,
