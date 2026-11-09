@@ -693,6 +693,114 @@ public class BinanceBrokerTests : IDisposable
         Assert.Equal(2, fake.Sent.Count);
     }
 
+    [Fact]
+    public async Task Resolving_an_unknown_submission_withdraws_its_unavailability_before_the_fill_is_visible()
+    {
+        using var fake = new FakeBinance(true) { UnknownPosts = 1, HideOwnedOrders = true };
+        var data = new InstrumentData(BtcUsdt, new SimulatedFeed());
+        using var broker = _orders.Binance(data, fake.Settings, "Binance accounting test");
+        data.Trades.Add(new Trade(1, DateTime.UtcNow, 59000m, 1m, TradeSide.Buy));
+        var strategy = new SubmissionStrategy();
+        using var runner = new LiveStrategyRunner(strategy, data, broker, ChartPeriod.M1) { Persist = false };
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        runner.Start();
+        strategy.Enter();
+        // A completed poll has published the unknown outcome as a genuinely unavailable source.
+        await Until(() => fake.Sent.Count == 1 &&
+            broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Unavailable);
+        var entry = Assert.Single(broker.ActiveOrders);
+        Assert.False(runner.Paused);
+
+        // Hold the poll that resolves the submission just after its exact client lookup, while the pass is still running.
+        // The fake records a lookup's reply before answering it, so a completed lookup that returned the order (200)
+        // identifies the resolving poll; its algo listing follows that lookup in the same poll.
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int holds = 0;
+        fake.BeforeGetReply = (r, ct) =>
+        {
+            if (r.Route == "/fapi/v1/openAlgoOrders" && fake.ClientLookups.Any(lookup => lookup.Status == 200) &&
+                Interlocked.Exchange(ref holds, 1) == 0)
+            {
+                held.TrySetResult();
+                return release.Task.WaitAsync(ct);
+            }
+            return Task.CompletedTask;
+        };
+        fake.Fill(Assert.Single(fake.Sent).ExchangeId, 1m);
+        fake.HideOwnedOrders = false;
+        try
+        {
+            await held.Task.WaitAsync(TimeSpan.FromSeconds(12));
+            Assert.Equal(1m, entry.Filled); // the resolved fill is already visible to the account's consumers
+            Assert.NotEqual(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+        }
+        finally
+        {
+            fake.BeforeGetReply = null;
+            release.TrySetResult();
+        }
+        await Until(() => runner.Ledger.Position == 1m && !runner.Ledger.HasPendingFinancials);
+        Assert.False(runner.Paused, string.Join(" | ", runner.LogLines.ToArray()));
+        Assert.Same(entry, Assert.Single(broker.ActiveOrders));
+    }
+
+    [Fact]
+    public async Task A_protection_read_skipped_by_another_poll_error_is_not_clean_for_a_later_resolved_submission()
+    {
+        using var fake = new FakeBinance(true) { UnknownPosts = 1, HideOwnedOrders = true };
+        var settings = fake.Settings;
+        settings.RequestTimeout = TimeSpan.FromSeconds(2); // only the held algo listing times out
+        using var broker = _orders.Binance(new InstrumentData(BtcUsdt, new SimulatedFeed()), settings, "Binance stale protection read");
+        await Until(() => broker.OrdersReady && broker.PositionReady &&
+            broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready); // clean protection reads
+
+        // Poll N+1: the unknown submission's lookup finds nothing and the algo listing fails, so protection is not read.
+        // Polls N+2 and later: only the unknown outcome remains. Then the lookup finds it and the binding resolves it.
+        var algoHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAlgo = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resolvingHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseResolving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int algoHolds = 0, resolvingHolds = 0;
+        fake.BeforeGetReply = (r, ct) =>
+        {
+            if (r.Route != "/fapi/v1/openAlgoOrders") return Task.CompletedTask;
+            var lookups = fake.ClientLookups;
+            if (lookups.Any(lookup => lookup.Status == 200))
+            {
+                if (Interlocked.Exchange(ref resolvingHolds, 1) != 0) return Task.CompletedTask;
+                resolvingHeld.TrySetResult();
+                return releaseResolving.Task.WaitAsync(ct);
+            }
+            if (lookups.Count(lookup => lookup.Status == 400) == 1 && Interlocked.Exchange(ref algoHolds, 1) == 0)
+            {
+                algoHeld.TrySetResult();
+                return releaseAlgo.Task.WaitAsync(ct); // outlives the request timeout: this poll's algo listing fails
+            }
+            return Task.CompletedTask;
+        };
+        try
+        {
+            var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1m, 50000m);
+            await algoHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+            await Until(() => fake.ClientLookups.Count(lookup => lookup.Status == 400) >= 3); // submission-only polls followed
+            Assert.Equal(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+            fake.HideOwnedOrders = false;
+            await resolvingHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+            Assert.Equal(order.ExchangeOrderId, Assert.Single(fake.Sent).ExchangeId); // bound by the resolving poll
+            // No protection read has been clean since the failed poll: resolving the submission must not end unavailability.
+            Assert.Equal(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+        }
+        finally
+        {
+            fake.BeforeGetReply = null;
+            releaseAlgo.TrySetResult();
+            releaseResolving.TrySetResult();
+        }
+        await Until(() => broker.OrdersReady &&
+            broker.Executions.Capture(ExecutionCursor.Start).Availability != ExecutionAvailability.Unavailable);
+    }
+
     [Theory]
     [InlineData(false, false, 503, -1007)]
     [InlineData(true, false, 503, -1007)]
@@ -1631,6 +1739,111 @@ public class BinanceBrokerTests : IDisposable
         Assert.Empty(fake.Open);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Manual_stop_limit_triggered_into_a_resting_limit_can_be_modified(bool resizeRemaining)
+    {
+        // A stop-limit placed on Binance's website triggers into a LIMIT that rests in the book. It is not an executing
+        // exit: dragging that limit must cancel and replace it as for any other resting limit.
+        using var fake = new FakeBinance(futures: true);
+        long algoId = fake.AddExternalAlgo("BUY", "STOP", 3m, triggerPrice: 61000m, price: 61100m);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any());
+        var order = Assert.Single(broker.ActiveOrders);
+        long childId = fake.Trigger(algoId, fill: 1m);
+        await Observed(broker, fake, () => order.ExchangeOrderId == childId.ToString(Inv) &&
+            order.Type == OrderTypes.Limit && order.Filled == 1m && order.Unfilled == 2m);
+        await Polls(fake, 2);
+
+        decimal remaining = resizeRemaining ? 1m : 2m;
+        if (resizeRemaining) OrderActions.Replace(broker, order, 61200m, remaining);
+        else OrderActions.Reprice(broker, order, 61200m);
+        Assert.False(broker.LastError?.StartsWith("Not modified", StringComparison.Ordinal) == true, broker.LastError);
+        await Observed(broker, fake, () => fake.Placed.Count == 1 &&
+            order.ExchangeOrderId != childId.ToString(Inv) && order.ExchangeOrderId.Length > 0 &&
+            !broker.IsReplacementPending(order));
+        var replacement = Assert.Single(fake.OpenOrders);
+        Assert.Equal(("BUY", "LIMIT", remaining, 61200m), (replacement.Side, replacement.Type, replacement.Qty, replacement.Price));
+        Assert.Equal("CANCELED", fake.Order(childId).Status);
+        Assert.Empty(fake.PlacedAlgo);
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+        Assert.Equal((OrderTypes.Limit, 1m, remaining, 61200m), (order.Type, order.Filled, order.Unfilled, order.Price));
+    }
+
+    [Fact]
+    public async Task Triggered_stop_whose_bound_intent_is_missing_reports_the_working_type_fault()
+    {
+        // An owned stop whose handle names an intent the context does not know is unproven ownership: its triggered
+        // child must report the unresolved working type, not silently drop the conditional parent.
+        using var fake = new FakeBinance(futures: true);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.PositionReady);
+        var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 1m, 59000m, "Test: stop");
+        await Accepted(fake, stop);
+        Assert.False(string.IsNullOrEmpty(stop.OwnerId));
+        stop.IntentId = "missing-" + Guid.NewGuid().ToString("N"); // the bound intent cannot be found
+        Assert.Null(broker.OrderContext.Find(stop.IntentId));
+        long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId);
+        await Observed(broker, fake, () => stop.ExchangeOrderId == childId.ToString(Inv) &&
+            broker.LastError?.Contains("Binance working order type remains unresolved", StringComparison.Ordinal) == true);
+        Assert.Equal(OrderTypes.Stop, stop.Type);
+        Assert.Equal(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+    }
+
+    [Fact]
+    public async Task Manual_triggered_limit_adopted_by_a_refused_modify_finishes_without_an_ownership_fault()
+    {
+        // A website stop-limit's LIMIT fills just before the user drags it: the drag adopts the limit, its cancel is
+        // refused (-2011, already filled), and the next poll books the fill on the adopted LIMIT handle.
+        using var fake = new FakeBinance(futures: true);
+        long algoId = fake.AddExternalAlgo("BUY", "STOP", 3m, triggerPrice: 61000m, price: 61100m);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any());
+        var order = Assert.Single(broker.ActiveOrders);
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        broker.Changed += () => { if (broker.LastError is { } e) errors.Enqueue(e); };
+        long childId = fake.Trigger(algoId, fill: 1m);
+        await Observed(broker, fake, () => order.ExchangeOrderId == childId.ToString(Inv) &&
+            order.Type == OrderTypes.Limit && order.Filled == 1m && order.Unfilled == 2m);
+        await Polls(fake, 2);
+        Assert.True(string.IsNullOrEmpty(order.OwnerId));
+
+        var releaseOrders = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            // Polls cannot observe the fill until the drag's cancel has been refused.
+            fake.BeforeGetReply = (request, ct) => request.Route is "/fapi/v1/openOrders" or "/fapi/v1/openAlgoOrders"
+                ? releaseOrders.Task.WaitAsync(ct) : Task.CompletedTask;
+            fake.Fill(childId, 2m);
+            OrderActions.Reprice(broker, order, 61200m);
+            Assert.False(string.IsNullOrEmpty(order.OwnerId)); // the drag adopted the limit
+            await Until(() => fake.Refused.Any(refused => refused.StartsWith("DELETE /fapi/v1/order", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            releaseOrders.TrySetResult();
+            fake.BeforeGetReply = null;
+        }
+
+        await Observed(broker, fake, () => order.State != OrderStates.Active && !broker.IsReplacementPending(order));
+        await Polls(fake, 2);
+        Assert.Equal((OrderStates.Done, OrderStatus.Filled, 3m, OrderTypes.Limit), (order.State, order.Status, order.Filled, order.Type));
+        Assert.Empty(fake.Sent);
+        Assert.Empty(fake.PlacedAlgo);
+        Assert.False(broker.OrderContext.HasStorageFault);
+        // No ownership fault makes the producer unavailable. (It stays Synchronizing: the drag adopted the partly filled
+        // limit with an unknown execution baseline, which this scenario does not resolve; a plain website limit does the same.)
+        await Polls(fake, 2);
+        Assert.NotEqual(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+        Assert.DoesNotContain(errors, e => e.Contains("working order type", StringComparison.Ordinal) ||
+            e.Contains("could not be restored", StringComparison.Ordinal) || e.Contains("terminal ownership", StringComparison.Ordinal));
+        var bound = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.IntentId!));
+        Assert.Equal(OrderTypes.Limit, bound.Request.Type);
+        Assert.Equal(order.NativeIdentity, bound.TerminalOrder?.Native);
+        Assert.Empty(broker.ActiveOrders);
+    }
+
     [Fact]
     public async Task Orders_reach_terminal_states_while_the_futures_position_read_keeps_failing()
     {
@@ -1989,6 +2202,9 @@ internal sealed class FakeBinance : IDisposable
     /// <summary>Hold a selected GET response after snapshotting its body, outside the matching-engine lock.</summary>
     public Func<FakeRequest, CancellationToken, Task>? BeforeGetReply { get; set; }
 
+    /// <summary>Replace a selected GET response (for example a transient failure) instead of the venue's answer.</summary>
+    public Func<FakeRequest, (int Status, string Body)?>? OverrideGetReply { get; set; }
+
     /// <summary>Hold a successful single-order DELETE reply after the venue mutation, outside the matching-engine lock.</summary>
     public Func<CancellationToken, Task>? BeforeDeleteReply { get; set; }
 
@@ -2181,6 +2397,12 @@ internal sealed class FakeBinance : IDisposable
             a.StaleListings = staleListings;
             return TriggerLocked(a, fill);
         }
+    }
+
+    /// <summary>Ends (0) or extends the lagging untriggered copy that open algo-order lists show.</summary>
+    public void SetStaleListings(long algoId, int staleListings)
+    {
+        lock (_gate) _algo[algoId].StaleListings = staleListings;
     }
 
     /// <summary>The matching engine refuses the conditional order when it triggers (for example a failed margin check).</summary>
@@ -2401,6 +2623,8 @@ internal sealed class FakeBinance : IDisposable
             await beforeTradeReply(ct).ConfigureAwait(false);
         if (r.Method == "GET" && BeforeGetReply is { } beforeGetReply)
             await beforeGetReply(r, ct).ConfigureAwait(false);
+        if (r.Method == "GET" && OverrideGetReply?.Invoke(r) is { } overridden)
+            answer = overridden;
         if (r.Method == "DELETE" && answer.Status == 200 &&
             (r.Route is "/api/v3/order" or "/fapi/v1/order" or "/fapi/v1/algoOrder") && BeforeDeleteReply is { } beforeDeleteReply)
             await beforeDeleteReply(ct).ConfigureAwait(false);

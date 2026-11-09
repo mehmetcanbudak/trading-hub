@@ -88,7 +88,8 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         public AccountExecutionSnapshot? CompleteSnapshot;
         public AccountExecutionSnapshot? PartialSnapshot;
     }
-    private sealed record Amendment(decimal Price, decimal Total, bool Sent = false, string? OwnershipIntentId = null);
+    /// <param name="Conditional">The field the requested move changes, fixed when requested: triggerPrice (true) or price (false). Null only in state saved before this was recorded.</param>
+    private sealed record Amendment(decimal Price, decimal Total, bool Sent = false, string? OwnershipIntentId = null, bool? Conditional = null);
     private sealed record FlattenIntent(Instrument Instrument, string CloseLinkId);
     private sealed record SavedOrder(string Symbol, string LinkId, bool Own, string OrderId, OrderDirections Direction, OrderTypes Type,
         decimal Quantity, decimal Executed, decimal Price, decimal Trigger, bool ReduceOnly, OrderStates State, OrderStatus Status,
@@ -162,7 +163,18 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 order.NativeIdentity = native;
                 order.ClientOrderId = tracked.LinkId;
                 if (order.IntentId == null)
-                    OrderContext.RecoverNativeOrder(order, tracked.LinkId, native, instrument.Key, instrument.Symbol, instrument.Exchange, notify: false);
+                {
+                    // Recover against the type the durable claim froze: a stop claim without working evidence for this
+                    // native order was dispatched as a stop, even if Bybit has since triggered it (with or without a kept
+                    // triggerPrice); one with that evidence recovers as its working type. The working type is recorded below.
+                    var working = order.Type;
+                    if (OrderContext.FindNativeSubmission(tracked.LinkId, native) is { Request.Type: OrderTypes.Stop } claim &&
+                        !(claim.WorkingOrder is { } evidence && evidence.Child == native &&
+                            evidence.NativeInstrument == instrument.Symbol && evidence.NativeExchange == instrument.Exchange))
+                        order.Type = OrderTypes.Stop;
+                    try { OrderContext.RecoverNativeOrder(order, tracked.LinkId, native, instrument.Key, instrument.Symbol, instrument.Exchange, notify: false); }
+                    finally { order.Type = working; }
+                }
                 if (order.IntentId == null) continue;
                 if (OrderContext.BindNative(order, native, notify: false) is { } bindingError) { LastError = bindingError; continue; }
                 if (OrderContext.Find(order.IntentId)?.Request.Type == OrderTypes.Stop && order.Type == OrderTypes.Market &&
@@ -723,7 +735,11 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         if (newReport) tracked.LastSeen = _clock.GetUtcNow().UtcDateTime;
         order.Security.Code = report.Symbol;
         order.Direction = report.Buy ? OrderDirections.Buy : OrderDirections.Sell;
-        order.Type = report.Conditional ? OrderTypes.Stop : report.IsLimit ? OrderTypes.Limit : OrderTypes.Market;
+        // A triggered conditional keeps its order id and triggerPrice and works as its orderType. Only Untriggered and
+        // Deactivated (canceled before the trigger) reports, or an unexecuted cancel/reject of a waiting stop, remain a stop.
+        bool waiting = report.Conditional && (report.Status is "Untriggered" or "Deactivated" ||
+            (report.Terminal && report.Executed == 0 && order.Type == OrderTypes.Stop));
+        order.Type = waiting ? OrderTypes.Stop : report.IsLimit ? OrderTypes.Limit : OrderTypes.Market;
         order.Price = report.Price;
         order.TriggerPrice = report.Conditional ? report.TriggerPrice : report.Price;
         order.QuantityToFill = Math.Max(report.Quantity, tracked.Executed);
@@ -743,10 +759,14 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         {
             order.State = OrderStates.Active;
             order.Status = tracked.Executed > 0 ? OrderStatus.PartlyFilled : OrderStatus.Placed;
-            if (tracked.Amendment is { Sent: true } amendment && report.Quantity == amendment.Total &&
-                (report.Conditional ? report.TriggerPrice : report.Price) == amendment.Price)
+            if (tracked.Amendment is { Sent: true } amendment)
             {
-                tracked.Amendment = null; // Only a matching authoritative working report confirms a native amendment.
+                bool triggerAmendment = amendment.Conditional ?? order.Type == OrderTypes.Stop;
+                // Only a matching authoritative working report confirms a native amendment. A trigger-price amendment
+                // overtaken by the trigger has no trigger left to confirm: this report already states what Bybit works.
+                if ((triggerAmendment && order.Type != OrderTypes.Stop) ||
+                    (report.Quantity == amendment.Total && (triggerAmendment ? report.TriggerPrice : report.Price) == amendment.Price))
+                    tracked.Amendment = null;
             }
         }
     }
@@ -921,7 +941,8 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             if (ownershipError == null && order.NativeIdentity != null)
                 ownershipError = OrderContext.BindNative(order, order.NativeIdentity, notify: false);
             if (ownershipError != null) { LastError = ownershipError; return order; }
-            tracked.QueuedAmendment = new(price, order.Filled + newQuantity, OwnershipIntentId: intent.Id);
+            // The field is the one the requester moved: a waiting stop's trigger or a working price, fixed now.
+            tracked.QueuedAmendment = new(price, order.Filled + newQuantity, OwnershipIntentId: intent.Id, Conditional: order.Type == OrderTypes.Stop);
             tracked.AmendmentViewGuard = viewGuard;
             Save();
         }
@@ -982,6 +1003,14 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 var amendmentGuard = tracked.AmendmentViewGuard;
                 var ownership = OrderContext.Find(requested.OwnershipIntentId);
                 var ticket = ownership == null ? null : new PreparedOrderIntent(OrderContext, ownership) { BoundOrder = tracked.Order };
+                bool conditional = requested.Conditional ?? tracked.Order.Type == OrderTypes.Stop;
+                if (conditional != (tracked.Order.Type == OrderTypes.Stop))
+                {
+                    // The order triggered (or otherwise changed type) since this move was requested: sending it now would
+                    // move a different field, e.g. a resting stop-limit price to the intended trigger. Drop it unsent.
+                    LastError = "Bybit amendment ownership is unavailable; request the amendment again after reconciliation.";
+                    Save(); continue;
+                }
                 if (requested.Total <= tracked.Executed)
                 {
                     tracked.CancelRequested = true; tracked.CancelSent = false; Wake(); continue;
@@ -990,7 +1019,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 string? denied = ticket == null ? "Bybit amendment ownership is unavailable; request the amendment again after reconciliation."
                     : OrderContext.CheckDispatch(ticket, Math.Abs(signed)) ?? Check(tracked.Symbol, signed, tracked.Order.ReduceOnly);
                 if (denied != null) { LastError = denied; Save(); continue; }
-                tracked.Amendment = requested with { Sent = true };
+                tracked.Amendment = requested with { Sent = true, Conditional = conditional };
                 tracked.OperationBusy = true;
                 if (!Save() && !tracked.Order.ReduceOnly) { tracked.Amendment = null; tracked.OperationBusy = false; continue; }
                 RunOperation(async () =>
@@ -1004,7 +1033,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                             if (permission != null) throw new BybitApiException(-1, permission);
                             _mutationVersion++; PositionReady = false;
                         }
-                        await _client.AmendOrderAsync(tracked.Symbol, tracked.Order.ExchangeOrderId, requested.Total, requested.Price, tracked.Order.Type == OrderTypes.Stop, _cts.Token,
+                        await _client.AmendOrderAsync(tracked.Symbol, tracked.Order.ExchangeOrderId, requested.Total, requested.Price, conditional, _cts.Token,
                             () => OrderContext.CheckDispatch(ticket!, Math.Max(0, requested.Total - tracked.Executed)) ??
                                 AtTransport(tracked.Symbol, (tracked.Order.Direction == OrderDirections.Buy ? 1 : -1) *
                                 Math.Max(0, requested.Total - tracked.Executed), tracked.Order.ReduceOnly, amendmentGuard)).ConfigureAwait(false);

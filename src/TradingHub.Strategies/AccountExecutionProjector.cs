@@ -33,9 +33,15 @@ public sealed class AccountExecutionProjector
     private readonly Queue<WeakReference<ProjectionSubscription>[]> _foreignNotifications = new();
     private int _foreignDrainScheduled, _synchronizationScheduled;
     private int _availability = (int)ExecutionAvailability.Unavailable;
+    /// <summary>Availability as of this projector's last capture; it can lag a source while a pass is in flight.</summary>
     public ExecutionAvailability Availability => (ExecutionAvailability)Volatile.Read(ref _availability);
+    /// <summary>The source's availability now, read without consuming or advancing projection. A cursor read while a pass
+    /// advances it only selects how many changes the snapshot copies, never the availability.</summary>
+    public ExecutionAvailability SourceAvailability => _source.Capture(_cursor).Availability;
     private ExecutionCursor _cursor;
     private int _processing, _requested;
+    /// <summary>Test seam: runs on the synchronizing thread immediately before a pass captures its source.</summary>
+    internal Action? BeforeSourceCapture;
 
     private AccountExecutionProjector(IExecutionSource source, OrderContext context)
     {
@@ -433,6 +439,7 @@ public sealed class AccountExecutionProjector
                 bool healthy = quantitiesHealthy;
                 if (_root != null)
                     foreach (var pending in _context.PendingReceipts()) healthy &= Project(pending.Report, pending.Cursor, pending);
+                BeforeSourceCapture?.Invoke();
                 var snapshot = _source.Capture(_cursor);
                 var availability = (ExecutionAvailability)Interlocked.Exchange(ref _availability, (int)snapshot.Availability);
                 if (availability != snapshot.Availability)

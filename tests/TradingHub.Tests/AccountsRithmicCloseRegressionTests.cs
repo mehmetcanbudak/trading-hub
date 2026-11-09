@@ -321,7 +321,7 @@ public sealed partial class AccountsRithmicCloseRegressionTests
             return slot;
         }
 
-        public async Task RestartAsync()
+        public async Task RestartAsync(Func<Task>? whileStopped = null)
         {
             foreach (var broker in Field<Dictionary<string, ITradingAccount>>(Services, "_realBrokers").Values)
                 (broker as IDisposable)?.Dispose();
@@ -329,6 +329,7 @@ public sealed partial class AccountsRithmicCloseRegressionTests
             Field<Dictionary<string, OrderContext>>(Services, "_orderContexts").Clear();
             Field<ConcurrentDictionary<(string Context, string Instrument), WeakReference<ITradingAccount>>>(Services, "_wireAccounts").Clear();
             await Session.StopAsync().WaitAsync(Deadline);
+            if (whileStopped != null) await whileStopped().WaitAsync(Deadline);
             Session = new RithmicTradingSession(new RithmicSettings { Uri = Profile.RithmicUri, System = Profile.RithmicSystem,
                 User = "demo", Password = "demo", TimeoutMs = 5000 });
             Field<Dictionary<string, RithmicTradingSession>>(Services, "_rithmicSessions")[Profile.Id] = Session;

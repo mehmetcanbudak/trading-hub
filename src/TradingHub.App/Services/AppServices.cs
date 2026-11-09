@@ -514,7 +514,7 @@ public sealed partial class AppServices
             throw new InvalidOperationException("Composite crypto prices are data only and cannot be executed, including in the shared simulator. Use an explicitly owned practice replay.");
         if (!_simBrokers.TryGetValue(data.Instrument.Key, out var b))
         {
-            _simOrderContext ??= new OrderContext(OrderContext.EphemeralSimulation(Portfolio.AccountID).Descriptor, _executionRoot);
+            _simOrderContext ??= OrderContext.ProcessSimulation(Portfolio.AccountID, _executionRoot, message => this.LogWarn(message));
             b = new SimBroker(data, Portfolio, Statistics, _simOrderContext);
             AccountExecutionProjector.For(b.Executions, b.OrderContext).Synchronize();
             _simBrokers[data.Instrument.Key] = b;
@@ -644,11 +644,14 @@ public sealed partial class AppServices
         if (p.Kind is not (ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot))
             throw new NotSupportedException("This connection provides market data only and has no order route.");
         var settings = Connections.BinanceSettingsOf(p);
-        var binanceContext = TradingContext(p, accountId, "Binance", settings.Futures ? "usd-m-futures" : "spot",
-            (settings.Testnet ? "testnet|" : "live|") + PublicEndpoint(settings.RestBase), null);
         return Cache(key, p, new BinanceBroker(data, settings, p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL",
-            binanceContext, network: NetworkProxy.CreateFactory()));
+            BinanceContext(p, accountId, settings), network: NetworkProxy.CreateFactory()));
     }
+
+    /// <summary>The ownership context of a Binance account: its id keys the persisted intents, executions and native bindings.</summary>
+    internal OrderContext BinanceContext(ConnectionProfile p, string accountId, BinanceAccountSettings settings) =>
+        TradingContext(p, accountId, "Binance", settings.Futures ? "usd-m-futures" : "spot",
+            (settings.Testnet ? "testnet|" : "live|") + PublicEndpoint(settings.ContextEndpoint), null);
 
     /// <summary>
     /// How a real broker was built: from which connection, whether it traded real money then, and the connection settings

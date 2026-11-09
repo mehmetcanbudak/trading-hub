@@ -31,6 +31,48 @@ public sealed partial class RithmicTradingSession
             }
     }
 
+    // A stopped equivalent session stays registered while it knows a working order, but it no longer observes the venue.
+    // Its basketed working orders known before this connection requests its order replay already existed at the venue,
+    // so this complete replay reconciles them exactly as it reconciles this session's own replay candidates. Guarded by _orderGate.
+    private readonly List<(RithmicTradingSession Session, RithmicOrderState Order, string Account)> _stoppedPeerReplayCandidates = new();
+
+    private void CaptureStoppedPeerReplayCandidates()
+    {
+        var candidates = new List<(RithmicTradingSession Session, RithmicOrderState Order, string Account)>();
+        lock (NativeAdmissionGate)
+            foreach (var account in Accounts)
+            {
+                string identity = NativeAccountOf(account.AccountId);
+                if (identity.Length == 0 || !NativeSessions.TryGetValue(new(_nativeObservationEnvironment, identity), out var sessions)) continue;
+                foreach (var peer in sessions)
+                {
+                    if (ReferenceEquals(peer, this) || !peer._closeSessionStopping) continue;
+                    lock (peer._orderGate)
+                        foreach (var order in peer._orders.Values)
+                            if (!order.Done && order.BasketId.Length > 0 && order.NativeObservationEnvironment == _nativeObservationEnvironment &&
+                                order.NativeAccountIdentity == identity) candidates.Add((peer, order, account.AccountId));
+                }
+            }
+        lock (_orderGate)
+        {
+            _stoppedPeerReplayCandidates.Clear();
+            _stoppedPeerReplayCandidates.AddRange(candidates);
+        }
+    }
+
+    private static void MarkStoppedPeerReplayAbsence(List<(RithmicTradingSession Session, RithmicOrderState Order, string Account)>? absent)
+    {
+        if (absent == null) return;
+        foreach (var (peer, order, _) in absent)
+            lock (peer._orderGate)
+                if (!order.Done)
+                {
+                    order.Done = true;
+                    order.Cancelled = true;
+                    order.ReplayAbsent = true;
+                }
+    }
+
     private void StampNativeOrder(RithmicOrderState order, bool submitted = false)
     {
         if (order.NativeObservationEnvironment.Length == 0) order.NativeObservationEnvironment = _nativeObservationEnvironment;

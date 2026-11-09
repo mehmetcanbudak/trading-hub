@@ -285,6 +285,7 @@ public sealed partial class RithmicTradingSession : IDisposable
                     _orderReplays.Clear();
                     _positionReports.Clear();
                     _replayCandidates.Clear();
+                    _stoppedPeerReplayCandidates.Clear();
                     foreach (var (id, order) in _orders)
                         if (!order.Done && order.BasketId.Length > 0) _replayCandidates[id] = order;
                 }
@@ -322,6 +323,7 @@ public sealed partial class RithmicTradingSession : IDisposable
 
                 Accounts = accounts;
                 RegisterNativeAccountSessions();
+                CaptureStoppedPeerReplayCandidates();
                 // órdenes en vivo de cada cuenta + las que ya estaban abiertas
                 foreach (var a in accounts)
                 {
@@ -479,6 +481,7 @@ public sealed partial class RithmicTradingSession : IDisposable
                         if (tag.StartsWith("show:", StringComparison.Ordinal))
                         {
                             string account = tag[5..];
+                            List<(RithmicTradingSession Session, RithmicOrderState Order, string Account)>? absent = null;
                             lock (_orderGate)
                             {
                                 foreach (var (id, order) in _replayCandidates)
@@ -488,8 +491,17 @@ public sealed partial class RithmicTradingSession : IDisposable
                                         order.Cancelled = true;
                                         order.ReplayAbsent = true;
                                     }
-                                _orderReplays[account] = 0;
+                                for (int i = _stoppedPeerReplayCandidates.Count - 1; i >= 0; i--)
+                                    if (_stoppedPeerReplayCandidates[i].Account == account)
+                                    {
+                                        (absent ??= new()).Add(_stoppedPeerReplayCandidates[i]);
+                                        _stoppedPeerReplayCandidates.RemoveAt(i);
+                                    }
                             }
+                            // Peer state uses its own gate, never nested inside this session's gate, and is reconciled
+                            // before this replay is published as complete.
+                            MarkStoppedPeerReplayAbsence(absent);
+                            lock (_orderGate) _orderReplays[account] = 0;
                         }
                     Changed?.Invoke();
                 }
@@ -576,6 +588,7 @@ public sealed partial class RithmicTradingSession : IDisposable
         lock (_orderGate)
         {
             _replayCandidates.TryRemove(basket, out _);
+            _stoppedPeerReplayCandidates.RemoveAll(candidate => candidate.Order.BasketId == basket);
             string tag = m.String(RpO.UserTag) ?? "";
             _orders.TryRemove("tag:" + tag, out var provisional);
             var o = _orders.GetOrAdd(basket, b => provisional ?? new RithmicOrderState { Time = when });

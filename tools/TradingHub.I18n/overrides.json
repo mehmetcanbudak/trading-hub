@@ -13586,5 +13586,13 @@
   "Not canceled: the stop already triggered at Binance and its order is executing.": {
     "es": "No cancelada: el stop ya se activó en Binance y su orden se está ejecutando.",
     "zh-CN": "未取消：止损单已在 Binance 触发，其订单正在执行。"
+  },
+  "Not modified: the stop already triggered at Binance and its order is executing.": {
+    "es": "No modificada: el stop ya se activó en Binance y su orden se está ejecutando.",
+    "zh-CN": "未修改：止损单已在 Binance 触发，其订单正在执行。"
+  },
+  "Kept ownership context {0}: {1}": {
+    "es": "Se conservó el contexto de propiedad {0}: {1}",
+    "zh-CN": "已保留所有权上下文 {0}：{1}"
   }
 }

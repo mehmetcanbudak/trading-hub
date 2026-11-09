@@ -33,11 +33,26 @@ public sealed class BinanceAccountSettings
         ? BaseUrl!.TrimEnd('/')
         : (Futures, Testnet) switch
         {
-            (true, true) => "https://testnet.binancefuture.com",
+            (true, true) => "https://" + FuturesDemoHost,
             (true, false) => "https://fapi.binance.com",
             (false, true) => "https://testnet.binance.vision",
             _ => "https://api.binance.com",
         };
+
+    /// <summary>Binance's documented USDⓈ-M testnet (demo trading) REST host.</summary>
+    private const string FuturesDemoHost = "demo-fapi.binance.com";
+
+    /// <summary>The earlier default USDⓈ-M testnet host, an alias of <see cref="FuturesDemoHost"/>.</summary>
+    private const string FuturesTestnetAliasHost = "testnet.binancefuture.com";
+
+    /// <summary>
+    /// <see cref="RestBase"/> as account-context identity. The demo host names the same service as its earlier alias, so it
+    /// keeps the identity persisted under the alias: owned intents, executions and native bindings stay recovered.
+    /// </summary>
+    public string ContextEndpoint =>
+        Uri.TryCreate(RestBase, UriKind.Absolute, out var uri) && uri.Host.Equals(FuturesDemoHost, StringComparison.OrdinalIgnoreCase)
+            ? new UriBuilder(uri) { Host = FuturesTestnetAliasHost }.Uri.ToString()
+            : RestBase;
 
     public bool HasKeys => !string.IsNullOrWhiteSpace(ApiKey) && !string.IsNullOrWhiteSpace(ApiSecret);
 }
@@ -494,6 +509,10 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         OwnedOrderQuantity? Quantity = null, bool Ownership = false, bool Account = false);
     private ExecutionAvailability _producerAvailability = ExecutionAvailability.Synchronizing;
     private string? _nativeError, _financialError;
+    // The last poll's native error was only a still-unknown submission outcome, and the last protection read was clean
+    // (a poll whose orders fail skips that read). Its unavailability ends when no unknown submission remains, at the
+    // binding that resolves it, not when the poll that resolved it later completes.
+    private bool _nativeErrorIsSubmission, _refreshSubmissionOnly, _protectionClean;
     private readonly Dictionary<string, decimal> _nativeQuantities = new(), _pricedQuantities = new(), _quantityBaselines = new();
     private readonly Dictionary<long, string> _publishedTradeLogicalIds = new();
     private int _uncoveredNative;
@@ -588,6 +607,12 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
 
         /// <summary>Executed quantity of the current exchange order; it never goes back.</summary>
         public decimal Executed;
+
+        /// <summary>
+        /// What the triggered conditional order reported its placed order executed. Never shown on a working handle: only
+        /// the floor of one that finishes without that order's own answer.
+        /// </summary>
+        public decimal TriggeredExecuted;
 
         /// <summary>
         /// Cancels or replaces in flight or queued: the order missing from the open list is expected, not final, and a
@@ -700,6 +725,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 {
                     positionFailure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
                 }
+                // A failure already observed in this poll keeps the previous unavailability until the poll completes.
+                if (positionFailure != null) lock (_gate) _nativeErrorIsSubmission = false;
 
                 // Read orders after the position: a fill between the two requests then appears as a newer order execution
                 // bounding an older position, which brackets expect, never as a position leading its working orders.
@@ -724,6 +751,10 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     _nativeReplayReady = _nativeOrdersReady;
                     _lastError = null;
                     _nativeError = lookupError ?? protection.Error;
+                    // Only a submission-only poll may skip protection without voiding the last clean read.
+                    if (lookupError == null) _protectionClean = protection.Error == null && protection.NativeComplete;
+                    else if (!_refreshSubmissionOnly) _protectionClean = false;
+                    _nativeErrorIsSubmission = lookupError != null && _refreshSubmissionOnly && HasUnknownSubmission() && _protectionClean;
                     UpdateProducerAvailability();
                 }
                 _initialNativeReplay.TrySetResult();
@@ -745,6 +776,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     if (_disposed) break;
                     _nativeOrdersReady = false;
                     _nativeError = ex.Message;
+                    _nativeErrorIsSubmission = _protectionClean = false;
                     UpdateProducerAvailability();
                 }
                 PublishOwnershipObservations();
@@ -799,7 +831,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     // Install visibility under the broker gate; notifications alone are deferred outside it.
     private void UpdateProducerAvailability()
     {
-        var availability = _nativeError != null || _financialError != null || _ownershipFault != null ? ExecutionAvailability.Unavailable
+        bool nativeUnavailable = _nativeError != null && (!_nativeErrorIsSubmission || HasUnknownSubmission());
+        var availability = nativeUnavailable || _financialError != null || _ownershipFault != null ? ExecutionAvailability.Unavailable
             : _tradeReplayComplete && _nativeOrdersReady && !HasUnknownSubmission() && _uncoveredNative == 0
                 ? ExecutionAvailability.Ready : ExecutionAvailability.Synchronizing;
         QueueProducerAvailability(availability);
@@ -1167,7 +1200,20 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 }
                 else if (!t.ReplacementPending && ++t.NotFound >= 3)
                 {
-                    FinishCanceled(t); // Binance dropped it: canceled or expired without fills
+                    // Binance dropped it: canceled or expired. A triggered conditional's report of what its order
+                    // executed is the floor; shown only now, on a finished handle, it is no executing stop's progress.
+                    var o = t.Order;
+                    decimal previousFilled = o.Filled;
+                    var previousState = o.State;
+                    var previousStatus = o.Status;
+                    if (t.TriggeredExecuted > t.Executed)
+                    {
+                        t.Executed = t.TriggeredExecuted;
+                        o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
+                    }
+                    if (t.TriggeredExecuted > 0 && o.Unfilled == 0) Finish(t, OrderStates.Done, OrderStatus.Filled);
+                    else FinishCanceled(t);
+                    ObserveNativeQuantity(o, previousFilled, previousState, previousStatus);
                 }
 
                 if (t.Order.State == OrderStates.Failed && t.ReplaceFailure is { } why)
@@ -1179,7 +1225,11 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         DispatchQueuedReprices();
         Publish();
         QueueDeferredCancels();
-        lock (_gate) _nativeOrdersReady = error == null && algoError == null && recoveryError == null && baselineError == null;
+        lock (_gate)
+        {
+            _nativeOrdersReady = error == null && algoError == null && recoveryError == null && baselineError == null;
+            _refreshSubmissionOnly = submissionError != null && _nativeOrdersReady;
+        }
         return submissionError ?? error ?? algoError ?? recoveryError ?? baselineError;
     }
 
@@ -1525,18 +1575,28 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 (s.Type is "LIMIT" or "MARKET") && s.Side == (o.Direction == OrderDirections.Buy ? "BUY" : "SELL") &&
                 s.ReduceOnly == o.ReduceOnly && !string.IsNullOrEmpty(o.OwnerId))
             {
-                var child = new NativeOrderIdentity("binance:order", s.Symbol + ":" + s.OrderId.ToString(CultureInfo.InvariantCulture));
-                var workingType = s.Type == "MARKET" ? OrderTypes.Market : OrderTypes.Limit;
-                var error = OrderContext.RecordNativeWorkingType(o, parent, child, workingType,
-                    Instrument.Key, s.Symbol, notify: false);
-                if (error == null)
+                // Working-type evidence belongs to an owned conditional request. A foreign stop-limit adopted only after
+                // it triggered (for example by dragging its LIMIT) owns the LIMIT it became: it has nothing to record. An
+                // intent that cannot be found is not that proof: it falls through and reports the unresolved ownership.
+                if (OrderContext.Find(o.IntentId) is { Request.Type: not OrderTypes.Stop })
                 {
                     t.ConditionalParent = null;
-                    _ownershipChanged = true;
-                    o.Type = workingType;
-                    o.Price = s.Price;
                 }
-                else _ownershipFault = "Binance working order type remains unresolved: " + error;
+                else
+                {
+                    var child = new NativeOrderIdentity("binance:order", s.Symbol + ":" + s.OrderId.ToString(CultureInfo.InvariantCulture));
+                    var workingType = s.Type == "MARKET" ? OrderTypes.Market : OrderTypes.Limit;
+                    var error = OrderContext.RecordNativeWorkingType(o, parent, child, workingType,
+                        Instrument.Key, s.Symbol, notify: false);
+                    if (error == null)
+                    {
+                        t.ConditionalParent = null;
+                        _ownershipChanged = true;
+                        o.Type = workingType;
+                        o.Price = s.Price;
+                    }
+                    else _ownershipFault = "Binance working order type remains unresolved: " + error;
+                }
             }
 
             if (s.Quantity > 0) o.QuantityToFill = t.FilledBefore + s.Quantity;
@@ -1612,9 +1672,11 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
         if (a.ActualOrderId != 0)
         {
-            t.Executed = Math.Max(t.Executed, a.ActualQuantity);
-            o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
-            Follow(t, a.ActualOrderId); // triggered: the regular orders tell how the order it placed ends
+            // Triggered: the regular orders tell how the order it placed ends. Its execution is booked only through that
+            // order's own answer, which first records the MARKET working type: shown here, on a handle not yet known to be
+            // executing a stop, a position-led bracket would count it twice and cancel the order closing the position.
+            t.TriggeredExecuted = Math.Max(t.TriggeredExecuted, a.ActualQuantity);
+            Follow(t, a.ActualOrderId);
             ObserveNativeQuantity(o, previousFilled, previousState, previousStatus);
             return;
         }
@@ -1681,21 +1743,32 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     private void Bind(Tracked t, long id)
     {
         t.Id = id;
+        bool wasUnknown = t.SubmissionUnknown;
         t.SubmissionUnknown = false;
         t.Order.ExchangeOrderId = id.ToString(CultureInfo.InvariantCulture);
         _byId[id] = t;
         // Regular order numbers are symbol-scoped; the transport and handle keep Binance's raw number.
         BindNative(t, new NativeOrderIdentity("binance:order", Instrument.Symbol + ":" + t.Order.ExchangeOrderId));
+        if (wasUnknown) WithdrawResolvedSubmissionUnavailability();
     }
 
     private void BindAlgo(Tracked t, long algoId)
     {
         t.AlgoId = algoId;
         t.ConditionalParent = new NativeOrderIdentity("binance:algo", algoId.ToString(CultureInfo.InvariantCulture));
+        bool wasUnknown = t.SubmissionUnknown;
         t.SubmissionUnknown = false;
         t.Order.ExchangeOrderId = AlgoPrefix + algoId.ToString(CultureInfo.InvariantCulture);
         _byAlgoId[algoId] = t;
         BindNative(t, new NativeOrderIdentity("binance:algo", algoId.ToString(CultureInfo.InvariantCulture)));
+        if (wasUnknown) WithdrawResolvedSubmissionUnavailability();
+    }
+
+    // Called under the broker gate before the resolved order's facts are applied, so no consumer can observe its fill
+    // together with the unavailability of an outcome that is no longer unknown.
+    private void WithdrawResolvedSubmissionUnavailability()
+    {
+        if (_nativeErrorIsSubmission && !HasUnknownSubmission()) UpdateProducerAvailability();
     }
 
     private void BindNative(Tracked tracked, NativeOrderIdentity native)
@@ -2174,6 +2247,18 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     private void StartReplacement(Tracked tracked, PreparedOrderIntent intent)
     {
         var order = tracked.Order;
+        // A conditional order that triggered is followed through the order it placed; an own stop's is executing the
+        // exit. An amendment (also a price update queued while it was pending) targeted the conditional order: like a
+        // cancel that arrives past the trigger, it must not cancel that order. A foreign stop-limit's resting LIMIT, shown
+        // as a limit, stays modifiable.
+        if ((tracked.ConditionalParent != null && tracked.AlgoId == 0 && order.Type == OrderTypes.Stop) ||
+            intent.Request.Type != order.Type)
+        {
+            const string triggered = "Not modified: the stop already triggered at Binance and its order is executing.";
+            LastError = triggered;
+            RecordRejected(intent, triggered);
+            return;
+        }
         var predecessor = new Order
         {
             Security = order.Security, Portfolio = order.Portfolio, Direction = order.Direction, Type = order.Type,
@@ -2284,6 +2369,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         decimal? canceled = null; // once the old order is known to be canceled: what it had executed
         BinanceOpenOrder? found = null;
         BinanceAlgoOrder? foundAlgo = null;
+        BinanceOpenOrder? foundChild = null;
         Exception? cancelError = null;
         try
         {
@@ -2328,6 +2414,21 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             {
                 canceled = 0;
                 foundAlgo = null;
+            }
+        }
+
+        // A conditional order that triggered is followed through the order it placed. Read that order now, as a poll does
+        // before it publishes: its fills must not appear before it is known as the stop's executing child, or a position
+        // report that led them would count them twice and cancel the order closing the position.
+        if (foundAlgo is { ActualOrderId: not 0 } triggered && !_cts.IsCancellationRequested)
+        {
+            try
+            {
+                foundChild = await _client.GetOrderAsync(Instrument.Symbol, triggered.ActualOrderId, _cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // the next poll looks it up
             }
         }
 
@@ -2392,6 +2493,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
 
                     if (found != null) Apply(t, found); // still working (shown as it is at Binance again) or filled
                     if (foundAlgo != null) ApplyAlgo(t, foundAlgo); // still working, or triggered: then the order it placed is followed
+                    if (foundChild != null && t.AlgoId == 0 && t.Id == foundChild.OrderId && _byOrder.ContainsKey(order))
+                        Apply(t, foundChild);
                 }
             }
             else
@@ -2461,6 +2564,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
 
             t.FilledBefore = filled;
             t.Executed = 0;
+            t.TriggeredExecuted = 0;
             t.ReplaceFailure = null;
             order.Type = type;
             if (t.Busy == 0)
@@ -2522,7 +2626,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 t.CancelRequested = true;
                 // Own conditional orders are STOP_MARKET: once triggered, the order they placed is executing the exit.
                 t.CancelTargetsConditional = t.Own && IsConditional(order.Type);
-                t.CancelPassedTrigger = false;
+                // Already followed to that order, whose working snapshot is not known yet: the cancel is past the trigger.
+                t.CancelPassedTrigger = t.CancelTargetsConditional && t.ConditionalParent != null && t.AlgoId == 0;
                 RejectQueuedReprice(t, "Cancellation superseded the queued price update.");
             }
         }
