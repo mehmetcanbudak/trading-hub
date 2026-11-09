@@ -590,6 +590,12 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         public decimal Executed;
 
         /// <summary>
+        /// What the triggered conditional order reported its placed order executed. Never shown on a working handle: only
+        /// the floor of one that finishes without that order's own answer.
+        /// </summary>
+        public decimal TriggeredExecuted;
+
+        /// <summary>
         /// Cancels or replaces in flight or queued: the order missing from the open list is expected, not final, and a
         /// queued Modify's price and quantity stay on the handle.
         /// </summary>
@@ -1167,7 +1173,20 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 }
                 else if (!t.ReplacementPending && ++t.NotFound >= 3)
                 {
-                    FinishCanceled(t); // Binance dropped it: canceled or expired without fills
+                    // Binance dropped it: canceled or expired. A triggered conditional's report of what its order
+                    // executed is the floor; shown only now, on a finished handle, it is no executing stop's progress.
+                    var o = t.Order;
+                    decimal previousFilled = o.Filled;
+                    var previousState = o.State;
+                    var previousStatus = o.Status;
+                    if (t.TriggeredExecuted > t.Executed)
+                    {
+                        t.Executed = t.TriggeredExecuted;
+                        o.Unfilled = Math.Max(0, o.QuantityToFill - t.FilledBefore - t.Executed);
+                    }
+                    if (t.TriggeredExecuted > 0 && o.Unfilled == 0) Finish(t, OrderStates.Done, OrderStatus.Filled);
+                    else FinishCanceled(t);
+                    ObserveNativeQuantity(o, previousFilled, previousState, previousStatus);
                 }
 
                 if (t.Order.State == OrderStates.Failed && t.ReplaceFailure is { } why)
@@ -1615,6 +1634,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
             // Triggered: the regular orders tell how the order it placed ends. Its execution is booked only through that
             // order's own answer, which first records the MARKET working type: shown here, on a handle not yet known to be
             // executing a stop, a position-led bracket would count it twice and cancel the order closing the position.
+            t.TriggeredExecuted = Math.Max(t.TriggeredExecuted, a.ActualQuantity);
             Follow(t, a.ActualOrderId);
             ObserveNativeQuantity(o, previousFilled, previousState, previousStatus);
             return;
@@ -2175,10 +2195,12 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     private void StartReplacement(Tracked tracked, PreparedOrderIntent intent)
     {
         var order = tracked.Order;
-        // A conditional order that triggered is followed through the order it placed, which is executing the exit. An
-        // amendment (also a price update queued while it was pending) targeted the conditional order: like a cancel that
-        // arrives past the trigger, it must not cancel that order.
-        if ((tracked.ConditionalParent != null && tracked.AlgoId == 0) || intent.Request.Type != order.Type)
+        // A conditional order that triggered is followed through the order it placed; an own stop's is executing the
+        // exit. An amendment (also a price update queued while it was pending) targeted the conditional order: like a
+        // cancel that arrives past the trigger, it must not cancel that order. A foreign stop-limit's resting LIMIT, shown
+        // as a limit, stays modifiable.
+        if ((tracked.ConditionalParent != null && tracked.AlgoId == 0 && order.Type == OrderTypes.Stop) ||
+            intent.Request.Type != order.Type)
         {
             const string triggered = "Not modified: the stop already triggered at Binance and its order is executing.";
             LastError = triggered;
@@ -2490,6 +2512,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
 
             t.FilledBefore = filled;
             t.Executed = 0;
+            t.TriggeredExecuted = 0;
             t.ReplaceFailure = null;
             order.Type = type;
             if (t.Busy == 0)
@@ -2551,7 +2574,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 t.CancelRequested = true;
                 // Own conditional orders are STOP_MARKET: once triggered, the order they placed is executing the exit.
                 t.CancelTargetsConditional = t.Own && IsConditional(order.Type);
-                t.CancelPassedTrigger = false;
+                // Already followed to that order, whose working snapshot is not known yet: the cancel is past the trigger.
+                t.CancelPassedTrigger = t.CancelTargetsConditional && t.ConditionalParent != null && t.AlgoId == 0;
                 RejectQueuedReprice(t, "Cancellation superseded the queued price update.");
             }
         }
