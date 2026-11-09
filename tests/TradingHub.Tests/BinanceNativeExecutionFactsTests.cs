@@ -3189,6 +3189,78 @@ public sealed class BinanceNativeExecutionFactsTests
     }
 
     [Fact]
+    public async Task Resolving_an_unknown_submission_keeps_the_source_unavailable_until_pending_protection_reads_cleanly()
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            var context = RecoveryContext(root, fake);
+            const string key = "binance-unknown-submission-behind-pending-protection";
+            var owner = context.LedgerOwner(key, LiveStore.CaptureLedgerGeneration(root, key));
+            var settings = fake.Settings;
+            settings.RequestTimeout = TimeSpan.FromSeconds(2); // only the held exact client lookup times out
+            using var broker = orders.Binance(data, settings, "Unknown submission behind pending protection", context);
+            var projector = AccountExecutionProjector.For(broker.Executions, context);
+            projector.Synchronize();
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Place(broker, owner, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            long openingId = long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture);
+            fake.Fill(openingId, 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m &&
+                !LiveStore.LoadLedger(root, key, 1m).HasPendingFinancials, broker, fake);
+            var entry = Assert.Single(broker.Executions.Capture(ExecutionCursor.Start).Changes,
+                report => report.NativeOrder == opening.NativeIdentity);
+            var entryTrade = new FakeBinanceFuturesTrade(long.Parse(entry.Identity.Id, CultureInfo.InvariantCulture),
+                openingId, "BTCUSDT", true, 3m, 59990m, new DateTimeOffset(entry.Time).ToUnixTimeMilliseconds());
+            fake.HoldFuturesTradeHistory = true;
+            var stop = OrderActions.Place(broker, owner, OrderTypes.Stop, OrderDirections.Sell, 3m, 59000m,
+                reduceOnly: true, protective: true, maximumOwnedQuantity: 3m);
+            await ConditionalState(() => stop.ExchangeOrderId.StartsWith("algo:", StringComparison.Ordinal) &&
+                !broker.IsReplacementPending(stop), broker, fake);
+            long childId = fake.Trigger(Assert.Single(fake.PlacedAlgo).AlgoId, fill: 1m);
+            await ConditionalState(() => broker.Position.Volume == 2m && stop.Type == OrderTypes.Market &&
+                stop.Filled == 1m && stop.Unfilled == 2m, broker, fake);
+            // History overstates the executing child: protection reads pending and the source is unavailable.
+            fake.ReportFuturesTrades(entryTrade, new FakeBinanceFuturesTrade(long.Parse(entry.Identity.Id, CultureInfo.InvariantCulture) + 1,
+                childId, "BTCUSDT", false, 2m, 60000m, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), RealizedPnl: 10m));
+            await ConditionalState(() => broker.PositionReady && !broker.OrdersReady &&
+                broker.LastError?.Contains("protection is synchronizing", StringComparison.Ordinal) == true &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Unavailable, broker, fake);
+
+            var releaseLookup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var observed = new System.Collections.Concurrent.ConcurrentQueue<ExecutionAvailability>();
+            void Observe() => observed.Enqueue(broker.Executions.Capture(ExecutionCursor.Start).Availability);
+            broker.Executions.Changed += Observe;
+            try
+            {
+                // A submission's outcome becomes unknown; its exact client lookup then fails while the open-order listing
+                // binds it by client identity in the same poll, which therefore never reads protection.
+                fake.BeforeGetReply = (request, ct) => request.Route == "/fapi/v1/order" && request.Query("origClientOrderId").Length > 0
+                    ? releaseLookup.Task.WaitAsync(ct) : Task.CompletedTask;
+                fake.UnknownPosts = 1;
+                var unknown = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1m, 50000m);
+                await ConditionalState(() => unknown.ExchangeOrderId.Length > 0, broker, fake);
+                await ConditionalPolls(fake, broker);
+                Observe();
+                Assert.Equal((OrderStates.Active, 1m), (stop.State, stop.Filled));
+                // Protection was pending when last read: resolving the submission must not report the source available.
+                Assert.All(observed, availability => Assert.Equal(ExecutionAvailability.Unavailable, availability));
+            }
+            finally
+            {
+                broker.Executions.Changed -= Observe;
+                fake.BeforeGetReply = null;
+                releaseLookup.TrySetResult();
+            }
+        });
+    }
+
+    [Fact]
     public async Task Bracket_never_shrinks_an_executing_market_child_after_a_separate_close()
     {
         await WithRecoveryRoot(async root =>
