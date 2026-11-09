@@ -514,7 +514,7 @@ public sealed partial class AppServices
             throw new InvalidOperationException("Composite crypto prices are data only and cannot be executed, including in the shared simulator. Use an explicitly owned practice replay.");
         if (!_simBrokers.TryGetValue(data.Instrument.Key, out var b))
         {
-            _simOrderContext ??= OrderContext.ProcessSimulation(Portfolio.AccountID, _executionRoot);
+            _simOrderContext ??= OrderContext.ProcessSimulation(Portfolio.AccountID, _executionRoot, message => this.LogWarn(message));
             b = new SimBroker(data, Portfolio, Statistics, _simOrderContext);
             AccountExecutionProjector.For(b.Executions, b.OrderContext).Synchronize();
             _simBrokers[data.Instrument.Key] = b;
