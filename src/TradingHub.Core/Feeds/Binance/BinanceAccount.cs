@@ -1545,8 +1545,9 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 s.ReduceOnly == o.ReduceOnly && !string.IsNullOrEmpty(o.OwnerId))
             {
                 // Working-type evidence belongs to an owned conditional request. A foreign stop-limit adopted only after
-                // it triggered (for example by dragging its LIMIT) owns the LIMIT it became: it has nothing to record.
-                if (OrderContext.Find(o.IntentId)?.Request.Type != OrderTypes.Stop)
+                // it triggered (for example by dragging its LIMIT) owns the LIMIT it became: it has nothing to record. An
+                // intent that cannot be found is not that proof: it falls through and reports the unresolved ownership.
+                if (OrderContext.Find(o.IntentId) is { Request.Type: not OrderTypes.Stop })
                 {
                     t.ConditionalParent = null;
                 }
