@@ -1298,7 +1298,7 @@ public class LiveRunnerTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void Unprojected_fill_pauses_only_for_a_source_unavailable_now_not_a_projector_pass_in_flight(bool sourceRecovered)
+    public async Task Unprojected_fill_pauses_only_for_a_source_unavailable_now_not_a_projector_pass_in_flight(bool sourceRecovered)
     {
         var (_, broker, r) = Setup();
         var source = (ExecutionLog)broker.Executions;
@@ -1350,7 +1350,7 @@ public class LiveRunnerTests : IDisposable
         {
             projector.BeforeSourceCapture = null;
             release.Set();
-            Assert.True(pass.Wait(TimeSpan.FromSeconds(10)));
+            await pass.WaitAsync(TimeSpan.FromSeconds(10));
         }
         Assert.True(SpinWait.SpinUntil(() => r.Ledger.Fills.Count == 1 && !r.Ledger.HasPendingPrices, TimeSpan.FromSeconds(10)),
             string.Join(" | ", r.LogLines));
