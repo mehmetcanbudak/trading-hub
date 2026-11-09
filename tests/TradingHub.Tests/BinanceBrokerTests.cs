@@ -693,6 +693,56 @@ public class BinanceBrokerTests : IDisposable
         Assert.Equal(2, fake.Sent.Count);
     }
 
+    [Fact]
+    public async Task Resolving_an_unknown_submission_withdraws_its_unavailability_before_the_fill_is_visible()
+    {
+        using var fake = new FakeBinance(true) { UnknownPosts = 1, HideOwnedOrders = true };
+        var data = new InstrumentData(BtcUsdt, new SimulatedFeed());
+        using var broker = _orders.Binance(data, fake.Settings, "Binance accounting test");
+        data.Trades.Add(new Trade(1, DateTime.UtcNow, 59000m, 1m, TradeSide.Buy));
+        var strategy = new SubmissionStrategy();
+        using var runner = new LiveStrategyRunner(strategy, data, broker, ChartPeriod.M1) { Persist = false };
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        runner.Start();
+        strategy.Enter();
+        // A completed poll has published the unknown outcome as a genuinely unavailable source.
+        await Until(() => fake.Sent.Count == 1 &&
+            broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Unavailable);
+        var entry = Assert.Single(broker.ActiveOrders);
+        Assert.False(runner.Paused);
+
+        // Hold the poll that resolves the submission just after its exact client lookup, while the pass is still running.
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int resolved = 0, holds = 0;
+        fake.BeforeGetReply = (r, ct) =>
+        {
+            if (r.Route == "/fapi/v1/order" && r.Query("origClientOrderId").Length > 0) Interlocked.Exchange(ref resolved, 1);
+            else if (r.Route == "/fapi/v1/openAlgoOrders" && Volatile.Read(ref resolved) == 1 && Interlocked.Exchange(ref holds, 1) == 0)
+            {
+                held.TrySetResult();
+                return release.Task.WaitAsync(ct);
+            }
+            return Task.CompletedTask;
+        };
+        fake.Fill(Assert.Single(fake.Sent).ExchangeId, 1m);
+        fake.HideOwnedOrders = false;
+        try
+        {
+            await held.Task.WaitAsync(TimeSpan.FromSeconds(12));
+            Assert.Equal(1m, entry.Filled); // the resolved fill is already visible to the account's consumers
+            Assert.NotEqual(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+        }
+        finally
+        {
+            fake.BeforeGetReply = null;
+            release.TrySetResult();
+        }
+        await Until(() => runner.Ledger.Position == 1m && !runner.Ledger.HasPendingFinancials);
+        Assert.False(runner.Paused, string.Join(" | ", runner.LogLines.ToArray()));
+        Assert.Same(entry, Assert.Single(broker.ActiveOrders));
+    }
+
     [Theory]
     [InlineData(false, false, 503, -1007)]
     [InlineData(true, false, 503, -1007)]
