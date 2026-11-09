@@ -509,6 +509,10 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         OwnedOrderQuantity? Quantity = null, bool Ownership = false, bool Account = false);
     private ExecutionAvailability _producerAvailability = ExecutionAvailability.Synchronizing;
     private string? _nativeError, _financialError;
+    // The last poll's native error was only a still-unknown submission outcome, and the last protection read was clean
+    // (a poll whose orders fail skips that read). Its unavailability ends when no unknown submission remains, at the
+    // binding that resolves it, not when the poll that resolved it later completes.
+    private bool _nativeErrorIsSubmission, _refreshSubmissionOnly, _protectionClean;
     private readonly Dictionary<string, decimal> _nativeQuantities = new(), _pricedQuantities = new(), _quantityBaselines = new();
     private readonly Dictionary<long, string> _publishedTradeLogicalIds = new();
     private int _uncoveredNative;
@@ -715,6 +719,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 {
                     positionFailure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
                 }
+                // A failure already observed in this poll keeps the previous unavailability until the poll completes.
+                if (positionFailure != null) lock (_gate) _nativeErrorIsSubmission = false;
 
                 // Read orders after the position: a fill between the two requests then appears as a newer order execution
                 // bounding an older position, which brackets expect, never as a position leading its working orders.
@@ -739,6 +745,10 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     _nativeReplayReady = _nativeOrdersReady;
                     _lastError = null;
                     _nativeError = lookupError ?? protection.Error;
+                    // Only a submission-only poll may skip protection without voiding the last clean read.
+                    if (lookupError == null) _protectionClean = protection.Error == null && protection.NativeComplete;
+                    else if (!_refreshSubmissionOnly) _protectionClean = false;
+                    _nativeErrorIsSubmission = lookupError != null && _refreshSubmissionOnly && HasUnknownSubmission() && _protectionClean;
                     UpdateProducerAvailability();
                 }
                 _initialNativeReplay.TrySetResult();
@@ -760,6 +770,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     if (_disposed) break;
                     _nativeOrdersReady = false;
                     _nativeError = ex.Message;
+                    _nativeErrorIsSubmission = _protectionClean = false;
                     UpdateProducerAvailability();
                 }
                 PublishOwnershipObservations();
@@ -814,7 +825,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     // Install visibility under the broker gate; notifications alone are deferred outside it.
     private void UpdateProducerAvailability()
     {
-        var availability = _nativeError != null || _financialError != null || _ownershipFault != null ? ExecutionAvailability.Unavailable
+        bool nativeUnavailable = _nativeError != null && (!_nativeErrorIsSubmission || HasUnknownSubmission());
+        var availability = nativeUnavailable || _financialError != null || _ownershipFault != null ? ExecutionAvailability.Unavailable
             : _tradeReplayComplete && _nativeOrdersReady && !HasUnknownSubmission() && _uncoveredNative == 0
                 ? ExecutionAvailability.Ready : ExecutionAvailability.Synchronizing;
         QueueProducerAvailability(availability);
@@ -1194,7 +1206,11 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         DispatchQueuedReprices();
         Publish();
         QueueDeferredCancels();
-        lock (_gate) _nativeOrdersReady = error == null && algoError == null && recoveryError == null && baselineError == null;
+        lock (_gate)
+        {
+            _nativeOrdersReady = error == null && algoError == null && recoveryError == null && baselineError == null;
+            _refreshSubmissionOnly = submissionError != null && _nativeOrdersReady;
+        }
         return submissionError ?? error ?? algoError ?? recoveryError ?? baselineError;
     }
 
@@ -1696,21 +1712,32 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     private void Bind(Tracked t, long id)
     {
         t.Id = id;
+        bool wasUnknown = t.SubmissionUnknown;
         t.SubmissionUnknown = false;
         t.Order.ExchangeOrderId = id.ToString(CultureInfo.InvariantCulture);
         _byId[id] = t;
         // Regular order numbers are symbol-scoped; the transport and handle keep Binance's raw number.
         BindNative(t, new NativeOrderIdentity("binance:order", Instrument.Symbol + ":" + t.Order.ExchangeOrderId));
+        if (wasUnknown) WithdrawResolvedSubmissionUnavailability();
     }
 
     private void BindAlgo(Tracked t, long algoId)
     {
         t.AlgoId = algoId;
         t.ConditionalParent = new NativeOrderIdentity("binance:algo", algoId.ToString(CultureInfo.InvariantCulture));
+        bool wasUnknown = t.SubmissionUnknown;
         t.SubmissionUnknown = false;
         t.Order.ExchangeOrderId = AlgoPrefix + algoId.ToString(CultureInfo.InvariantCulture);
         _byAlgoId[algoId] = t;
         BindNative(t, new NativeOrderIdentity("binance:algo", algoId.ToString(CultureInfo.InvariantCulture)));
+        if (wasUnknown) WithdrawResolvedSubmissionUnavailability();
+    }
+
+    // Called under the broker gate before the resolved order's facts are applied, so no consumer can observe its fill
+    // together with the unavailability of an outcome that is no longer unknown.
+    private void WithdrawResolvedSubmissionUnavailability()
+    {
+        if (_nativeErrorIsSubmission && !HasUnknownSubmission()) UpdateProducerAvailability();
     }
 
     private void BindNative(Tracked tracked, NativeOrderIdentity native)

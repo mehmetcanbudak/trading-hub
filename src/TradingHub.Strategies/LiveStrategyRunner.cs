@@ -70,8 +70,9 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         || (_owner != null && _account.OrderContext.HasUnprojectedQuantity(_owner));
     // Ready may precede this runner consuming already-published execution facts. Pending prices hold
     // admitted orders; source failure, ownership faults and configured risk still require a pause.
+    // The source is read now: the projector's cached availability can lag it while a pass is in flight.
     private bool FinancialPauseRequired => FinancialRiskBlocked &&
-        (OwnershipRiskBlocked || ConfiguredValuationBlocked || _projector?.Availability == ExecutionAvailability.Unavailable);
+        (OwnershipRiskBlocked || ConfiguredValuationBlocked || _projector?.SourceAvailability == ExecutionAvailability.Unavailable);
     private readonly List<string> _log = new();
     private readonly SynchronizationContext? _sync;
     private BarBuilder _builder = null!;
