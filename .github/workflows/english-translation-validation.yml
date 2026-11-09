@@ -203,9 +203,17 @@ jobs:
           path: |
             ${{ runner.temp }}/tradinghub-ui/
             ${{ runner.temp }}/tradinghub-results/
-            dist/TradingHub-Setup-*.exe
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 1
+      # The self-contained installers dominate account artifact storage; keep them only to debug a failed run.
+      - name: Upload Windows installers from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tradinghub-windows-installers-${{ matrix.arch }}
+          path: dist/TradingHub-Setup-*.exe
+          if-no-files-found: ignore
+          retention-days: 3
 
   macos-build-and-tests:
     runs-on: macos-26
