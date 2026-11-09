@@ -1278,8 +1278,8 @@ internal sealed partial class OrderOwnershipJournal
     {
         _descriptor = descriptor;
         _root = Path.Combine(root, "execution-state", OrderContext.Hash(descriptor.OwnershipNamespace ?? descriptor.Id));
-        EnsureDirectory(_root);
-        using var lease = Acquire();
+        // Created under the lease, so a concurrent leftover removal can never delete a directory being constructed.
+        using var lease = Acquire(_root, create: true);
         string path = Path.Combine(_root, "context.json");
         var existing = Read<AccountContextDescriptor>(path);
         if (existing != null && (existing with { VerifiedNativeAccount = null }) != (descriptor with { VerifiedNativeAccount = null }))
@@ -1299,8 +1299,8 @@ internal sealed partial class OrderOwnershipJournal
 
     /// <summary>Removes earlier processes' idle simulator contexts. A simulator context is created per process for an
     /// in-memory portfolio and no recovery path reads another process's simulator context. Only an exact simulator record
-    /// with no intent, receipt, projection or native index, whose owning process no longer holds it, is removed;
-    /// every other context, including an unreadable one, is kept.</summary>
+    /// with no intent, receipt, projection or native index, whose owning process no longer holds it, is removed, as is
+    /// what an interrupted removal leaves; every other context, including an unreadable one, is kept.</summary>
     internal static void RemoveEndedSimulations(string root, Action<string>? report)
     {
         string directory = Path.Combine(Path.GetFullPath(root), "execution-state");
@@ -1319,13 +1319,17 @@ internal sealed partial class OrderOwnershipJournal
     private static void RemoveEndedSimulation(string candidate)
     {
         string context = Path.Combine(candidate, "context.json");
-        // Leave every non-simulator context untouched, including its lease file.
-        if (Read<AccountContextDescriptor>(context) is not { } unleased || !IsProcessSimulation(unleased)) return;
+        if (!File.Exists(context))
+        {
+            RemoveInterruptedRemoval(candidate, context);
+            return;
+        }
+        // Leave every non-simulator or nonempty context untouched (including its lease file) without waiting for its lease.
+        if (Read<AccountContextDescriptor>(context) is not { } unleased || !IsProcessSimulation(unleased) || !OnlyIdleEntries(candidate)) return;
         using var lease = Acquire(candidate);
         var descriptor = Read<AccountContextDescriptor>(context);
-        if (descriptor == null || !IsProcessSimulation(descriptor) || Path.GetFileName(candidate) != OrderContext.Hash(descriptor.Id)) return;
-        foreach (string entry in Directory.EnumerateFileSystemEntries(candidate))
-            if (Path.GetFileName(entry) is not ("context.json" or "native-account.json" or ".lease" or ProcessOwnerFile)) return;
+        if (descriptor == null || !IsProcessSimulation(descriptor) || Path.GetFileName(candidate) != OrderContext.Hash(descriptor.Id) ||
+            !OnlyIdleEntries(candidate)) return;
         string nativeAccount = Path.Combine(candidate, "native-account.json"), ownerPath = Path.Combine(candidate, ProcessOwnerFile);
         if (File.Exists(nativeAccount) && Read<string>(nativeAccount) != descriptor.VerifiedNativeAccount) return;
         FileStream owner;
@@ -1337,10 +1341,45 @@ internal sealed partial class OrderOwnershipJournal
             owner.Dispose();
             File.Delete(ownerPath);
         }
+        // The descriptor goes last: until then an interrupted removal is still recognizably an idle simulator context;
+        // afterwards, RemoveInterruptedRemoval recognizes what remains.
+        File.Delete(context);
+        RemoveLeasedDirectory(candidate, lease);
+    }
+
+    private static bool OnlyIdleEntries(string candidate) => Directory.EnumerateFileSystemEntries(candidate)
+        .All(entry => Path.GetFileName(entry) is "context.json" or "native-account.json" or ".lease" or ProcessOwnerFile);
+
+    // Files an interrupted removal can leave after deleting context.json; .DS_Store is Finder metadata, never app data.
+    private static bool OnlyRemovalLeftovers(string candidate) => Directory.EnumerateFileSystemEntries(candidate)
+        .All(entry => Path.GetFileName(entry) is ".lease" or ProcessOwnerFile or ".DS_Store");
+
+    /// <summary>A directory without a descriptor that holds at most the lease, the liveness file and Finder metadata is
+    /// what remains of an interrupted removal. Journals create their directory and write the descriptor under the same
+    /// lease, so it holds no ownership; anything else without a descriptor is kept.</summary>
+    private static void RemoveInterruptedRemoval(string candidate, string context)
+    {
+        // Checked before leasing so that no lease file is created in any other descriptorless directory.
+        if (!OnlyRemovalLeftovers(candidate)) return;
+        using var lease = Acquire(candidate);
+        if (File.Exists(context) || !OnlyRemovalLeftovers(candidate)) return;
+        string ownerPath = Path.Combine(candidate, ProcessOwnerFile);
+        FileStream owner;
+        try { owner = new FileStream(ownerPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException) { return; } // a process still holds it
+        using (owner)
+        {
+            owner.Dispose();
+            File.Delete(ownerPath);
+        }
+        File.Delete(Path.Combine(candidate, ".DS_Store"));
+        RemoveLeasedDirectory(candidate, lease);
+    }
+
+    private static void RemoveLeasedDirectory(string candidate, JournalLease lease)
+    {
         lease.ReleaseFile();
         File.Delete(Path.Combine(candidate, ".lease"));
-        // The descriptor goes last: until then an interrupted removal is still recognizably an idle simulator context.
-        File.Delete(context);
         Directory.Delete(candidate);
         StorageSync.SyncDirectory(Path.GetDirectoryName(candidate)!);
     }
@@ -1646,7 +1685,7 @@ internal sealed partial class OrderOwnershipJournal
     }
 
     private JournalLease Acquire() => Acquire(_root);
-    private static JournalLease Acquire(string root)
+    private static JournalLease Acquire(string root, bool create = false)
     {
         var mutex = new Mutex(false, "TradingHub.OrderOwnership." + OrderContext.Hash(Path.GetFullPath(root)));
         bool owned = false;
@@ -1655,6 +1694,7 @@ internal sealed partial class OrderOwnershipJournal
             try { mutex.WaitOne(); }
             catch (AbandonedMutexException) { }
             owned = true;
+            if (create) EnsureDirectory(root);
             return new(mutex, new FileStream(Path.Combine(root, ".lease"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
         }
         catch
