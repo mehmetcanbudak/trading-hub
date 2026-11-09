@@ -88,7 +88,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         public AccountExecutionSnapshot? CompleteSnapshot;
         public AccountExecutionSnapshot? PartialSnapshot;
     }
-    /// <param name="Conditional">The amend sent triggerPrice (true) or price (false). Null only in state saved before this was recorded.</param>
+    /// <param name="Conditional">The field the requested move changes, fixed when requested: triggerPrice (true) or price (false). Null only in state saved before this was recorded.</param>
     private sealed record Amendment(decimal Price, decimal Total, bool Sent = false, string? OwnershipIntentId = null, bool? Conditional = null);
     private sealed record FlattenIntent(Instrument Instrument, string CloseLinkId);
     private sealed record SavedOrder(string Symbol, string LinkId, bool Own, string OrderId, OrderDirections Direction, OrderTypes Type,
@@ -941,7 +941,8 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             if (ownershipError == null && order.NativeIdentity != null)
                 ownershipError = OrderContext.BindNative(order, order.NativeIdentity, notify: false);
             if (ownershipError != null) { LastError = ownershipError; return order; }
-            tracked.QueuedAmendment = new(price, order.Filled + newQuantity, OwnershipIntentId: intent.Id);
+            // The field is the one the requester moved: a waiting stop's trigger or a working price, fixed now.
+            tracked.QueuedAmendment = new(price, order.Filled + newQuantity, OwnershipIntentId: intent.Id, Conditional: order.Type == OrderTypes.Stop);
             tracked.AmendmentViewGuard = viewGuard;
             Save();
         }
@@ -1002,6 +1003,14 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 var amendmentGuard = tracked.AmendmentViewGuard;
                 var ownership = OrderContext.Find(requested.OwnershipIntentId);
                 var ticket = ownership == null ? null : new PreparedOrderIntent(OrderContext, ownership) { BoundOrder = tracked.Order };
+                bool conditional = requested.Conditional ?? tracked.Order.Type == OrderTypes.Stop;
+                if (conditional != (tracked.Order.Type == OrderTypes.Stop))
+                {
+                    // The order triggered (or otherwise changed type) since this move was requested: sending it now would
+                    // move a different field, e.g. a resting stop-limit price to the intended trigger. Drop it unsent.
+                    LastError = "Bybit amendment ownership is unavailable; request the amendment again after reconciliation.";
+                    Save(); continue;
+                }
                 if (requested.Total <= tracked.Executed)
                 {
                     tracked.CancelRequested = true; tracked.CancelSent = false; Wake(); continue;
@@ -1010,7 +1019,6 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 string? denied = ticket == null ? "Bybit amendment ownership is unavailable; request the amendment again after reconciliation."
                     : OrderContext.CheckDispatch(ticket, Math.Abs(signed)) ?? Check(tracked.Symbol, signed, tracked.Order.ReduceOnly);
                 if (denied != null) { LastError = denied; Save(); continue; }
-                bool conditional = tracked.Order.Type == OrderTypes.Stop; // The field this amend sends, fixed at dispatch.
                 tracked.Amendment = requested with { Sent = true, Conditional = conditional };
                 tracked.OperationBusy = true;
                 if (!Save() && !tracked.Order.ReduceOnly) { tracked.Amendment = null; tracked.OperationBusy = false; continue; }
