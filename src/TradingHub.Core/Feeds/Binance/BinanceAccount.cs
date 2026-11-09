@@ -494,9 +494,10 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
         OwnedOrderQuantity? Quantity = null, bool Ownership = false, bool Account = false);
     private ExecutionAvailability _producerAvailability = ExecutionAvailability.Synchronizing;
     private string? _nativeError, _financialError;
-    // The last poll's native error was only an unknown submission outcome. Its unavailability ends when no unknown
-    // submission remains, at the binding that resolves it, not when the poll that resolved it later completes.
-    private bool _nativeErrorIsSubmission, _refreshSubmissionOnly;
+    // The last poll's native error was only a still-unknown submission outcome, and the last protection read was clean
+    // (a poll whose orders fail skips that read). Its unavailability ends when no unknown submission remains, at the
+    // binding that resolves it, not when the poll that resolved it later completes.
+    private bool _nativeErrorIsSubmission, _refreshSubmissionOnly, _protectionClean;
     private readonly Dictionary<string, decimal> _nativeQuantities = new(), _pricedQuantities = new(), _quantityBaselines = new();
     private readonly Dictionary<long, string> _publishedTradeLogicalIds = new();
     private int _uncoveredNative;
@@ -729,7 +730,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     _nativeReplayReady = _nativeOrdersReady;
                     _lastError = null;
                     _nativeError = lookupError ?? protection.Error;
-                    _nativeErrorIsSubmission = lookupError != null && _refreshSubmissionOnly; // protection is not read then
+                    if (lookupError == null) _protectionClean = protection.Error == null && protection.NativeComplete;
+                    _nativeErrorIsSubmission = lookupError != null && _refreshSubmissionOnly && HasUnknownSubmission() && _protectionClean;
                     UpdateProducerAvailability();
                 }
                 _initialNativeReplay.TrySetResult();
@@ -751,7 +753,7 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                     if (_disposed) break;
                     _nativeOrdersReady = false;
                     _nativeError = ex.Message;
-                    _nativeErrorIsSubmission = false;
+                    _nativeErrorIsSubmission = _protectionClean = false;
                     UpdateProducerAvailability();
                 }
                 PublishOwnershipObservations();
