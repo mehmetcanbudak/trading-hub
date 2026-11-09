@@ -166,6 +166,9 @@ public sealed partial class OrderContext
     public static OrderContext EphemeralSimulation(string account) => new(new(Guid.NewGuid().ToString("N"),
         "simulator", "paper", "local simulation", account, Guid.NewGuid().ToString("N"), account));
 
+    /// <summary>The shared simulator's durable context for this process, under <paramref name="root"/>.</summary>
+    public static OrderContext ProcessSimulation(string account, string root) => new(EphemeralSimulation(account).Descriptor, root);
+
     public void Configure(AccountContextDescriptor descriptor, string? root, Func<OrderRequest, string?>? permission = null,
         Func<OrderRequest, decimal, string?>? nativePermission = null)
     {
