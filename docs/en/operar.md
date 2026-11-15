@@ -44,6 +44,12 @@ It appears on each chart's right edge (collapse with the arrow or ⌥T), and abo
 
 PnL and position are below the buttons so updates do not shift click targets.
 
+### Order actions on broker accounts
+
+On Binance, Bybit, Rithmic and Tradovate accounts, an order action you confirm (Chart Trader and DOM buttons, hotkeys, chart and DOM drags, stop/target drops, chart-menu bracket actions, and Bybit Cancel/Close in **Accounts**) is handed to that account's order queue and the window keeps responding while the order is recorded on disk and sent. The status bar shows **<action>: pending…** until the account call returns, then its result; if more actions are still queued it adds **· N order action(s) pending**. Actions on one account run one at a time in the order you issued them; confirmations and permission checks happen before the hand-off, exactly as before.
+
+The simulated account, practice replay accounts and live strategies still record their orders on the window's thread, so a slow disk can briefly freeze the window while they do.
+
 ## Order types
 
 | Type | Submission | Simulated fill |
@@ -160,6 +166,7 @@ For simulation, change **Initial balance** or **Reset simulated account**. Reset
 - **Maximum order size.** Real orders larger than the configured connection limit are blocked with an **Order blocked** message.
 - **Strategy limits.** Automatic strategies have daily-loss and drawdown limits; **0 means no limit**. **Live → Stop all** stops strategies, cancels their orders and requests closure of their positions. Confirm resulting broker positions; network failures can prevent closure.
 - **Quitting asks first.** While live strategies hold positions, ⌘Q and **Quit Trading Hub** show the same **Quit Trading Hub** dialog: keep their stop loss and take profit working at the broker (the default), cancel them, close the positions (never by Enter) or don't quit (Esc). Quitting never closes positions unless you choose that. Details are in Live strategies, under Closing the window and reopening.
+- **Queued order actions finish before quitting.** After you quit, order actions already handed to a broker account's queue are recorded and sent before strategies stop or connections close; an order action issued after that is refused with **Trading Hub is quitting: the order action was not sent.**
 - **Visible real-account warnings.** Real destinations are marked orange with **REAL** / **REAL ACCOUNT**.
 
 A launch confirmation authorizes an automatic strategy to trade without an individual dialog for every generated order. Start with simulation; a translated interface is not a guarantee of trading safety.

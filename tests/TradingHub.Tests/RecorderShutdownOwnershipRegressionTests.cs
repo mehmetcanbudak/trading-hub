@@ -210,6 +210,7 @@ public sealed class RecorderShutdownOwnershipRegressionTests
             SetField(Services, "<Journal>k__BackingField", new AccountJournal(Path.Combine(_root, "Accounts")));
             SetField(Services, "<PineHandoffs>k__BackingField", new OwnedOperationRegistry());
             SetField(Services, "<Work>k__BackingField", new OwnedOperationRegistry());
+            SetField(Services, "<OrderLanes>k__BackingField", new OrderActionLanes()); // shutdown drains it first
             SetField(Services, "<Sleep>k__BackingField", new SleepGuard { FlagDirectory = _root });
             var alerts = new AlertCenter(Path.Combine(_root, "notifications.json"), secrets, _http);
             SetField(Services, "<Alerts>k__BackingField", alerts);

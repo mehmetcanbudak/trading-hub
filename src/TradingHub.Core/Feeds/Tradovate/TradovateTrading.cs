@@ -662,7 +662,7 @@ internal sealed class TradovateOrderRejectedException(string message) : Exceptio
 /// Una cuenta de Tradovate operando un futuro (ES → el contrato del mes, ESZ6). Sirve con los gráficos de cualquier
 /// conexión de futuros (Tradovate, Rithmic): el Chart Trader, el DOM, los stops y las estrategias operan igual.
 /// </summary>
-public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement, INativeProtection, IDisposable
+public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, INativeProtection, IDisposable
 {
     private readonly InstrumentData _data;
     private readonly TradovateTradingSession _session;
@@ -687,7 +687,7 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
     private bool _nativeAccountVerified;
     private readonly Func<bool> _nativeProtectionEnabled;
     private LinkScope? _link;
-    private string? _nativeFault;
+    private volatile string? _nativeFault; // set under _gate; read and cleared lock-free by CurrentNativeFault
     private readonly HashSet<long> _recoveryChecked = new();
     // Every order this app asked Tradovate to cancel, in request order. An entry outlives the acknowledgment by one sync
     // (consumers read it on the change that reports the cancellation) and while its OCO partner still works; beyond the
@@ -698,7 +698,10 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
 
     /// <summary>Upper bound on remembered cancel requests of ended orders.</summary>
     public int CancelRequestMemory { get; init; } = 1024;
-    private List<Order> _active = new();
+    // Published whole under _gate and never mutated afterwards, so readers need no lock: the working handles of the
+    // last Sync, and _pending as of its last change.
+    private volatile List<Order> _active = new();
+    private volatile Order[] _pendingSnapshot = Array.Empty<Order>();
     private readonly object _executionProducer = new();
     private readonly SemaphoreSlim _executionWake = new(0, 1);
     private readonly HashSet<long> _executionPending = new();
@@ -1102,17 +1105,10 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
     public Instrument Instrument => _data.Instrument;
     public decimal LastPrice => _data.LastPrice;
     public Position Position { get; }
-    public IEnumerable<Order> ActiveOrders
-    {
-        get
-        {
-            lock (_gate)
-                foreach (var order in _active)
-                    if (string.IsNullOrEmpty(order.OwnerId) && order.NativeIdentity != null)
-                        order.ContextId = OrderContext.Descriptor.Id;
-            return _active;
-        }
-    }
+    /// <summary>The working handles of the last Sync, less those that ended since. Never waits on the broker gate, which
+    /// order entry holds across durable journal writes: readers (the UI thread among them) see the previous publication
+    /// until the entry finishes.</summary>
+    public IEnumerable<Order> ActiveOrders => _active.Where(o => o.State == OrderStates.Active);
     private string? _lastError;
     private string? _ownershipFault;
     public string? LastError
@@ -1125,17 +1121,16 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         private set => _lastError = value;
     }
     public bool PositionReady => _contract != null && _session.SnapshotReady;
+    /// <summary>Lock-free like <see cref="ActiveOrders"/>: false while any submitted handle still works without a
+    /// Tradovate order id.</summary>
     public bool OrdersReady
     {
         get
         {
             if (_contract == null || !_session.SnapshotReady) return false;
-            lock (_gate)
-            {
-                foreach (var order in _pending)
-                    if (order.State == OrderStates.Active && order.ExchangeOrderId.Length == 0) return false;
-                return true;
-            }
+            foreach (var order in _pendingSnapshot)
+                if (order.State == OrderStates.Active && order.ExchangeOrderId.Length == 0) return false;
+            return true;
         }
     }
     public event Action? Changed;
@@ -1254,6 +1249,7 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
             // las recién mandadas que todavía no aparecieron
             foreach (var o in _pending.Where(o => o.State == OrderStates.Active && !active.Contains(o))) active.Add(o);
             _pending.RemoveAll(o => o.State != OrderStates.Active);
+            _pendingSnapshot = _pending.ToArray();
             foreach (var order in _cancelPending)
                 if (replayReady && order.State == OrderStates.Active && IdOf(order) != 0 &&
                     !_cancelAwaitingAck.Contains(order) && _cancelInFlight.Add(order))
@@ -1272,6 +1268,9 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                         _session.ResolveReplacement(order);
                     }
                 }
+            foreach (var order in active)
+                if (string.IsNullOrEmpty(order.OwnerId) && order.NativeIdentity != null)
+                    order.ContextId = OrderContext.Descriptor.Id;
             _active = active;
             PruneCancelRequests(states);
         }
@@ -1324,6 +1323,7 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
             if (_byClientId.TryGetValue(clientOrderId, out var existing)) return existing;
             _byClientId.Add(clientOrderId, order);
             _pending.Add(order);
+            _pendingSnapshot = _pending.ToArray();
             _intents[order] = intent;
         }
         Sync();
@@ -1379,6 +1379,9 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                     // A transport failure, timeout, 408/5xx, or unreadable/missing reply is
                     // not a rejection. Keep the exact handle owned until clOrdId replay.
                     bool rejected = !placementStarted || TradovateTradingSession.IsDefinitePlacementRejection(ex);
+                    // The error is set first: lock-free readers that see the handle end also see why.
+                    LastError = order.ExchangeOrderId.Length > 0 ? null : rejected ? ex.Message :
+                        "Tradovate order acceptance is unknown; awaiting client-tag reconciliation: " + ex.Message;
                     if (rejected && order.ExchangeOrderId.Length == 0)
                     {
                         order.State = OrderStates.Failed;
@@ -1386,8 +1389,6 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                         _cancelPending.Remove(order);
                         RecordRejected(intent, ex.Message);
                     }
-                    LastError = order.ExchangeOrderId.Length > 0 ? null : rejected ? ex.Message :
-                        "Tradovate order acceptance is unknown; awaiting client-tag reconciliation: " + ex.Message;
                 }
             }
 
@@ -1409,14 +1410,13 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
     public string? NativeProtectionFault => CurrentNativeFault(out _);
 
     // Observing the option off (Chart Trader reads it on every refresh) clears a refusal, so switching off and on retries.
+    // Never waits on _gate, which order entry holds across durable journal writes: the option is read outside any lock
+    // either way, so a clear racing a refusal set under _gate has the same outcomes the gate allowed.
     private string? CurrentNativeFault(out bool enabled)
     {
         enabled = _nativeProtectionEnabled();
-        lock (_gate)
-        {
-            if (!enabled) _nativeFault = null;
-            return _nativeFault;
-        }
+        if (!enabled) _nativeFault = null;
+        return _nativeFault;
     }
 
     public IDisposable? LinkProtection(OrderOwner owner)
@@ -1586,6 +1586,11 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                 {
                     if (_disposed) return;
                     bool rejected = !placementStarted || TradovateTradingSession.IsDefinitePlacementRejection(ex);
+                    // A venue refusal switches linking off for this session; the caller falls back to app-managed legs.
+                    // Fault and error are set first: lock-free readers that see the legs end also see why.
+                    if (rejected && placementStarted) _nativeFault = "Tradovate refused the exchange-side OCO: " + ex.Message;
+                    LastError = stop.Order.ExchangeOrderId.Length > 0 ? null : rejected ? ex.Message :
+                        "Tradovate OCO acceptance is unknown; awaiting client-tag reconciliation: " + ex.Message;
                     foreach (var leg in new[] { stop, target })
                         if (rejected && leg.Order.ExchangeOrderId.Length == 0)
                         {
@@ -1594,10 +1599,6 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                             _cancelPending.Remove(leg.Order);
                             RecordRejected(leg.Intent, ex.Message);
                         }
-                    // A venue refusal switches linking off for this session; the caller falls back to app-managed legs.
-                    if (rejected && placementStarted) _nativeFault = "Tradovate refused the exchange-side OCO: " + ex.Message;
-                    LastError = stop.Order.ExchangeOrderId.Length > 0 ? null : rejected ? ex.Message :
-                        "Tradovate OCO acceptance is unknown; awaiting client-tag reconciliation: " + ex.Message;
                 }
             }
 

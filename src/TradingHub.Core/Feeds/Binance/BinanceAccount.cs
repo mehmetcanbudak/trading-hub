@@ -552,7 +552,7 @@ public sealed class BinanceAccountClient : IDisposable
 /// remain unavailable (0); strategy cost accounting continues to come from its own fills.
 /// </para>
 /// </remarks>
-public sealed partial class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, IDisposable
+public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, IDisposable
 {
     /// <summary>Starts the <see cref="Order.ExchangeOrderId"/> of a conditional order: an algo id is not an order id.</summary>
     private const string AlgoPrefix = "algo:";
@@ -719,17 +719,9 @@ public sealed partial class BinanceBroker : ITradingAccount, ITrackedOrderReplac
     public decimal LastPrice => _data.LastPrice;
     public Instrument Instrument => _data.Instrument;
     public Position Position { get; }
-    public IEnumerable<Order> ActiveOrders
-    {
-        get
-        {
-            lock (_gate)
-                foreach (var order in _orders)
-                    if (string.IsNullOrEmpty(order.OwnerId) && order.NativeIdentity != null)
-                        order.ContextId = OrderContext.Descriptor.Id;
-            return _orders.Where(o => o.State == OrderStates.Active);
-        }
-    }
+    /// <summary>The last published working handles. Never waits on the broker gate, which order entry holds across durable
+    /// journal writes: readers (the UI thread among them) see the previous publication until the entry finishes.</summary>
+    public IEnumerable<Order> ActiveOrders => Volatile.Read(ref _orders).Where(o => o.State == OrderStates.Active);
     private string? _lastError;
     private string? _ownershipFault;
     public string? LastError
@@ -2057,7 +2049,10 @@ public sealed partial class BinanceBroker : ITradingAccount, ITrackedOrderReplac
                 if (_byAlgoId.TryGetValue(id, out var t) && t.Order.State == OrderStates.Active && !list.Contains(t.Order)) list.Add(t.Order);
             foreach (var t in _byOrder.Values)
                 if (t.Order.State == OrderStates.Active && !list.Contains(t.Order)) list.Add(t.Order);
-            _orders = list;
+            foreach (var order in list)
+                if (string.IsNullOrEmpty(order.OwnerId) && order.NativeIdentity != null)
+                    order.ContextId = OrderContext.Descriptor.Id;
+            Volatile.Write(ref _orders, list); // published whole, never mutated afterwards
         }
         PublishOwnershipObservations();
     }

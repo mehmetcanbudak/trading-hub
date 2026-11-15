@@ -394,7 +394,8 @@ public sealed class AccountCenter
         }
         if (o.Ref is (BybitTradingSession bybit, Order bybitOrder))
         {
-            bybit.Cancel(bybitOrder);
+            // Same FIFO lane as the chart's gestures on this account; the durable commit runs off the UI thread.
+            await _svc.OrderLanes.RunAsync(bybit.OrderContext, "Cancel order", () => { bybit.Cancel(bybitOrder); return true; });
             return;
         }
         if (a.Kind == AccountKind.Replay && o.Ref is (ITradingAccount replay, Order replayOrder))
@@ -435,7 +436,7 @@ public sealed class AccountCenter
             if (net == 0) return NothingToClose(position.Symbol, 0);
             if (Math.Sign(net) != Math.Sign(p.Net)) return "Bybit position changed side; check the new position before closing.";
             var instrument = await bybit.GetInstrumentAsync(position.Symbol, CancellationToken.None).ConfigureAwait(false);
-            bybit.Flatten(instrument);
+            await _svc.OrderLanes.RunAsync(bybit.OrderContext, "Close position", () => { bybit.Flatten(instrument); return true; }).ConfigureAwait(false);
             return bybit.LastError ?? "Bybit close requested; check position and order status for confirmation.";
         }
 

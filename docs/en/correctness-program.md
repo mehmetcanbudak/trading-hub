@@ -53,6 +53,46 @@ Before this change, journaling was process-crash consistent: execution journals,
 
 A single drive flush dominates, at about 4 ms. A directory sync on APFS costs less than run-to-run noise. Order-path latency did not rise, so no fsync batching was introduced. Settings, workspace, drawings and runner/portfolio saves now cost one drive flush each, where they previously had none. Workspace and drawings skip rewriting content that this process has already committed.
 
+## Order lanes and UI-thread holds (`fp/flakes`)
+
+Every manual order gesture (chart and DOM drags, stop/target drops, chart-menu bracket actions, Chart Trader, DOM and hotkey buttons, Bybit Cancel/Close in Accounts) called its account on the Avalonia UI thread. The account call waits for the durable ownership journal (`DurableFile`, one drive flush per record), so a slow disk froze the window for the whole write.
+
+- **Order lanes.** Accounts marked `IThreadSafeOrderEntry` (Binance, Bybit, Rithmic, Tradovate) run each confirmed gesture's account call, unchanged, on `OrderActionLanes`: one first-in-first-out lane per `OrderContext`, after the confirmation dialog and permission checks. The result or exception returns to the awaiting UI code. The status bar shows `<gesture>: pending…` while the call runs and `· N order action(s) pending` while later gestures wait.
+- **Quit drain.** `QuitFlow` and `AppServices` shutdown wait for every gesture already handed to a lane before strategies stop or providers close. A gesture issued after that is refused with a visible message, not queued behind the exit.
+- **Readers never wait on a write.** Moving the call off the UI thread was not enough. With every drive flush slowed to 1.5 s, the safety scene's dispatcher probe still saw one UI-thread wait of 10.6 to 13.5 s (three runs), although no flush ran on the UI thread. `dotnet-stack` samples showed the UI thread in `Monitor.Enter` inside `BinanceBroker.ActiveOrders` (from `ChartTraderPanel.Refresh`), while the lane held the broker gate across `OrderContext.StartDispatch`'s journal writes. Brokers and `OrderContext` hold their gates across durable writes by design, and that is unchanged. Instead, every member the UI reads now uses state published under the gate and never takes it:
+  - Binance, Rithmic and Tradovate `ActiveOrders`/`OrdersReady`, and Tradovate `NativeProtection`/`NativeProtectionFault`;
+  - the Bybit session's orders, positions, average fill, amendment and unknown-submission flags;
+  - `OrderContext.LastError`;
+  - `BracketManager` stop, targets, roles, pending attachments, mode and note, which the chart and DOM read every frame. Pending attachments are now returned as copies; `MovePending`/`RemovePending` apply to the manager's attachment for the same entry, so an edit on a lane cannot change a list the renderer is enumerating.
+
+  `UiReadsDuringDurableWriteTests` holds a real durable flush inside each broker's order entry and requires every UI-read member to return within 2 s. On the earlier readers it failed for all four brokers. `BracketReaderTests` holds an account call inside a bracket action, and it failed on the earlier `BracketManager`. All of these tests pass now. Readers see the state published before the write in progress. Bybit publishes at the start of each save, so its readers see the state being committed.
+
+**Measured UI-thread hold** (`safety` scene, isolated fake Binance and simulated accounts, five runs; worst of 5 orders per run on real storage; one order per run with every drive flush slowed to 1.5 s):
+
+| Path | Real storage | 1.5 s flushes |
+|---|---|---|
+| Native gesture before lanes (the same account call inline) | 47.8 to 55.2 ms | 3.06 to 3.08 s (2 UI-thread flushes) |
+| Native gesture with lanes, before the reader fix | 0.2 ms hand-off | 0.001 s hand-off, but 10.6 to 13.5 s dispatcher wait |
+| Native gesture with lanes and lock-free readers | 0.2 to 0.5 ms | 0.001 to 0.003 s hand-off, 0.022 to 0.045 s worst dispatcher wait, 0 UI-thread flushes |
+| Simulated account gesture (unchanged) | 68.6 to 88.6 ms | 16.64 to 16.66 s (11 UI-thread flushes) |
+| Live-runner order call on the simulated account (`OrderActions.Place` with a ledger owner, unchanged) | 74.1 to 90.5 ms | 16.63 to 16.65 s (11 UI-thread flushes) |
+
+**Remaining limitation.** Simulated and practice-replay accounts are UI-thread-affine and still journal on the UI thread, as the table shows. The live strategy runner still places orders on its synchronization context, the UI thread; that row excludes its own LiveStore state and fill writes, which add to it. The Accounts snapshot and menu-bar metrics still read some Bybit session members under its gate (identity, execution state, closed PnL, open-position check). Rithmic and Tradovate `IsReplacementPending` still lock, but only the bracket manager calls them, on account threads.
+
+**Flakes in the same branch.**
+
+| Test | Before | After | Class | Cause and fix |
+|---|---|---|---|---|
+| `BybitExecutionFactsTests`/`BybitProviderTests` | 5/67 failed (300 ms forced delay), 9/67 (1000 ms) | 0/670 forced, 0/1,005 under load | test synchronization | Tests waited for the exchange id, which appears before the placement settles. They now also wait for `!IsSending` (`6505f7f`). |
+| `TradovateNativeProtectionTests.A_restarted_app_re_owns…` | 8/20 to 15/30 under load | 0/30 at the heaviest load | product | `BracketManager` only synchronized on account changes, so a manager created after the restarted account settled did not adopt the working OCO for about 10 s. It now reconciles once at creation and places nothing (`25c1cfc`). A forcing test failed 3/3 before the fix and passes after it. |
+| `OrderContextAdmissionRegressionTests.Partial_native_close_rechecks…` | Matched, equal iterations: moderate load 0/30 with `b296c61` vs 0/30 without; extreme mixed load 6/9 with vs 3/9 without | 0/72 alone under heavy CPU and I/O load | unresolved | `b296c61` (the fake sends PnL snapshots in snapshot order) does not lower the rate, so the stale-report explanation was wrong. Failures occur only when 10 to 12 sibling Rithmic tests in the same run also time out. [INFERENCE] The read loop is starved past the 8 s deadline. This is not proven, and the deadline was not extended. |
+| Tradovate `A_refused_placeoco…`, `A_position_is_never_proven…`, `An_unknown_placeoco_reply…` | 2/200, 3/240, 2/240 at the heaviest earlier load (before `25c1cfc`) | 0/60 per test (4 workers, CPU and I/O load) and 0/72 (6 workers, focused) with lateness diagnostics | not reproduced | Each earlier failure was a 10 s deadline. No cause was established, and nothing was changed. |
+| `BinanceNativeExecutionFactsTests.Adopting_a_partially_filled…`, `RecoveredTerminalOpening…`, `RecoveredUnfilledOwnedOpening…` | 3/3, 2/3 and 1/1 (full suite) after the reader fix; passing on `066270d` (2 runs) | 0 failures in 3 focused class runs and both final full-suite runs | test synchronization | The tests waited for the exchange id and then read the native identity. The acceptance section assigns the native identity last, after its durable binding. All three now also wait for the native identity, as `BinanceBrokerTests.Accepted` already does. Why the rate rose after the reader change is not established: these tests read the order fields directly, and a timing probe on rerun saw no gap. |
+| `OrderActionLanesTests.Gestures_run_once_each…` (new in this branch) | 1 of 1 loaded suite run | 0 failures in 3 focused runs and both final full-suite runs | test assertion | The test compared pool thread ids, but the awaiting test's thread can legitimately serve the lane later. It now asserts the actual property: no gesture runs on the caller's stack inside `RunAsync`. |
+| `RecorderShutdownOwnershipRegressionTests` (4 tests) | 4/4 failed after `066270d` | 0 failures in 3 focused runs and both final full-suite runs | fixture composition | The fixture builds `AppServices` without its constructor and composes only the shutdown owners. Shutdown now drains `OrderLanes` first, and the fixture lacked it, so creating the delegate threw before the drain could run. The fixture now composes `OrderLanes`. |
+
+**Branch verification.** The Release solution built with zero warnings and zero errors. The complete suite passed 2,360 tests with 0 failures and 7 Windows-only skips, once unloaded and once with four busy CPU loops. The `safety` scene passed all 169 checks in five English runs and once each in Spanish and Simplified Chinese. The English checker and the i18n gates pass: es and zh-CN each have 10,128 translations, with zero untranslated candidates and zero template defects.
+
 ## Current verification
 
 | Gate | Observed result |

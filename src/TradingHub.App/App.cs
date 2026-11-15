@@ -221,6 +221,8 @@ internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, IQuitTermin
         _quitting = true;
         try
         {
+            // Manual gestures already handed over complete before strategies stop or connections close.
+            await svc.OrderLanes.DrainAsync();
             await StopAsync(mode);
         }
         catch (Exception ex)

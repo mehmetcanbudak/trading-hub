@@ -44,6 +44,16 @@ public interface ITradingAccount
 
 }
 
+/// <summary>
+/// Order entry (submit, replace, cancel, cancel-all, coordinated close/reverse) may be called from any thread: the
+/// account serializes its own state, already accepts these calls while its own transport loops run, and raises
+/// <see cref="ITradingAccount.Changed"/> from any thread. Simulated and replay accounts are UI-thread-affine and do not
+/// implement it.
+/// </summary>
+public interface IThreadSafeOrderEntry
+{
+}
+
 /// <summary>Client-coordinated close. Acceptance is not native reduction enforcement or completion.</summary>
 public interface ICoordinatedPositionClose
 {

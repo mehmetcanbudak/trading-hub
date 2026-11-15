@@ -976,6 +976,9 @@ public sealed partial class AppServices
         }
         try
         {
+            // Gestures already handed to an order lane finish (durably and through transport) before strategies stop
+            // and providers close; later gestures are refused visibly.
+            await CloseOwnedAsync(OrderLanes.DrainAsync, "Error draining order actions");
             var workDrain = CloseOwnedAsync(Work.StopAsync, "Error closing ordinary work");
             var recordingDrain = CloseOwnedAsync(Hub.StopRecordingAsync, "Error closing recorded history");
             Close(() => StopLiveForQuit(QuitMode.CancelStops));

@@ -2235,6 +2235,10 @@
     "es": "Cancelar autorización",
     "zh-CN": "取消授权流程"
   },
+  "Cancel orders at {0}": {
+    "es": "Cancelar órdenes en {0}",
+    "zh-CN": "撤销 {0} 处的订单"
+  },
   "Cancel relocation": {
     "es": "Cancelar traslado",
     "zh-CN": "取消迁移"
@@ -3886,6 +3890,10 @@
   "Error closing replay or alerts": {
     "es": "Error al cerrar el replay o las alertas",
     "zh-CN": "关闭回放或提醒时出错"
+  },
+  "Error draining order actions": {
+    "es": "Error al completar las acciones de órdenes entregadas",
+    "zh-CN": "完成已提交的订单操作时出错"
   },
   "Error stopping {0} to quit": {
     "es": "Error al detener {0} para salir",
@@ -10663,6 +10671,10 @@
     "es": "Trading Hub entrega a la CLI seleccionada el código fuente revisado, la solicitud y las instrucciones de la aplicación que aparecen abajo. La CLI puede añadir su propio contexto de sistema o cuenta y conservar el contenido según sus políticas; se aplican la facturación o los límites de suscripción del proveedor. Este envío no concede acceso a directorios de estrategias o indicadores, al laboratorio ni a investigación.\n",
     "zh-CN": "Trading Hub 会将下方已审阅的源代码、请求和应用指令交给你选择的 CLI。CLI 可能添加自身的系统/账户上下文，并根据其政策保留内容；适用提供商的计费或订阅限制。此次交接不授予策略/指标目录、实验室或研究访问权限。\n"
   },
+  "Trading Hub is quitting: the order action was not sent.": {
+    "es": "Trading Hub se está cerrando: la acción de orden no se envió.",
+    "zh-CN": "Trading Hub 正在退出：该订单操作未发送。"
+  },
   "Trading Hub is shutting down: new exposure is disabled; cancellation and reducing exits remain available.": {
     "es": "Trading Hub se está cerrando: la nueva exposición está desactivada; siguen disponibles la cancelación de órdenes y las salidas que reducen posiciones.",
     "zh-CN": "Trading Hub 正在关闭：已禁止新增风险敞口；撤单和减仓退出仍可用。"
@@ -12331,6 +12343,10 @@
     "es": "{0} · {1} días · {2}{3}",
     "zh-CN": "{0} · {1} 天 · {2}{3}"
   },
+  "{0} · {1} order action(s) pending": {
+    "es": "{0} · {1} acción(es) de orden pendiente(s)",
+    "zh-CN": "{0} · {1} 个订单操作待处理"
+  },
   "{0} · {1} · REAL": {
     "es": "{0} · {1} · REAL",
     "zh-CN": "{0} · {1} · 实盘"
@@ -12410,6 +12426,10 @@
   "{0}: no new entries until the next session{1}": {
     "es": "{0}: sin nuevas entradas hasta la siguiente sesión{1}",
     "zh-CN": "{0}：在下一交易时段前不再入场{1}"
+  },
+  "{0}: pending…": {
+    "es": "{0}: pendiente…",
+    "zh-CN": "{0}：待处理…"
   },
   "{0}: required column '{1}' missing.": {
     "es": "{0}: falta la columna requerida «{1}».",

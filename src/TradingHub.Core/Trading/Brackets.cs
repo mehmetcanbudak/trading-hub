@@ -130,6 +130,13 @@ public sealed class BracketManager : IDisposable
     // The venue refused or dissolved this position's linked pair: app-managed protection until the next position.
     private bool _linkFallback;
     private string? _protectionNote;
+    // What readers on any thread see (the chart, DOM and Chart Trader render from it on the UI thread). Republished under
+    // _gate at the end of every section that changes it; readers never take _gate, which actions and synchronization hold
+    // across account calls and their durable journal writes. Orders are the live handles; pending attachments are copies.
+    private sealed record ExitView(BracketRole Role, Order Handle, Order Latest, bool Linked);
+    private sealed record ReaderView(IReadOnlyList<ExitView> Owned, IReadOnlyList<ExitView> Exits,
+        IReadOnlyList<PendingBracket> Pending, decimal EntryPrice, string? Note);
+    private volatile ReaderView _view = new([], [], [], 0, null);
 
     public BracketManager(ITradingAccount account)
     {
@@ -143,7 +150,11 @@ public sealed class BracketManager : IDisposable
         // never send. Reconcile once now, exactly as that change would: working venue-linked protection is adopted at
         // once instead of looking absent (and inviting a duplicate). Nothing is placed here: the position is the known
         // baseline above and the default template is off.
-        lock (_gate) SyncLoop();
+        lock (_gate)
+        {
+            SyncLoop();
+            PublishView();
+        }
     }
 
     public ITradingAccount Account { get; }
@@ -202,61 +213,56 @@ public sealed class BracketManager : IDisposable
         _exits.Where(e => e.Role == role && e.Current != null)
             .Select(e => (Intent: e, Order: Current(e.Current!))).Where(e => !Terminal(e.Order));
 
+    // Under _gate.
+    private void PublishView() => _view = new(
+        _owned.Select(o => new ExitView(o.Intent.Role, o.Handle, o.Latest, false)).ToArray(),
+        _exits.Where(e => e.Current != null)
+            .Select(e => new ExitView(e.Role, e.Current!.Handle, e.Current.Latest, e.Current is { Linked: true, Partner: not null })).ToArray(),
+        _pending.Select(p =>
+        {
+            var copy = new PendingBracket { Entry = p.Entry, StopTicks = p.StopTicks };
+            copy.Targets.AddRange(p.Targets.Select(t => new BracketTarget { Ticks = t.Ticks, Percent = t.Percent }));
+            return copy;
+        }).ToArray(),
+        _entryPrice, _protectionNote);
+
+    // Current() for readers: resolves the working order without touching the writer's Latest.
+    private Order Resolve(ExitView exit) =>
+        Terminal(exit.Handle) ? exit.Handle : Terminal(exit.Latest) ? exit.Latest
+            : Account.ActiveOrders.FirstOrDefault(a => Same(a, exit.Handle) || Same(a, exit.Latest)) ?? exit.Latest;
+
+    private IEnumerable<(ExitView Exit, Order Order)> WorkingView(ReaderView view, BracketRole role) =>
+        view.Exits.Where(e => e.Role == role).Select(e => (Exit: e, Order: Resolve(e))).Where(e => !Terminal(e.Order));
+
     private string? NotReady => Account.PositionReady && Account.OrdersReady
         ? null : "Account position and working orders are still synchronizing.";
 
-    public BracketRole RoleOf(Order o)
-    {
-        lock (_gate)
-        {
-            var owned = _owned.FirstOrDefault(e => Same(e.Handle, o) || Same(e.Latest, o));
-            if (owned != null) return owned.Intent.Role;
-            return BracketRole.None;
-        }
-    }
+    public BracketRole RoleOf(Order o) =>
+        _view.Owned.FirstOrDefault(e => Same(e.Handle, o) || Same(e.Latest, o))?.Role ?? BracketRole.None;
 
     /// <summary>Número del objetivo (1 = el más cercano a la entrada), o 0 si no es un objetivo.</summary>
     public int TargetNumber(Order o)
     {
-        lock (_gate)
-        {
-            var live = Working(BracketRole.Target).Select(x => x.Order).OrderBy(x => Math.Abs(PriceOf(x) - _entryPrice)).ToList();
-            int i = live.FindIndex(x => Same(x, o));
-            return i + 1;
-        }
+        var view = _view;
+        var live = WorkingView(view, BracketRole.Target).Select(x => x.Order).OrderBy(x => Math.Abs(PriceOf(x) - view.EntryPrice)).ToList();
+        int i = live.FindIndex(x => Same(x, o));
+        return i + 1;
     }
 
-    public Order? StopLoss
-    {
-        get
-        {
-            lock (_gate) return Working(BracketRole.StopLoss).Select(x => x.Order).FirstOrDefault();
-        }
-    }
+    public Order? StopLoss => WorkingView(_view, BracketRole.StopLoss).Select(x => x.Order).FirstOrDefault();
 
-    public IReadOnlyList<Order> Targets
-    {
-        get
-        {
-            lock (_gate) return Working(BracketRole.Target).Select(x => x.Order).ToList();
-        }
-    }
+    public IReadOnlyList<Order> Targets => WorkingView(_view, BracketRole.Target).Select(x => x.Order).ToList();
 
     /// <summary>Precio de entrada de la posición abierta.</summary>
-    public decimal EntryPrice => Volume != 0 ? Account.Position.AveragePrice : _entryPrice;
+    public decimal EntryPrice => Volume != 0 ? Account.Position.AveragePrice : _view.EntryPrice;
+    // The same under _gate, for actions and synchronization.
+    private decimal CurrentEntryPrice => Volume != 0 ? Account.Position.AveragePrice : _entryPrice;
 
-    public IReadOnlyList<PendingBracket> Pending
-    {
-        get
-        {
-            lock (_gate) return _pending.ToList();
-        }
-    }
+    /// <summary>Attachments to pending entries, as copies: edit them through <see cref="MovePending"/> and
+    /// <see cref="RemovePending"/>, which apply to this manager's attachment for the same entry.</summary>
+    public IReadOnlyList<PendingBracket> Pending => _view.Pending;
 
-    public PendingBracket? PendingFor(Order entry)
-    {
-        lock (_gate) return _pending.FirstOrDefault(p => Same(p.Entry, entry));
-    }
+    public PendingBracket? PendingFor(Order entry) => _view.Pending.FirstOrDefault(p => Same(p.Entry, entry));
 
     /// <summary>
     /// How the working stop and targets are held. Exchange-side only when every working leg was sent linked and the venue
@@ -266,26 +272,18 @@ public sealed class BracketManager : IDisposable
     {
         get
         {
-            lock (_gate)
-            {
-                var working = Working(BracketRole.StopLoss).Concat(Working(BracketRole.Target)).ToList();
-                if (working.Count == 0) return ProtectionMode.None;
-                return Account is INativeProtection native && working.Count == 2 &&
-                    working.All(w => w.Intent.Current is { Linked: true, Partner: not null } && native.ProtectionGroupOf(w.Order) != null)
-                    ? ProtectionMode.ExchangeSide : ProtectionMode.AppManaged;
-            }
+            var view = _view;
+            var working = WorkingView(view, BracketRole.StopLoss).Concat(WorkingView(view, BracketRole.Target)).ToList();
+            if (working.Count == 0) return ProtectionMode.None;
+            return Account is INativeProtection native && working.Count == 2 &&
+                working.All(w => w.Exit.Linked && native.ProtectionGroupOf(w.Order) != null)
+                ? ProtectionMode.ExchangeSide : ProtectionMode.AppManaged;
         }
     }
 
     /// <summary>Why opted-in exchange-side protection is not in use for this position (venue refusal, dissolved link or an
     /// unrepresentable layout); null when nothing fell back.</summary>
-    public string? ProtectionNote
-    {
-        get
-        {
-            lock (_gate) return _protectionNote ?? (Account as INativeProtection)?.NativeProtectionFault;
-        }
-    }
+    public string? ProtectionNote => _view.Note ?? (Account as INativeProtection)?.NativeProtectionFault;
 
     /// <summary>Resultado en dinero si la posición (o la cantidad dada) se cerrara en ese precio.</summary>
     public decimal PnLAt(decimal price, decimal? quantity = null, decimal? entry = null, int? side = null)
@@ -308,14 +306,21 @@ public sealed class BracketManager : IDisposable
             _busy = true;
             try
             {
-                result = op();
+                try
+                {
+                    result = op();
+                }
+                finally
+                {
+                    if (outer) _busy = false;
+                }
+
+                if (outer) SyncLoop();
             }
             finally
             {
-                if (outer) _busy = false;
+                if (outer) PublishView(); // a nested action is published by the section that holds it
             }
-
-            if (outer) SyncLoop();
         }
 
         Changed?.Invoke();
@@ -352,7 +357,7 @@ public sealed class BracketManager : IDisposable
         if (v == 0) return "No open position.";
         if (role == BracketRole.None)
         {
-            decimal last = Account.LastPrice > 0 ? Account.LastPrice : EntryPrice;
+            decimal last = Account.LastPrice > 0 ? Account.LastPrice : CurrentEntryPrice;
             if (price == last) return "Drop above or below the current price.";
             role = (price > last) == (v > 0) ? BracketRole.Target : BracketRole.StopLoss;
         }
@@ -483,7 +488,7 @@ public sealed class BracketManager : IDisposable
         if (NotReady is { } pending) return pending;
         decimal v = Volume;
         if (v == 0 || ExitQuantity == 0) return "No open position.";
-        decimal be = Inst.RoundPrice(EntryPrice + Math.Sign(v) * Template.BreakevenOffsetTicks * Inst.TickSize);
+        decimal be = Inst.RoundPrice(CurrentEntryPrice + Math.Sign(v) * Template.BreakevenOffsetTicks * Inst.TickSize);
         if (Validate(BracketRole.StopLoss, be, Math.Sign(v), Account.LastPrice) != null)
             return "Not enough profit yet to move the stop to breakeven.";
         var stop = Desired(BracketRole.StopLoss).FirstOrDefault();
@@ -514,7 +519,7 @@ public sealed class BracketManager : IDisposable
         decimal v = Volume;
         if (v == 0) return "No open position.";
         CancelManaged();
-        return PlaceBrackets(Math.Sign(v), EntryPrice, Template.StopTicks, Template.Targets);
+        return PlaceBrackets(Math.Sign(v), CurrentEntryPrice, Template.StopTicks, Template.Targets);
     }
 
     private string PlaceBrackets(int side, decimal entry, int? stopTicks, IReadOnlyList<BracketTarget> targets)
@@ -619,8 +624,9 @@ public sealed class BracketManager : IDisposable
     });
 
     /// <summary>Mueve el stop (index −1) o un objetivo adjunto a una entrada pendiente.</summary>
-    public string MovePending(PendingBracket pb, int index, decimal price) => Run(() =>
+    public string MovePending(PendingBracket attachment, int index, decimal price) => Run(() =>
     {
+        if (Attached(attachment) is not { } pb) return "";
         int ticks = (int)Math.Round((Inst.RoundPrice(price) - pb.EntryPrice) / Inst.TickSize) * pb.Side;
         if (index < 0)
         {
@@ -635,8 +641,9 @@ public sealed class BracketManager : IDisposable
         return $"Target attached at {ticks} ticks";
     });
 
-    public void RemovePending(PendingBracket pb, int index) => Run(() =>
+    public void RemovePending(PendingBracket attachment, int index) => Run(() =>
     {
+        if (Attached(attachment) is not { } pb) return 0;
         if (index < 0) pb.StopTicks = null;
         else if (index < pb.Targets.Count)
         {
@@ -647,6 +654,9 @@ public sealed class BracketManager : IDisposable
 
         return 0;
     });
+
+    // The attachment this manager holds for the entry of a reader copy (or of itself); null once it was settled or dropped.
+    private PendingBracket? Attached(PendingBracket attachment) => _pending.FirstOrDefault(p => Same(p.Entry, attachment.Entry));
 
     // ===================================================================== sincronización
 
@@ -659,7 +669,8 @@ public sealed class BracketManager : IDisposable
                 _syncAgain = true;
                 return;
             }
-            SyncLoop();
+            try { SyncLoop(); }
+            finally { PublishView(); }
         }
 
         Changed?.Invoke();

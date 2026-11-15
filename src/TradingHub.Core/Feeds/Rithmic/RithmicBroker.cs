@@ -9,7 +9,7 @@ namespace TradingHub.Feeds.Rithmic;
 /// Una cuenta de Rithmic operando un instrumento (el contrato del mes: ES → ESZ6). El Chart Trader, el DOM,
 /// el gráfico y el stop/objetivo operan contra esta cuenta igual que con la simulada o la de Binance.
 /// </summary>
-public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, ICoordinatedPositionClose, IDisposable
+public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, ICoordinatedPositionClose, IDisposable
 {
     private readonly InstrumentData? _data;
     private readonly Instrument _instrument;
@@ -37,7 +37,10 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
     }
     private (string Symbol, string Exchange)? _resolved;
     private RithmicAccountInfo? _verifiedNativeAccount;
+    // Published whole under _gate and never mutated afterwards, so readers need no lock: the working handles of the
+    // last Sync, and every tracked handle (_byTag's values), republished at each membership change.
     private volatile List<Order> _active = new();
+    private volatile Order[] _tracked = Array.Empty<Order>();
 
     public RithmicBroker(InstrumentData data, RithmicTradingSession session, string accountId, string name,
         Func<CancellationToken, Task<(string Symbol, string Exchange)>> contract, OrderContext? orderContext = null)
@@ -81,17 +84,10 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
     public OrderContext OrderContext { get; }
     public IExecutionSource Executions => OrderContext.Executions;
     public Position Position { get; }
-    public IEnumerable<Order> ActiveOrders
-    {
-        get
-        {
-            lock (_gate)
-                foreach (var order in _active)
-                    if (string.IsNullOrEmpty(order.OwnerId) && order.NativeIdentity != null)
-                        order.ContextId = OrderContext.Descriptor.Id;
-            return _active;
-        }
-    }
+    /// <summary>The working handles of the last Sync, less those that ended since. Never waits on the broker gate, which
+    /// order entry holds across durable journal writes: readers (the UI thread among them) see the previous publication
+    /// until the entry finishes.</summary>
+    public IEnumerable<Order> ActiveOrders => _active.Where(o => o.State == OrderStates.Active);
     private string? _lastError;
     private string? _ownershipFault;
     public string? LastError
@@ -104,16 +100,15 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         private set => _lastError = value;
     }
     public bool PositionReady => _resolved is { } c && _session.PositionReadyFor(_account, c.Symbol, c.Exchange);
+    /// <summary>Lock-free like <see cref="ActiveOrders"/>: false while any tracked handle still works without a
+    /// Rithmic basket id.</summary>
     public bool OrdersReady
     {
         get
         {
             if (_resolved == null || !_session.OrdersReadyFor(_account)) return false;
-            lock (_gate)
-            {
-                foreach (var order in _byTag.Values)
-                    if (order.State == OrderStates.Active && order.ExchangeOrderId.Length == 0) return false;
-            }
+            foreach (var order in _tracked)
+                if (order.State == OrderStates.Active && order.ExchangeOrderId.Length == 0) return false;
             return true;
         }
     }
@@ -207,6 +202,7 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
                             {
                                 _intents[o] = recovered;
                                 _byTag[recovered.ClientOrderId] = o;
+                                _tracked = _byTag.Values.ToArray();
                                 _tagOf[o] = recovered.ClientOrderId;
                                 recoveredNow = true;
                                 _ownershipNotificationPending = true;
@@ -278,6 +274,9 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
             if (open == 0 && Position.Volume != 0 && LastPrice > 0 && Position.AveragePrice > 0)
                 open = (LastPrice - Position.AveragePrice) * Position.Volume * (Instrument.PointValue > 0 ? Instrument.PointValue : 1);
             Position.UnrealizedPnL = open;
+            foreach (var order in active)
+                if (string.IsNullOrEmpty(order.OwnerId) && order.NativeIdentity != null)
+                    order.ContextId = OrderContext.Descriptor.Id;
             _active = active;
             if (!_session.IsConnected) _cancelAttempted.Clear();
             _cancelRequested.RemoveWhere(static order => order.State != OrderStates.Active);
@@ -346,6 +345,7 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
         {
             if (_byTag.TryGetValue(tag, out var existing)) return existing;
             _byTag[tag] = order;
+            _tracked = _byTag.Values.ToArray();
             _tagOf[order] = tag;
             _intents[order] = intent;
         }
@@ -394,15 +394,16 @@ public sealed class RithmicBroker : ITradingAccount, ITrackedOrderReplacement, I
                 lock (_gate)
                 {
                     if (_disposed) return;
+                    // A lost response is not a rejection. Keep the original tag and handle for exact replay.
+                    // The error is set first: lock-free readers that see the handle end also see why.
+                    LastError = submissionStarted && ex is not RithmicTradingSession.RithmicRejectedException
+                        ? "Rithmic submission outcome is unknown: " + ex.Message : ex.Message;
                     if (!submissionStarted || ex is RithmicTradingSession.RithmicRejectedException)
                     {
                         order.State = OrderStates.Failed;
                         order.Status = OrderStatus.Rejected;
                         RecordRejected(intent, ex.Message);
                     }
-                    // A lost response is not a rejection. Keep the original tag and handle for exact replay.
-                    LastError = submissionStarted && ex is not RithmicTradingSession.RithmicRejectedException
-                        ? "Rithmic submission outcome is unknown: " + ex.Message : ex.Message;
                 }
             }
 

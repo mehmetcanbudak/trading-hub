@@ -79,6 +79,28 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         public DateTime LastSeen;
         public DateTime? ExecutionScanCursor;
     }
+    /// <summary>What account readers see of the tracked orders and positions, published whole under _gate by
+    /// <see cref="Publish"/> and never mutated afterwards; order handles keep their own lock-free fields.</summary>
+    private sealed class View
+    {
+        public static readonly View Empty = new(Array.Empty<PublishedOrder>(), new(StringComparer.Ordinal));
+        public readonly PublishedOrder[] Orders;
+        public readonly Order[] Handles;
+        public readonly Dictionary<Order, PublishedOrder> ByOrder;
+        public readonly Dictionary<string, BybitPosition> Positions;
+        public readonly BybitPosition[] PositionList;
+        public View(PublishedOrder[] orders, Dictionary<string, BybitPosition> positions)
+        {
+            Orders = orders;
+            Handles = Array.ConvertAll(orders, published => published.Order);
+            ByOrder = new(orders.Length, ReferenceEqualityComparer.Instance);
+            foreach (var published in orders) ByOrder.Add(published.Order, published);
+            Positions = positions;
+            PositionList = positions.Values.ToArray();
+        }
+    }
+    private sealed record PublishedOrder(Order Order, string Symbol, bool ReplacementPending, bool SubmissionUnknown, decimal AverageFill);
+    private volatile View _view = View.Empty;
     private sealed class OrderExecutions
     {
         public decimal Quantity;
@@ -122,6 +144,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         OrderContext = new(new("unverified:bybit:" + ContextIdentity, "Bybit", "linear-uta", Settings.EnvironmentName,
             ContextIdentity, ContextIdentity, OwnershipNamespace: "bybit:" + ContextIdentity), executions: _executionSource);
         Load();
+        Publish();
     }
 
     public BybitAccountSettings Settings { get; }
@@ -242,8 +265,10 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
     public DateTime ExecutionCoverageStart { get; }
     public event Action? Changed;
     public event Action<BybitExecution>? FillReceived;
-    public IReadOnlyList<BybitPosition> Positions { get { lock (_gate) return _positions.Values.ToArray(); } }
-    public IReadOnlyList<Order> Orders { get { lock (_gate) return _byLink.Values.Select(t => t.Order).ToArray(); } }
+    // The members below read the last publication (see Publish) and never wait on _gate, which order entry holds across
+    // durable journal and state writes: readers (the UI thread among them) never stall behind storage.
+    public IReadOnlyList<BybitPosition> Positions => _view.PositionList;
+    public IReadOnlyList<Order> Orders => _view.Handles;
     public IReadOnlyList<BybitExecution> Executions => GetExecutionState().Executions;
     public (IReadOnlyList<BybitExecution> Executions, long Revision) GetExecutionState()
     {
@@ -286,11 +311,12 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 _executions.Keys.Any(key => !_publishedExecutions.Contains(key));
         }
     }
-    public BybitPosition? PositionFor(string symbol) { lock (_gate) return _positions.GetValueOrDefault(symbol); }
-    public IReadOnlyList<Order> OrdersFor(string symbol) { lock (_gate) return _byLink.Values.Where(t => t.Symbol == symbol).Select(t => t.Order).ToArray(); }
-    public decimal AverageFillFor(Order order) { lock (_gate) return Find(order)?.AverageFill ?? 0; }
-    public bool IsReplacementPending(Order order) { lock (_gate) return Find(order) is { } t && (t.Amendment != null || t.QueuedAmendment != null); }
-    public bool IsSubmissionUnknown(Order order) { lock (_gate) return Find(order)?.SubmissionUnconfirmed ?? false; }
+    public BybitPosition? PositionFor(string symbol) => _view.Positions.GetValueOrDefault(symbol);
+    public IReadOnlyList<Order> OrdersFor(string symbol) =>
+        _view.Orders.Where(published => published.Symbol == symbol).Select(published => published.Order).ToArray();
+    public decimal AverageFillFor(Order order) => _view.ByOrder.TryGetValue(order, out var published) ? published.AverageFill : 0;
+    public bool IsReplacementPending(Order order) => _view.ByOrder.TryGetValue(order, out var published) && published.ReplacementPending;
+    public bool IsSubmissionUnknown(Order order) => _view.ByOrder.TryGetValue(order, out var published) && published.SubmissionUnknown;
     /// <summary>True while a placement request for this order is still in flight; its outcome is not yet settled into the tracked state.</summary>
     internal bool IsSending(Order order) { lock (_gate) return Find(order)?.Sending ?? false; }
     public string? StableOrderIdentityOf(Order order)
@@ -508,6 +534,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                     missing.Add(terminal[_terminalReviewCursor]);
                     _terminalReviewCursor = (_terminalReviewCursor + 1) % terminal.Length;
                 }
+                Publish();
             }
             foreach (var tracked in missing)
             {
@@ -523,6 +550,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                     if (report != null) Apply(tracked, report);
                     else if (tracked.Order.State == OrderStates.Active) unresolved = "Bybit order outcome is unknown; exact client/order lookup has not resolved it. No cancellation was inferred.";
                     else lateReviewError = "Bybit terminal-order late-fill history is unavailable; retained executions are not complete financial coverage.";
+                    Publish();
                 }
             }
 
@@ -856,6 +884,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             {
                 order.State = OrderStates.Failed; order.Status = OrderStatus.Rejected; tracked.SubmissionUnconfirmed = tracked.Sending = false;
                 OrderContext.RecordRejected(prepared, _storageError ?? "The native state could not be committed before transport.");
+                Publish();
                 return order;
             }
             OrdersReady = false;
@@ -887,6 +916,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 {
                     lock (_gate)
                     {
+                        LastError = ex.Message; // first: lock-free readers that see the handle end also see why
                         if (order.ExchangeOrderId.Length == 0 && order.Status == OrderStatus.None)
                         {
                             order.State = OrderStates.Failed; order.Status = OrderStatus.Rejected; tracked.SubmissionUnconfirmed = false;
@@ -895,7 +925,6 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                             tracked.AmendmentViewGuard = null;
                             OrderContext.RecordRejected(prepared, ex.Message);
                         }
-                        LastError = ex.Message;
                     }
                 }
                 catch (Exception ex) { lock (_gate) LastError = "Bybit placement outcome remains tracked and unknown: " + ex.Message; }
@@ -1051,6 +1080,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 });
             }
             DispatchFlattening();
+            Publish();
         }
     }
     private void DispatchFlattening()
@@ -1141,6 +1171,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
     }
     private bool Save()
     {
+        Publish(); // Every mutation of the published state that persists ends here; readers never wait for the write.
         if (_statePath == null) return true;
         if (_lease == null || _storageError != null) return false;
         try
@@ -1165,6 +1196,13 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             return false;
         }
     }
+
+    /// <summary>Under _gate (or before construction completes). Called at every Save, after each order-report
+    /// application, and after the mutations that end without one.</summary>
+    private void Publish() => _view = new View(
+        _byLink.Values.Select(t => new PublishedOrder(t.Order, t.Symbol, t.Amendment != null || t.QueuedAmendment != null,
+            t.SubmissionUnconfirmed, t.AverageFill)).ToArray(),
+        new Dictionary<string, BybitPosition>(_positions, StringComparer.Ordinal));
 
     /// <summary>Atomically stop only a confirmed idle context. Its state lease is published/released before a new identical context can open.</summary>
     public bool TryBeginIdleShutdown(out Task completion)
