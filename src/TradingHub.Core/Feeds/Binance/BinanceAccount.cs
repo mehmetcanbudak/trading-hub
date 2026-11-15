@@ -583,6 +583,9 @@ public sealed partial class BinanceBroker : ITradingAccount, ITrackedOrderReplac
     private readonly Queue<Tracked> _baselineRecovery = new();
     private const int RecoveryBatchSize = 16;
     private readonly TaskCompletionSource _initialNativeReplay = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // Completed (and replaced) under _gate each time a poll finishes a complete native replay. Dispatch waits for this
+    // event: a poll that starts again immediately leaves no observable idle window to sample.
+    private TaskCompletionSource _nativeReplay = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private string? _spotBaseAsset; // reuse the instrument catalog metadata; resolve an older metadata-less instrument once
     private string? _quoteAsset;
@@ -812,6 +815,12 @@ public sealed partial class BinanceBroker : ITradingAccount, ITrackedOrderReplac
                     OrdersReady = lookupError == null && protection.Error == null && !HasUnknownSubmission();
                     _nativeOrdersReady &= protection.NativeComplete;
                     _nativeReplayReady = _nativeOrdersReady;
+                    if (_nativeReplayReady)
+                    {
+                        var completed = _nativeReplay;
+                        _nativeReplay = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                        completed.TrySetResult();
+                    }
                     _lastError = null;
                     _nativeError = lookupError ?? protection.Error;
                     // Only a submission-only poll may skip protection without voiding the last clean read.
@@ -2852,10 +2861,9 @@ public sealed partial class BinanceBroker : ITradingAccount, ITrackedOrderReplac
 
     private async Task WaitForNativeReplayAsync()
     {
-        while (!_nativeReplayReady)
-        {
-            await Task.Delay(100, _cts.Token).ConfigureAwait(false);
-        }
+        Task replay;
+        lock (_gate) replay = _nativeReplayReady ? Task.CompletedTask : _nativeReplay.Task;
+        await replay.WaitAsync(_cts.Token).ConfigureAwait(false);
         _cts.Token.ThrowIfCancellationRequested();
     }
 

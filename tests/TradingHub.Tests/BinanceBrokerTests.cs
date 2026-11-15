@@ -422,6 +422,27 @@ public partial class BinanceBrokerTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task Submission_and_replacement_follow_completed_native_replays_when_polls_run_back_to_back(bool conditional)
+    {
+        // A loaded host can leave no idle gap between polls. Each completed replay still authorizes the waiting
+        // dispatch; sampling the between-poll flag would miss every such window and starve the order indefinitely.
+        using var fake = new FakeBinance(true);
+        var settings = fake.Settings;
+        settings.PollInterval = TimeSpan.Zero;
+        using var broker = _orders.Binance(new InstrumentData(BtcUsdt, new SimulatedFeed()), settings, "Binance back-to-back polls");
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Accepted(fake, order);
+        OrderActions.Reprice(broker, order, 59500m);
+        await Observed(broker, fake, () => fake.Sent.Count == 2 && !broker.IsReplacementPending(order) && order.ExchangeOrderId.Length > 0);
+        Assert.Equal(59500m, Level(order));
+        Assert.Equal(59500m, fake.Sent[1].Level);
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+        Assert.Empty(fake.Refused);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task Queued_trailing_modify_waits_for_exact_unknown_submission_recovery(bool conditional)
     {
         using var fake = new FakeBinance(true);
