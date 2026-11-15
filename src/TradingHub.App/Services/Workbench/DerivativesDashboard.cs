@@ -1,5 +1,6 @@
 using TradingHub.Feeds;
 using TradingHub.Feeds.Derivatives;
+using TradingHub.Market;
 
 namespace TradingHub.App.Services.Workbench;
 
@@ -116,7 +117,8 @@ public static class DerivativesDashboard
         decimal? usd = openInterest is { } q && price is { } p ? q * p : null;
 
         var ls = input.LongShort is { Availability: OpenInterestAvailability.Available } l && l.Samples.Count > 0 ? l.Samples[^1] : (LongShortSample?)null;
-        if (input.LongShort?.Message is { } lm) notes.Add(lm);
+        // A metric the venue does not publish is shown as such in its cell, not repeated as a note.
+        if (input.LongShort is { Message: { } lm, Availability: not OpenInterestAvailability.Unsupported }) notes.Add(lm);
 
         decimal? longs = null, shorts = null;
         var coverage = LiquidationCoverage.NotObserved;
@@ -136,4 +138,136 @@ public static class DerivativesDashboard
             Change(oi, TimeSpan.FromHours(1), TimeSpan.FromMinutes(20)), Change(oi, TimeSpan.FromHours(24), TimeSpan.FromHours(2)),
             input.Stats?.PremiumPercent, ls?.Ratio, longs, shorts, coverage, notes.Distinct().ToArray());
     }
+
+    // ================================================================ cross-coin funding board
+
+    /// <summary>The board's default coins; the selected coin is added when it is not one of them.</summary>
+    public static readonly IReadOnlyList<string> BoardCoins = new[] { "BTC", "ETH", "SOL", "XRP", "DOGE" };
+
+    /// <summary>Funding at or above this 8-hour rate (in percent) gets the strongest board color.</summary>
+    public const decimal HeatScale8hPercent = 0.05m;
+
+    /// <summary>Board rows as (coin, USDT derivatives symbol): the default coins, then the selected symbol if it is new.</summary>
+    public static IReadOnlyList<(string Coin, string Symbol)> BoardSymbols(IReadOnlyList<string> coins, string? selectedSymbol)
+    {
+        var result = coins.Select(c => (Coin: c.ToUpperInvariant(), Symbol: c.ToUpperInvariant() + "USDT")).ToList();
+        if (selectedSymbol is { Length: > 4 } s && s.ToUpperInvariant() is var upper && upper.EndsWith("USDT", StringComparison.Ordinal)
+            && result.All(r => r.Symbol != upper))
+            result.Add((upper[..^4], upper));
+        return result;
+    }
+
+    /// <summary>
+    /// One board row from each venue's bulk funding answer. A venue whose board is absent has not answered yet; a null
+    /// board failed; a loaded board without the symbol does not list it. None of these is a zero rate.
+    /// </summary>
+    public static FundingBoardRow BuildBoardRow(string coin, string symbol, IReadOnlyList<string> venues,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, FundingSnapshot>?> boards)
+    {
+        var cells = new List<FundingBoardCell>(venues.Count);
+        foreach (var venue in venues)
+        {
+            if (!boards.TryGetValue(venue, out var board)) cells.Add(new(venue, FundingBoardCellState.Pending, null, null, null));
+            else if (board == null) cells.Add(new(venue, FundingBoardCellState.Failed, null, null, null));
+            else if (!board.TryGetValue(symbol, out var snapshot)) cells.Add(new(venue, FundingBoardCellState.NotListed, null, null, null));
+            else cells.Add(new(venue, FundingBoardCellState.Value, snapshot.Rate8hPercent, snapshot.RatePercent, snapshot.IntervalHours));
+        }
+        var known = cells.Where(c => c.Rate8hPercent != null).ToArray();
+        if (known.Length < 2) return new FundingBoardRow(coin, symbol, cells, null, null, null);
+        var high = known.MaxBy(c => c.Rate8hPercent!.Value);
+        var low = known.MinBy(c => c.Rate8hPercent!.Value);
+        return new FundingBoardRow(coin, symbol, cells, AnnualizedSpread(known.Select(c => c.Rate8hPercent)), high.Venue, low.Venue);
+    }
+
+    /// <summary>
+    /// The widest 8-hour funding difference between venues, annualized (three settlements a day, 365 days), in percent;
+    /// null with fewer than two known rates. Unknown venues are skipped, never counted as zero.
+    /// </summary>
+    public static decimal? AnnualizedSpread(IEnumerable<decimal?> rates8hPercent)
+    {
+        var known = rates8hPercent.Where(r => r != null).Select(r => r!.Value).ToArray();
+        return known.Length < 2 ? null : (known.Max() - known.Min()) * 3 * 365;
+    }
+
+    /// <summary>Color strength 0–1 of a board cell: proportional to the rate up to <see cref="HeatScale8hPercent"/>.</summary>
+    public static double Heat(decimal rate8hPercent) => (double)Math.Min(1m, Math.Abs(rate8hPercent) / HeatScale8hPercent);
+
+    // ================================================================ price and CVD
+
+    /// <summary>
+    /// Price and cumulative volume delta from the instrument's own trades, one value per step. CVD sums only volume
+    /// whose aggressor side was measured (buy minus sell); volume with an inferred or unknown side, or synthetic prints,
+    /// is left out and counted in <see cref="PriceCvdSeries.UnmeasuredVolume"/>. A step without trades is a gap for
+    /// both series, and a step with trades but no measured side is a CVD gap; the cumulative total carries across
+    /// gaps. Steps that left volume out or contain compact or partial history are flagged.
+    /// </summary>
+    public static PriceCvdSeries PriceAndCvd(IEnumerable<FlowTrade> trades, DateTime from, DateTime to, TimeSpan step)
+    {
+        if (step <= TimeSpan.Zero || to <= from) return new(Array.Empty<double?>(), Array.Empty<double?>(), Array.Empty<bool>(), 0, 0, 0, null);
+        int count = (int)Math.Min(10_000, Math.Ceiling((to - from) / step));
+        var price = new double?[count];
+        var delta = new decimal?[count];
+        var flagged = new bool[count];
+        decimal measured = 0, unmeasured = 0;
+        DateTime? first = null;
+        foreach (var t in trades)
+        {
+            if (t.Time < from || t.Time >= to || t.Size <= 0) continue;
+            int i = Math.Min(count - 1, (int)((t.Time - from) / step));
+            first ??= t.Time;
+            price[i] = (double)t.Price;
+            var p = t.Provenance;
+            bool sideMeasured = t.Side is TradeSide.Buy or TradeSide.Sell && !p.IsSideInferred && p.IsMeasured;
+            if (sideMeasured)
+            {
+                delta[i] = (delta[i] ?? 0) + (t.Side == TradeSide.Buy ? t.Size : -t.Size);
+                measured += t.Size;
+            }
+            else
+            {
+                unmeasured += t.Size;
+                flagged[i] = true;
+            }
+            if (p.IsPartial || (p.Quality & DataQuality.Compact) != 0) flagged[i] = true;
+        }
+        var cvd = new double?[count];
+        decimal running = 0;
+        int flaggedCount = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (flagged[i]) flaggedCount++;
+            if (delta[i] is not { } d) continue;
+            running += d;
+            cvd[i] = (double)running;
+        }
+        return new PriceCvdSeries(price, cvd, flagged, measured, unmeasured, flaggedCount, first);
+    }
+
+    // ================================================================ liquidation feed
+
+    /// <summary>Observed liquidations at or above <paramref name="minNotional"/> (quote currency), newest first, at most <paramref name="max"/>.</summary>
+    public static IReadOnlyList<LiquidationEvent> LiquidationFeed(IReadOnlyList<LiquidationEvent> events, decimal minNotional, int max) =>
+        events.Where(e => e.Notional >= minNotional).OrderByDescending(e => e.Time).Take(Math.Max(0, max)).ToArray();
+
+    /// <summary>
+    /// Whether each venue's liquidation stream is observing now: an observed window reaches within
+    /// <paramref name="tolerance"/> of <paramref name="now"/>.
+    /// </summary>
+    public static IReadOnlyList<(string Venue, bool Observing)> StreamCoverage(IReadOnlyList<ObservedWindow> windows, IReadOnlyList<string> venues, DateTime now, TimeSpan tolerance) =>
+        venues.Select(v => (v, windows.Any(w => string.Equals(w.VenueId, v, StringComparison.OrdinalIgnoreCase) && w.From <= now && w.To >= now - tolerance))).ToArray();
 }
+
+public enum FundingBoardCellState { Pending, Value, NotListed, Failed }
+
+/// <summary>One venue's funding for one coin: the rate per settlement, its interval and the 8-hour rate; null unless <see cref="State"/> is Value.</summary>
+public readonly record struct FundingBoardCell(string Venue, FundingBoardCellState State, decimal? Rate8hPercent, decimal? RatePercent, double? IntervalHours);
+
+/// <summary>A board row: per-venue cells and the annualized spread between the highest and lowest known venue.</summary>
+public sealed record FundingBoardRow(string Coin, string Symbol, IReadOnlyList<FundingBoardCell> Cells, decimal? SpreadAnnualizedPercent, string? HighVenue, string? LowVenue);
+
+/// <summary>One trade of the selected instrument for the price and CVD panes.</summary>
+public readonly record struct FlowTrade(DateTime Time, decimal Price, decimal Size, TradeSide Side, TradeProvenance Provenance);
+
+/// <summary>Gap-aware price and CVD per step with the provenance of the volume behind them.</summary>
+public sealed record PriceCvdSeries(double?[] Price, double?[] Cvd, bool[] Flagged, decimal MeasuredVolume, decimal UnmeasuredVolume,
+    int FlaggedSteps, DateTime? FirstTrade);

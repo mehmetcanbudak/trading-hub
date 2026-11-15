@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using TradingHub.Feeds.Binance;
 using TradingHub.Feeds.Bybit;
+using TradingHub.Feeds.Venues;
 using TradingHub.Market;
 
 namespace TradingHub.Feeds.Derivatives;
@@ -36,18 +37,23 @@ public sealed record DerivativesTransport(
     Uri? BinanceSocket = null,
     Uri? BybitSocket = null,
     Func<DateTime>? UtcNow = null,
-    Func<TimeSpan, CancellationToken, Task>? Delay = null);
+    Func<TimeSpan, CancellationToken, Task>? Delay = null,
+    Uri? OkxRest = null,
+    Uri? BitgetRest = null,
+    Uri? HyperliquidRest = null);
 
 /// <summary>
 /// Public, credential-free crypto derivatives data for Binance USD-M and Bybit linear perpetuals: funding history,
 /// open interest (through each venue's <see cref="IOpenInterestProvider"/>) and live liquidations. Liquidations exist
 /// only while a stream is connected; observed windows are recorded with the events so earlier periods remain unknown.
-/// Binance's forceOrder stream publishes at most one liquidation per symbol per second, so it is a sample.
+/// Binance's forceOrder stream publishes at most one liquidation per symbol per second, so it is a sample. OKX, Bitget
+/// and Hyperliquid add funding, open interest, premium and long/short where each publishes them (DerivativesData.Venues.cs).
 /// </summary>
 public sealed partial class DerivativesData : IDisposable
 {
     public const string Binance = "binance";
     public const string Bybit = "bybit";
+    /// <summary>Venues with liquidation streams and open-interest history; <see cref="PerpetualVenues"/> adds OKX, Bitget and Hyperliquid.</summary>
     public static readonly IReadOnlyList<string> Venues = new[] { Binance, Bybit };
 
     /// <summary>The application-wide service, configured with the network policy and data root; null when not configured.</summary>
@@ -78,7 +84,7 @@ public sealed partial class DerivativesData : IDisposable
         _bybitOpenInterest = new BybitOpenInterest(_http, _transport.BybitRest, utcNow: _utcNow, delay: _delay);
     }
 
-    public static string VenueName(string venue) => venue == Binance ? "Binance Futures" : venue == Bybit ? "Bybit" : venue;
+    public static string VenueName(string venue) => venue == Binance ? "Binance Futures" : venue == Bybit ? "Bybit" : CryptoVenues.Find(venue)?.Name ?? venue;
 
     private string BinanceOrigin => (_transport.BinanceRest ?? new Uri("https://fapi.binance.com")).GetLeftPart(UriPartial.Authority);
     private string BybitOrigin => (_transport.BybitRest ?? new Uri("https://api.bybit.com")).GetLeftPart(UriPartial.Authority);
@@ -95,6 +101,7 @@ public sealed partial class DerivativesData : IDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
         ct = linked.Token;
+        if (IsAddedVenue(venue)) return await LoadVenueFundingAsync(venue, symbol, from, to, ct).ConfigureAwait(false);
         var samples = new SortedDictionary<DateTime, FundingSample>();
         if (venue == Binance)
         {
@@ -171,6 +178,7 @@ public sealed partial class DerivativesData : IDisposable
     public Task<OpenInterestHistoryResult> LoadOpenInterestAsync(string venue, string symbol, DateTime from, DateTime to, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (IsAddedVenue(venue)) return LoadVenueOpenInterestAsync(venue, symbol, from, to, ct);
         IOpenInterestProvider provider = venue switch
         {
             Binance => _binance,

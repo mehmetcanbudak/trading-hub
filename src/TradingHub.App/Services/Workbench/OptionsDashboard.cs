@@ -17,9 +17,31 @@ public sealed record OptionsSummary(string Underlying, string Source, DateTime T
     IReadOnlyList<OptionsStrikeRow> Strikes, IReadOnlyList<(double Spot, double Gex)> GexCurve, IReadOnlyList<(DateTime Expiry, double Days, double AtmIv)> Term,
     IReadOnlyList<(double Strike, double Iv)> Smile, DateTime? SmileExpiry, IReadOnlyList<OptionsExpiryRow> Expiries);
 
+/// <summary>
+/// A published volatility index over completed UTC days, oldest first. A day without a published close is null (a gap,
+/// never zero); <see cref="Today"/> is the forming day's latest value, kept apart from the completed closes.
+/// </summary>
+public sealed record VolatilityIndexWindow(string Name, DateTime FirstDay, IReadOnlyList<double?> Closes, int MissingDays, double? Today);
+
 public static class OptionsDashboard
 {
     private static double? Finite(double v) => double.IsFinite(v) ? v : null;
+
+    /// <summary>
+    /// The last <paramref name="days"/> completed UTC days of a volatility index (percent points) ending the day before
+    /// <paramref name="now"/>. Non-finite or non-positive values count as missing.
+    /// </summary>
+    public static VolatilityIndexWindow VolatilityIndex(string name, IEnumerable<(DateTime Day, double Value)> points, DateTime now, int days = 30)
+    {
+        var today = now.Date;
+        var first = today.AddDays(-days);
+        var byDay = new Dictionary<DateTime, double>();
+        foreach (var (day, value) in points)
+            if (double.IsFinite(value) && value > 0) byDay[day.Date] = value;
+        var closes = new double?[days];
+        for (int i = 0; i < days; i++) closes[i] = byDay.TryGetValue(first.AddDays(i), out var v) ? v : null;
+        return new VolatilityIndexWindow(name, first, closes, closes.Count(c => c == null), byDay.TryGetValue(today, out var t) ? t : null);
+    }
 
     /// <summary>
     /// Summarizes a chain. <paramref name="maxDays"/> keeps expiries within that many days (null = all);

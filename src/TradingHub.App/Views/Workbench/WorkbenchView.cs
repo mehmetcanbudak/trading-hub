@@ -135,7 +135,11 @@ internal sealed class WorkbenchView : UserControl, IPage
         return new StackPanel
         {
             Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            Children = { Ui.Muted($"{panel.Title} is open in a separate window."), back },
+            Children =
+            {
+                new TextBlock { Name = "WorkbenchDetachedTitle", Text = panel.Title, FontWeight = FontWeight.SemiBold, HorizontalAlignment = HorizontalAlignment.Center },
+                Ui.Muted("This panel is open in a separate window."), back,
+            },
         };
     }
 
@@ -152,7 +156,7 @@ internal sealed class WorkbenchView : UserControl, IPage
         }
         catch (Exception ex)
         {
-            _context.Status("Could not open the instrument: " + ex.Message);
+            _context.Status($"Could not open the instrument: {ex.Message}");
         }
     }
 
@@ -228,7 +232,8 @@ internal sealed class WorkbenchView : UserControl, IPage
         var st = WindowState(key);
         var window = new Window
         {
-            Title = $"{panel.Title} · Workbench", Width = Math.Clamp(st.Width, 360, 2400), Height = Math.Clamp(st.Height, 300, 1800),
+            // Panel titles and the page name are separate display texts joined by the " · " separator.
+            Title = string.Join(" · ", panel.Title, "Workbench"), Width = Math.Clamp(st.Width, 360, 2400), Height = Math.Clamp(st.Height, 300, 1800),
             MinWidth = 360, MinHeight = 280, Background = Ui.Bg1, Content = new Border { Padding = new Thickness(12), Child = panel },
             Icon = AppIcon.Window,
         };
@@ -247,7 +252,7 @@ internal sealed class WorkbenchView : UserControl, IPage
         if (_selected == key) _host.Content = DetachedNote(panel);
         window.Show(owner);
         UpdateActivity();
-        _context.Status($"{panel.Title} in a separate window: it follows the Workbench instrument and returns to the page when closed.");
+        _context.Status(string.Join(" · ", panel.Title, "Opened in a separate window: it follows the Workbench instrument and returns to the page when closed."));
     }
 
     internal void Reattach(string key)

@@ -13,62 +13,104 @@ using TradingHub.Feeds.Derivatives;
 namespace TradingHub.App.Views.Workbench;
 
 /// <summary>
-/// Derivatives dashboard for the selected coin across the public venues Trading Hub reads (Binance USD-M and Bybit
-/// linear): funding (per period and normalized to 8 hours), open interest and its change, perpetual premium over the
-/// index, long/short account ratio and observed liquidations, as a table plus small charts. Missing data is a dash or a
-/// hatched gap, never a zero.
+/// Derivatives dashboard for the selected coin across the public perpetual venues Trading Hub reads (Binance USD-M,
+/// Bybit linear, OKX swaps, Bitget USDT-M and Hyperliquid): funding (per period and normalized to 8 hours), open
+/// interest and its change, perpetual premium over the index, long/short account ratio and observed liquidations, as a
+/// table plus small charts; a cross-coin funding board; price and CVD from the instrument's own trades; and a live
+/// liquidation feed. Missing data is a dash or a hatched gap, never a zero; metrics a venue does not publish say so.
 /// </summary>
 internal sealed class DerivativesPanel : WorkbenchPanel
 {
     private static readonly TimeSpan Reload = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan BoardReload = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan BoardMinimumInterval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan FlowReload = TimeSpan.FromSeconds(5);
+    private const int FeedRows = 50;
     private static readonly string[] Columns =
     {
         "Venue", "Funding", "Funding 8h", "Next funding", "Open interest", "OI (USD)", "OI 1h", "OI 24h", "Premium", "Long/short", "Long liqs 24h", "Short liqs 24h",
     };
     private readonly Grid _table = new() { Name = "DerivativesTable" };
-    private readonly DerivativesChartsCanvas _charts = new() { Name = "DerivativesCharts" };
+    private readonly DerivativesChartsCanvas _charts = new() { Name = "DerivativesCharts", Height = 400 };
     private readonly TextBlock _status = new() { Name = "DerivativesStatus", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
+    private readonly Grid _board = new() { Name = "DerivativesFundingBoard", HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly TextBlock _boardStatus = new() { Name = "DerivativesBoardStatus", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _flowNote = new() { Name = "DerivativesFlowNote", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
+    private readonly Grid _feed = new() { Name = "DerivativesLiquidationFeed", HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly TextBlock _feedCoverage = new() { Name = "DerivativesLiquidationCoverage", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
     private readonly Dictionary<string, DerivativesVenueInputs> _inputs = new();
+    private readonly Dictionary<string, IReadOnlyDictionary<string, FundingSnapshot>?> _boards = new();
+    private readonly List<string> _boardErrors = new();
+    private IReadOnlyList<(string Coin, string Symbol)> _boardSymbols = Array.Empty<(string, string)>();
     private IDisposable? _watch;
     private string? _watchSymbol;
-    private DateTime _loadedAt = DateTime.MinValue, _lastTable;
+    private DateTime _loadedAt = DateTime.MinValue, _lastTable, _boardLoadedAt = DateTime.MinValue, _flowAt = DateTime.MinValue;
+    private PriceCvdSeries? _flow;
+    private (long Generation, decimal Minimum, long Minute, string? Symbol) _feedKey;
     private int _generation;
-    private bool _loading;
+    private bool _loading, _boardLoading, _boardDirty = true;
 
     public DerivativesPanel(WorkbenchContext context) : base(context)
     {
         var s = context.Settings;
         var range = new Ui.Segmented<int>(new (int, string, string?)[] { (24, "24 hours", null), (72, "3 days", null), (168, "7 days", null) }) { Name = "DerivativesRange" };
         range.Select(s.DerivativesHours is 24 or 72 or 168 ? s.DerivativesHours : 24);
-        range.SelectionChanged += h => { s.DerivativesHours = h; context.Save(); _loadedAt = DateTime.MinValue; Load(); };
+        range.SelectionChanged += h => { s.DerivativesHours = h; context.Save(); _loadedAt = DateTime.MinValue; _flowAt = DateTime.MinValue; Load(); };
         var reload = Ui.Button("Reload", MaterialIconKind.Refresh, () => { _loadedAt = DateTime.MinValue; Load(); });
         reload.Name = "DerivativesReload";
         for (int c = 0; c < Columns.Length; c++) _table.ColumnDefinitions.Add(new ColumnDefinition(c == 0 ? new GridLength(130) : GridLength.Auto));
-        var top = Ui.V(8, Ui.H(12, range, reload),
-            Note("Public Binance USD-M and Bybit linear data for the coin's USDT perpetual. Funding is shown per settlement and normalized to 8 hours; premium = (mark − index) / index; long/short is the venues' account ratio; liquidations come from the live streams only while observed (Binance publishes a one-per-second sample)."),
-            new ScrollViewer { Content = _table, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
-        top.Margin = new Thickness(0, 0, 0, 10);
+        var minimum = Number("DerivativesLiquidationMinimum", s.DerivativesLiquidationMinNotional, 0, 100_000_000, 1_000, "#,0", v =>
+        {
+            s.DerivativesLiquidationMinNotional = v;
+            context.Save();
+            RenderFeed(Context.Clock(), force: true);
+        });
+        var content = Ui.V(10,
+            Ui.H(12, range, reload),
+            Note("Public USDT-perpetual data from Binance USD-M, Bybit linear, OKX, Bitget USDT-M and Hyperliquid (USD-settled). Funding is shown per settlement and normalized to 8 hours; premium = (mark − index) / index, with Hyperliquid's oracle price as its index; long/short is each venue's account ratio. \"not published\" marks data the venue does not offer; liquidations come from the Binance and Bybit live streams only while observed (Binance publishes a one-per-second sample)."),
+            new ScrollViewer { Content = _table, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled },
+            Heading("Funding across venues (8-hour basis)"),
+            Note("Each venue's current funding normalized to 8 hours. Max spread = (highest − lowest) × 3 × 365, from the venues that list the coin. \"not listed\" means the venue has no USDT perpetual for the coin; \"failed\" means its request failed. Refreshed every 3 minutes while this panel is open."),
+            new ScrollViewer { Content = _board, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled },
+            _boardStatus,
+            Heading("Charts"),
+            _flowNote,
+            _charts,
+            Heading("Liquidation feed"),
+            Ui.H(8, new TextBlock { Text = "Minimum notional (USD)", Classes = { "muted" }, VerticalAlignment = VerticalAlignment.Center }, minimum),
+            _feedCoverage,
+            Note("OKX, Bitget and Hyperliquid liquidations are not streamed by Trading Hub; their columns say \"not streamed\"."),
+            _feed);
+        content.Margin = new Thickness(0, 0, 8, 10);
         var root = new DockPanel();
-        DockPanel.SetDock(top, Dock.Top);
         DockPanel.SetDock(_status, Dock.Bottom);
-        root.Children.Add(top);
         root.Children.Add(_status);
-        root.Children.Add(_charts);
+        root.Children.Add(new ScrollViewer { Content = content, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto });
         Content = root;
         RenderTable(Array.Empty<DerivativesVenueRow>());
+        RenderBoard();
     }
 
     public override string Key => "derivatives";
     public override string Title => "Derivatives";
     public override MaterialIconKind Icon => MaterialIconKind.ChartTimelineVariant;
     internal IReadOnlyDictionary<string, DerivativesVenueInputs> Inputs => _inputs;
+    internal IReadOnlyDictionary<string, IReadOnlyDictionary<string, FundingSnapshot>?> Boards => _boards;
+    internal PriceCvdSeries? Flow => _flow;
+
+    private static TextBlock Heading(string text) => new() { Text = text, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 6, 0, 0) };
 
     protected override void OnSelectionChanged()
     {
         _generation++;
         _inputs.Clear();
         _loading = false;
+        _boardLoading = false;
         _loadedAt = DateTime.MinValue;
+        _flowAt = DateTime.MinValue;
+        _flow = null;
+        _feedKey = default;
+        _boardDirty = true;
         Release();
         if (IsActive) OnActivated();
         Refresh();
@@ -87,6 +129,7 @@ internal sealed class DerivativesPanel : WorkbenchPanel
             catch (ObjectDisposedException) { }
         }
         Load();
+        LoadBoard();
     }
 
     protected override void OnDeactivated() => Release();
@@ -103,6 +146,7 @@ internal sealed class DerivativesPanel : WorkbenchPanel
     public override void Tick(DateTime now)
     {
         if (now - _loadedAt >= Reload) Load();
+        LoadBoard();
         if (now - _lastTable >= TimeSpan.FromSeconds(2)) Refresh();
     }
 
@@ -121,29 +165,11 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         string symbol = sel.DerivativesSymbol;
         var now = _loadedAt;
         var from = now.AddHours(-Math.Clamp(Context.Settings.DerivativesHours, 1, 24 * 30));
-        _status.Text = $"Loading {symbol} from Binance and Bybit…";
+        _status.Text = $"Loading {symbol} from Binance, Bybit, OKX, Bitget and Hyperliquid…";
         _ = Task.Run(async () =>
         {
-            var results = new List<DerivativesVenueInputs>();
-            foreach (var venue in DerivativesData.Venues)
-            {
-                var errors = new List<string>();
-                async Task<T?> Try<T>(string what, Func<Task<T>> load) where T : class
-                {
-                    try { return await load().ConfigureAwait(false); }
-                    catch (Exception ex) when (ex is not ObjectDisposedException)
-                    {
-                        errors.Add($"{WorkbenchFormat.Venue(venue)} {what}: {ex.Message}");
-                        return null;
-                    }
-                    catch (ObjectDisposedException) { return null; }
-                }
-                var funding = await Try("funding", () => service.LoadFundingAsync(venue, symbol, from.AddHours(-8), now, CancellationToken.None));
-                var oi = await Try("open interest", () => service.LoadOpenInterestAsync(venue, symbol, from.AddHours(-1), now, CancellationToken.None));
-                var stats = await Try("premium", () => service.LoadMarketStatsAsync(venue, symbol, CancellationToken.None));
-                var ls = await Try("long/short", () => service.LoadLongShortAsync(venue, symbol, from, now, CancellationToken.None));
-                results.Add(new DerivativesVenueInputs(venue, funding, oi, stats, ls, null, errors));
-            }
+            // Venues are separate hosts and load side by side; each venue's requests stay sequential.
+            var results = await Task.WhenAll(DerivativesData.PerpetualVenues.Select(venue => LoadVenueAsync(service, venue, symbol, from, now))).ConfigureAwait(false);
             Dispatcher.UIThread.Post(() =>
             {
                 if (generation != _generation) return;
@@ -154,27 +180,102 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         });
     }
 
-    /// <summary>Rebuilds rows (with the latest observed liquidations) and the charts from the loaded inputs.</summary>
+    private static async Task<DerivativesVenueInputs> LoadVenueAsync(DerivativesData service, string venue, string symbol, DateTime from, DateTime now)
+    {
+        var errors = new List<string>();
+        // One complete template per metric: the venue and the venue's message are the only data holes.
+        async Task<T?> Try<T>(Func<string, string> failed, Func<Task<T>> load) where T : class
+        {
+            try { return await load().ConfigureAwait(false); }
+            catch (ObjectDisposedException) { return null; }
+            catch (Exception ex)
+            {
+                errors.Add(failed(ex.Message));
+                return null;
+            }
+        }
+        string name = WorkbenchFormat.Venue(venue);
+        var funding = await Try(m => $"{name} funding failed: {m}", () => service.LoadFundingAsync(venue, symbol, from.AddHours(-8), now, CancellationToken.None)).ConfigureAwait(false);
+        var oi = await Try(m => $"{name} open interest failed: {m}", () => service.LoadOpenInterestAsync(venue, symbol, from.AddHours(-1), now, CancellationToken.None)).ConfigureAwait(false);
+        var stats = await Try(m => $"{name} premium failed: {m}", () => service.LoadMarketStatsAsync(venue, symbol, CancellationToken.None)).ConfigureAwait(false);
+        var ls = await Try(m => $"{name} long/short ratio failed: {m}", () => service.LoadLongShortAsync(venue, symbol, from, now, CancellationToken.None)).ConfigureAwait(false);
+        return new DerivativesVenueInputs(venue, funding, oi, stats, ls, null, errors);
+    }
+
+    /// <summary>Loads every venue's bulk funding for the board coins: every three minutes, or after a minute when the coin list changed.</summary>
+    private void LoadBoard()
+    {
+        if (_boardLoading || !IsActive || Selection is not { IsCryptoUsd: true } sel || Context.Derivatives() is not { } service) return;
+        var now = Context.Clock();
+        var symbols = DerivativesDashboard.BoardSymbols(DerivativesDashboard.BoardCoins, sel.DerivativesSymbol);
+        bool changed = !symbols.SequenceEqual(_boardSymbols);
+        if (now - _boardLoadedAt < (changed ? BoardMinimumInterval : BoardReload)) return;
+        _boardLoading = true;
+        _boardLoadedAt = now;
+        int generation = _generation;
+        _ = Task.Run(async () =>
+        {
+            var wanted = symbols.Select(s => s.Symbol).ToArray();
+            var results = await Task.WhenAll(DerivativesData.PerpetualVenues.Select(async venue =>
+            {
+                try { return (venue, Board: await service.LoadFundingBoardAsync(venue, wanted, CancellationToken.None).ConfigureAwait(false), Error: (string?)null); }
+                catch (ObjectDisposedException) { return (venue, Board: (IReadOnlyDictionary<string, FundingSnapshot>?)null, Error: (string?)null); }
+                catch (Exception ex) { return (venue, Board: null, Error: $"{WorkbenchFormat.Venue(venue)}: {ex.Message}"); }
+            })).ConfigureAwait(false);
+            Dispatcher.UIThread.Post(() =>
+            {
+                _boardLoading = false;
+                if (generation != _generation) return;
+                _boardSymbols = symbols;
+                _boards.Clear();
+                _boardErrors.Clear();
+                foreach (var (venue, board, error) in results)
+                {
+                    _boards[venue] = board;
+                    if (error != null) _boardErrors.Add(error);
+                }
+                _boardStatus.Text = _boardErrors.Count == 0
+                    ? $"Updated {now.ToLocalTime():HH:mm:ss}"
+                    : $"Updated {now.ToLocalTime():HH:mm:ss}; failed: {string.Join(" · ", _boardErrors)}";
+                _boardDirty = true;
+                RenderBoard();
+            });
+        });
+    }
+
+    /// <summary>Rebuilds rows (with the latest observed liquidations), the charts, the price/CVD panes and the liquidation feed.</summary>
     private void Refresh()
     {
         _lastTable = Context.Clock();
         var now = _lastTable;
-        if (Selection is not { } sel || _inputs.Count == 0)
+        if (_boardDirty) RenderBoard();
+        if (Selection is not { } sel)
         {
             RenderTable(Array.Empty<DerivativesVenueRow>());
             _charts.Set(Array.Empty<DerivativesChart>());
+            _flowNote.Text = "";
+            RenderFeed(now, force: false);
             return;
         }
         var hours = Math.Clamp(Context.Settings.DerivativesHours, 1, 24 * 30);
         var from = now.AddHours(-hours);
-        var liquidations = Context.Derivatives()?.Liquidations(sel.DerivativesSymbol, from < now.AddHours(-24) ? from : now.AddHours(-24), now);
-        var rows = new List<DerivativesVenueRow>();
-        var charts = new List<DerivativesChart>();
         var step = TimeSpan.FromHours(hours) / 96;
-        foreach (var venue in DerivativesData.Venues)
+        var charts = new List<DerivativesChart>();
+        AddFlowCharts(sel, charts, from, now, step);
+        RenderFeed(now, force: false);
+        if (_inputs.Count == 0)
+        {
+            RenderTable(Array.Empty<DerivativesVenueRow>());
+            _charts.Set(charts);
+            return;
+        }
+        var liquidations = sel.IsCryptoUsd ? Context.Derivatives()?.Liquidations(sel.DerivativesSymbol, from < now.AddHours(-24) ? from : now.AddHours(-24), now) : null;
+        var rows = new List<DerivativesVenueRow>();
+        foreach (var venue in DerivativesData.PerpetualVenues)
         {
             if (!_inputs.TryGetValue(venue, out var input)) continue;
-            input = input with { Liquidations = liquidations };
+            var coverage = DerivativesData.Coverage(venue);
+            input = input with { Liquidations = coverage.LiquidationStream ? liquidations : null };
             var row = DerivativesDashboard.BuildRow(input, now);
             rows.Add(row);
             string name = WorkbenchFormat.Venue(venue);
@@ -183,18 +284,55 @@ internal sealed class DerivativesPanel : WorkbenchPanel
                 .Select(f => new SeriesPoint(f.Time, (double)(interval is { } h ? DerivativesDashboard.NormalizeTo8Hours(f.RatePercent, h) : f.RatePercent))).ToArray();
             charts.Add(new($"{name} · funding (8h %)", DerivativesDashboard.Resample(funding, from, now, step, TimeSpan.FromHours(Math.Max(9, (interval ?? 8) + 1))), true, v => v.ToString("0.####", CultureInfo.InvariantCulture) + "%"));
             var oi = (input.OpenInterest?.Samples ?? Array.Empty<OpenInterestSample>()).Select(o => new SeriesPoint(o.Time, (double)o.Quantity)).ToArray();
-            charts.Add(new($"{name} · open interest", DerivativesDashboard.Resample(oi, from, now, step, TimeSpan.FromHours(2)), false, v => WorkbenchFormat.Compact(v)));
-            var ls = (input.LongShort?.Samples ?? Array.Empty<LongShortSample>()).Where(x => x.Ratio != null).Select(x => new SeriesPoint(x.Time, (double)x.Ratio!.Value)).ToArray();
-            charts.Add(new($"{name} · long/short ratio", DerivativesDashboard.Resample(ls, from, now, step, TimeSpan.FromHours(2)), false, v => v.ToString("0.00", CultureInfo.InvariantCulture)));
-            var liqStep = TimeSpan.FromHours(Math.Max(1, hours / 48));
-            var longs = liquidations == null ? Array.Empty<double?>() : DerivativesDashboard.LiquidationBuckets(liquidations.Events, liquidations.Windows, venue, from, now, liqStep, true);
-            var shorts = liquidations == null ? Array.Empty<double?>() : DerivativesDashboard.LiquidationBuckets(liquidations.Events, liquidations.Windows, venue, from, now, liqStep, false);
-            charts.Add(new($"{name} · liquidations (longs − / shorts +)", longs.Zip(shorts, (l, s) => l is { } a && s is { } b ? b - a : (double?)null).ToArray(), true, v => WorkbenchFormat.Compact(v)));
+            charts.Add(new(coverage.OpenInterestHistory ? $"{name} · open interest" : $"{name} · open interest (current only)",
+                DerivativesDashboard.Resample(oi, from, now, step, TimeSpan.FromHours(2)), false, v => WorkbenchFormat.Compact(v)));
+            if (coverage.LongShortRatio)
+            {
+                var ls = (input.LongShort?.Samples ?? Array.Empty<LongShortSample>()).Where(x => x.Ratio != null).Select(x => new SeriesPoint(x.Time, (double)x.Ratio!.Value)).ToArray();
+                charts.Add(new($"{name} · long/short ratio", DerivativesDashboard.Resample(ls, from, now, step, TimeSpan.FromHours(Math.Max(2, step.TotalHours * 2))), false, v => v.ToString("0.00", CultureInfo.InvariantCulture)));
+            }
+            if (coverage.LiquidationStream)
+            {
+                var liqStep = TimeSpan.FromHours(Math.Max(1, hours / 48));
+                var longs = liquidations == null ? Array.Empty<double?>() : DerivativesDashboard.LiquidationBuckets(liquidations.Events, liquidations.Windows, venue, from, now, liqStep, true);
+                var shorts = liquidations == null ? Array.Empty<double?>() : DerivativesDashboard.LiquidationBuckets(liquidations.Events, liquidations.Windows, venue, from, now, liqStep, false);
+                charts.Add(new($"{name} · liquidations (longs − / shorts +)", longs.Zip(shorts, (l, s) => l is { } a && s is { } b ? b - a : (double?)null).ToArray(), true, v => WorkbenchFormat.Compact(v), Warn: true));
+            }
         }
         RenderTable(rows);
         _charts.Set(charts);
         var notes = rows.SelectMany(r => r.Notes).Distinct().ToArray();
         if (!_loading) _status.Text = notes.Length == 0 ? $"{sel.DerivativesSymbol} · updated {_loadedAt.ToLocalTime():HH:mm:ss}" : string.Join(" · ", notes);
+    }
+
+    /// <summary>Price and CVD panes from the instrument's own trades, recomputed at most every few seconds.</summary>
+    private void AddFlowCharts(WorkbenchSelection sel, List<DerivativesChart> charts, DateTime from, DateTime now, TimeSpan step)
+    {
+        if (_flow == null || now - _flowAt >= FlowReload)
+        {
+            _flowAt = now;
+            _flow = DerivativesDashboard.PriceAndCvd(Trades(sel.Data.Trades, from), from, now, step);
+            _flowNote.Text = FlowNote(sel, _flow);
+        }
+        charts.Add(new($"{sel.Instrument.Symbol} · price", _flow.Price, false, v => WorkbenchFormat.Price(v)));
+        charts.Add(new($"{sel.Instrument.Symbol} · CVD (measured aggressor side)", _flow.Cvd, true, v => WorkbenchFormat.Compact(v), Flagged: _flow.Flagged));
+    }
+
+    private static IEnumerable<FlowTrade> Trades(TradingHub.Data.TradeStore store, DateTime from)
+    {
+        for (int i = store.LowerBound(from); i < store.Count; i++)
+            yield return new FlowTrade(store.GetTime(i), store.GetPrice(i), store.GetVolume(i), store.GetSide(i), store.GetProvenance(i));
+    }
+
+    private static string FlowNote(WorkbenchSelection sel, PriceCvdSeries flow)
+    {
+        if (flow.FirstTrade is not { } first) return $"Price and CVD: no trades of {sel.Instrument.Symbol} are recorded in this range; the panes stay hatched.";
+        string text = $"Price and CVD from {sel.Display} trades recorded since {first.ToLocalTime():yyyy-MM-dd HH:mm}; hatched steps had no trades. CVD counts measured aggressor sides only and starts at zero at the range start.";
+        decimal total = flow.MeasuredVolume + flow.UnmeasuredVolume;
+        if (flow.UnmeasuredVolume > 0 && total > 0)
+            return string.Join("\n", text, $"{(flow.UnmeasuredVolume / total * 100).ToString("0.#", CultureInfo.InvariantCulture)}% of the volume had an inferred or unknown side and is left out; amber marks show the affected steps.");
+        // Separate sentences are separate lines so each translates on its own.
+        return flow.FlaggedSteps > 0 ? string.Join("\n", text, "Amber marks show steps built from compact or partial history.") : text;
     }
 
     private void RenderTable(IReadOnlyList<DerivativesVenueRow> rows)
@@ -206,20 +344,39 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         int r = 1;
         foreach (var row in rows)
         {
+            var coverage = DerivativesData.Coverage(row.Venue);
             _table.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             Cell(WorkbenchFormat.Venue(row.Venue), r, 0, bold: true);
-            Cell(WorkbenchFormat.Percent(row.FundingPercent, 4) + (row.FundingIntervalHours is { } h ? $" / {h:0.##}h" : ""), r, 1, color: Sign(row.FundingPercent));
+            Cell(row.FundingIntervalHours is { } h ? $"{WorkbenchFormat.Percent(row.FundingPercent, 4)} / {h.ToString("0.##", CultureInfo.InvariantCulture)}h" : WorkbenchFormat.Percent(row.FundingPercent, 4),
+                r, 1, color: Sign(row.FundingPercent));
             Cell(WorkbenchFormat.Percent(row.Funding8hPercent, 4), r, 2, color: Sign(row.Funding8hPercent));
             Cell(row.NextFunding is { } next ? next.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture) : WorkbenchFormat.Missing, r, 3);
             Cell(WorkbenchFormat.Compact(row.OpenInterest), r, 4);
             Cell(WorkbenchFormat.Compact(row.OpenInterestUsd), r, 5);
-            Cell(WorkbenchFormat.Percent(row.OpenInterestChange1hPercent), r, 6, color: Sign(row.OpenInterestChange1hPercent));
-            Cell(WorkbenchFormat.Percent(row.OpenInterestChange24hPercent), r, 7, color: Sign(row.OpenInterestChange24hPercent));
+            if (coverage.OpenInterestHistory)
+            {
+                Cell(WorkbenchFormat.Percent(row.OpenInterestChange1hPercent), r, 6, color: Sign(row.OpenInterestChange1hPercent));
+                Cell(WorkbenchFormat.Percent(row.OpenInterestChange24hPercent), r, 7, color: Sign(row.OpenInterestChange24hPercent));
+            }
+            else
+            {
+                Cell("not published", r, 6, color: Ui.Text2);
+                Cell("not published", r, 7, color: Ui.Text2);
+            }
             Cell(WorkbenchFormat.Percent(row.PremiumPercent, 4), r, 8, color: Sign(row.PremiumPercent));
-            Cell(row.LongShortRatio is { } ls ? ls.ToString("0.00", CultureInfo.InvariantCulture) : WorkbenchFormat.Missing, r, 9);
-            string coverage = row.Liquidations24hCoverage == LiquidationCoverage.Partial ? " (partial)" : "";
-            Cell(row.LongLiquidations24h is { } l ? WorkbenchFormat.Compact(l) + coverage : "not observed", r, 10, color: row.LongLiquidations24h != null ? Ui.Down : Ui.Text2);
-            Cell(row.ShortLiquidations24h is { } s ? WorkbenchFormat.Compact(s) + coverage : "not observed", r, 11, color: row.ShortLiquidations24h != null ? Ui.Up : Ui.Text2);
+            if (coverage.LongShortRatio) Cell(row.LongShortRatio is { } ls ? ls.ToString("0.00", CultureInfo.InvariantCulture) : WorkbenchFormat.Missing, r, 9);
+            else Cell("not published", r, 9, color: Ui.Text2);
+            if (coverage.LiquidationStream)
+            {
+                bool partial = row.Liquidations24hCoverage == LiquidationCoverage.Partial;
+                Cell(LiquidationText(row.LongLiquidations24h, partial), r, 10, color: row.LongLiquidations24h != null ? Ui.Down : Ui.Text2);
+                Cell(LiquidationText(row.ShortLiquidations24h, partial), r, 11, color: row.ShortLiquidations24h != null ? Ui.Up : Ui.Text2);
+            }
+            else
+            {
+                Cell("not streamed", r, 10, color: Ui.Text2);
+                Cell("not streamed", r, 11, color: Ui.Text2);
+            }
             r++;
         }
         if (rows.Count == 0)
@@ -230,6 +387,149 @@ internal sealed class DerivativesPanel : WorkbenchPanel
             Grid.SetColumnSpan(empty, Columns.Length);
             _table.Children.Add(empty);
         }
+    }
+
+    private static string LiquidationText(decimal? value, bool partial) => value is not { } v ? "not observed"
+        : partial ? $"{WorkbenchFormat.Compact(v)} (partial)" : WorkbenchFormat.Compact(v);
+
+    private void RenderBoard()
+    {
+        _boardDirty = false;
+        _board.Children.Clear();
+        _board.RowDefinitions.Clear();
+        _board.ColumnDefinitions.Clear();
+        var venues = DerivativesData.PerpetualVenues;
+        for (int c = 0; c < venues.Count + 2; c++) _board.ColumnDefinitions.Add(new ColumnDefinition(c == 0 ? new GridLength(90) : GridLength.Auto));
+        _board.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        BoardCell(new TextBlock { Text = "Coin", Classes = { "muted" }, FontWeight = FontWeight.SemiBold }, 0, 0, null);
+        for (int v = 0; v < venues.Count; v++)
+            BoardCell(new TextBlock { Text = WorkbenchFormat.Venue(venues[v]), Classes = { "muted" }, FontWeight = FontWeight.SemiBold }, 0, v + 1, null);
+        BoardCell(new TextBlock { Text = "Max spread (annualized)", Classes = { "muted" }, FontWeight = FontWeight.SemiBold }, 0, venues.Count + 1, null);
+        if (_boardSymbols.Count == 0)
+        {
+            _board.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            var empty = new TextBlock { Text = _boardLoading ? "Loading…" : "The funding board loads while this panel is open for a USD-quoted crypto coin.", Classes = { "muted" }, Margin = new Thickness(4, 6) };
+            Grid.SetRow(empty, 1);
+            Grid.SetColumnSpan(empty, venues.Count + 2);
+            _board.Children.Add(empty);
+            return;
+        }
+        int r = 1;
+        foreach (var (coin, symbol) in _boardSymbols)
+        {
+            var row = DerivativesDashboard.BuildBoardRow(coin, symbol, venues, _boards);
+            _board.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            BoardCell(new TextBlock { Text = coin, FontWeight = FontWeight.SemiBold }, r, 0, null);
+            for (int v = 0; v < row.Cells.Count; v++)
+            {
+                var cell = row.Cells[v];
+                var text = new TextBlock
+                {
+                    Text = cell.State switch
+                    {
+                        FundingBoardCellState.Value => WorkbenchFormat.Percent(cell.Rate8hPercent, 4),
+                        FundingBoardCellState.NotListed => "not listed",
+                        FundingBoardCellState.Failed => "failed",
+                        _ => WorkbenchFormat.Missing,
+                    },
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                };
+                if (cell.State != FundingBoardCellState.Value) text.Foreground = Ui.Text2;
+                IBrush? background = null;
+                if (cell.Rate8hPercent is { } rate && rate != 0)
+                {
+                    var c = Ui.Color(rate > 0 ? "Warn" : "Accent");
+                    background = new SolidColorBrush(Color.FromArgb((byte)(255 * (0.10 + 0.55 * DerivativesDashboard.Heat(rate))), c.R, c.G, c.B));
+                }
+                var border = BoardCell(text, r, v + 1, background);
+                if (cell.State == FundingBoardCellState.Value && cell.IntervalHours is { } h && cell.RatePercent is { } raw)
+                    ToolTip.SetTip(border, $"{WorkbenchFormat.Percent(raw, 5)} per settlement every {h.ToString("0.##", CultureInfo.InvariantCulture)} h");
+            }
+            BoardCell(new TextBlock
+            {
+                Text = row.SpreadAnnualizedPercent is { } spread ? spread.ToString("0.0", CultureInfo.InvariantCulture) + "%" : WorkbenchFormat.Missing,
+                HorizontalAlignment = HorizontalAlignment.Right,
+            }, r, venues.Count + 1, null);
+            r++;
+        }
+    }
+
+    private Border BoardCell(TextBlock text, int row, int column, IBrush? background)
+    {
+        var border = new Border { Child = text, Padding = new Thickness(8, 3), Margin = new Thickness(1), CornerRadius = new CornerRadius(3), Background = background };
+        Grid.SetRow(border, row);
+        Grid.SetColumn(border, column);
+        _board.Children.Add(border);
+        return border;
+    }
+
+    /// <summary>Newest observed liquidations at or above the minimum, rebuilt only when new events or windows arrive.</summary>
+    private void RenderFeed(DateTime now, bool force)
+    {
+        var sel = Selection;
+        var service = Context.Derivatives();
+        string? symbol = sel is { IsCryptoUsd: true } ? sel.DerivativesSymbol : null;
+        decimal minimum = Context.Settings.DerivativesLiquidationMinNotional;
+        long generation = symbol != null && service != null ? service.LiquidationGeneration(symbol) : 0;
+        var key = (generation, minimum, now.Ticks / TimeSpan.TicksPerMinute, symbol);
+        if (!force && key == _feedKey) return;
+        _feedKey = key;
+        _feed.Children.Clear();
+        _feed.RowDefinitions.Clear();
+        _feed.ColumnDefinitions.Clear();
+        if (symbol == null || service == null)
+        {
+            _feedCoverage.Text = symbol == null ? "Liquidations: available only for USD-quoted crypto perpetuals (Binance and Bybit streams)." : "Liquidations: derivatives data is unavailable in this session.";
+            return;
+        }
+        var snapshot = service.Liquidations(symbol, now.AddHours(-24), now.AddSeconds(5));
+        var coverage = DerivativesDashboard.StreamCoverage(snapshot.Windows, DerivativesData.Venues, now, TimeSpan.FromMinutes(2));
+        // One line per venue, each translated on its own. The literal comes first: a venue-first "{0}: …" template would be
+        // captured by venue-prefixed catalog templates such as "Binance {0}: {1}".
+        var lines = coverage.Select(c => Localization.Lang.T(c.Observing ? $"Liquidation stream observed: {WorkbenchFormat.Venue(c.Venue)}" : $"Liquidation stream not connected: {WorkbenchFormat.Venue(c.Venue)}"));
+        if (snapshot.Message is { } message) lines = lines.Append(Localization.Lang.T(message));
+        _feedCoverage.Text = string.Join("\n", lines);
+        var rows = DerivativesDashboard.LiquidationFeed(snapshot.Events, minimum, FeedRows);
+        string[] headers = { "Time", "Venue", "Side", "Size", "Price", "Notional" };
+        for (int c = 0; c < headers.Length; c++) _feed.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+        _feed.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        for (int c = 0; c < headers.Length; c++) FeedCell(headers[c], 0, c, Ui.Text2);
+        if (rows.Count == 0)
+        {
+            _feed.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            var empty = new TextBlock
+            {
+                Text = snapshot.Windows.Count == 0 ? "No liquidation stream has been observed for this coin yet." : "No liquidations at or above this size were observed in the last 24 hours.",
+                Classes = { "muted" }, Margin = new Thickness(4, 6),
+            };
+            Grid.SetRow(empty, 1);
+            Grid.SetColumnSpan(empty, headers.Length);
+            _feed.Children.Add(empty);
+            return;
+        }
+        int r = 1;
+        foreach (var e in rows)
+        {
+            _feed.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            var color = e.LongLiquidated ? Ui.Down : Ui.Up;
+            FeedCell(e.Time.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture), r, 0, null);
+            FeedCell(WorkbenchFormat.Venue(e.VenueId), r, 1, null);
+            FeedCell(e.LongLiquidated ? "Long liquidated" : "Short liquidated", r, 2, color);
+            FeedCell(WorkbenchFormat.Compact(e.Quantity), r, 3, null);
+            FeedCell(WorkbenchFormat.Price(e.Price), r, 4, null);
+            FeedCell(WorkbenchFormat.Compact(e.Notional), r, 5, color);
+            r++;
+        }
+    }
+
+    private void FeedCell(string text, int row, int column, IBrush? color)
+    {
+        var t = new TextBlock { Text = text, Margin = new Thickness(column == 0 ? 4 : 14, 2, 4, 2), HorizontalAlignment = column >= 3 ? HorizontalAlignment.Right : HorizontalAlignment.Left };
+        if (row == 0) t.Classes.Add("muted");
+        if (color != null) t.Foreground = color;
+        Grid.SetRow(t, row);
+        Grid.SetColumn(t, column);
+        _feed.Children.Add(t);
     }
 
     private static IBrush? Sign(decimal? value) => value is > 0 ? Ui.Up : value is < 0 ? Ui.Down : null;
@@ -249,11 +549,15 @@ internal sealed class DerivativesPanel : WorkbenchPanel
     }
 }
 
-internal sealed record DerivativesChart(string Title, IReadOnlyList<double?> Values, bool ZeroLine, Func<double, string> Format);
+/// <summary>A small chart; <paramref name="Flagged"/> marks steps whose data has reduced provenance (amber ticks).</summary>
+internal sealed record DerivativesChart(string Title, IReadOnlyList<double?> Values, bool ZeroLine, Func<double, string> Format,
+    IReadOnlyList<bool>? Flagged = null, bool Warn = false);
 
-/// <summary>Grid of small gap-aware charts, four per venue.</summary>
+/// <summary>Grid of small gap-aware charts, four per row.</summary>
 internal sealed class DerivativesChartsCanvas : WorkbenchCanvas
 {
+    private const int Columns = 4;
+    private const double RowHeight = 120;
     private IReadOnlyList<DerivativesChart> _charts = Array.Empty<DerivativesChart>();
 
     public IReadOnlyList<DerivativesChart> Charts => _charts;
@@ -261,6 +565,7 @@ internal sealed class DerivativesChartsCanvas : WorkbenchCanvas
     public void Set(IReadOnlyList<DerivativesChart> charts)
     {
         _charts = charts;
+        Height = Math.Max(160, Math.Ceiling(charts.Count / (double)Columns) * RowHeight + 8);
         InvalidateVisual();
     }
 
@@ -273,13 +578,23 @@ internal sealed class DerivativesChartsCanvas : WorkbenchCanvas
             Label(canvas, "Charts appear once the venues answer", 10, 22, Text);
             return;
         }
-        int columns = 4, rows = (int)Math.Ceiling(_charts.Count / (double)columns);
-        float cw = (width - 8) / columns, ch = (height - 8) / Math.Max(1, rows);
+        int rows = (int)Math.Ceiling(_charts.Count / (double)Columns);
+        float cw = (width - 8) / Columns, ch = (height - 8) / Math.Max(1, rows);
+        using var tick = new SKPaint { Color = Warn, IsAntialias = false };
         for (int i = 0; i < _charts.Count; i++)
         {
             var c = _charts[i];
-            var rect = new SKRect(4 + (i % columns) * cw + 3, 4 + (i / columns) * ch + 3, 4 + (i % columns + 1) * cw - 3, 4 + (i / columns + 1) * ch - 3);
-            Sparkline(canvas, rect, c.Title, c.Values, i % columns == 3 ? Warn : Accent, c.Format, c.ZeroLine);
+            var rect = new SKRect(4 + (i % Columns) * cw + 3, 4 + (i / Columns) * ch + 3, 4 + (i % Columns + 1) * cw - 3, 4 + (i / Columns + 1) * ch - 3);
+            Sparkline(canvas, rect, c.Title, c.Values, c.Warn ? Warn : Accent, c.Format, c.ZeroLine);
+            if (c.Flagged is not { } flagged || c.Values.Count == 0) continue;
+            // Same horizontal mapping as the sparkline's plot area.
+            var plot = new SKRect(rect.Left + 6, rect.Top + 22, rect.Right - 6, rect.Bottom - 6);
+            for (int k = 0; k < flagged.Count && k < c.Values.Count; k++)
+                if (flagged[k])
+                {
+                    float x = plot.Left + (c.Values.Count <= 1 ? plot.Width : plot.Width * k / (c.Values.Count - 1));
+                    canvas.DrawRect(x - 1.5f, plot.Bottom - 3, 3, 3, tick);
+                }
         }
     }
 }

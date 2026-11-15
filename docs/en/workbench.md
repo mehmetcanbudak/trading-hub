@@ -69,10 +69,24 @@ None of these is exchange data or a list of real positions.
 
 ## Derivatives
 
-A table plus small charts for the coin's USDT perpetual on **Binance USD-M** and **Bybit linear** (the venues whose
-public derivatives data Trading Hub reads): funding per settlement and normalized to 8 hours, next settlement, open
-interest (coin units and USD at the mark price) with 1-hour and 24-hour change, perpetual premium
-((mark − index) / index), the venues' long/short account ratio, and observed long and short liquidations over 24 hours.
+A table plus small charts for the coin's USDT perpetual on **Binance USD-M**, **Bybit linear**, **OKX** (USDT swap),
+**Bitget** (USDT-M) and **Hyperliquid** (perp), from their public credential-free APIs: funding per settlement and
+normalized to 8 hours, next settlement, open interest (coin units and USD at the mark price) with 1-hour and 24-hour
+change, perpetual premium ((mark − index) / index; Hyperliquid uses its oracle price as the index and settles hourly), the
+venues' long/short account ratio, and observed long and short liquidations over 24 hours.
+
+- **What each venue publishes:** Bitget and Hyperliquid publish current open interest only (no history, so no change
+  figures); OKX publishes the long/short ratio itself (shares are derived from it); Hyperliquid publishes no long/short
+  ratio. These cells say "not published" rather than showing a number.
+- **Liquidations** are streamed from Binance and Bybit only; OKX, Bitget and Hyperliquid show "not streamed".
+- **Funding board:** BTC, ETH, SOL, XRP, DOGE and the selected coin across the five venues, normalized to 8 hours,
+  colour-scaled, with the largest venue spread annualized ((highest − lowest 8-hour rate) × 3 × 365, needs at least two
+  venues). Binance symbols without an entry in its funding-interval list settle every 8 hours. Refreshed at most every
+  few minutes while the panel is visible; a coin a venue does not list is a gap.
+- **Price and CVD** of the selected instrument from its own trades: CVD counts only trades whose aggressor side was
+  measured; steps with inferred sides or compact/partial data are flagged, and steps without trades are gaps.
+- **Live liquidation feed:** newest first, venue, side, size and notional, with a minimum-notional filter and a coverage
+  line naming which venue streams are observed.
 
 A value the venue did not publish, or whose request failed, is a dash (the failure is named under the table), and chart
 spans without data are hatched gaps. Liquidation totals are "not observed" unless the stream was listening; a partly
@@ -84,7 +98,9 @@ From your **Options data** connection (Deribit public data or your own JSON API,
 gamma exposure by strike with spot, gamma flip, call wall, put wall and max pain marked; total GEX versus price;
 the IV smile of the expiry nearest 30 days; the ATM IV term structure; a per-expiry table (call and put open interest,
 put/call ratio, max pain, ATM IV, 25-delta risk reversal and butterfly, one-standard-deviation expected move); and large
-option trades of the last 24 hours, with page-limited spans named.
+option trades of the last 24 hours, with page-limited spans named. With the Deribit source, a **DVOL** chart shows the
+volatility index over the last 30 completed UTC days (missing days hatched, never zero) with today's forming value kept
+apart; it reuses the source's existing daily request. Sources that publish no volatility index say so.
 
 Without an options-data connection the panel shows how to add one and makes no requests. GEX is an estimate from public
 open interest under the customers-buy-puts / sell-calls convention (USD per 1 % move), not dealer books.
@@ -104,6 +120,12 @@ Calculators that only compute from the values you type:
 - **Funding cost**: notional × rate per settlement × whole settlements while holding; also per day and annualized.
 - **Session clock**: Asia (18–02), London (02–08), New York morning (08–12) and afternoon (12–16) in New York time with
   your local times, and the next settlement of the common 8-hour funding schedule.
+- **Structure summary**: a read-only summary of the selected instrument at 5m, 15m, 1h or 4h, computed by the same
+  structure, key-level, session and session-VWAP studies used on charts over candles from the connection's candle history:
+  trend, last break of structure / change of character, sweep and CISD, PO3 phase, nearest fair-value gaps, order blocks
+  or breakers and liquidity above and below, previous trading-day and week high/low/open, and session ranges. Only
+  closed bars count; every item shows when it formed and the close that confirmed it, and its distance to the price.
+  Levels that are not published yet are dashes. It refreshes at most once a minute while visible.
 
 ## Local market-data API
 
@@ -112,7 +134,9 @@ market data Trading Hub already has. It is **off by default**: enable it in **Se
 
 ### Security model
 
-- Listens on `127.0.0.1` only; other computers on your network cannot reach it.
+- Listens on `127.0.0.1` only; other computers on your network cannot reach it. If another program already listens on
+  the chosen port (on loopback or on all interfaces), Settings reports "Port … is already in use." and the API does not
+  start, so it never silently takes over that program's local connections.
 - Read-only: every route is `GET`. Nothing can be created, changed or deleted; the API never opens new market
   subscriptions, places orders or touches accounts or positions.
 - No credentials, API keys, user names, account ids, gateway URLs, trading namespaces, device ids or order permissions

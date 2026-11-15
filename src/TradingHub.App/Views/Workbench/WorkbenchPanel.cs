@@ -205,8 +205,12 @@ internal abstract class WorkbenchCanvas : SkiaView
 
     protected static SKFont Font(float size = 11, bool bold = false) => RenderContext.GetFont("Inter", size, bold, false);
 
+    /// <summary>When set (by scenes), collects the translated text every Workbench canvas label draws.</summary>
+    internal static System.Collections.Concurrent.ConcurrentQueue<string>? DrawnText { get; set; }
+
     protected static void Label(SKCanvas canvas, string text, float x, float y, SKColor color, float size = 11, bool bold = false, bool right = false)
     {
+        DrawnText?.Enqueue(UiText.Tr(text));
         using var paint = new SKPaint { IsAntialias = true, Color = color };
         var font = Font(size, bold);
         if (right) x -= font.MeasureUiText(text);

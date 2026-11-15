@@ -1,12 +1,15 @@
 // Scene "workbench": every Workbench panel through the real page, its detachable windows and its persisted settings,
 // on offline fixtures only (no network): a fake three-venue aggregate with recent prints and recorded depth, a
 // derivatives service whose HTTP and liquidation sockets are in-process fixtures (Bybit long/short fails on purpose so
-// the gap shows), a third-party levels fixture, a fixture options provider and an unconfigured options hub.
+// the gap shows), a third-party levels fixture, an options provider that publishes DVOL (with gaps), a chain-only
+// provider and an unconfigured options hub; venue candles drift upward so closed bars confirm structure breaks.
 // Repeat with TRADINGHUB_LANG=es and zh-CN.
 using System.Globalization;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.RegularExpressions;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.VisualTree;
@@ -59,11 +62,13 @@ internal static class WorkbenchScene
         // ---- offline fixtures
         using var derivatives = new DerivativesData(new DerivativesTransport(new HttpClient(new DerivativesFixture()), OwnsHttp: true,
             BinanceRest: new Uri("https://binance.fixture"), BybitRest: new Uri("https://bybit.fixture"),
+            OkxRest: new Uri("https://okx.fixture"), BitgetRest: new Uri("https://bitget.fixture"), HyperliquidRest: new Uri("https://hyperliquid.fixture"),
             ConnectWebSocket: (uri, _) => Task.FromResult<WebSocket>(new LiquidationSocket(uri))));
         long asOf = new DateTimeOffset(now.AddMinutes(-10)).ToUnixTimeMilliseconds();
         string levelsJson = $$"""{"v":2,"coin":"BTC","attribution":"Fixture attribution","snapshot":{"asOf":{{asOf}}},"mark":80000,"positions":42,"step":100,"bins":[[770,900000,0,0,0,3,0,600000,0],[775,400000,0,0,0,2,0,100000,0],[790,300000,0,0,0,2,0,100000,0],[815,0,0,700000,200000,0,4,0,300000],[825,0,0,300000,0,0,1,0,100000]]}""";
         using var levels = new LiquidationLevelsService(new HttpClient(new Fixture(levelsJson)), ownsHttp: true);
-        var options = new OptionsData(null) { Provider = new FixtureOptions() };
+        var options = new OptionsData(null) { Provider = new FixtureIndexedOptions() };
+        var chainOnly = new OptionsData(null) { Provider = new FixtureOptions() };
         var unconfigured = new OptionsData(null);
 
         var venues = new[]
@@ -106,6 +111,50 @@ internal static class WorkbenchScene
         }
         using var live = feed.Subscribe(instrument, new NullSink());
         Until(() => feed.GetCoverage(instrument, AggregateOperation.Live).Constituents.Count(c => c.Status == FeedStatus.Connected) == 2, 10);
+
+        // ---- untranslated English: every visible text, tooltip, window title and canvas label of each panel
+        var probe = new EnglishProbe(language, new[]
+        {
+            instrument.Symbol, instrument.Exchange, feed.DisplayName, WorkbenchFormat.Venue(DerivativesData.Binance), WorkbenchFormat.Venue(DerivativesData.Bybit),
+            "Fixture options", "Fixture chain", "Fixture attribution", "fixture outage",
+        }.Concat(venues.SelectMany(v => new[] { v.DisplayName, v.Venue })));
+        int inspectedTexts = 0, drawnTexts = 0;
+        IEnumerable<string> Visible(Visual root)
+        {
+            if (root is Window { Title: { Length: > 0 } title }) yield return title;
+            foreach (var visual in root.GetVisualDescendants())
+            {
+                if (visual is not Control { IsEffectivelyVisible: true } control) continue;
+                if (control is TextBlock { Text: { Length: > 0 } text }) yield return text;
+                if (ToolTip.GetTip(control) is string { Length: > 0 } tip) yield return tip;
+            }
+        }
+        void NoEnglish(string where, IReadOnlyCollection<string> texts)
+        {
+            if (language == Lang.English) return;
+            var bad = texts.Distinct().Select(t => (Text: t, Words: probe.Find(t))).Where(x => x.Words.Count > 0).ToList();
+            Check(bad.Count == 0, $"{where}: no untranslated English in {texts.Count} {language} texts"
+                + (bad.Count == 0 ? "" : ": " + string.Join(" | ", bad.Take(10).Select(b => $"\"{b.Text}\" [{string.Join(", ", b.Words)}]"))));
+        }
+        // Captures the surface, then checks its controls and everything its canvases drew in that frame.
+        void Inspect(TopLevel target, Visual root, string name, bool canvases = true)
+        {
+            var drawn = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            WorkbenchCanvas.DrawnText = drawn;
+            foreach (var canvas in root.GetVisualDescendants().OfType<WorkbenchCanvas>()) canvas.InvalidateVisual();
+            try { Shot(target, name); }
+            finally { WorkbenchCanvas.DrawnText = null; }
+            var texts = Visible(root).ToList();
+            inspectedTexts += texts.Count;
+            drawnTexts += drawn.Count;
+            if (canvases) Check(drawn.Count > 0, $"{name}: the panel's canvases drew labels ({drawn.Count})");
+            NoEnglish(name + " controls", texts);
+            NoEnglish(name + " canvases", drawn.ToArray());
+        }
+        if (language != Lang.English)
+            Check(probe.Find("Coverage: OKX reconnecting").Count > 0 && probe.Find("Liquidations from").Count > 0
+                  && probe.Find(Lang.T("Aggregated trades")).Count == 0 && probe.Find("BTCUSDT · Binance Futures 80,000.5 · OKX 1.2K/3.4M · 10×").Count == 0,
+                "the untranslated-English detector flags English and accepts data, symbols and venue names");
 
         var settings = svc.Settings.Workbench ?? new WorkbenchSettings();
         string savedJson = System.Text.Json.JsonSerializer.Serialize(settings);
@@ -154,7 +203,7 @@ internal static class WorkbenchScene
             string coverage = view.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "TapeCoverage")?.Text ?? "";
             Check(coverage.Contains("OKX", StringComparison.Ordinal) && tape.Tape.Buckets.Any(b => b.Venues.TryGetValue("okx-swap", out var okx) && okx.TradesPartial),
                 "a reconnecting venue is shown and its volume is flagged partial: " + coverage);
-            Shot(window, "tape");
+            Inspect(window, view, "tape");
 
             // ---- depth heat map, with recording and without
             view.Select("heatmap");
@@ -162,12 +211,12 @@ internal static class WorkbenchScene
             Until(() => heat.Canvas.LastSpans > 0, 10);
             Check(heat.Canvas.LastSpans > 0, $"the heat map paints recorded depth ({heat.Canvas.LastSpans} spans)");
             Check(view.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "HeatmapRecordingOff").IsVisible == false, "no recording-off banner while depth is recorded");
-            Shot(window, "heatmap");
+            Inspect(window, view, "heatmap");
             view.Apply(new WorkbenchSelection("fixture-aggregate", instrument, noDepth));
             Until(() => view.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "HeatmapRecordingOff").IsVisible, 5);
             Check(view.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "HeatmapRecordingOff").IsVisible, "with depth recording off the heat map says so instead of showing an empty map");
             Check(!svc.Settings.RecordDepth, "the Workbench never turns depth recording on");
-            Shot(window, "heatmap_recording_off");
+            Inspect(window, view, "heatmap_recording_off");
             view.Apply(new WorkbenchSelection("fixture-aggregate", instrument, data));
 
             // ---- liquidation map
@@ -179,37 +228,79 @@ internal static class WorkbenchScene
             Check(liquidity.Canvas.View?.ThirdParty is { Count: > 0 }, "the opt-in third-party levels fixture is drawn and labelled");
             Check(liquidity.Canvas.View?.Bands.Count == 5, "the leverage reference grid has five tiers");
             Check(svc.Settings.ThirdPartyLiquidationLevels == levelsBefore, "the panel does not change the third-party opt-in");
-            Shot(window, "liquidity");
+            Inspect(window, view, "liquidity");
 
             // ---- derivatives dashboard
             view.Select("derivatives");
             var deriv = view.Panels.OfType<DerivativesPanel>().Single();
-            Until(() => deriv.Inputs.Count == 2, 30);
+            // all five venues post together; the funding board reads each venue's bulk endpoint
+            Until(() => deriv.Inputs.Count == 5 && deriv.Boards.Count == 5 && deriv.Flow != null, 30);
             pump(2.5);
+            Check(deriv.Inputs.Count == 5 && DerivativesData.PerpetualVenues.All(deriv.Inputs.ContainsKey), "all five venues load: " + string.Join(", ", deriv.Inputs.Keys));
             Check(deriv.Inputs.TryGetValue(DerivativesData.Binance, out var binance) && binance.Funding != null && binance.OpenInterest != null && binance.Stats != null && binance.LongShort != null,
                 "Binance funding, open interest, premium and long/short load");
-            Check(deriv.Inputs.TryGetValue(DerivativesData.Bybit, out var bybit) && bybit.LongShort == null && bybit.Errors.Any(e => e.Contains("long/short", StringComparison.Ordinal)),
-                "a failing Bybit long/short request stays a reported gap");
+            Check(deriv.Inputs.TryGetValue(DerivativesData.Bybit, out var bybit) && bybit.LongShort == null && bybit.Errors.Count > 0,
+                "a failing Bybit long/short request stays a reported gap: " + string.Join(" | ", bybit?.Errors ?? Array.Empty<string>()));
+            Check(new[] { DerivativesData.Okx, DerivativesData.Bitget, DerivativesData.Hyperliquid }.All(v => deriv.Inputs.TryGetValue(v, out var i) && i.Funding is { Samples.Count: > 0 } && i.Stats != null && i.Errors.Count == 0),
+                "OKX, Bitget and Hyperliquid funding and premium load from their published shapes: "
+                + string.Join(" | ", deriv.Inputs.Values.SelectMany(i => i.Errors)));
             var table = view.GetVisualDescendants().OfType<Grid>().Single(g => g.Name == "DerivativesTable");
             Check(table.Children.OfType<TextBlock>().Count(t => t.Text == WorkbenchFormat.Missing) >= 1, "missing values are dashes, not zeros");
-            Shot(window, "derivatives");
+            string? TableCell(string venueName, int column)
+            {
+                int? row = table.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetColumn(t) == 0 && t.Text == venueName) is { } name ? Grid.GetRow(name) : null;
+                return row == null ? null : table.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetRow(t) == row && Grid.GetColumn(t) == column)?.Text;
+            }
+            Check(TableCell(WorkbenchFormat.Venue(DerivativesData.Hyperliquid), 9) == Lang.T("not published"),
+                "Hyperliquid's long/short ratio says 'not published' instead of a value: " + TableCell(WorkbenchFormat.Venue(DerivativesData.Hyperliquid), 9));
+            var board = view.GetVisualDescendants().OfType<Grid>().Single(g => g.Name == "DerivativesFundingBoard");
+            var boardCoins = board.GetVisualDescendants().OfType<TextBlock>().Where(t => t.Parent is Border b && Grid.GetColumn(b) == 0 && Grid.GetRow(b) > 0).Select(t => t.Text).ToArray();
+            Check(boardCoins.SequenceEqual(DerivativesDashboard.BoardCoins) && deriv.Boards.Values.All(b => b is { Count: 5 })
+                  && !board.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == Lang.T("failed")),
+                $"the funding board lists five coins with every venue's bulk rate ({string.Join(", ", boardCoins)})");
+            var liquidationFeed = view.GetVisualDescendants().OfType<Grid>().Single(g => g.Name == "DerivativesLiquidationFeed");
+            string feedCoverage = view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "DerivativesLiquidationCoverage").Text ?? "";
+            Check(liquidationFeed.RowDefinitions.Count > 1 && liquidationFeed.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == Lang.T(WorkbenchFormat.Venue(DerivativesData.Binance)))
+                  && feedCoverage.Contains(Lang.T($"Liquidation stream observed: {WorkbenchFormat.Venue(DerivativesData.Binance)}"), StringComparison.Ordinal),
+                $"the liquidation feed lists observed liquidations and names the observing streams ({liquidationFeed.RowDefinitions.Count - 1} rows): {feedCoverage}");
+            Check(deriv.Flow is { FirstTrade: not null, MeasuredVolume: > 0 } flow && flow.Price.Any(p => p != null) && flow.Cvd.Any(c => c != null),
+                $"price and CVD are computed from the instrument's measured trades ({deriv.Flow?.MeasuredVolume} measured)");
+            Inspect(window, view, "derivatives");
 
             // ---- options: unconfigured, then a fixture provider
             view.Context.Options = () => unconfigured;
             view.Select("options");
             pump(1.2);
             Check(view.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "OptionsConnect").IsVisible, "without an options-data connection the panel asks to connect one");
-            Shot(window, "options_unconfigured");
-            view.Context.Options = () => options;
+            Inspect(window, view, "options_unconfigured", canvases: false);
             var optionsPanel = view.Panels.OfType<OptionsPanel>().Single();
-            Until(() => optionsPanel.Summary is { CallWall: not null }, 20);
+            TextBlock DvolStatus() => view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "OptionsDvolStatus");
+            Control DvolCanvas() => view.GetVisualDescendants().OfType<Control>().Single(c => c.Name == "OptionsDvol");
+            string noIndex = Lang.T($"Volatility index (DVOL): not provided by this source ({chainOnly.Provider!.Name}).");
+            view.Context.Options = () => chainOnly;
+            Until(() => DvolStatus().Text == noIndex, 20);
+            Check(DvolStatus().Text == noIndex && !DvolCanvas().IsVisible && optionsPanel.DvolWindow == null,
+                "a source without a volatility index says so instead of drawing one: " + DvolStatus().Text);
+            view.Context.Options = () => options;
+            Until(() => optionsPanel.Summary is { CallWall: not null } && optionsPanel.DvolWindow != null, 20);
             Check(optionsPanel.Summary is { CallWall: not null, PutWall: not null, MaxPain: not null, ExpectedMove: not null }, "GEX walls, max pain and expected move are computed");
             Check(optionsPanel.Summary?.Expiries.Count == 4 && optionsPanel.Summary.Term.Count == 4, "the per-expiry table and term structure cover every expiry");
-            Shot(window, "options");
+            // the fixture skips two days and publishes one NaN close: three gaps, never zeros
+            Check(optionsPanel.DvolWindow is { MissingDays: >= 3, Today: not null } dvol && dvol.Closes.Count(c => c == null) == dvol.MissingDays && dvol.Closes.All(c => c is null or > 0)
+                  && DvolCanvas().IsVisible,
+                $"the published DVOL window shows its missing days as gaps ({optionsPanel.DvolWindow?.MissingDays} missing) and today's value separately");
+            Inspect(window, view, "options");
 
             // ---- toolbox
             view.Select("toolbox");
+            var toolbox = view.Panels.OfType<ToolboxPanel>().Single();
+            Until(() => toolbox.StructureResult != null, 30);
             pump(0.3);
+            var structure = toolbox.StructureResult;
+            var structureRows = view.GetVisualDescendants().OfType<StackPanel>().Single(s => s.Name == "ToolStructureResult").GetVisualDescendants().OfType<TextBlock>().Count(t => !string.IsNullOrEmpty(t.Text));
+            Check(structure is { ClosedBars: > 0, LastClose: { } lastClose, LastBreak: { } lastBreak } && lastBreak.ConfirmedAt <= lastClose && lastBreak.FormedAt <= lastBreak.ConfirmedAt && lastClose <= DateTime.UtcNow
+                  && structureRows > 0,
+                $"the structure summary lists breaks confirmed by closed bars ({structure?.ClosedBars} bars, last break {structure?.LastBreak?.Kind} confirmed {structure?.LastBreak?.ConfirmedAt:u}, {structureRows} rows)");
             NumericUpDown Box(string name) => view.GetVisualDescendants().OfType<NumericUpDown>().Single(n => n.Name == name);
             Box("ToolEntry").Value = 80_000;
             Box("ToolStop").Value = 79_000;
@@ -222,7 +313,7 @@ internal static class WorkbenchScene
             var liqText = string.Join(" ", view.GetVisualDescendants().OfType<StackPanel>().Single(s => s.Name == "ToolLiquidationResult").GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
             Check(liqText.Contains("72,361.81", StringComparison.Ordinal), "approximate isolated liquidation price for 10× and 0.5 %: " + liqText);
             Check(svc.Portfolio.Balance == svc.Settings.SimStartBalance || svc.Portfolio.Balance > 0, "calculators never touch an account");
-            Shot(window, "toolbox");
+            Inspect(window, view, "toolbox", canvases: false);
 
             // ---- detachable panel window
             view.Detach("derivatives");
@@ -231,7 +322,8 @@ internal static class WorkbenchScene
             Check(floating is { IsVisible: true } && deriv.IsActive, "a panel opens in its own window and stays active there");
             if (floating != null)
             {
-                Shot(floating, "derivatives_window");
+                Inspect(floating, floating, "derivatives_window");
+                Check(floating.Title == string.Join(" · ", Lang.T(deriv.Title), Lang.T("Workbench")), "the panel window's title is translated: " + floating.Title);
                 floating.Close();
                 pump(0.3);
             }
@@ -253,9 +345,64 @@ internal static class WorkbenchScene
             window.Navigate("trading");
             pump(0.3);
         }
-        File.WriteAllText(Path.Combine(outDir, $"workbench-results-{language}.json"), System.Text.Json.JsonSerializer.Serialize(new { checks, failures, language }));
-        Console.WriteLine(failures == 0 ? $"WORKBENCH: all OK ({checks} checks)" : $"WORKBENCH: {failures} failure(s) of {checks}");
+        File.WriteAllText(Path.Combine(outDir, $"workbench-results-{language}.json"), System.Text.Json.JsonSerializer.Serialize(new { checks, failures, language, inspectedTexts, drawnTexts }));
+        Console.WriteLine(failures == 0 ? $"WORKBENCH: all OK ({checks} checks, {inspectedTexts} control texts, {drawnTexts} canvas labels)" : $"WORKBENCH: {failures} failure(s) of {checks}");
         return failures;
+    }
+
+    /// <summary>
+    /// Finds untranslated English in displayed text. Its vocabulary is the running language's own catalog: words of
+    /// the English source keys that no translation keeps (so brand names, units and loan words the translators kept
+    /// pass), plus English function words that never belong in a Spanish or Chinese sentence. All-capital tokens
+    /// (symbols, acronyms such as BTC, OI or GEX), numbers and the fixtures' own data names are data, not English.
+    /// A text that is itself an English catalog key with a different translation is untranslated as a whole.
+    /// </summary>
+    private sealed class EnglishProbe
+    {
+        private static readonly Regex Word = new(@"[^\W\d_]+", RegexOptions.CultureInvariant);
+        private static readonly HashSet<string> Function = new(StringComparer.Ordinal)
+        {
+            "the", "and", "of", "to", "is", "are", "was", "were", "for", "with", "from", "at", "by", "this", "that", "these", "those",
+            "not", "only", "than", "when", "while", "after", "before", "since", "until", "below", "above", "yet", "never", "into",
+            "which", "there", "their", "its", "have", "been", "will", "would", "can", "could", "should", "or", "in", "on", "it", "be", "an", "as", "if",
+        };
+        private readonly Dictionary<string, string> _catalog = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _english = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _data = new(StringComparer.Ordinal);
+
+        public EnglishProbe(string language, IEnumerable<string> data)
+        {
+            if (language == Lang.English) return;
+            using var stream = typeof(Lang).Assembly.GetManifestResourceStream($"TradingHub.App.Localization.{language}.json")
+                ?? throw new InvalidOperationException("Missing catalog " + language);
+            foreach (var (key, value) in System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(stream)!)
+                _catalog[key.Replace("{{", "{").Replace("}}", "}")] = value.Replace("{{", "{").Replace("}}", "}");
+            var kept = new HashSet<string>(_catalog.Values.SelectMany(Words), StringComparer.Ordinal);
+            foreach (var word in _catalog.Keys.SelectMany(Words))
+                if (word.Length >= 3 && !kept.Contains(word)) _english.Add(word);
+            foreach (var word in data.SelectMany(Words)) _data.Add(word);
+        }
+
+        /// <summary>Lower-cased ASCII words that are not all-capital tokens.</summary>
+        private static IEnumerable<string> Words(string text)
+        {
+            foreach (Match match in Word.Matches(text))
+            {
+                string word = match.Value;
+                if (!word.All(char.IsAscii) || word.Length > 1 && word.All(char.IsUpper)) continue;
+                yield return word.ToLowerInvariant();
+            }
+        }
+
+        /// <summary>The English words of a displayed text (empty when it contains none).</summary>
+        public List<string> Find(string text)
+        {
+            var found = new List<string>();
+            if (_catalog.TryGetValue(text, out var translated) && translated != text && Word.IsMatch(text)) found.Add("(untranslated text)");
+            foreach (var word in Words(text).Distinct())
+                if (!_data.Contains(word) && (Function.Contains(word) || _english.Contains(word))) found.Add(word);
+            return found;
+        }
     }
 
     private static long Ms(DateTime t) => new DateTimeOffset(DateTime.SpecifyKind(t, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
@@ -273,31 +420,90 @@ internal static class WorkbenchScene
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
     }
 
-    /// <summary>Public derivatives endpoints answered in-process from the query's own time range.</summary>
+    /// <summary>
+    /// Public derivatives endpoints of the five venues answered in-process from the query's own time range, in each
+    /// venue's published shape (see DerivativesVenueTests). Bybit long/short fails on purpose; Hyperliquid publishes none.
+    /// </summary>
     private sealed class DerivativesFixture : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        private static readonly (string Coin, double Price)[] Coins = { ("BTC", 80_000), ("ETH", 3_000), ("SOL", 150), ("XRP", 0.6), ("DOGE", 0.15) };
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query);
+            var uri = request.RequestUri!;
+            var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
             long Q(string name, long fallback) => long.TryParse(query[name], NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : fallback;
             long now = Ms(DateTime.UtcNow);
-            long from = Q("startTime", now - 86_400_000), to = Math.Min(Q("endTime", now), now);
+            long from = Q("startTime", Q("begin", now - 86_400_000)), to = Math.Min(Q("endTime", Q("end", now)), now);
+            const long Hour = 3_600_000, Settle = 8 * Hour;
+            long nextSettle = (now / Settle + 1) * Settle;
             string F(double v) => v.ToString("0.########", CultureInfo.InvariantCulture);
             IEnumerable<long> Every(long step, int max) { long first = (from + step - 1) / step * step; for (long t = first; t <= to && max-- > 0; t += step) yield return t; }
+            // newest first, within [lo, hi], at most max rows
+            IEnumerable<long> Newest(long step, long lo, long hi, int max) { for (long t = hi / step * step; t >= lo && max-- > 0; t -= step) yield return t; }
+            static long Period(string? name) => name is { Length: > 1 } p && long.TryParse(p[..^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+                ? n * (char.ToLowerInvariant(p[^1]) switch { 'm' => 60_000L, 'h' => Hour, 'd' => 24 * Hour, _ => Hour }) : Hour;
             double Oi(long t, double scale) => scale * (1 + 0.05 * Math.Sin(t / 3_600_000.0 / 5));
-            (int, string) body = request.RequestUri.AbsolutePath switch
+            string? symbol = query["symbol"], instId = query["instId"];
+            (int, string) body = (uri.Host, uri.AbsolutePath) switch
             {
-                "/fapi/v1/fundingRate" => (200, "[" + string.Join(",", Every(8 * 3_600_000, 1000).Select(t => $$"""{"symbol":"BTCUSDT","fundingTime":{{t}},"fundingRate":"{{F(0.0001 * Math.Cos(t / 1e8))}}"}""")) + "]"),
-                "/v5/market/funding/history" => (200, """{"retCode":0,"result":{"list":[""" + string.Join(",", Every(8 * 3_600_000, 200).Reverse().Select(t => $$"""{"symbol":"BTCUSDT","fundingRate":"{{F(0.00012 * Math.Sin(t / 1e8))}}","fundingRateTimestamp":"{{t}}"}""")) + "]}}"),
-                "/futures/data/openInterestHist" => (200, "[" + string.Join(",", Every(300_000, 500).Select(t => $$"""{"symbol":"BTCUSDT","sumOpenInterest":"{{F(Oi(t, 80_000))}}","sumOpenInterestValue":"1","timestamp":{{t}}}""")) + "]"),
-                "/v5/market/open-interest" => (200, """{"retCode":0,"result":{"symbol":"BTCUSDT","list":[""" + string.Join(",", Every(300_000, 5000).Reverse().Select(t => $$"""{"openInterest":"{{F(Oi(t, 50_000))}}","timestamp":"{{t}}"}""")) + """],"nextPageCursor":""}}"""),
-                "/fapi/v1/premiumIndex" => (200, $$"""{"symbol":"BTCUSDT","markPrice":"80010","indexPrice":"80000","lastFundingRate":"0.0001","nextFundingTime":{{now + 3_600_000}},"time":{{now}}}"""),
-                "/v5/market/tickers" => (200, $$"""{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","markPrice":"79990","indexPrice":"80000","fundingRate":"-0.00005","nextFundingTime":"{{now + 3_600_000}}"}]},"time":{{now}}}"""),
-                "/futures/data/globalLongShortAccountRatio" => (200, "[" + string.Join(",", Every(300_000, 500).Select(t => $$"""{"symbol":"BTCUSDT","longShortRatio":"1.4","longAccount":"{{F(0.58 + 0.02 * Math.Sin(t / 1e7))}}","shortAccount":"{{F(0.42 - 0.02 * Math.Sin(t / 1e7))}}","timestamp":{{t}}}""")) + "]"),
-                "/v5/market/account-ratio" => (500, """{"retCode":10016,"retMsg":"fixture outage"}"""),
+                // ---- Binance USD-M and Bybit linear
+                (_, "/fapi/v1/fundingRate") => (200, "[" + string.Join(",", Every(Settle, 1000).Select(t => $$"""{"symbol":"BTCUSDT","fundingTime":{{t}},"fundingRate":"{{F(0.0001 * Math.Cos(t / 1e8))}}"}""")) + "]"),
+                (_, "/v5/market/funding/history") => (200, """{"retCode":0,"result":{"list":[""" + string.Join(",", Every(Settle, 200).Reverse().Select(t => $$"""{"symbol":"BTCUSDT","fundingRate":"{{F(0.00012 * Math.Sin(t / 1e8))}}","fundingRateTimestamp":"{{t}}"}""")) + "]}}"),
+                (_, "/futures/data/openInterestHist") => (200, "[" + string.Join(",", Every(300_000, 500).Select(t => $$"""{"symbol":"BTCUSDT","sumOpenInterest":"{{F(Oi(t, 80_000))}}","sumOpenInterestValue":"1","timestamp":{{t}}}""")) + "]"),
+                (_, "/v5/market/open-interest") => (200, """{"retCode":0,"result":{"symbol":"BTCUSDT","list":[""" + string.Join(",", Every(300_000, 5000).Reverse().Select(t => $$"""{"openInterest":"{{F(Oi(t, 50_000))}}","timestamp":"{{t}}"}""")) + """],"nextPageCursor":""}}"""),
+                (_, "/fapi/v1/premiumIndex") when symbol == null => (200, "[" + string.Join(",", Coins.Select(c => $$"""{"symbol":"{{c.Coin}}USDT","markPrice":"{{F(c.Price)}}","indexPrice":"{{F(c.Price)}}","lastFundingRate":"0.0001","nextFundingTime":{{nextSettle}},"time":{{now}}}""")) + "]"),
+                (_, "/fapi/v1/premiumIndex") => (200, $$"""{"symbol":"BTCUSDT","markPrice":"80010","indexPrice":"80000","lastFundingRate":"0.0001","nextFundingTime":{{now + 3_600_000}},"time":{{now}}}"""),
+                (_, "/fapi/v1/fundingInfo") => (200, "[]"),
+                (_, "/v5/market/tickers") when symbol == null => (200, """{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[""" + string.Join(",", Coins.Select(c => $$"""{"symbol":"{{c.Coin}}USDT","markPrice":"{{F(c.Price)}}","indexPrice":"{{F(c.Price)}}","fundingRate":"-0.00005","nextFundingTime":"{{nextSettle}}","fundingIntervalHour":"8"}""")) + $$"""]},"time":{{now}}}"""),
+                (_, "/v5/market/tickers") => (200, $$"""{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","markPrice":"79990","indexPrice":"80000","fundingRate":"-0.00005","nextFundingTime":"{{now + 3_600_000}}"}]},"time":{{now}}}"""),
+                (_, "/futures/data/globalLongShortAccountRatio") => (200, "[" + string.Join(",", Every(300_000, 500).Select(t => $$"""{"symbol":"BTCUSDT","longShortRatio":"1.4","longAccount":"{{F(0.58 + 0.02 * Math.Sin(t / 1e7))}}","shortAccount":"{{F(0.42 - 0.02 * Math.Sin(t / 1e7))}}","timestamp":{{t}}}""")) + "]"),
+                (_, "/v5/market/account-ratio") => (500, """{"retCode":10016,"retMsg":"fixture outage"}"""),
+                // ---- OKX
+                ("okx.fixture", "/api/v5/public/funding-rate-history") => (200, """{"code":"0","data":[""" + string.Join(",", Newest(Settle, now - 10 * 24 * Hour, Math.Min(now, Q("after", long.MaxValue) - 1), 400)
+                    .Select(t => $$"""{"formulaType":"withRate","fundingRate":"{{F(0.00008 * Math.Cos(t / 1e8))}}","fundingTime":"{{t}}","instId":"BTC-USDT-SWAP","instType":"SWAP","method":"current_period","realizedRate":""}""")) + """],"msg":""}"""),
+                ("okx.fixture", "/api/v5/public/funding-rate") => (200, """{"code":"0","data":[""" + string.Join(",", Coins.Where(c => instId == "ANY" || instId == $"{c.Coin}-USDT-SWAP")
+                    .Select(c => $$"""{"formulaType":"withRate","fundingRate":"0.00006","fundingTime":"{{nextSettle}}","instId":"{{c.Coin}}-USDT-SWAP","instType":"SWAP","method":"current_period","nextFundingRate":"","nextFundingTime":"{{nextSettle + Settle}}","premium":"0.0001","ts":"{{now}}"}""")) + """],"msg":""}"""),
+                ("okx.fixture", "/api/v5/public/mark-price") => (200, $$"""{"code":"0","data":[{"instId":"BTC-USDT-SWAP","instType":"SWAP","markPx":"80005","ts":"{{now}}"}],"msg":""}"""),
+                ("okx.fixture", "/api/v5/market/index-tickers") => (200, $$"""{"code":"0","data":[{"instId":"BTC-USDT","idxPx":"80000","ts":"{{now}}"}],"msg":""}"""),
+                ("okx.fixture", "/api/v5/public/open-interest") => (200, $$"""{"code":"0","data":[{"instId":"BTC-USDT-SWAP","instType":"SWAP","oi":"{{F(Oi(now, 3_000_000))}}","oiCcy":"{{F(Oi(now, 30_000))}}","oiUsd":"1","ts":"{{now}}"}],"msg":""}"""),
+                ("okx.fixture", "/api/v5/rubik/stat/contracts/open-interest-history") => (200, """{"code":"0","data":[""" + string.Join(",", Newest(Period(query["period"]), from, to, 100)
+                    .Select(t => $$"""["{{t}}","{{F(Oi(t, 3_000_000))}}","{{F(Oi(t, 30_000))}}","1"]""")) + """],"msg":""}"""),
+                ("okx.fixture", "/api/v5/rubik/stat/contracts/long-short-account-ratio-contract") => (200, """{"code":"0","data":[""" + string.Join(",", Newest(Period(query["period"]), from, to, 100)
+                    .Select(t => $$"""["{{t}}","{{F(2 + 0.2 * Math.Sin(t / 1e7))}}"]""")) + """],"msg":""}"""),
+                // ---- Bitget
+                ("bitget.fixture", "/api/v2/mix/market/history-fund-rate") => (200, $$"""{"code":"00000","msg":"success","requestTime":{{now}},"data":[""" + string.Join(",", Newest(Settle, now - 10 * 24 * Hour, now, 100)
+                    .Select(t => $$"""{"symbol":"BTCUSDT","fundingRate":"{{F(0.00007 * Math.Sin(t / 1e8))}}","fundingTime":"{{t}}"}""")) + "]}"),
+                ("bitget.fixture", "/api/v2/mix/market/current-fund-rate") => (200, $$"""{"code":"00000","msg":"success","requestTime":{{now}},"data":[""" + string.Join(",", Coins.Where(c => symbol == null || symbol == $"{c.Coin}USDT")
+                    .Select(c => $$"""{"symbol":"{{c.Coin}}USDT","fundingRate":"0.00004","fundingRateInterval":"8","nextUpdate":"{{nextSettle}}","minFundingRate":"-0.003","maxFundingRate":"0.003"}""")) + "]}"),
+                ("bitget.fixture", "/api/v2/mix/market/ticker") => (200, $$"""{"code":"00000","msg":"success","requestTime":{{now}},"data":[{"symbol":"BTCUSDT","lastPr":"80002","ts":"{{now}}","indexPrice":"80000","fundingRate":"0.00004","holdingAmount":"36789.1","markPrice":"80002"}]}"""),
+                ("bitget.fixture", "/api/v2/mix/market/open-interest") => (200, $$$"""{"code":"00000","msg":"success","requestTime":{{{now}}},"data":{"openInterestList":[{"symbol":"BTCUSDT","size":"36789.1944"}],"ts":"{{{now}}}"}}"""),
+                ("bitget.fixture", "/api/v2/mix/market/account-long-short") => (200, $$"""{"code":"00000","msg":"success","requestTime":{{now}},"data":[""" + string.Join(",", Newest(Period(query["period"]), now - 30 * Period(query["period"]), now, 30).Reverse()
+                    .Select(t => $$"""{"longAccountRatio":"0.6","shortAccountRatio":"0.4","longShortAccountRatio":"1.5","ts":"{{t}}"}""")) + "]}"),
+                // ---- Hyperliquid (POST /info)
+                ("hyperliquid.fixture", "/info") => await Hyperliquid(request, now, cancellationToken).ConfigureAwait(false),
                 _ => (404, "{}"),
             };
-            return Task.FromResult(new HttpResponseMessage((HttpStatusCode)body.Item1) { Content = new StringContent(body.Item2, Encoding.UTF8, "application/json") });
+            return new HttpResponseMessage((HttpStatusCode)body.Item1) { Content = new StringContent(body.Item2, Encoding.UTF8, "application/json") };
+        }
+
+        private static async Task<(int, string)> Hyperliquid(HttpRequestMessage request, long now, CancellationToken ct)
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct).ConfigureAwait(false));
+            var root = doc.RootElement;
+            if (root.GetProperty("type").GetString() == "metaAndAssetCtxs")
+            {
+                string universe = string.Join(",", Coins.Select(c => $$"""{"szDecimals":2,"name":"{{c.Coin}}","maxLeverage":40}"""));
+                string contexts = string.Join(",", Coins.Select(c => string.Create(CultureInfo.InvariantCulture,
+                    $$"""{"funding":"0.0000125","openInterest":"37277.79","premium":"-0.0004","oraclePx":"{{c.Price}}","markPx":"{{c.Price}}"}""")));
+                return (200, $$"""[{"universe":[{{universe}}]},[{{contexts}}]]""");
+            }
+            long start = root.GetProperty("startTime").GetInt64(), end = Math.Min(root.GetProperty("endTime").GetInt64(), now);
+            const long Hour = 3_600_000;
+            var rows = new List<string>();
+            for (long t = (start + Hour - 1) / Hour * Hour; t <= end && rows.Count < 500; t += Hour)
+                rows.Add(string.Create(CultureInfo.InvariantCulture, $$"""{"coin":"BTC","fundingRate":"0.0000125","premium":"-0.0001","time":{{t + 21}}}"""));
+            return (200, "[" + string.Join(",", rows) + "]");
         }
     }
 
@@ -347,6 +553,7 @@ internal static class WorkbenchScene
     /// <summary>A venue of the aggregate that lists BTCUSDT, publishes deterministic 15-minute candles and a fixed live status.</summary>
     private sealed class FixtureVenue(string id, string name, string venue, FeedStatus status) : IMarketDataFeed, ICryptoVenue, IKlineHistory
     {
+        private static readonly long Anchor = Ms(DateTime.UtcNow);
         private readonly Instrument _instrument = new() { Symbol = "BTCUSDT", FeedId = id, TickSize = 0.1m, VolumeStep = 0.001m, BaseAsset = "BTC", QuoteAsset = "USDT" };
         public string Id => id;
         public string DisplayName => name;
@@ -367,8 +574,9 @@ internal static class WorkbenchScene
             var bars = new List<Kline>();
             for (long t = first; t < last; t += step)
             {
-                double phase = t / 3_600_000.0;
-                decimal open = Mid + (decimal)(Math.Sin(phase / 9) * 2500), close = Mid + (decimal)(Math.Sin((phase + minutes / 60.0) / 9) * 2500);
+                // a slow upward drift makes each swing high exceed the previous one, so closed bars confirm structure breaks
+                double phase = t / 3_600_000.0, drift = (t - Anchor) / 3_600_000.0 * 20;
+                decimal open = Mid + (decimal)(Math.Sin(phase / 9) * 2500 + drift), close = Mid + (decimal)(Math.Sin((phase + minutes / 60.0) / 9) * 2500 + drift + minutes / 60.0 * 20);
                 decimal high = Math.Max(open, close) + 40, low = Math.Min(open, close) - 40, volume = 100 + (decimal)(Math.Abs(Math.Cos(phase)) * 50);
                 decimal buy = volume * (close >= open ? 0.6m : 0.4m);
                 bars.Add(new Kline(t, open, high, low, close, volume, buy, true));
@@ -379,7 +587,7 @@ internal static class WorkbenchScene
 
         public IDisposable Subscribe(Instrument instrument, IMarketDataSink sink)
         {
-            sink.OnStatus(instrument, status, status == FeedStatus.Connected ? null : "Fixture venue is reconnecting.");
+            sink.OnStatus(instrument, status, null);
             return new End();
         }
 
@@ -388,9 +596,9 @@ internal static class WorkbenchScene
     }
 
     /// <summary>A chain around 80,000 with four expiries, a convex smile, call open interest above and put open interest below.</summary>
-    private sealed class FixtureOptions : IOptionsProvider
+    private class FixtureOptions(string name = "Fixture chain") : IOptionsProvider
     {
-        public string Name => "Fixture options";
+        public string Name => name;
         public bool Supports(string underlying) => underlying == "BTC";
 
         public Task<OptionsChain?> ChainAsync(string underlying, CancellationToken ct)
@@ -408,7 +616,7 @@ internal static class WorkbenchScene
                     contracts.Add(new OptionContract($"BTC-{days}-{k}-P", expiry, k, OptionRight.Put, 0, 0, 1, iv + 0.03, 0, 0, 0, 0, putOi, putOi / 5, 1));
                 }
             }
-            return Task.FromResult<OptionsChain?>(new OptionsChain("BTC", now.AddMinutes(-1), 80_000, contracts, "Fixture options", "index"));
+            return Task.FromResult<OptionsChain?>(new OptionsChain("BTC", now.AddMinutes(-1), 80_000, contracts, name, "index"));
         }
 
         public Task<IReadOnlyList<OptionTrade>> TradesAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
@@ -420,7 +628,29 @@ internal static class WorkbenchScene
             return Task.FromResult<IReadOnlyList<OptionTrade>>(trades);
         }
 
-        public Task<IReadOnlyList<OptionDaily>> DailyAsync(string underlying, DateTime from, DateTime to, CancellationToken ct) =>
+        public virtual Task<IReadOnlyList<OptionDaily>> DailyAsync(string underlying, DateTime from, DateTime to, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<OptionDaily>>(Array.Empty<OptionDaily>());
+    }
+
+    /// <summary>
+    /// The same chain from a source that publishes DVOL: daily ATM IV rows (fractions) for the last 40 days and today,
+    /// with days 5 and 6 missing and day 10 a NaN close.
+    /// </summary>
+    private sealed class FixtureIndexedOptions() : FixtureOptions("Fixture options"), IVolatilityIndexSource
+    {
+        public string VolatilityIndexName => "DVOL";
+
+        public override Task<IReadOnlyList<OptionDaily>> DailyAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
+        {
+            var rows = new List<OptionDaily>();
+            var today = DateTime.UtcNow.Date;
+            for (int ago = 40; ago >= 0; ago--)
+            {
+                if (ago is 5 or 6) continue;
+                double iv = ago == 10 ? double.NaN : 0.5 + 0.05 * Math.Sin(ago / 3.0);
+                rows.Add(new OptionDaily(today.AddDays(-ago), 80_000, iv, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+            }
+            return Task.FromResult<IReadOnlyList<OptionDaily>>(rows);
+        }
     }
 }

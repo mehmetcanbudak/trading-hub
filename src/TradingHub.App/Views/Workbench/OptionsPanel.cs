@@ -26,7 +26,9 @@ internal sealed class OptionsPanel : WorkbenchPanel
     private readonly Grid _expiries = new() { Name = "OptionsExpiries" };
     private readonly StackPanel _trades = new() { Name = "OptionsTrades", Spacing = 2 };
     private readonly TextBlock _status = new() { Name = "OptionsStatus", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
-    private string _key = "";
+    private readonly OptionsDvolCanvas _dvol = new() { Name = "OptionsDvol", Height = 150 };
+    private readonly TextBlock _dvolStatus = new() { Name = "OptionsDvolStatus", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
+    private string _key = "", _dvolKey = "";
     private DateTime _lastCheck;
 
     public OptionsPanel(WorkbenchContext context) : base(context)
@@ -45,6 +47,7 @@ internal sealed class OptionsPanel : WorkbenchPanel
         var large = Number("OptionsLargePremium", s.OptionsLargeTradePremium, 0, 1_000_000_000, 50_000, "0", v => { s.OptionsLargeTradePremium = v; context.Save(); _key = ""; Update(); });
         for (int c = 0; c < 10; c++) _expiries.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
         _body = Ui.V(10, Ui.H(12, expiry, range, Ui.Field("Large trades from (premium)", large)), _kpis, _charts,
+            Ui.H2("Implied volatility index"), _dvolStatus, _dvol,
             Ui.H2("By expiry"), Note("Max pain = the settlement price where option holders' total intrinsic value is lowest. Expected move = spot × ATM IV × √time (one standard deviation)."),
             new ScrollViewer { Content = _expiries, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled },
             Ui.H2("Large option trades (24 hours)"), _trades,
@@ -63,6 +66,7 @@ internal sealed class OptionsPanel : WorkbenchPanel
     public override string Title => "Options";
     public override MaterialIconKind Icon => MaterialIconKind.Sigma;
     internal OptionsSummary? Summary { get; private set; }
+    internal VolatilityIndexWindow? DvolWindow { get; private set; }
 
     private void Navigate(string page)
     {
@@ -103,9 +107,12 @@ internal sealed class OptionsPanel : WorkbenchPanel
         if (unavailable != null || hub == null || !IsActive)
         {
             Summary = null;
+            DvolWindow = null;
             _status.Text = "";
+            _dvolKey = "";
             return;
         }
+        UpdateDvol(hub, underlying);
         var chain = hub.Chain(underlying);
         var now = Context.Clock();
         var trades = hub.TradesBetween(underlying, now.AddHours(-24), now);
@@ -115,7 +122,7 @@ internal sealed class OptionsPanel : WorkbenchPanel
         if (chain == null)
         {
             Summary = null;
-            _status.Text = hub.ChainError(underlying) is { } error ? "Options data: " + error : $"Loading the {underlying} options chain…";
+            _status.Text = hub.ChainError(underlying) is { } error ? $"Options data: {error}" : $"Loading the {underlying} options chain…";
             _kpis.Children.Clear();
             _charts.Set(null);
             return;
@@ -127,8 +134,44 @@ internal sealed class OptionsPanel : WorkbenchPanel
         _charts.Set(summary);
         Expiries(summary);
         Trades(trades, (double)s.OptionsLargeTradePremium, hub.TradeCoverageNote(underlying, now.AddHours(-24), now));
-        _status.Text = $"{summary.Source} · {summary.Underlying} · {summary.Contracts} contracts · snapshot {Ui.Ago(summary.Time)}"
-            + (summary.Contracts == 0 ? " · no contracts in the selected expiries" : "");
+        string snapshot = summary.Time.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        _status.Text = summary.Contracts == 0
+            ? $"{summary.Source} · {summary.Underlying} · {summary.Contracts} contracts · snapshot at {snapshot} · no contracts in the selected expiries"
+            : $"{summary.Source} · {summary.Underlying} · {summary.Contracts} contracts · snapshot at {snapshot}";
+    }
+
+    /// <summary>
+    /// The source's published volatility index (Deribit DVOL) over the last 30 completed UTC days. Sources without one
+    /// say so; days without a published close are hatched gaps.
+    /// </summary>
+    private void UpdateDvol(OptionsData hub, string underlying)
+    {
+        var now = Context.Clock();
+        var series = hub.VolatilityIndex(underlying);
+        string key = $"{underlying}|{hub.Generation}|{now:yyyyMMdd}|{series?.Points?.Count ?? -1}|{series?.Error}";
+        if (key == _dvolKey) return;
+        _dvolKey = key;
+        if (series == null)
+        {
+            DvolWindow = null;
+            _dvol.IsVisible = false;
+            _dvolStatus.Text = $"Volatility index (DVOL): not provided by this source ({hub.Provider?.Name}).";
+            return;
+        }
+        _dvol.IsVisible = true;
+        if (series.Points == null)
+        {
+            DvolWindow = null;
+            _dvol.Set(null);
+            _dvolStatus.Text = series.Error is { } error ? $"{series.Name}: {error}" : $"Loading the {series.Name} daily history…";
+            return;
+        }
+        var window = OptionsDashboard.VolatilityIndex(series.Name, series.Points, now);
+        DvolWindow = window;
+        _dvol.Set(window);
+        _dvolStatus.Text = window.MissingDays == 0
+            ? $"{series.Name}: the source's published 30-day implied volatility index; daily UTC closes of the last 30 completed days."
+            : $"{series.Name}: the source's published 30-day implied volatility index; daily UTC closes of the last 30 completed days. {window.MissingDays} days without a published close are hatched, not zero.";
     }
 
     private void Kpis(OptionsSummary s)
@@ -195,11 +238,24 @@ internal sealed class OptionsPanel : WorkbenchPanel
         }
         foreach (var t in large)
         {
-            string side = t.Aggressor > 0 ? "bought" : t.Aggressor < 0 ? "sold" : "traded";
-            string right = t.Right == OptionRight.Call ? "call" : "put";
+            string time = t.Time.ToLocalTime().ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
+            string size = t.Size.ToString("0.##", CultureInfo.InvariantCulture);
+            string strike = t.Strike.ToString("0.##", CultureInfo.InvariantCulture);
+            string expiry = t.Expiry.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            string premium = WorkbenchFormat.Compact(t.Premium);
+            bool call = t.Right == OptionRight.Call;
+            string text = (Math.Sign(t.Aggressor), call) switch
+            {
+                (> 0, true) => $"{time} · {t.Venue} · bought {size} × {strike} call {expiry} · premium {premium}",
+                (> 0, false) => $"{time} · {t.Venue} · bought {size} × {strike} put {expiry} · premium {premium}",
+                (< 0, true) => $"{time} · {t.Venue} · sold {size} × {strike} call {expiry} · premium {premium}",
+                (< 0, false) => $"{time} · {t.Venue} · sold {size} × {strike} put {expiry} · premium {premium}",
+                (_, true) => $"{time} · {t.Venue} · traded {size} × {strike} call {expiry} · premium {premium}",
+                _ => $"{time} · {t.Venue} · traded {size} × {strike} put {expiry} · premium {premium}",
+            };
             var line = new TextBlock
             {
-                Text = $"{t.Time.ToLocalTime():MM-dd HH:mm} · {t.Venue} · {side} {t.Size:0.##} × {t.Strike.ToString("0.##", CultureInfo.InvariantCulture)} {right} {t.Expiry:yyyy-MM-dd} · premium {WorkbenchFormat.Compact(t.Premium)}",
+                Text = text,
                 Foreground = t.Bias > 0 ? Ui.Up : t.Bias < 0 ? Ui.Down : Ui.Text1, FontSize = 12,
             };
             _trades.Children.Add(line);
@@ -310,5 +366,45 @@ internal sealed class OptionsChartsCanvas : WorkbenchCanvas
         canvas.DrawPath(path, line);
         Label(canvas, format(y1), rect.Right - 4, plot.Top + 9, Text, 9.5f, right: true);
         Label(canvas, format(y0), rect.Right - 4, plot.Bottom, Text, 9.5f, right: true);
+    }
+}
+
+/// <summary>Daily closes of the source's volatility index; days without a published close are hatched, never drawn as zero.</summary>
+internal sealed class OptionsDvolCanvas : WorkbenchCanvas
+{
+    private VolatilityIndexWindow? _window;
+
+    public void Set(VolatilityIndexWindow? window)
+    {
+        _window = window;
+        InvalidateVisual();
+    }
+
+    protected override void Draw(SKCanvas canvas, float width, float height)
+    {
+        LoadColors();
+        canvas.Clear(Bg);
+        if (_window is not { } w)
+        {
+            Label(canvas, "Waiting for the volatility index", 10, 22, Text);
+            return;
+        }
+        var rect = new SKRect(6, 6, width - 6, height - 22);
+        static string Points(double v) => v.ToString("0.0", CultureInfo.InvariantCulture);
+        string title = $"{w.Name} · daily close, last {w.Closes.Count} completed UTC days";
+        if (w.Closes.All(c => c == null))
+        {
+            using var frame = new SKPaint { Color = Grid, IsAntialias = true, Style = SKPaintStyle.Stroke };
+            canvas.DrawRoundRect(rect, 5, 5, frame);
+            Label(canvas, title, rect.Left + 8, rect.Top + 15, Text, 10.5f);
+            Hatch(canvas, new SKRect(rect.Left + 6, rect.Top + 22, rect.Right - 6, rect.Bottom - 6));
+            Label(canvas, "No published closes in this window", rect.Left + 8, rect.MidY + 6, Strong, 10.5f);
+        }
+        else Sparkline(canvas, rect, title, w.Closes, Accent, Points);
+        string first = w.FirstDay.ToString("MM-dd", CultureInfo.InvariantCulture);
+        string last = w.FirstDay.AddDays(w.Closes.Count - 1).ToString("MM-dd", CultureInfo.InvariantCulture);
+        Label(canvas, first, rect.Left + 6, height - 6, Text, 9.5f);
+        Label(canvas, last, rect.Right - 6, height - 6, Text, 9.5f, right: true);
+        if (w.Today is { } today) Label(canvas, $"Today so far: {Points(today)}", rect.MidX, height - 6, Text, 9.5f);
     }
 }

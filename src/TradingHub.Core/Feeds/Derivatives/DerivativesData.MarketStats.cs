@@ -36,6 +36,7 @@ public sealed partial class DerivativesData
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
         ct = linked.Token;
+        if (IsAddedVenue(venue)) return await LoadVenueMarketStatsAsync(venue, symbol, ct).ConfigureAwait(false);
         string escaped = Uri.EscapeDataString(symbol);
         if (venue == Binance)
         {
@@ -81,6 +82,7 @@ public sealed partial class DerivativesData
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
         ct = linked.Token;
+        if (IsAddedVenue(venue)) return await LoadVenueLongShortAsync(venue, symbol, from, to, ct).ConfigureAwait(false);
         var span = to - from;
         string escaped = Uri.EscapeDataString(symbol);
         IReadOnlyList<LongShortSample> rows;

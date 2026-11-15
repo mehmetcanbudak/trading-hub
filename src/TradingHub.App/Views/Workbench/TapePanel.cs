@@ -29,6 +29,7 @@ internal sealed class TapePanel : WorkbenchPanel
     private readonly TapeListCanvas _list;
     private readonly TapeChartCanvas _chart;
     private readonly TextBlock _coverage = new() { Name = "TapeCoverage", TextWrapping = TextWrapping.Wrap, Classes = { "small" } };
+    private readonly TextBlock _skippedNote = new() { Name = "TapeSkipped", TextWrapping = TextWrapping.Wrap, Classes = { "small" }, Foreground = Ui.Warn, IsVisible = false };
     private readonly TextBlock _liquidationState = new() { Name = "TapeLiquidationCoverage", TextWrapping = TextWrapping.Wrap, Classes = { "faint", "small" } };
     private readonly WrapPanel _venueFilters = new() { Name = "TapeVenues", Orientation = Orientation.Horizontal };
     private readonly Dictionary<string, ToggleButton> _venueButtons = new(StringComparer.OrdinalIgnoreCase);
@@ -79,7 +80,10 @@ internal sealed class TapePanel : WorkbenchPanel
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("420,*"), RowDefinitions = new RowDefinitions("*") };
         grid.Children.Add(listBorder);
         var right = new DockPanel();
-        var legend = Ui.V(4, _coverage, _liquidationState, _venueFilters);
+        var coverageTitle = new TextBlock { Text = "Coverage:", Classes = { "small" }, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 0, 6, 0) };
+        DockPanel.SetDock(coverageTitle, Dock.Left);
+        var coverageRow = new DockPanel { Children = { coverageTitle, _coverage } };
+        var legend = Ui.V(4, coverageRow, _skippedNote, _liquidationState, _venueFilters);
         DockPanel.SetDock(legend, Dock.Bottom);
         right.Children.Add(legend);
         right.Children.Add(_chart);
@@ -267,26 +271,36 @@ internal sealed class TapePanel : WorkbenchPanel
         foreach (var v in venues)
         {
             if (v.Status != FeedStatus.Connected) _tape.MarkPartial(now, v.Id);
-            string m = v.Message is { Length: > 0 } text ? text : "-";
-            lines.Add(v.Status switch
-            {
-                FeedStatus.Connected when !v.Partial => $"{v.Name}: live",
-                FeedStatus.Connected => $"{v.Name}: partial ({m})",
-                FeedStatus.Connecting => $"{v.Name}: connecting ({m})",
-                FeedStatus.Reconnecting => $"{v.Name}: reconnecting ({m})",
-                FeedStatus.Error => $"{v.Name}: error ({m})",
-                _ => $"{v.Name}: missing ({m})",
-            });
+            // Translated per venue: in the joined line a leading "{0}: …" template hole could swallow the earlier venues.
+            lines.Add(Localization.Lang.T(CoverageLine(v.Name, v.Status, v.Partial, v.Message is { Length: > 0 } text ? text : null)));
             EnsureVenueButton(v.Id, v.Name);
         }
         foreach (var venue in _tape.Totals.Keys.Where(v => !DerivativesData.Venues.Contains(v, StringComparer.OrdinalIgnoreCase)).ToArray())
             EnsureVenueButton(venue, WorkbenchFormat.Venue(venue));
-        if (_skipped > 0) lines.Add($"{_skipped} prints arrived faster than the tape could list; volume bars may be incomplete.");
-        _coverage.Text = "Coverage · " + string.Join(" · ", lines);
+        _skippedNote.IsVisible = _skipped > 0;
+        _skippedNote.Text = _skipped > 0 ? $"{_skipped} prints arrived faster than the tape could list; volume bars may be incomplete." : "";
+        // Each venue line is one complete template whose holes are data (venue name, provider message).
+        _coverage.Text = string.Join(" · ", lines);
         _liquidationState.Text = _liquidationSymbol == null
             ? sel.IsCryptoUsd ? "Liquidations: derivatives data is unavailable in this session." : "Liquidations: available only for USD-quoted crypto perpetuals (Binance and Bybit streams)."
             : $"Liquidations ({_liquidationSymbol}): Binance and Bybit public streams since this panel started listening; hatched bars were not observed. Binance publishes at most one liquidation per second (a sample).";
     }
+
+    /// <summary>One venue's coverage as a complete display template per state; holes carry only the venue name and the provider's message.</summary>
+    internal static string CoverageLine(string venue, FeedStatus status, bool partial, string? message) => (status, message) switch
+    {
+        (FeedStatus.Connected, _) when !partial => $"{venue}: live",
+        (FeedStatus.Connected, null) => $"{venue}: partial",
+        (FeedStatus.Connected, { } m) => $"{venue}: partial ({m})",
+        (FeedStatus.Connecting, null) => $"{venue}: connecting",
+        (FeedStatus.Connecting, { } m) => $"{venue}: connecting ({m})",
+        (FeedStatus.Reconnecting, null) => $"{venue}: reconnecting",
+        (FeedStatus.Reconnecting, { } m) => $"{venue}: reconnecting ({m})",
+        (FeedStatus.Error, null) => $"{venue}: error",
+        (FeedStatus.Error, { } m) => $"{venue}: error ({m})",
+        (_, null) => $"{venue}: missing",
+        (_, { } m) => $"{venue}: missing ({m})",
+    };
 
     private void EnsureVenueButton(string id, string name)
     {
@@ -350,8 +364,8 @@ internal sealed class TapeListCanvas(TradeTape tape, List<string> hidden) : Work
             bool bold = r.Emphasis != TapeEmphasis.Normal || r.IsLiquidation;
             Label(canvas, r.Time.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture), 8, baseLine, Text, 10.5f);
             string venue = WorkbenchFormat.Venue(r.Venue);
-            if (r.IsLiquidation) venue = "LIQ " + venue;
-            Label(canvas, venue.Length > 18 ? venue[..18] : venue, 92, baseLine, r.IsLiquidation ? color : Strong, 10.5f, bold);
+            if (venue.Length > 18) venue = venue[..18];
+            Label(canvas, r.IsLiquidation ? $"LIQ {venue}" : venue, 92, baseLine, r.IsLiquidation ? color : Strong, 10.5f, bold);
             Label(canvas, (r.Side == TradeSide.Sell ? "▼ " : "▲ ") + WorkbenchFormat.Price(r.Price), width * 0.62f, baseLine, color, 10.5f, bold, right: true);
             Label(canvas, (r.SideInferred ? "~" : "") + WorkbenchFormat.Compact(r.Size) + (r.Prints > 1 ? $" ×{r.Prints}" : ""), width * 0.80f, baseLine, Strong, 10.5f, right: true);
             Label(canvas, WorkbenchFormat.Compact(r.Notional), width - 8, baseLine, color, 10.5f, bold, right: true);

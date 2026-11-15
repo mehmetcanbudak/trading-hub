@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Sockets;
 using TradingHub.App.Services.LocalApi;
 using TradingHub.Common.Logging;
@@ -7,52 +8,79 @@ namespace TradingHub.App.Services;
 
 public sealed partial class AppServices
 {
-    private readonly object _localApiGate = new();
-    private readonly List<Task> _localApiDrains = new();
-    private string? _localApiConfiguration;
-    private bool _localApiClosed;
+    private LocalApiHost? _localApiHost;
+
+    private LocalApiHost LocalApiHost =>
+        LazyInitializer.EnsureInitialized(ref _localApiHost, () => new LocalApiHost(() => new AppLocalMarketDataSource(this)));
 
     /// <summary>The running local market-data API, or null when it is off or could not bind.</summary>
-    internal LocalMarketDataApi? LocalApi { get; private set; }
+    internal LocalMarketDataApi? LocalApi => LocalApiHost.Api;
 
     /// <summary>User-visible state of the local market-data API (shown in Settings).</summary>
-    public string LocalApiStatus { get; private set; } = "Off";
+    public string LocalApiStatus => LocalApiHost.Status;
 
-    /// <summary>
-    /// Starts, stops or restarts the opt-in loopback API to match the settings. Idempotent; a port or origin change
-    /// restarts it. Every replaced server's drain is retained so shutdown awaits all of them.
-    /// </summary>
+    /// <summary>Starts, stops or restarts the opt-in loopback API to match the settings (also at startup).</summary>
     internal void ApplyLocalApi()
     {
-        lock (_localApiGate)
-        {
-            if (_localApiClosed || IsShuttingDown) return;
-            _localApiDrains.RemoveAll(drain => drain.IsCompletedSuccessfully);
-            int port = Math.Clamp(Settings.LocalApiPort, 1024, 65535);
-            var origins = LocalMarketDataApiOptions.NormalizeOrigins(Settings.LocalApiAllowedOrigins);
-            string configuration = port.ToString(CultureInfo.InvariantCulture) + "\n" + string.Join("\n", origins);
-            if (Settings.LocalApiEnabled && LocalApi is { IsRunning: true } && _localApiConfiguration == configuration) return;
+        if (IsShuttingDown) return;
+        LocalApiHost.Apply(Settings);
+    }
 
-            StopLocalApiLocked();
-            if (!Settings.LocalApiEnabled)
+    /// <summary>Closes admission permanently and awaits the drain of the current and every previously replaced server.</summary>
+    internal Task ShutdownLocalApiAsync() => LocalApiHost.ShutdownAsync();
+}
+
+/// <summary>
+/// Lifecycle of the opt-in local market-data API: starts, stops or restarts it to match the settings, reports a
+/// user-visible status and retains every replaced server's drain so shutdown awaits all of them.
+/// </summary>
+internal sealed class LocalApiHost(Func<ILocalMarketDataSource> source)
+{
+    private readonly object _gate = new();
+    private readonly List<Task> _drains = new();
+    private string? _configuration;
+    private bool _closed;
+
+    /// <summary>The running API, or null when it is off, could not bind or was shut down.</summary>
+    public LocalMarketDataApi? Api { get; private set; }
+
+    /// <summary>One complete display text per state; holes are only the port, URL or system error.</summary>
+    public string Status { get; private set; } = "Off";
+
+    /// <summary>Idempotent; a port or origin change restarts the server, and a failed bind is retried on the next call.</summary>
+    public void Apply(AppSettings settings)
+    {
+        lock (_gate)
+        {
+            if (_closed) return;
+            _drains.RemoveAll(drain => drain.IsCompletedSuccessfully);
+            int port = Math.Clamp(settings.LocalApiPort, 1024, 65535);
+            var origins = LocalMarketDataApiOptions.NormalizeOrigins(settings.LocalApiAllowedOrigins);
+            string configuration = port.ToString(CultureInfo.InvariantCulture) + "\n" + string.Join("\n", origins);
+            if (settings.LocalApiEnabled && Api is { IsRunning: true } && _configuration == configuration) return;
+
+            StopLocked();
+            if (!settings.LocalApiEnabled)
             {
-                LocalApiStatus = "Off";
+                Status = "Off";
                 return;
             }
 
-            var api = new LocalMarketDataApi(new AppLocalMarketDataSource(this), new LocalMarketDataApiOptions { Port = port, AllowedOrigins = origins });
+            var api = new LocalMarketDataApi(source(), new LocalMarketDataApiOptions { Port = port, AllowedOrigins = origins });
             try
             {
+                if (!OperatingSystem.IsWindows() && WildcardListenerHolds(port))
+                    throw new SocketException((int)SocketError.AddressAlreadyInUse);
                 api.Start();
-                LocalApi = api;
-                _localApiConfiguration = configuration;
-                LocalApiStatus = $"Listening on http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/api/v1";
+                Api = api;
+                _configuration = configuration;
+                Status = $"Listening on http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/api/v1";
                 this.LogInfo($"Local market-data API listening on 127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)} ({origins.Count} allowed browser origins).");
             }
             catch (Exception error)
             {
-                _localApiDrains.Add(api.StopAsync());
-                LocalApiStatus = error is SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse }
+                _drains.Add(api.StopAsync());
+                Status = error is SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse }
                     ? $"Port {port.ToString(CultureInfo.InvariantCulture)} is already in use."
                     : $"The local market-data API could not start: {error.Message}";
                 this.LogWarn("Local market-data API could not start", error);
@@ -61,25 +89,45 @@ public sealed partial class AppServices
     }
 
     /// <summary>Closes admission permanently and awaits the drain of the current and every previously replaced server.</summary>
-    internal Task ShutdownLocalApiAsync()
+    public Task ShutdownAsync()
     {
         Task[] drains;
-        lock (_localApiGate)
+        lock (_gate)
         {
-            _localApiClosed = true;
-            StopLocalApiLocked();
-            LocalApiStatus = "Off";
-            drains = _localApiDrains.ToArray();
+            _closed = true;
+            StopLocked();
+            Status = "Off";
+            drains = _drains.ToArray();
         }
         return Task.WhenAll(drains);
     }
 
-    private void StopLocalApiLocked()
+    /// <summary>
+    /// macOS (BSD sockets) lets a 127.0.0.1 bind succeed while another program listens on the IPv4 or dual-stack
+    /// wildcard of the same port, which would silently take that program's loopback connections. A wildcard bind
+    /// with address reuse (tolerating TIME_WAIT) fails exactly when such a listener exists.
+    /// </summary>
+    internal static bool WildcardListenerHolds(int port)
     {
-        if (LocalApi is not { } api) return;
-        LocalApi = null;
-        _localApiConfiguration = null;
-        _localApiDrains.Add(api.StopAsync());
+        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        probe.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        try
+        {
+            probe.Bind(new IPEndPoint(IPAddress.Any, port));
+            return false;
+        }
+        catch (SocketException error) when (error.SocketErrorCode == SocketError.AddressAlreadyInUse)
+        {
+            return true;
+        }
+    }
+
+    private void StopLocked()
+    {
+        if (Api is not { } api) return;
+        Api = null;
+        _configuration = null;
+        _drains.Add(api.StopAsync());
         this.LogInfo("Local market-data API stopped.");
     }
 }

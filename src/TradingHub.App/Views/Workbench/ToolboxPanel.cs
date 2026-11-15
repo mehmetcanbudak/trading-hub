@@ -1,16 +1,22 @@
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Material.Icons;
 using TradingHub.App.Services.Workbench;
+using TradingHub.Data;
+using TradingHub.Feeds;
+using TradingHub.Indicators.Native;
 
 namespace TradingHub.App.Views.Workbench;
 
 /// <summary>
 /// Self-contained calculators: risk-based position size (with the chart position drawing's sizing rules), approximate
-/// isolated liquidation price, funding cost, and a New York session clock with the next 8-hour funding settlement.
-/// Calculators only compute numbers; they never read an account or place orders.
+/// isolated liquidation price, funding cost, a New York session clock with the next 8-hour funding settlement, and a
+/// read-only structure summary of the chart's structure studies on closed candles of the selected instrument.
+/// Nothing here reads an account or places orders.
 /// </summary>
 internal sealed class ToolboxPanel : WorkbenchPanel
 {
@@ -22,9 +28,14 @@ internal sealed class ToolboxPanel : WorkbenchPanel
     private readonly StackPanel _liqOut = new() { Name = "ToolLiquidationResult", Spacing = 4 };
     private readonly StackPanel _fundOut = new() { Name = "ToolFundingResult", Spacing = 4 };
     private readonly StackPanel _clock = new() { Name = "ToolSessionClock", Spacing = 6 };
+    private readonly StackPanel _structureOut = new() { Name = "ToolStructureResult", Spacing = 3 };
+    private readonly TextBlock _structureStatus = new() { Name = "ToolStructureStatus", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _instrumentNote = new() { Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
-    private DateTime _lastClock;
+    private DateTime _lastClock, _structureLoadedAt;
+    private int _structureGeneration;
+    private bool _structureLoading;
     private TradeDirection _sizeDirection = TradeDirection.Long, _liquidationDirection = TradeDirection.Long;
+    private static readonly TimeSpan StructureReload = TimeSpan.FromMinutes(1);
 
     public ToolboxPanel(WorkbenchContext context) : base(context)
     {
@@ -58,9 +69,18 @@ internal sealed class ToolboxPanel : WorkbenchPanel
             Ui.Field("Position notional", _fundNotional), Ui.Row(8, Ui.Field("Rate per settlement (%)", _fundRate), Ui.Field("Interval (hours)", _fundEvery)),
             Ui.Field("Holding time (hours)", _fundHold), _fundOut);
         var clock = Card("Session clock", "Sessions in New York time shown with your local times; the next settlement of the common 8-hour funding schedule.", _clock);
+        var timeframe = new Ui.Segmented<StructureTimeframe>(new (StructureTimeframe, string, string?)[]
+        {
+            (StructureTimeframe.Minutes5, "5m", null), (StructureTimeframe.Minutes15, "15m", null), (StructureTimeframe.Hour1, "1h", null), (StructureTimeframe.Hours4, "4h", null),
+        }) { Name = "ToolStructureTimeframe" };
+        timeframe.Select(StructureTimeframeSetting);
+        timeframe.SelectionChanged += v => { s.ToolStructureMinutes = (int)v; Save(); ReloadStructure(); };
+        var structure = Card("Structure summary", "Read-only: the chart's own structure, key-level, session-map and VWAP studies run on closed candles of the selected instrument. Each item shows the bar it formed on and the close that confirmed it.",
+            Ui.Field("Timeframe", timeframe), _structureStatus, _structureOut,
+            Note("OHLC heuristics from the connection's candle history (no footprint), not observed orders. Nothing is known before its confirming close; the forming candle is never used. No order is placed."));
 
         var grid = new WrapPanel { Orientation = Orientation.Horizontal, ItemWidth = 420 };
-        foreach (var c in new[] { size, liquidation, funding, clock }) grid.Children.Add(c);
+        foreach (var c in new[] { size, liquidation, funding, clock, structure }) grid.Children.Add(c);
         Content = new ScrollViewer { Content = Ui.V(10, Note("Calculations run locally from the values entered; nothing is sent and no order is placed. Inputs are remembered."), grid) };
         foreach (var box in new[] { _balance, _risk, _fee, _leverage, _maintenance, _fundNotional, _fundRate, _fundEvery, _fundHold })
             box.ValueChanged += (_, _) => Recalculate();
@@ -72,6 +92,12 @@ internal sealed class ToolboxPanel : WorkbenchPanel
     public override string Key => "toolbox";
     public override string Title => "Toolbox";
     public override MaterialIconKind Icon => MaterialIconKind.Calculator;
+    internal StructureSummaryResult? StructureResult { get; private set; }
+
+    private StructureTimeframe StructureTimeframeSetting => Context.Settings.ToolStructureMinutes switch
+    {
+        5 => StructureTimeframe.Minutes5, 60 => StructureTimeframe.Hour1, 240 => StructureTimeframe.Hours4, _ => StructureTimeframe.Minutes15,
+    };
 
     private void Save() => Context.Save();
 
@@ -112,6 +138,7 @@ internal sealed class ToolboxPanel : WorkbenchPanel
     /// <summary>Prefills the instrument's point value and quantity step and the last price as entry.</summary>
     protected override void OnSelectionChanged()
     {
+        ReloadStructure();
         if (Selection is not { } s) return;
         _pointValue.Value = s.Instrument.PointValue > 0 ? s.Instrument.PointValue : 1;
         _step.Value = s.Instrument.VolumeStep > 0 ? s.Instrument.VolumeStep : 0;
@@ -128,6 +155,191 @@ internal sealed class ToolboxPanel : WorkbenchPanel
     public override void Tick(DateTime now)
     {
         if (now - _lastClock >= TimeSpan.FromSeconds(1)) UpdateClock(now);
+        if (now - _structureLoadedAt >= StructureReload) LoadStructure();
+    }
+
+    protected override void OnActivated() => LoadStructure();
+
+    protected override void OnDispose() => _structureGeneration++;
+
+    private void ReloadStructure()
+    {
+        _structureGeneration++;
+        _structureLoading = false;
+        _structureLoadedAt = DateTime.MinValue;
+        StructureResult = null;
+        _structureOut.Children.Clear();
+        _structureStatus.Text = "";
+        LoadStructure();
+    }
+
+    /// <summary>Loads candle history for the chosen timeframe in the background (only while visible) and summarizes it.</summary>
+    private void LoadStructure()
+    {
+        if (_structureLoading || !IsActive || Disposed) return;
+        _structureLoadedAt = Context.Clock();
+        if (Selection is not { } sel)
+        {
+            _structureStatus.Text = "Choose an instrument";
+            return;
+        }
+        if (sel.Data.Feed is not IKlineHistory source)
+        {
+            _structureStatus.Text = "This connection has no candle history for the structure summary.";
+            return;
+        }
+        var timeframe = StructureTimeframeSetting;
+        int generation = _structureGeneration;
+        _structureLoading = true;
+        if (StructureResult == null) _structureStatus.Text = "Loading candles…";
+        var now = _structureLoadedAt;
+        decimal price = sel.Data.LastPrice;
+        var session = (sel.Data.Feed as ISessionSettingsFeed)?.GetSessionSettings(sel.Instrument);
+        _ = Task.Run(async () =>
+        {
+            StructureSummaryResult? result = null;
+            string? error = null;
+            var notes = new List<string>();
+            try
+            {
+                var candles = await KlineHistory.LoadAsync(source, sel.Instrument, now - StructureSummary.History(timeframe), now, StructureSummary.SourceMinutes(timeframe), 0, null,
+                    CancellationToken.None, warning: notes.Add).ConfigureAwait(false);
+                result = StructureSummary.Build(sel.Instrument, candles, timeframe, price, now, session);
+            }
+            catch (Exception ex) { error = ex.Message; }
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (generation != _structureGeneration) return;
+                _structureLoading = false;
+                if (result == null)
+                {
+                    _structureStatus.Text = $"Candles: {error}";
+                    return;
+                }
+                StructureResult = result;
+                ShowStructure(result, notes.Distinct().ToArray());
+            });
+        });
+    }
+
+    private static string When(DateTime utc) => utc.ToLocalTime().ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
+
+    private static string Range(decimal low, decimal high) => low == high ? WorkbenchFormat.Price(low) : $"{WorkbenchFormat.Price(low)} – {WorkbenchFormat.Price(high)}";
+
+    private static IBrush? Tone(int direction) => direction > 0 ? Ui.Up : direction < 0 ? Ui.Down : null;
+
+    private static string ItemValue(StructureItem item)
+    {
+        string range = Range(item.Low, item.High), distance = WorkbenchFormat.Percent(item.DistancePercent);
+        bool up = item.Direction > 0;
+        return item.Kind switch
+        {
+            StructureItemKind.Bos => up ? $"Bullish BOS at {range} ({distance})" : $"Bearish BOS at {range} ({distance})",
+            StructureItemKind.Choch => up ? $"Bullish CHoCH at {range} ({distance})" : $"Bearish CHoCH at {range} ({distance})",
+            StructureItemKind.Sweep => up ? $"Low swept at {range} ({distance})" : $"High swept at {range} ({distance})",
+            StructureItemKind.Cisd => up ? $"Bullish CISD at {range} ({distance})" : $"Bearish CISD at {range} ({distance})",
+            StructureItemKind.Breaker => up ? $"Bullish breaker {range} ({distance})" : $"Bearish breaker {range} ({distance})",
+            StructureItemKind.Liquidity => up ? $"Equal lows {range} ({distance})" : $"Equal highs {range} ({distance})",
+            _ => up ? $"Bullish {range} ({distance})" : $"Bearish {range} ({distance})",
+        };
+    }
+
+    private void ItemRow(string label, StructureItem? item, string none)
+    {
+        if (item == null)
+        {
+            _structureOut.Children.Add(Result(label, none));
+            return;
+        }
+        _structureOut.Children.Add(Result(label, ItemValue(item), color: Tone(item.Direction)));
+        _structureOut.Children.Add(Note($"formed {When(item.FormedAt)} · confirmed at close {When(item.ConfirmedAt)}"));
+    }
+
+    private void ShowStructure(StructureSummaryResult r, IReadOnlyList<string> notes)
+    {
+        _structureOut.Children.Clear();
+        string tf = StructureSummary.Code(r.Timeframe);
+        if (r.LastClose is not { } lastClose)
+        {
+            _structureStatus.Text = $"No closed {tf} candles yet.";
+            return;
+        }
+        _structureStatus.Text = $"{r.ClosedBars} closed {tf} candles · last close {When(lastClose)} · reference price {WorkbenchFormat.Price(r.Price)}";
+        foreach (var note in notes) _structureOut.Children.Add(Warning($"Candles: {note}"));
+
+        _structureOut.Children.Add(Ui.Text("Structure", "muted"));
+        string trend = r.Trend switch { > 0 => "Up", < 0 => "Down", 0 => "No confirmed break yet", _ => WorkbenchFormat.Missing };
+        _structureOut.Children.Add(Result("Trend (closed bars)", trend, true, Tone(r.Trend ?? 0)));
+        ItemRow("Last BOS / CHoCH", r.LastBreak, "None confirmed");
+        ItemRow("Last sweep", r.LastSweep, "None confirmed");
+        ItemRow("Last CISD", r.LastCisd, "None confirmed");
+        string po3Label = $"PO3 ({StructureSummary.Po3Period(r.Timeframe)} candles)";
+        if (r.Po3 is not { } p) _structureOut.Children.Add(Result(po3Label, "None live"));
+        else
+        {
+            string range = Range(p.RangeLow, p.RangeHigh);
+            string value = (p.Direction > 0, p.TwoSided) switch
+            {
+                (true, false) => $"Bullish, range {range}",
+                (true, true) => $"Bullish (two-sided), range {range}",
+                (false, false) => $"Bearish, range {range}",
+                _ => $"Bearish (two-sided), range {range}",
+            };
+            _structureOut.Children.Add(Result(po3Label, value, color: Tone(p.Direction)));
+            _structureOut.Children.Add(Note($"formed {When(p.FormedAt)} · confirmed at close {When(p.ConfirmedAt)}"));
+            if (p.CisdLevel is { } cisd && p.CisdConfirmedAt is { } cisdAt)
+                _structureOut.Children.Add(Note($"CISD {WorkbenchFormat.Price(cisd)} · confirmed at close {When(cisdAt)}"));
+        }
+
+        _structureOut.Children.Add(Ui.Text("Zones nearest the price", "muted"));
+        ItemRow("Nearest FVG above", r.GapAbove, "None unfilled");
+        ItemRow("Nearest FVG below", r.GapBelow, "None unfilled");
+        ItemRow("Nearest order block above", r.BlockAbove, "None live");
+        ItemRow("Nearest order block below", r.BlockBelow, "None live");
+        ItemRow("Nearest liquidity above", r.LiquidityAbove, "None live");
+        ItemRow("Nearest liquidity below", r.LiquidityBelow, "None live");
+
+        _structureOut.Children.Add(Ui.Text("Calendar levels (trading day and week)", "muted"));
+        foreach (var level in r.Levels)
+        {
+            string label = level.Kind switch
+            {
+                StructureLevelKind.PreviousDayHigh => "Previous day high",
+                StructureLevelKind.PreviousDayLow => "Previous day low",
+                StructureLevelKind.DayOpen => "Day open",
+                StructureLevelKind.PreviousWeekHigh => "Previous week high",
+                StructureLevelKind.PreviousWeekLow => "Previous week low",
+                StructureLevelKind.WeekOpen => "Week open",
+                _ => "Session VWAP (estimate from candles)",
+            };
+            if (level.Price is not { } price || level.ConfirmedAt is not { } at)
+            {
+                _structureOut.Children.Add(Result(label, WorkbenchFormat.Missing));
+                continue;
+            }
+            _structureOut.Children.Add(Result(label, $"{WorkbenchFormat.Price(price)} ({WorkbenchFormat.Percent(level.DistancePercent)})"));
+            _structureOut.Children.Add(Note(level.Kind == StructureLevelKind.SessionVwap ? $"as of close {When(at)}" : $"confirmed at close {When(at)}"));
+        }
+        if (r.Levels.Any(l => l.Price == null))
+            _structureOut.Children.Add(Note("A dash is a level the study does not publish yet: its period is partial or not fully loaded."));
+
+        _structureOut.Children.Add(Ui.Text("Sessions (closed bars)", "muted"));
+        if (r.Sessions.Count == 0) _structureOut.Children.Add(Note("No session has closed bars in the loaded candles."));
+        foreach (var range in r.Sessions)
+        {
+            string label = range.Session switch { WorldSession.Asia => "Asia session", WorldSession.London => "London session", _ => "New York session" };
+            string span = Range(range.Low, range.High);
+            if (range.ConfirmedAt is { } done)
+            {
+                _structureOut.Children.Add(Result(label, span));
+                _structureOut.Children.Add(Note($"{When(range.From)} to {When(range.Through)} · confirmed at close {When(done)}"));
+            }
+            else
+            {
+                _structureOut.Children.Add(Result(label, $"{span} · forming", color: Ui.Accent));
+                _structureOut.Children.Add(Note($"{When(range.From)} to {When(range.Through)} so far, closed bars only"));
+            }
+        }
     }
 
     private void Recalculate()
@@ -188,9 +400,13 @@ internal sealed class ToolboxPanel : WorkbenchPanel
         _clock.Children.Add(Result("Local", now.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)));
         foreach (var row in WorkbenchCalculators.SessionClock(now))
         {
-            string span = $"{row.StartUtc.ToLocalTime():HH:mm}–{row.EndUtc.ToLocalTime():HH:mm}";
-            string state = row.Live ? $"live, {WorkbenchFormat.Countdown(row.Left)} left" : $"starts in {WorkbenchFormat.Countdown(row.Until)}";
-            _clock.Children.Add(Result(row.Session.Name, $"{span} · {state}", color: row.Live ? Ui.Accent : null));
+            string span = $"{row.StartUtc.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)}–{row.EndUtc.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)}";
+            string value = row.Live ? $"{span} · live, {WorkbenchFormat.Countdown(row.Left)} left" : $"{span} · starts in {WorkbenchFormat.Countdown(row.Until)}";
+            string name = row.Session.From switch
+            {
+                18 => "Asia session", 2 => "London session", 8 => "New York morning session", 12 => "New York afternoon session", _ => row.Session.Name,
+            };
+            _clock.Children.Add(Result(name, value, color: row.Live ? Ui.Accent : null));
         }
         var next = WorkbenchCalculators.NextEightHourFunding(now);
         _clock.Children.Add(Note($"Next 8-hour funding settlement at {next.ToLocalTime():HH:mm} local (in {WorkbenchFormat.Countdown(next - now)}). Some venues settle every 1 or 4 hours."));

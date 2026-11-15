@@ -2,7 +2,13 @@ using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.VisualTree;
+using TradingHub.App.Localization;
 using TradingHub.App.Services;
+using TradingHub.App.Views;
 
 internal static partial class SafetyScene
 {
@@ -28,6 +34,7 @@ internal static partial class SafetyScene
         try
         {
             check(!enabled && svc.LocalApi == null, "the local market-data API is off by default");
+            LocalApiSettings(svc, pump, check);
             svc.Settings.LocalApiEnabled = true;
             svc.Settings.LocalApiPort = port;
             svc.ApplyLocalApi();
@@ -72,6 +79,94 @@ internal static partial class SafetyScene
         {
             svc.Settings.LocalApiEnabled = enabled;
             svc.Settings.LocalApiPort = previousPort;
+        }
+    }
+
+    /// <summary>
+    /// Settings → Local market-data API through its real controls: on, off and on again; a port change; a port another
+    /// listener holds (then freed); and origin validation listing every invalid entry. Leaves the API off.
+    /// </summary>
+    private static void LocalApiSettings(AppServices svc, Action<double> pump, Action<bool, string> check)
+    {
+        var saved = (Enabled: svc.Settings.LocalApiEnabled, Port: svc.Settings.LocalApiPort, Origins: svc.Settings.LocalApiAllowedOrigins.ToList());
+        var host = new Window { Width = 1000, Height = 800, Content = new SettingsView(svc, _ => { }) };
+        host.Show();
+        pump(0.3);
+        T Find<T>(string name) where T : Control => host.GetVisualDescendants().OfType<T>().Single(c => c.Name == name);
+        bool Await(Task<bool> task)
+        {
+            var until = DateTime.UtcNow.AddSeconds(10);
+            while (!task.IsCompleted && DateTime.UtcNow < until) pump(0.02);
+            return task.IsCompletedSuccessfully && task.Result;
+        }
+        bool Refused(int port) => Await(RefusedAsync(port));
+        bool Accepts(int port) => Await(RefusedAsync(port).ContinueWith(t => t.IsCompletedSuccessfully && !t.Result, TaskScheduler.Default));
+        static int FreePort()
+        {
+            var probe = new TcpListener(IPAddress.Loopback, 0);
+            probe.Start();
+            int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+            probe.Stop();
+            return port;
+        }
+        string Status() => Find<TextBlock>("LocalApiStatus").Text ?? "";
+        string Listening(int port) => Lang.T($"Listening on http://127.0.0.1:{port}/api/v1");
+        bool Running(int port) => svc.LocalApi is { IsRunning: true, Endpoint: { } endpoint } && endpoint.Port == port && Status() == Listening(port) && Accepts(port);
+        try
+        {
+            var enabled = Find<ToggleSwitch>("LocalApiEnabled");
+            var portBox = Find<NumericUpDown>("LocalApiPort");
+            var origins = Find<TextBox>("LocalApiAllowedOrigins");
+            var invalid = Find<TextBlock>("LocalApiInvalidOrigins");
+            int first = FreePort();
+            portBox.Value = first;
+            check(svc.Settings.LocalApiPort == first && svc.LocalApi == null && Status() == Lang.T("Off") && Refused(first),
+                "Settings: changing the port while the API is off saves it and listens on nothing");
+            enabled.IsChecked = true;
+            check(Running(first) && Find<TextBlock>("LocalApiAddress").Text == Lang.T($"Base URL: http://127.0.0.1:{first}/api/v1"),
+                "Settings: switching the API on listens on the loopback port and says so: " + Status());
+            enabled.IsChecked = false;
+            check(svc.LocalApi == null && Status() == Lang.T("Off") && Refused(first), "Settings: switching it off closes the listener");
+            enabled.IsChecked = true;
+            check(Running(first), "Settings: switching it on again listens again");
+
+            int second = FreePort();
+            portBox.Value = second;
+            check(Running(second) && Refused(first), "Settings: a port change restarts on the new port and the old port refuses connections");
+
+            var holder = new TcpListener(IPAddress.Loopback, 0);
+            holder.Start();
+            int held = ((IPEndPoint)holder.LocalEndpoint).Port;
+            try
+            {
+                portBox.Value = held;
+                check(svc.LocalApi == null && Status() == Lang.T($"Port {held} is already in use.") && Refused(second),
+                    "Settings: a port another program listens on is reported and nothing runs: " + Status());
+            }
+            finally { holder.Stop(); }
+            enabled.IsChecked = false;
+            enabled.IsChecked = true;
+            check(Running(held), "Settings: once that port is free, switching off and on again starts the API on it");
+
+            origins.Text = "http://localhost:3000/\nnot-an-origin\nftp://example.com";
+            origins.RaiseEvent(new RoutedEventArgs(InputElement.LostFocusEvent));
+            check(invalid.IsVisible && invalid.Text == Lang.T("Ignored invalid origins: not-an-origin, ftp://example.com")
+                  && svc.Settings.LocalApiAllowedOrigins.SequenceEqual(new[] { "http://localhost:3000" }) && Running(held),
+                "Settings: invalid origins are listed and ignored while the valid one is kept: " + invalid.Text);
+            origins.Text = "http://localhost:3000";
+            origins.RaiseEvent(new RoutedEventArgs(InputElement.LostFocusEvent));
+            check(!invalid.IsVisible, "Settings: the invalid-origin note disappears once every origin is valid");
+            enabled.IsChecked = false;
+            check(svc.LocalApi == null && Refused(held), "Settings: the API is left off");
+        }
+        finally
+        {
+            host.Close();
+            svc.Settings.LocalApiEnabled = saved.Enabled;
+            svc.Settings.LocalApiPort = saved.Port;
+            svc.Settings.LocalApiAllowedOrigins = saved.Origins;
+            svc.Settings.Save();
+            svc.ApplyLocalApi();
         }
     }
 

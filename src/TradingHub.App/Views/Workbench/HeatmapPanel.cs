@@ -81,21 +81,30 @@ internal sealed class HeatmapPanel : WorkbenchPanel
         _bannerText.Text = status.RecordingState switch
         {
             DepthRecordingState.Disabled => "Depth recording is off, so there is no depth history: only the current book is shown at the right edge. Turn on Settings → History and depth → Record received depth to build the heat map (an explicit opt-in that stores received depth on this computer).",
-            DepthRecordingState.Error => "Depth recording failed: " + (status.Message ?? "unknown error") + ". The heat map shows what was recorded before the failure.",
+            DepthRecordingState.Error => status.Message is { Length: > 0 } failure
+                ? $"Depth recording failed: {failure}. The heat map shows what was recorded before the failure."
+                : "Depth recording failed without a reported reason. The heat map shows what was recorded before the failure.",
             _ => "Depth recording is stopped; the heat map shows depth recorded earlier.",
         };
         var to = _lastDraw;
         var from = to.AddMinutes(-Math.Clamp(Context.Settings.HeatmapMinutes, 1, 1440));
         _canvas.Set(sel, from, to, Math.Max(1, Context.Settings.HeatmapGrouping), Context.Settings.HeatmapTrades, null);
-        string last = status.LastReceivedAt is { } t ? Ui.Ago(t) : "never";
-        string state = status.RecordingState switch
+        // Every piece is one complete display template; holes carry only data (symbol, count, provider message).
+        var pieces = new List<string>
         {
-            DepthRecordingState.Recording => "on",
-            DepthRecordingState.Disabled => "off",
-            DepthRecordingState.Error => "error",
-            _ => "stopped",
+            sel.Instrument.Symbol,
+            status.RecordingState switch
+            {
+                DepthRecordingState.Recording => "Depth recording on",
+                DepthRecordingState.Disabled => "Depth recording off",
+                DepthRecordingState.Error => "Depth recording failed",
+                _ => "Depth recording stopped",
+            },
+            status.LastReceivedAt is { } t ? $"Last book: {Ui.Ago(t)}" : "No book received yet",
+            $"Dropped records: {status.DroppedRecords}",
         };
-        _status.Text = $"{sel.Instrument.Symbol} · depth recording {state} · last book {last} · dropped records {status.DroppedRecords}" + (status.Message is { Length: > 0 } m ? " · " + m : "");
+        if (status.Message is { Length: > 0 } m) pieces.Add(m);
+        _status.Text = string.Join(" · ", pieces);
     }
 }
 

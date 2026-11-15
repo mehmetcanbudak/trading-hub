@@ -12,7 +12,7 @@ namespace TradingHub.Feeds.External;
 /// <c>direction</c>); daily IV history: <c>get_volatility_index_data</c> (DVOL, a 30-day implied volatility index).
 /// Deribit contracts are one coin, so the multiplier is 1.
 /// </summary>
-public sealed class DeribitOptions : IOptionsProvider, IOptionTradeWindows
+public sealed class DeribitOptions : IOptionsProvider, IOptionTradeWindows, IVolatilityIndexSource
 {
     /// <summary>Production REST root.</summary>
     public static readonly Uri DefaultRoot = new("https://www.deribit.com/api/v2/public/");
@@ -33,6 +33,9 @@ public sealed class DeribitOptions : IOptionsProvider, IOptionTradeWindows
     }
 
     public string Name => "Deribit";
+
+    /// <summary>The daily rows of <see cref="DailyAsync"/> are DVOL closes.</summary>
+    public string VolatilityIndexName => "DVOL";
 
     public bool Supports(string underlying) => underlying is "BTC" or "ETH";
 

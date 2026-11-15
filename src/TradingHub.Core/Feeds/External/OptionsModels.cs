@@ -96,3 +96,19 @@ public interface IOptionTradeWindows
 
     Task<OptionTradeWindow> TradesWindowAsync(string underlying, DateTime from, DateTime to, CancellationToken ct);
 }
+
+/// <summary>
+/// A provider whose own daily rows (<see cref="IOptionsProvider.DailyAsync"/>) carry a published implied-volatility index
+/// in <see cref="OptionDaily.AtmIv"/> (Deribit's DVOL), not an ATM IV measured from the chain.
+/// </summary>
+public interface IVolatilityIndexSource
+{
+    /// <summary>The index's published name (for example DVOL).</summary>
+    string VolatilityIndexName { get; }
+}
+
+/// <summary>
+/// Daily closes of a provider's published volatility index in percent points, oldest first. <see cref="Points"/> is null
+/// until the provider's daily history has been fetched; <see cref="Error"/> is the last failed request.
+/// </summary>
+public sealed record VolatilityIndexSeries(string Name, IReadOnlyList<(DateTime Day, double Value)>? Points, string? Error);

@@ -39,5 +39,8 @@ public sealed class WorkbenchSettings
     public decimal ToolFundingRatePercent { get; set; } = 0.01m;
     public decimal ToolFundingIntervalHours { get; set; } = 8;
     public decimal ToolFundingHoldHours { get; set; } = 24;
+    public decimal DerivativesLiquidationMinNotional { get; set; } = 10_000;
+    /// <summary>Structure summary timeframe in minutes (5, 15, 60 or 240).</summary>
+    public int ToolStructureMinutes { get; set; } = 15;
 }
 

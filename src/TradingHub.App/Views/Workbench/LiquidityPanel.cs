@@ -106,7 +106,7 @@ internal sealed class LiquidityPanel : WorkbenchPanel
             {
                 candles = await KlineHistory.LoadAsync(source, sel.Instrument, from, now, 15, 0, null, CancellationToken.None, warning: notes.Add).ConfigureAwait(false);
             }
-            catch (Exception ex) { notes.Add("Candles: " + ex.Message); }
+            catch (Exception ex) { notes.Add($"Candles could not be loaded: {ex.Message}"); }
             if (derivatives == null) notes.Add("Derivatives data is unavailable in this session.");
             else
                 foreach (var venue in DerivativesData.Venues)
@@ -115,9 +115,9 @@ internal sealed class LiquidityPanel : WorkbenchPanel
                     {
                         var r = await derivatives.LoadOpenInterestAsync(venue, symbol, from, now, CancellationToken.None).ConfigureAwait(false);
                         oi.Add(r.Samples.Select(x => (x.Time, x.Quantity)).ToArray());
-                        if (r.Message != null) notes.Add(WorkbenchFormat.Venue(venue) + ": " + r.Message);
+                        if (r.Message != null) notes.Add($"Open interest from {WorkbenchFormat.Venue(venue)}: {r.Message}");
                     }
-                    catch (Exception ex) { notes.Add(WorkbenchFormat.Venue(venue) + ": " + ex.Message); }
+                    catch (Exception ex) { notes.Add($"Open interest from {WorkbenchFormat.Venue(venue)}: {ex.Message}"); }
                 }
             var entries = LiquidityMapModel.Entries(candles, TimeSpan.FromMinutes(15), oi.Count == DerivativesData.Venues.Count ? oi : Array.Empty<IReadOnlyList<(DateTime, decimal)>>(), now);
             Dispatcher.UIThread.Post(() =>
@@ -173,7 +173,7 @@ internal sealed class LiquidityPanel : WorkbenchPanel
         {
             var latest = service.Latest;
             snapshot = latest.Snapshot;
-            if (snapshot == null) thirdParty = latest.Message is { } m ? "Third-party levels: " + m : "Third-party levels: loading…";
+            if (snapshot == null) thirdParty = latest.Message is { } m ? $"Third-party levels: {m}" : "Third-party levels: loading…";
             else if (Context.Clock() - snapshot.AsOfUtc > LiquidationLevelsService.MaximumSnapshotAge)
             {
                 thirdParty = $"Third-party levels: the snapshot is older than three hours ({Ui.Ago(snapshot.AsOfUtc)}) and is not drawn.";
@@ -189,9 +189,13 @@ internal sealed class LiquidityPanel : WorkbenchPanel
         _thirdParty.Foreground = service == null ? Ui.Text2 : Ui.Text1;
         var view = new LiquidityMapView(price, estimate, estimateNote, bins, snapshot, thirdParty, LiquidityMapModel.Bands(price));
         _canvas.Set(view, price <= 0 ? "Waiting for a price" : null, s.LiquidityRangePercent);
-        _status.Text = estimate is { } map
-            ? $"Local estimate: {map.Used} bars modelled, {map.Skipped} skipped (no open interest or measured delta)." + (estimateNote is { } n ? " · " + n : "")
-            : estimateNote ?? "";
+        // Each piece is one complete display template joined by the " · " separator; the counts are the only holes.
+        if (estimate is { } map)
+        {
+            string modelled = $"Local estimate: {map.Used} bars modelled, {map.Skipped} skipped (no open interest or measured delta).";
+            _status.Text = estimateNote is { } n ? string.Join(" · ", modelled, n) : modelled;
+        }
+        else _status.Text = estimateNote ?? "";
     }
 }
 

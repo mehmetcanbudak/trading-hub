@@ -30,7 +30,8 @@ public sealed class OptionsData : ExternalSeriesHub
     /// </summary>
     private sealed record TradeStore(DateTime From, DateTime To, DateTime FetchedAt, List<OptionTrade> Items, IReadOnlyList<(DateTime From, DateTime To)> Gaps);
 
-    private sealed record DailyEntry(DateTime FetchedAt, List<OptionDaily> Days);
+    /// <summary>Merged daily rows plus the provider's own rows (<see cref="Published"/>, null until a request succeeded).</summary>
+    private sealed record DailyEntry(DateTime FetchedAt, List<OptionDaily> Days, IReadOnlyList<OptionDaily>? Published = null, string? Error = null);
 
     private readonly string? _root;
     private IOptionsProvider? _provider;
@@ -299,6 +300,20 @@ public sealed class OptionsData : ExternalSeriesHub
         return hit?.Days ?? (IReadOnlyList<OptionDaily>)Array.Empty<OptionDaily>();
     }
 
+    /// <summary>
+    /// The provider's published volatility index (Deribit DVOL) as daily closes in percent points; null when the source
+    /// publishes none. Only the provider's own rows are used, never recorded chain ATM IV. Schedules the same hourly daily
+    /// request as <see cref="Daily"/>.
+    /// </summary>
+    public VolatilityIndexSeries? VolatilityIndex(string underlying)
+    {
+        if (Unavailable(underlying) != null || _provider is not IVolatilityIndexSource source) return null;
+        Daily(underlying);
+        _dailies.TryGetValue(underlying, out var hit);
+        var points = hit?.Published?.Where(d => double.IsFinite(d.AtmIv) && d.AtmIv > 0).OrderBy(d => d.Date).Select(d => (d.Date.Date, d.AtmIv * 100)).ToArray();
+        return new VolatilityIndexSeries(source.VolatilityIndexName, points, hit?.Error);
+    }
+
     public async Task RefreshDailyAsync(string underlying, CancellationToken ct, int days = 400)
     {
         var p = _provider;
@@ -308,7 +323,7 @@ public sealed class OptionsData : ExternalSeriesHub
             var to = Now;
             var got = await p.DailyAsync(underlying, to.AddDays(-days), to, ct).ConfigureAwait(false);
             if (!ReferenceEquals(p, _provider)) return;
-            _dailies[underlying] = new DailyEntry(Now, MergeDaily(got, LoadRecorded(underlying)));
+            _dailies[underlying] = new DailyEntry(Now, MergeDaily(got, LoadRecorded(underlying)), got.ToArray());
             LastError = null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -316,7 +331,7 @@ public sealed class OptionsData : ExternalSeriesHub
             LastError = ex.Message;
             _dailies.TryGetValue(underlying, out var hit);
             // Try again in about 15 minutes, keeping recorded rows meanwhile.
-            _dailies[underlying] = new DailyEntry(Now.AddMinutes(-45), hit?.Days ?? MergeDaily(Array.Empty<OptionDaily>(), LoadRecorded(underlying)));
+            _dailies[underlying] = new DailyEntry(Now.AddMinutes(-45), hit?.Days ?? MergeDaily(Array.Empty<OptionDaily>(), LoadRecorded(underlying)), hit?.Published, ex.Message);
         }
         finally { Bump(); }
     }
