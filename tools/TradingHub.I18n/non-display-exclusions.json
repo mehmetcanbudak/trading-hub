@@ -15,6 +15,14 @@
     "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:327",
     "reason": "Suffix of the default C# class name for an editable indicator copy. Generated identifiers stay English in every UI language."
   },
+  "ExecutionBenchmarks.{0}.VsArrival": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:796",
+    "reason": "Stable persisted DataSeries id of the execution-benchmark arrival series (strategy/workspace identity), not a display label."
+  },
+  "ExecutionBenchmarks.{0}.VsVwap": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:795",
+    "reason": "Stable persisted DataSeries id of the execution-benchmark window-VWAP series (strategy/workspace identity), not a display label."
+  },
   "Fee": {
     "locations": "TradingHub.Strategies/LivePortfolio.cs:1540 TradingHub.Strategies/LivePortfolio.cs:1545",
     "reason": "Existing imported-execution JSON property name, validated and decoded without renaming persisted records."
@@ -23,6 +31,14 @@
     "locations": "TradingHub.App/Services/IndicatorSourceCopies.cs:59",
     "reason": "Stable on-disk folder name for preserved previous copies, shown verbatim as a path. Translating it would scatter backups across language-specific folders."
   },
+  "KeyLevels.{0}.PriorClose": {
+    "locations": "TradingHub.Indicators.Native/SessionStudies.cs:136",
+    "reason": "Stable persisted DataSeries id of the Key levels prior-close series, not a display label."
+  },
+  "MultiVwap.{0}.{1}": {
+    "locations": "TradingHub.Indicators.Native/VwapStudies.cs:48",
+    "reason": "Stable persisted DataSeries id of the Multi-period VWAP band series (horizon and band), not a display label."
+  },
   "PORTFOLIO (closed trades; {0} accounting): net {1} · {2} trades · PF {3} · max drawdown {4} · ": {
     "locations": "TradingHub.App/Services/LiveRiskAgent.cs:242",
     "reason": "Inclusive extraction of the first concatenated model-input template in BuildPrompt. It is not a display label."
@@ -30,6 +46,18 @@
   "PORTFOLIO (closed trades; {0} accounting): net {1} · {2} trades · PF {3} · max drawdown {4} · Sharpe {5} · currently open {6}": {
     "locations": "TradingHub.App/Services/LiveRiskAgent.cs:242",
     "reason": "Complete concatenated model-input template in BuildPrompt. Assistant response language is selected separately from canonical input instructions."
+  },
+  "ProfileLevels.Poc.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:405",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
+  },
+  "ProfileLevels.Vah.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:406",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
+  },
+  "ProfileLevels.Val.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:407",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
   },
   "State": {
     "locations": "TradingHub.Core/Data/IbHistoryCoordinator.cs:115",
