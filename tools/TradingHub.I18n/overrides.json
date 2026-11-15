@@ -13594,5 +13594,33 @@
   "Kept ownership context {0}: {1}": {
     "es": "Se conservó el contexto de propiedad {0}: {1}",
     "zh-CN": "已保留所有权上下文 {0}：{1}"
+  },
+  "Not modified: this order's earlier executions are still being read.": {
+    "es": "No modificada: todavía se están leyendo las ejecuciones anteriores de esta orden.",
+    "zh-CN": "未修改：仍在读取此订单之前的成交。"
+  },
+  "Not modified: Binance execution history is still synchronizing. The order was left unowned and unchanged; try again.": {
+    "es": "No modificada: el historial de ejecuciones de Binance aún se está sincronizando. La orden quedó sin propietario y sin cambios; inténtalo de nuevo.",
+    "zh-CN": "未修改：Binance 成交历史仍在同步。该订单保持无归属且未更改；请重试。"
+  },
+  "Not modified: the order already finished at Binance.": {
+    "es": "No modificada: la orden ya terminó en Binance.",
+    "zh-CN": "未修改：该订单已在 Binance 结束。"
+  },
+  "Not modified: the order executed while its earlier executions were being read. It was left unowned and unchanged; try again.": {
+    "es": "No modificada: la orden se ejecutó mientras se leían sus ejecuciones anteriores. Quedó sin propietario y sin cambios; inténtalo de nuevo.",
+    "zh-CN": "未修改：读取该订单之前的成交时订单又有成交。它保持无归属且未更改；请重试。"
+  },
+  "Not modified: Binance's trade history does not account for this order's executed quantity. It was left unowned and unchanged.": {
+    "es": "No modificada: el historial de operaciones de Binance no cubre la cantidad ejecutada de esta orden. Quedó sin propietario y sin cambios.",
+    "zh-CN": "未修改：Binance 的成交历史无法对应此订单的已成交数量。它保持无归属且未更改。"
+  },
+  "Not modified: the order changed while its earlier executions were being read. It was left unowned and unchanged.": {
+    "es": "No modificada: la orden cambió mientras se leían sus ejecuciones anteriores. Quedó sin propietario y sin cambios.",
+    "zh-CN": "未修改：读取该订单之前的成交时订单发生了变化。它保持无归属且未更改。"
+  },
+  "Not modified: Binance could not confirm this order's earlier executions ({0}). It was left unowned and unchanged.": {
+    "es": "No modificada: Binance no pudo confirmar las ejecuciones anteriores de esta orden ({0}). Quedó sin propietario y sin cambios.",
+    "zh-CN": "未修改：Binance 无法确认此订单之前的成交（{0}）。它保持无归属且未更改。"
   }
 }
