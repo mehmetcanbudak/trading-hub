@@ -268,21 +268,29 @@ public abstract class ClosedBarStudy : Indicator
 
     // ------------------------------------------------------------------ alerts
 
-    /// <summary>Live alert-named horizontal lines and live box edges. Ids use the source bar time so they survive recalculation.</summary>
+    /// <summary>
+    /// Live alert-named horizontal lines and live box edges. Ids combine the name, the source bar time and the (immutable)
+    /// level price, so they survive recalculation and two levels started on the same bar stay distinct; identical live levels
+    /// (same name, source bar and price) are one alertable level.
+    /// </summary>
     public override IEnumerable<IndicatorLevel> GetAlertLevels()
     {
-        if (_bars.Count == 0) yield break;
+        if (_bars.Count == 0) return Array.Empty<IndicatorLevel>();
+        var levels = new List<IndicatorLevel>(); var seen = new HashSet<string>(StringComparer.Ordinal);
+        void Add(string id, string name, decimal price, int from) { if (seen.Add(id)) levels.Add(new IndicatorLevel(id, name, price, from)); }
         foreach (var line in _scene.Lines)
-            if (line.Alert != null && line.Live && line.Price == line.EndPrice)
-                yield return new IndicatorLevel($"{line.Alert}@{_bars[line.From].Time.Ticks}", line.Alert, line.Price, line.From);
+            if (line.Alert != null && line.Live && line.Price == line.EndPrice) Add(Id(line.Alert, line.From, line.Price), line.Alert, line.Price, line.From);
         foreach (var box in _scene.Boxes)
         {
             if (box.Alert == null || !box.Live) continue;
-            long key = _bars[box.From].Time.Ticks;
-            yield return new IndicatorLevel($"{box.Alert}.top@{key}", box.Alert + ": top edge", box.Top, box.From);
-            yield return new IndicatorLevel($"{box.Alert}.bottom@{key}", box.Alert + ": bottom edge", box.Bottom, box.From);
+            Add(Id(box.Alert + ".top", box.From, box.Top), $"{box.Alert}: top edge", box.Top, box.From);
+            Add(Id(box.Alert + ".bottom", box.From, box.Bottom), $"{box.Alert}: bottom edge", box.Bottom, box.From);
         }
+        return levels;
     }
+
+    private string Id(string name, int from, decimal price) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{name}@{_bars[from].Time.Ticks}@{price:G29}");
 
     // ------------------------------------------------------------------ drawing
 

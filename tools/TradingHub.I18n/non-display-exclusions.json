@@ -70,5 +70,33 @@
   "{0}Edited": {
     "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:327",
     "reason": "Default C# class name of an editable indicator copy (original type name + English suffix), not a display label."
+  },
+  "ExecutionBenchmarks.{0}.VsArrival": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:796",
+    "reason": "Stable persisted DataSeries id of the execution-benchmark arrival series (strategy/workspace identity), not a display label."
+  },
+  "ExecutionBenchmarks.{0}.VsVwap": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:795",
+    "reason": "Stable persisted DataSeries id of the execution-benchmark window-VWAP series (strategy/workspace identity), not a display label."
+  },
+  "KeyLevels.{0}.PriorClose": {
+    "locations": "TradingHub.Indicators.Native/SessionStudies.cs:136",
+    "reason": "Stable persisted DataSeries id of the Key levels prior-close series, not a display label."
+  },
+  "MultiVwap.{0}.{1}": {
+    "locations": "TradingHub.Indicators.Native/VwapStudies.cs:48",
+    "reason": "Stable persisted DataSeries id of the Multi-period VWAP band series (horizon and band), not a display label."
+  },
+  "ProfileLevels.Poc.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:405",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
+  },
+  "ProfileLevels.Vah.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:406",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
+  },
+  "ProfileLevels.Val.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:407",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
   }
 }

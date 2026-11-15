@@ -101,11 +101,11 @@ public class SessionBackgrounds : Indicator
 
 [DisplayName("Calendar and session key levels")]
 [Category(IndicatorCategories.Levels)]
-[Description("Four-hour/session/week/month/quarter/year opens and completed-period high, low and midpoint, plus the completed Monday range. Calendar boundaries follow the exchange session. First loaded periods are explicitly partial.")]
+[Description("Four-hour/session/week/month/quarter/year opens and completed-period high, low, midpoint and (optionally) close, plus the completed Monday range, each named at the right edge (labels at the same price are merged). Calendar boundaries follow the exchange session. Prior-period levels appear only once that period has completed; first loaded periods are explicitly partial.")]
 public class KeyLevels : Indicator
 {
     private readonly record struct State(long Key, decimal Open, decimal High, decimal Low, decimal PriorHigh, decimal PriorLow, bool HasPrior, bool HighTouched, bool LowTouched, bool Partial,
-        DateTime OpenAvailableAt, DateTime AvailableAt, DateTime PriorAvailableAt, bool Compatible, bool PriorCompatible, bool PriorPartial, bool TouchCoverageComplete);
+        DateTime OpenAvailableAt, DateTime AvailableAt, DateTime PriorAvailableAt, bool Compatible, bool PriorCompatible, bool PriorPartial, bool TouchCoverageComplete, decimal Close, decimal PriorClose);
     private readonly List<State>[] _states = new List<State>[6];
     private readonly OptionalValueDataSeries[,] _series = new OptionalValueDataSeries[6, 4];
     private static readonly StudyTimeFrame[] Periods = { StudyTimeFrame.Hours4, StudyTimeFrame.Day, StudyTimeFrame.Week, StudyTimeFrame.Month, StudyTimeFrame.Quarter, StudyTimeFrame.Year };
@@ -113,8 +113,10 @@ public class KeyLevels : Indicator
     private readonly List<MondayState> _mondays = new();
     private readonly OptionalValueDataSeries _mondayHigh = new("KeyLevels.Monday.High", "Monday high") { Color = Color.Purple, VisualType = VisualMode.Steps };
     private readonly OptionalValueDataSeries _mondayLow = new("KeyLevels.Monday.Low", "Monday low") { Color = Color.Purple, VisualType = VisualMode.Steps };
+    private readonly OptionalValueDataSeries[] _closes = new OptionalValueDataSeries[6];
+    private static readonly string[] Codes = { "4H", "D", "W", "M", "Q", "Y" };
     private bool _fourHour = true, _session = true, _weekly = true, _monthly = true, _quarterly, _yearly = true;
-    private bool _hideTouched, _showOpen = true, _showPrior = true, _monday = true;
+    private bool _hideTouched, _showOpen = true, _showPrior = true, _monday = true, _showClose;
     public KeyLevels() : base(true)
     {
         Color[] colors = { Color.Gray, Color.Gold, Color.Silver, Color.DodgerBlue, Color.SeaGreen, Color.Coral };
@@ -128,12 +130,20 @@ public class KeyLevels : Indicator
                 _series[k, j] = line; if (k == 0 && j == 0) DataSeries[0] = line; else DataSeries.Add(line);
             }
         }
-        DataSeries.Add(_mondayHigh); DataSeries.Add(_mondayLow); EnableCustomDrawing = true; SubscribeToDrawingEvents(DrawingLayouts.Final);
+        DataSeries.Add(_mondayHigh); DataSeries.Add(_mondayLow);
+        for (int k = 0; k < 6; k++)
+        {
+            _closes[k] = new OptionalValueDataSeries($"KeyLevels.{Periods[k]}.PriorClose", $"{Periods[k]} PriorClose") { Color = colors[k], VisualType = VisualMode.Steps, ShowZeroValue = true };
+            DataSeries.Add(_closes[k]);
+        }
+        EnableCustomDrawing = true; SubscribeToDrawingEvents(DrawingLayouts.Final);
     }
     [Display(Name = "Show period opens", GroupName = "Levels")] public bool ShowOpens { get => _showOpen; set { _showOpen = value; RecalculateValues(); } }
     [Display(Name = "Show prior high/low/midpoint", GroupName = "Levels")] public bool ShowPriorLevels { get => _showPrior; set { _showPrior = value; RecalculateValues(); } }
     [Display(Name = "Hide high/low after confirmed touch", GroupName = "Levels")] public bool HideTestedHighLow { get => _hideTouched; set { _hideTouched = value; RecalculateValues(); } }
     [Display(Name = "Completed Monday range", GroupName = "Levels")] public bool MondayRange { get => _monday; set { _monday = value; RecalculateValues(); } }
+    [Display(Name = "Show prior close", GroupName = "Levels")] public bool ShowPriorClose { get => _showClose; set { _showClose = value; RecalculateValues(); } }
+    [Display(Name = "Name levels at the right edge", GroupName = "Levels")] public bool ShowLevelLabels { get; set; } = true;
     [Display(Name = "Four-hour levels", GroupName = "Periods")] public bool FourHour { get => _fourHour; set { _fourHour = value; RecalculateValues(); } }
     [Display(Name = "Session levels", GroupName = "Periods")] public bool Session { get => _session; set { _session = value; RecalculateValues(); } }
     [Display(Name = "Weekly levels", GroupName = "Periods")] public bool Weekly { get => _weekly; set { _weekly = value; RecalculateValues(); } }
@@ -156,9 +166,9 @@ public class KeyLevels : Indicator
                 bool compatible = StudyMath.IsContained(c, Periods[k]) && (c.Quality & DataQuality.Partial) == 0;
                 State state = newPeriod
                     ? new(key, c.Open, c.High, c.Low, previous.High, previous.Low, b > 0, false, false, b == 0 && !StudyMath.IsPeriodOpening(c, Periods[k]),
-                        (c.Quality & (DataQuality.Compact | DataQuality.Synthetic)) != 0 ? c.AvailableAt : c.Time, c.AvailableAt, previous.AvailableAt, compatible, previous.Compatible, previous.Partial, true)
+                        (c.Quality & (DataQuality.Compact | DataQuality.Synthetic)) != 0 ? c.AvailableAt : c.Time, c.AvailableAt, previous.AvailableAt, compatible, previous.Compatible, previous.Partial, true, c.Close, previous.Close)
                     : previous with { High = Math.Max(previous.High, c.High), Low = Math.Min(previous.Low, c.Low), Compatible = previous.Compatible && compatible,
-                        AvailableAt = c.AvailableAt > previous.AvailableAt ? c.AvailableAt : previous.AvailableAt };
+                        AvailableAt = c.AvailableAt > previous.AvailableAt ? c.AvailableAt : previous.AvailableAt, Close = c.Close };
                 if (state.HasPrior)
                 {
                     var closed = c.IsCandleFinished ? c : b > 0 && !newPeriod ? GetCandle(b - 1) : null;
@@ -171,12 +181,13 @@ public class KeyLevels : Indicator
                     }
                 }
                 _states[k].Add(state); bool enabled = k switch { 0 => FourHour, 1 => Session, 2 => Weekly, 3 => Monthly, 4 => Quarterly, _ => Yearly };
-                bool priorKnown = enabled && ShowPriorLevels && state.HasPrior && state.PriorCompatible && !state.PriorPartial && state.PriorAvailableAt <= knownAt;
+                bool priorReady = enabled && state.HasPrior && state.PriorCompatible && !state.PriorPartial && state.PriorAvailableAt <= knownAt, priorKnown = priorReady && ShowPriorLevels;
                 _series[k, 0].Set(b, state.Open, enabled && ShowOpens && state.Compatible && !state.Partial && state.OpenAvailableAt <= knownAt);
                 _series[k, 1].Set(b, state.PriorHigh, priorKnown && (!HideTestedHighLow || state.TouchCoverageComplete && !state.HighTouched));
                 _series[k, 2].Set(b, state.PriorLow, priorKnown && (!HideTestedHighLow || state.TouchCoverageComplete && !state.LowTouched));
                 _series[k, 3].Set(b, state.PriorHigh / 2 + state.PriorLow / 2, priorKnown);
-                if (newPeriod && b > 0) for (int j = 0; j < 4; j++) _series[k, j].SetPointOfEndLine(b - 1);
+                _closes[k].Set(b, state.PriorClose, priorReady && ShowPriorClose);
+                if (newPeriod && b > 0) { for (int j = 0; j < 4; j++) _series[k, j].SetPointOfEndLine(b - 1); _closes[k].SetPointOfEndLine(b - 1); }
             }
             long week = StudyMath.PeriodKey(c, StudyTimeFrame.Week);
             MondayState monday = b > 0 && _mondays[b - 1].Week == week ? _mondays[b - 1] : new(week, 0, 0, false, false, default);
@@ -188,6 +199,43 @@ public class KeyLevels : Indicator
             _mondayHigh.Set(b, monday.High, complete); _mondayLow.Set(b, monday.Low, complete);
         }
     }
+    /// <summary>
+    /// The right-edge labels of the levels available at <paramref name="bar"/> (e.g. <c>PDH</c>, <c>PWL</c>, <c>MO</c>, <c>D EQ</c>,
+    /// <c>PDC</c>): one label per price snapped to the tick, the names of equal-price levels joined in level order, highest price first.
+    /// </summary>
+    public IReadOnlyList<(decimal Price, string Text, Color Color)> LevelLabels(int bar)
+    {
+        var named = new List<(decimal Price, string Name, Color Color)>();
+        void Take(OptionalValueDataSeries series, string name) { if (series.Visible && series.IsAvailable(bar)) named.Add((series[bar], name, series.Color)); }
+        for (int k = 0; k < 6; k++)
+        {
+            string code = Codes[k];
+            Take(_series[k, 0], code + "O"); Take(_series[k, 1], "P" + code + "H"); Take(_series[k, 2], "P" + code + "L");
+            Take(_series[k, 3], code + " EQ"); Take(_closes[k], "P" + code + "C");
+        }
+        Take(_mondayHigh, "Mon H"); Take(_mondayLow, "Mon L");
+        decimal tick = InstrumentInfo?.TickSize is > 0 and var t ? t : 0.01m;
+        return named.GroupBy(x => FootprintStudyData.Nearest(x.Price, tick)).OrderByDescending(g => g.Key)
+            .Select(g => (g.Key, string.Join(" / ", g.Select(x => TradingHub.Rendering.UiText.Tr(x.Name))) + " " + g.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), g.First().Color))
+            .ToList();
+    }
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
-    { if (ChartInfo != null) FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, Status, Color.LightSlateGray); }
+    {
+        if (ChartInfo == null) return;
+        var region = ChartInfo.PriceChartContainer.Region;
+        if (ShowLevelLabels && _states[0].Count > 0)
+        {
+            var font = FootprintStudyData.SmallFont;
+            foreach (var (price, text, color) in LevelLabels(Math.Clamp(LastVisibleBarNumber, 0, _states[0].Count - 1)))
+            {
+                int y = ChartInfo.GetYByPrice(price, false);
+                if (y < region.Top || y > region.Bottom) continue;
+                var size = context.MeasureString(text, font);
+                var rect = new Rectangle(region.Right - size.Width - 14, y - size.Height / 2 - 2, size.Width + 8, size.Height + 4);
+                context.FillRectangle(Color.FromArgb(200, color.R, color.G, color.B), rect, 3);
+                context.DrawString(text, font, Color.White, rect.X + 4, rect.Y + 2);
+            }
+        }
+        FootprintStudyData.Legend(context, region, 2, Status, Color.LightSlateGray);
+    }
 }

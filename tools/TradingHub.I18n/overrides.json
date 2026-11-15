@@ -15682,5 +15682,3069 @@
   "Not modified: Binance could not confirm this order's earlier executions ({0}). It was left unowned and unchanged.": {
     "es": "No modificada: Binance no pudo confirmar las ejecuciones anteriores de esta orden ({0}). Quedó sin propietario y sin cambios.",
     "zh-CN": "未修改：Binance 无法确认此订单之前的成交（{0}）。它保持无归属且未更改。"
+  },
+  "Week": {
+    "es": "Semana",
+    "zh-CN": "周"
+  },
+  "Month": {
+    "es": "Mes",
+    "zh-CN": "月"
+  },
+  "Year": {
+    "es": "Año",
+    "zh-CN": "年"
+  },
+  "Top left": {
+    "es": "Arriba a la izquierda",
+    "zh-CN": "左上"
+  },
+  "Top center": {
+    "es": "Arriba al centro",
+    "zh-CN": "上方居中"
+  },
+  "Top right": {
+    "es": "Arriba a la derecha",
+    "zh-CN": "右上"
+  },
+  "Middle left": {
+    "es": "Al medio a la izquierda",
+    "zh-CN": "左侧居中"
+  },
+  "Middle right": {
+    "es": "Al medio a la derecha",
+    "zh-CN": "右侧居中"
+  },
+  "Bottom left": {
+    "es": "Abajo a la izquierda",
+    "zh-CN": "左下"
+  },
+  "Bottom center": {
+    "es": "Abajo al centro",
+    "zh-CN": "下方居中"
+  },
+  "Bottom right": {
+    "es": "Abajo a la derecha",
+    "zh-CN": "右下"
+  },
+  "Small": {
+    "es": "Chico",
+    "zh-CN": "小"
+  },
+  "Normal": {
+    "es": "Normal",
+    "zh-CN": "正常"
+  },
+  "Large": {
+    "es": "Grande",
+    "zh-CN": "大"
+  },
+  "Sydney": {
+    "es": "Sídney",
+    "zh-CN": "悉尼"
+  },
+  "Tokyo": {
+    "es": "Tokio",
+    "zh-CN": "东京"
+  },
+  "London": {
+    "es": "Londres",
+    "zh-CN": "伦敦"
+  },
+  "New York": {
+    "es": "Nueva York",
+    "zh-CN": "纽约"
+  },
+  "Asia (19:00–04:00 New York)": {
+    "es": "Asia (19:00–04:00 de Nueva York)",
+    "zh-CN": "亚洲（纽约时间 19:00–04:00）"
+  },
+  "Draw from the source bar (strategy values stay causal)": {
+    "es": "Dibujar desde la vela de origen (los valores para estrategias siguen siendo causales)",
+    "zh-CN": "从来源K线开始绘制（策略数值仍保持因果）"
+  },
+  "Visualization": {
+    "es": "Visualización",
+    "zh-CN": "显示"
+  },
+  "Maximum retained objects": {
+    "es": "Máximo de objetos guardados",
+    "zh-CN": "保留对象上限"
+  },
+  "Show the dashboard": {
+    "es": "Mostrar el tablero",
+    "zh-CN": "显示面板"
+  },
+  "Dashboard": {
+    "es": "Tablero",
+    "zh-CN": "面板"
+  },
+  "Dashboard position": {
+    "es": "Posición del tablero",
+    "zh-CN": "面板位置"
+  },
+  "Text size": {
+    "es": "Tamaño del texto",
+    "zh-CN": "文字大小"
+  },
+  "Closed bars only; drawn at the source bar, known at the confirming close": {
+    "es": "Solo velas cerradas; se dibuja en la vela de origen y se conoce en el cierre que lo confirma",
+    "zh-CN": "仅使用已收盘K线；绘制于来源K线，在确认收盘时才可知"
+  },
+  "Supply and demand zones": {
+    "es": "Zonas de oferta y demanda",
+    "zh-CN": "供需区域"
+  },
+  "A zone at every confirmed swing high (supply) and swing low (demand), an ATR fraction deep, extended right until a close goes through it; the break is marked. The nearest live zone above and below price is named. Zones exist only from the swing's confirming close.": {
+    "es": "Una zona en cada máximo de swing confirmado (oferta) y en cada mínimo (demanda), de una fracción de ATR de alto, alargada a la derecha hasta que un cierre la atraviesa; se marca la ruptura. Se nombra la zona viva más cercana arriba y abajo del precio. Las zonas existen solo desde el cierre que confirma el swing.",
+    "zh-CN": "在每个已确认的摆动高点（供给）和摆动低点（需求）处建立一个深度为 ATR 一部分的区域，向右延伸，直到有收盘价穿越它；并标记突破。标出价格上方和下方最近的有效区域。区域仅从确认该摆动的收盘起才存在。"
+  },
+  "Swing strength (bars each side)": {
+    "es": "Fuerza del swing (velas a cada lado)",
+    "zh-CN": "摆动强度（每侧K线数）"
+  },
+  "Calculation": {
+    "es": "Cálculo",
+    "zh-CN": "计算"
+  },
+  "Zone depth (ATR)": {
+    "es": "Alto de la zona (ATR)",
+    "zh-CN": "区域深度（ATR）"
+  },
+  "Live zones per side": {
+    "es": "Zonas vivas por lado",
+    "zh-CN": "每侧有效区域数"
+  },
+  "Supply": {
+    "es": "Oferta",
+    "zh-CN": "供给"
+  },
+  "Demand": {
+    "es": "Demanda",
+    "zh-CN": "需求"
+  },
+  "Colors": {
+    "es": "Colores",
+    "zh-CN": "颜色"
+  },
+  "Break mark": {
+    "es": "Marca de ruptura",
+    "zh-CN": "突破标记"
+  },
+  "Supply zone": {
+    "es": "Zona de oferta",
+    "zh-CN": "供给区"
+  },
+  "Demand zone": {
+    "es": "Zona de demanda",
+    "zh-CN": "需求区"
+  },
+  "Supply zone: top edge": {
+    "es": "Zona de oferta: borde superior",
+    "zh-CN": "供给区：上沿"
+  },
+  "Supply zone: bottom edge": {
+    "es": "Zona de oferta: borde inferior",
+    "zh-CN": "供给区：下沿"
+  },
+  "Demand zone: top edge": {
+    "es": "Zona de demanda: borde superior",
+    "zh-CN": "需求区：上沿"
+  },
+  "Demand zone: bottom edge": {
+    "es": "Zona de demanda: borde inferior",
+    "zh-CN": "需求区：下沿"
+  },
+  "Supply and demand": {
+    "es": "Oferta y demanda",
+    "zh-CN": "供需"
+  },
+  "Live supply zones": {
+    "es": "Zonas de oferta vivas",
+    "zh-CN": "有效供给区"
+  },
+  "Live demand zones": {
+    "es": "Zonas de demanda vivas",
+    "zh-CN": "有效需求区"
+  },
+  "Nearest supply": {
+    "es": "Oferta más cercana",
+    "zh-CN": "最近供给"
+  },
+  "Nearest demand": {
+    "es": "Demanda más cercana",
+    "zh-CN": "最近需求"
+  },
+  "Zone break direction (+1 supply broken up, -1 demand broken down)": {
+    "es": "Dirección de la ruptura de zona (+1 oferta rota hacia arriba, -1 demanda rota hacia abajo)",
+    "zh-CN": "区域突破方向（+1 供给区被向上突破，-1 需求区被向下突破）"
+  },
+  "Four-hour/session/week/month/quarter/year opens and completed-period high, low, midpoint and (optionally) close, plus the completed Monday range, each named at the right edge (labels at the same price are merged). Calendar boundaries follow the exchange session. Prior-period levels appear only once that period has completed; first loaded periods are explicitly partial.": {
+    "es": "Aperturas de cuatro horas, sesión, semana, mes, trimestre y año, y máximo, mínimo, punto medio y (opcional) cierre del período terminado, más el rango del lunes terminado, cada uno con su nombre en el borde derecho (las etiquetas en el mismo precio se juntan). Los límites del calendario siguen la sesión de la bolsa. Los niveles del período anterior aparecen solo cuando ese período terminó; los primeros períodos cargados se marcan explícitamente como parciales.",
+    "zh-CN": "四小时/交易时段/周/月/季度/年的开盘价，以及已完成周期的最高价、最低价、中点和（可选）收盘价，外加已完成的周一区间，并在右侧边缘标注名称（同一价格的标签会合并）。日历边界遵循交易所时段。前一周期的水平仅在该周期完成后出现；最早载入的周期会明确标为不完整。"
+  },
+  "Show prior close": {
+    "es": "Mostrar el cierre anterior",
+    "zh-CN": "显示前一周期收盘价"
+  },
+  "Name levels at the right edge": {
+    "es": "Nombrar los niveles en el borde derecho",
+    "zh-CN": "在右侧边缘标注水平名称"
+  },
+  "Hours4 PriorClose": {
+    "es": "Cuatro horas: cierre anterior",
+    "zh-CN": "四小时前收盘价"
+  },
+  "Day PriorClose": {
+    "es": "Sesión: cierre anterior",
+    "zh-CN": "交易时段前收盘价"
+  },
+  "Week PriorClose": {
+    "es": "Semana: cierre anterior",
+    "zh-CN": "周前收盘价"
+  },
+  "Month PriorClose": {
+    "es": "Mes: cierre anterior",
+    "zh-CN": "月前收盘价"
+  },
+  "Quarter PriorClose": {
+    "es": "Trimestre: cierre anterior",
+    "zh-CN": "季度前收盘价"
+  },
+  "Year PriorClose": {
+    "es": "Año: cierre anterior",
+    "zh-CN": "年前收盘价"
+  },
+  "4HO": {
+    "es": "4HO",
+    "zh-CN": "4HO"
+  },
+  "P4HH": {
+    "es": "P4HH",
+    "zh-CN": "P4HH"
+  },
+  "P4HL": {
+    "es": "P4HL",
+    "zh-CN": "P4HL"
+  },
+  "4H EQ": {
+    "es": "4H EQ",
+    "zh-CN": "4H EQ"
+  },
+  "P4HC": {
+    "es": "P4HC",
+    "zh-CN": "P4HC"
+  },
+  "DO": {
+    "es": "DO",
+    "zh-CN": "DO"
+  },
+  "PDH": {
+    "es": "PDH",
+    "zh-CN": "PDH"
+  },
+  "PDL": {
+    "es": "PDL",
+    "zh-CN": "PDL"
+  },
+  "D EQ": {
+    "es": "D EQ",
+    "zh-CN": "D EQ"
+  },
+  "PDC": {
+    "es": "PDC",
+    "zh-CN": "PDC"
+  },
+  "WO": {
+    "es": "WO",
+    "zh-CN": "WO"
+  },
+  "PWH": {
+    "es": "PWH",
+    "zh-CN": "PWH"
+  },
+  "PWL": {
+    "es": "PWL",
+    "zh-CN": "PWL"
+  },
+  "W EQ": {
+    "es": "W EQ",
+    "zh-CN": "W EQ"
+  },
+  "PWC": {
+    "es": "PWC",
+    "zh-CN": "PWC"
+  },
+  "MO": {
+    "es": "MO",
+    "zh-CN": "MO"
+  },
+  "PMH": {
+    "es": "PMH",
+    "zh-CN": "PMH"
+  },
+  "PML": {
+    "es": "PML",
+    "zh-CN": "PML"
+  },
+  "M EQ": {
+    "es": "M EQ",
+    "zh-CN": "M EQ"
+  },
+  "PMC": {
+    "es": "PMC",
+    "zh-CN": "PMC"
+  },
+  "QO": {
+    "es": "QO",
+    "zh-CN": "QO"
+  },
+  "PQH": {
+    "es": "PQH",
+    "zh-CN": "PQH"
+  },
+  "PQL": {
+    "es": "PQL",
+    "zh-CN": "PQL"
+  },
+  "Q EQ": {
+    "es": "Q EQ",
+    "zh-CN": "Q EQ"
+  },
+  "PQC": {
+    "es": "PQC",
+    "zh-CN": "PQC"
+  },
+  "YO": {
+    "es": "YO",
+    "zh-CN": "YO"
+  },
+  "PYH": {
+    "es": "PYH",
+    "zh-CN": "PYH"
+  },
+  "PYL": {
+    "es": "PYL",
+    "zh-CN": "PYL"
+  },
+  "Y EQ": {
+    "es": "Y EQ",
+    "zh-CN": "Y EQ"
+  },
+  "PYC": {
+    "es": "PYC",
+    "zh-CN": "PYC"
+  },
+  "Mon H": {
+    "es": "Lun máx",
+    "zh-CN": "周一高"
+  },
+  "Mon L": {
+    "es": "Lun mín",
+    "zh-CN": "周一低"
+  },
+  "Floor": {
+    "es": "Piso",
+    "zh-CN": "地板"
+  },
+  "Traditional": {
+    "es": "Tradicional",
+    "zh-CN": "传统"
+  },
+  "Fibonacci": {
+    "es": "Fibonacci",
+    "zh-CN": "斐波那契"
+  },
+  "Woodie": {
+    "es": "Woodie",
+    "zh-CN": "Woodie"
+  },
+  "Classic": {
+    "es": "Clásico",
+    "zh-CN": "经典"
+  },
+  "DeMark": {
+    "es": "DeMark",
+    "zh-CN": "DeMark"
+  },
+  "Classic: H + 2 × (P − L) / L − 2 × (H − P)": {
+    "es": "Clásico: H + 2 × (P − L) / L − 2 × (H − P)",
+    "zh-CN": "经典：H + 2 × (P − L) / L − 2 × (H − P)"
+  },
+  "Range multiple: P ± 2 × range": {
+    "es": "Múltiplo del rango: P ± 2 × rango",
+    "zh-CN": "区间倍数：P ± 2 × 区间"
+  },
+  "Automatic (by chart period)": {
+    "es": "Automático (según el período del gráfico)",
+    "zh-CN": "自动（按图表周期）"
+  },
+  "Pivot points (floor, traditional, Fibonacci, Woodie, classic, DeMark, Camarilla)": {
+    "es": "Puntos pivote (piso, tradicional, Fibonacci, Woodie, clásico, DeMark, Camarilla)",
+    "zh-CN": "枢轴点（地板、传统、斐波那契、Woodie、经典、DeMark、Camarilla）"
+  },
+  "Pivot ladders (P with R1–R5/S1–S5 depending on the method) from the open, high, low and close of the previous completed session, week, month, quarter or year on the exchange-session calendar; Automatic picks the period from the chart period. A period's levels become known at the first close of the next period and are drawn from that period's first bar; the first loaded period is skipped because it may be incomplete. Optional marks and a signal when a close crosses the pivot or closes beyond R2/S2. The current period's levels are alertable.": {
+    "es": "Escaleras de pivotes (P con R1–R5/S1–S5 según el método) con la apertura, el máximo, el mínimo y el cierre de la sesión, semana, mes, trimestre o año anterior terminado en el calendario de sesiones de la bolsa; Automático elige el período según el del gráfico. Los niveles de un período se conocen en el primer cierre del período siguiente y se dibujan desde su primera vela; el primer período cargado se omite porque puede estar incompleto. Marcas y señal opcionales cuando un cierre cruza el pivote o cierra más allá de R2/S2. Los niveles del período actual admiten alertas.",
+    "zh-CN": "根据交易所时段日历上一个已完成的交易时段、周、月、季度或年的开盘价、最高价、最低价和收盘价计算枢轴阶梯（P 以及按方法不同的 R1–R5/S1–S5）；“自动”按图表周期选择周期。一个周期的水平在下一周期的第一次收盘时才可知，并从该周期的第一根K线开始绘制；最早载入的周期可能不完整，因此跳过。收盘穿越枢轴或收于 R2/S2 之外时可选显示标记和信号。当前周期的水平可设置提醒。"
+  },
+  "Pivot crossing (+1/-1 close crosses the pivot up/down, +2/-2 close crosses beyond R2/S2)": {
+    "es": "Cruce del pivote (+1/-1 el cierre cruza el pivote hacia arriba/abajo, +2/-2 el cierre cruza más allá de R2/S2)",
+    "zh-CN": "枢轴穿越（+1/-1 收盘向上/向下穿越枢轴，+2/-2 收盘穿越至 R2/S2 之外）"
+  },
+  "Method": {
+    "es": "Método",
+    "zh-CN": "方法"
+  },
+  "Floor R3 / S3": {
+    "es": "R3 / S3 de piso",
+    "zh-CN": "地板 R3 / S3"
+  },
+  "Period": {
+    "es": "Período",
+    "zh-CN": "周期"
+  },
+  "Periods drawn back": {
+    "es": "Períodos dibujados hacia atrás",
+    "zh-CN": "向前绘制的周期数"
+  },
+  "Highest level shown (R/S 1–5)": {
+    "es": "Nivel más alto mostrado (R/S 1–5)",
+    "zh-CN": "显示的最高水平（R/S 1–5）"
+  },
+  "Levels": {
+    "es": "Niveles",
+    "zh-CN": "水平"
+  },
+  "Level names": {
+    "es": "Nombres de los niveles",
+    "zh-CN": "水平名称"
+  },
+  "Mark pivot and R2/S2 crossings": {
+    "es": "Marcar los cruces del pivote y de R2/S2",
+    "zh-CN": "标记枢轴和 R2/S2 穿越"
+  },
+  "Pivot": {
+    "es": "Pivote",
+    "zh-CN": "枢轴"
+  },
+  "Resistances": {
+    "es": "Resistencias",
+    "zh-CN": "阻力位"
+  },
+  "Supports": {
+    "es": "Soportes",
+    "zh-CN": "支撑位"
+  },
+  "Levels of a completed period appear at the first close of the next period; the first loaded period is skipped": {
+    "es": "Los niveles de un período terminado aparecen en el primer cierre del período siguiente; el primer período cargado se omite",
+    "zh-CN": "已完成周期的水平在下一周期的第一次收盘时出现；最早载入的周期会被跳过"
+  },
+  "P": {
+    "es": "P",
+    "zh-CN": "P"
+  },
+  "Pivot P": {
+    "es": "Pivote P",
+    "zh-CN": "枢轴 P"
+  },
+  "R1": {
+    "es": "R1",
+    "zh-CN": "R1"
+  },
+  "Pivot R1": {
+    "es": "Pivote R1",
+    "zh-CN": "枢轴 R1"
+  },
+  "S1": {
+    "es": "S1",
+    "zh-CN": "S1"
+  },
+  "Pivot S1": {
+    "es": "Pivote S1",
+    "zh-CN": "枢轴 S1"
+  },
+  "R2": {
+    "es": "R2",
+    "zh-CN": "R2"
+  },
+  "Pivot R2": {
+    "es": "Pivote R2",
+    "zh-CN": "枢轴 R2"
+  },
+  "S2": {
+    "es": "S2",
+    "zh-CN": "S2"
+  },
+  "Pivot S2": {
+    "es": "Pivote S2",
+    "zh-CN": "枢轴 S2"
+  },
+  "R3": {
+    "es": "R3",
+    "zh-CN": "R3"
+  },
+  "Pivot R3": {
+    "es": "Pivote R3",
+    "zh-CN": "枢轴 R3"
+  },
+  "S3": {
+    "es": "S3",
+    "zh-CN": "S3"
+  },
+  "Pivot S3": {
+    "es": "Pivote S3",
+    "zh-CN": "枢轴 S3"
+  },
+  "R4": {
+    "es": "R4",
+    "zh-CN": "R4"
+  },
+  "Pivot R4": {
+    "es": "Pivote R4",
+    "zh-CN": "枢轴 R4"
+  },
+  "S4": {
+    "es": "S4",
+    "zh-CN": "S4"
+  },
+  "Pivot S4": {
+    "es": "Pivote S4",
+    "zh-CN": "枢轴 S4"
+  },
+  "R5": {
+    "es": "R5",
+    "zh-CN": "R5"
+  },
+  "Pivot R5": {
+    "es": "Pivote R5",
+    "zh-CN": "枢轴 R5"
+  },
+  "S5": {
+    "es": "S5",
+    "zh-CN": "S5"
+  },
+  "Pivot S5": {
+    "es": "Pivote S5",
+    "zh-CN": "枢轴 S5"
+  },
+  "Pivot points": {
+    "es": "Puntos pivote",
+    "zh-CN": "枢轴点"
+  },
+  "Price vs pivot": {
+    "es": "Precio frente al pivote",
+    "zh-CN": "价格相对枢轴"
+  },
+  "Above": {
+    "es": "Arriba",
+    "zh-CN": "上方"
+  },
+  "Below": {
+    "es": "Abajo",
+    "zh-CN": "下方"
+  },
+  "R2 / S2": {
+    "es": "R2 / S2",
+    "zh-CN": "R2 / S2"
+  },
+  "Chart bars": {
+    "es": "Velas del gráfico",
+    "zh-CN": "图表K线"
+  },
+  "15 minutes": {
+    "es": "15 minutos",
+    "zh-CN": "15 分钟"
+  },
+  "1 hour": {
+    "es": "1 hora",
+    "zh-CN": "1 小时"
+  },
+  "Line break": {
+    "es": "Line break (ruptura de líneas)",
+    "zh-CN": "新价线"
+  },
+  "N-line break on closes (chart closes, or 15-minute, 1-hour, 4-hour or session closes): a close beyond the last line extends the trend, a close beyond the extreme of the last N lines reverses it. A higher-frame close is known only at the first chart bar of the next block, so its line, marks and signal appear there. Shows line bodies, the continue and reverse trigger levels (current ones alertable), reversal and extended-run marks, optional bar colors, a mini line-break chart right of the last bar and a dashboard.": {
+    "es": "Line break de N líneas sobre los cierres (del gráfico, o de 15 minutos, 1 hora, 4 horas o la sesión): un cierre más allá de la última línea sigue la tendencia y un cierre más allá del extremo de las últimas N líneas la da vuelta. Un cierre de un marco mayor se conoce recién en la primera vela del bloque siguiente, así que su línea, marcas y señal aparecen ahí. Muestra los cuerpos de las líneas, los niveles para seguir y para dar vuelta (los actuales admiten alertas), las marcas de vuelta y de racha larga, colores de vela opcionales, un mini gráfico de line break a la derecha de la última vela y un tablero.",
+    "zh-CN": "基于收盘价的 N 线新价线（图表收盘价，或 15 分钟、1 小时、4 小时或交易时段收盘价）：收盘超过最后一条线则延续趋势，收盘超过最近 N 条线的极值则反转趋势。更高周期的收盘价要到下一区块的第一根图表K线才可知，因此其线、标记和信号出现在那里。显示线体、延续与反转触发水平（当前水平可设置提醒）、反转和长连标记、可选的K线着色、最后一根K线右侧的迷你新价线图以及面板。"
+  },
+  "Line break trend (+1 up, -1 down)": {
+    "es": "Tendencia del line break (+1 alcista, -1 bajista)",
+    "zh-CN": "新价线趋势（+1 上涨，-1 下跌）"
+  },
+  "Line break reversal (+1 bullish, -1 bearish) at the confirming bar": {
+    "es": "Vuelta del line break (+1 alcista, -1 bajista) en la vela que la confirma",
+    "zh-CN": "新价线反转（+1 看涨，-1 看跌），在确认K线处"
+  },
+  "Line break bar colors": {
+    "es": "Colores de vela del line break",
+    "zh-CN": "新价线K线颜色"
+  },
+  "Lines to reverse": {
+    "es": "Líneas para dar vuelta",
+    "zh-CN": "反转所需线数"
+  },
+  "Closes from": {
+    "es": "Cierres de",
+    "zh-CN": "收盘价来源"
+  },
+  "Extended run (lines)": {
+    "es": "Racha larga (líneas)",
+    "zh-CN": "长连（线数）"
+  },
+  "Line bodies": {
+    "es": "Cuerpos de las líneas",
+    "zh-CN": "线体"
+  },
+  "Drawing": {
+    "es": "Dibujo",
+    "zh-CN": "绘制"
+  },
+  "Reversal and extended-run marks": {
+    "es": "Marcas de vuelta y de racha larga",
+    "zh-CN": "反转和长连标记"
+  },
+  "Reversal labels": {
+    "es": "Etiquetas de vuelta",
+    "zh-CN": "反转标签"
+  },
+  "Continue and reverse triggers": {
+    "es": "Niveles para seguir y para dar vuelta",
+    "zh-CN": "延续与反转触发水平"
+  },
+  "Color price bars by trend": {
+    "es": "Pintar las velas según la tendencia",
+    "zh-CN": "按趋势为K线着色"
+  },
+  "Mini line-break chart right of the last bar": {
+    "es": "Mini gráfico de line break a la derecha de la última vela",
+    "zh-CN": "最后一根K线右侧的迷你新价线图"
+  },
+  "Mini chart lines": {
+    "es": "Líneas del mini gráfico",
+    "zh-CN": "迷你图线数"
+  },
+  "Bullish": {
+    "es": "Alcista",
+    "zh-CN": "看涨"
+  },
+  "Bearish": {
+    "es": "Bajista",
+    "zh-CN": "看跌"
+  },
+  "Closed bars only; a higher-frame close is known at the first chart bar of the next block": {
+    "es": "Solo velas cerradas; un cierre de un marco mayor se conoce en la primera vela del bloque siguiente",
+    "zh-CN": "仅使用已收盘K线；更高周期的收盘价在下一区块的第一根图表K线时才可知"
+  },
+  "Bullish reversal": {
+    "es": "Vuelta alcista",
+    "zh-CN": "看涨反转"
+  },
+  "Bearish reversal": {
+    "es": "Vuelta bajista",
+    "zh-CN": "看跌反转"
+  },
+  "Line break continue": {
+    "es": "Line break: seguir",
+    "zh-CN": "新价线：延续"
+  },
+  "Line break reverse": {
+    "es": "Line break: dar vuelta",
+    "zh-CN": "新价线：反转"
+  },
+  "Trend": {
+    "es": "Tendencia",
+    "zh-CN": "趋势"
+  },
+  "Up": {
+    "es": "Alcista",
+    "zh-CN": "上涨"
+  },
+  "Down": {
+    "es": "Bajista",
+    "zh-CN": "下跌"
+  },
+  "Consecutive lines": {
+    "es": "Líneas seguidas",
+    "zh-CN": "连续线数"
+  },
+  "Continue above": {
+    "es": "Sigue por encima de",
+    "zh-CN": "高于此价延续"
+  },
+  "Continue below": {
+    "es": "Sigue por debajo de",
+    "zh-CN": "低于此价延续"
+  },
+  "Reverses at": {
+    "es": "Da vuelta en",
+    "zh-CN": "反转于"
+  },
+  "ATR distance": {
+    "es": "Distancia en ATR",
+    "zh-CN": "ATR 距离"
+  },
+  "ATR length": {
+    "es": "Longitud del ATR",
+    "zh-CN": "ATR 长度"
+  },
+  "Background on the breakout": {
+    "es": "Fondo en la ruptura",
+    "zh-CN": "突破K线背景"
+  },
+  "Background on the sweep bar": {
+    "es": "Fondo en la vela del barrido",
+    "zh-CN": "扫荡K线背景"
+  },
+  "Bars after the sweep": {
+    "es": "Velas después del barrido",
+    "zh-CN": "扫荡后的K线数"
+  },
+  "Bars to return inside the range": {
+    "es": "Velas para volver al rango",
+    "zh-CN": "回到区间内的K线数"
+  },
+  "Bars to the left": {
+    "es": "Velas a la izquierda",
+    "zh-CN": "左侧K线数"
+  },
+  "Bars to the right": {
+    "es": "Velas a la derecha",
+    "zh-CN": "右侧K线数"
+  },
+  "Bearish break": {
+    "es": "Ruptura bajista",
+    "zh-CN": "看跌突破"
+  },
+  "Bearish only": {
+    "es": "Solo bajistas",
+    "zh-CN": "仅看跌"
+  },
+  "Bearish retest": {
+    "es": "Re-prueba bajista",
+    "zh-CN": "看跌回测"
+  },
+  "Bearish wick": {
+    "es": "Mecha bajista",
+    "zh-CN": "看跌影线"
+  },
+  "Body swing length": {
+    "es": "Largo del swing de cuerpo",
+    "zh-CN": "实体摆动长度"
+  },
+  "Break labels": {
+    "es": "Etiquetas de ruptura",
+    "zh-CN": "突破标签"
+  },
+  "Breakout": {
+    "es": "Ruptura",
+    "zh-CN": "突破"
+  },
+  "Breakout (+1 up through resistance, -1 down through support)": {
+    "es": "Ruptura (+1 arriba a través de la resistencia, -1 abajo a través del soporte)",
+    "zh-CN": "突破（+1 向上穿越阻力，-1 向下跌破支撑）"
+  },
+  "Breakout FVG": {
+    "es": "FVG de la ruptura",
+    "zh-CN": "突破 FVG"
+  },
+  "Breakout gap": {
+    "es": "Hueco de la ruptura",
+    "zh-CN": "突破缺口"
+  },
+  "Breakout gap: top edge": {
+    "es": "Hueco de la ruptura: borde superior",
+    "zh-CN": "突破缺口：上边缘"
+  },
+  "Breakout gap: bottom edge": {
+    "es": "Hueco de la ruptura: borde inferior",
+    "zh-CN": "突破缺口：下边缘"
+  },
+  "Breakout marks": {
+    "es": "Marcas de ruptura",
+    "zh-CN": "突破标记"
+  },
+  "Breakout tests and retests": {
+    "es": "Pruebas y re-pruebas de rupturas",
+    "zh-CN": "突破测试与回测"
+  },
+  "Breakout with FVG (+1 up through equal highs, -1 down through equal lows)": {
+    "es": "Ruptura con FVG (+1 arriba a través de máximos iguales, -1 abajo a través de mínimos iguales)",
+    "zh-CN": "带 FVG 的突破（+1 向上突破等高点，-1 向下跌破等低点）"
+  },
+  "Breakouts (bullish / bearish)": {
+    "es": "Rupturas (alcistas / bajistas)",
+    "zh-CN": "突破（看涨 / 看跌）"
+  },
+  "Breakouts (up / down)": {
+    "es": "Rupturas (arriba / abajo)",
+    "zh-CN": "突破（向上 / 向下）"
+  },
+  "Breaks (bullish / bearish)": {
+    "es": "Rupturas (alcistas / bajistas)",
+    "zh-CN": "突破（看涨 / 看跌）"
+  },
+  "Breaks and retests only": {
+    "es": "Solo rupturas y re-pruebas",
+    "zh-CN": "仅突破与回测"
+  },
+  "Broken": {
+    "es": "Rota",
+    "zh-CN": "已突破"
+  },
+  "Broken resistance zone": {
+    "es": "Zona de resistencia rota",
+    "zh-CN": "已突破的阻力区"
+  },
+  "Broken resistance zone: top edge": {
+    "es": "Zona de resistencia rota: borde superior",
+    "zh-CN": "已突破的阻力区：上边缘"
+  },
+  "Broken resistance zone: bottom edge": {
+    "es": "Zona de resistencia rota: borde inferior",
+    "zh-CN": "已突破的阻力区：下边缘"
+  },
+  "Broken support zone": {
+    "es": "Zona de soporte rota",
+    "zh-CN": "已跌破的支撑区"
+  },
+  "Broken support zone: top edge": {
+    "es": "Zona de soporte rota: borde superior",
+    "zh-CN": "已跌破的支撑区：上边缘"
+  },
+  "Broken support zone: bottom edge": {
+    "es": "Zona de soporte rota: borde inferior",
+    "zh-CN": "已跌破的支撑区：下边缘"
+  },
+  "Broken-zone retest (+1 broken resistance held, -1 broken support held)": {
+    "es": "Re-prueba de zona rota (+1 resistencia rota sostenida, -1 soporte roto sostenido)",
+    "zh-CN": "已破区域回测（+1 已破阻力守住，-1 已破支撑守住）"
+  },
+  "Bullish and bearish": {
+    "es": "Alcistas y bajistas",
+    "zh-CN": "看涨与看跌"
+  },
+  "Bullish break": {
+    "es": "Ruptura alcista",
+    "zh-CN": "看涨突破"
+  },
+  "Bullish only": {
+    "es": "Solo alcistas",
+    "zh-CN": "仅看涨"
+  },
+  "Bullish retest": {
+    "es": "Re-prueba alcista",
+    "zh-CN": "看涨回测"
+  },
+  "Bullish wick": {
+    "es": "Mecha alcista",
+    "zh-CN": "看涨影线"
+  },
+  "Days kept": {
+    "es": "Días que se guardan",
+    "zh-CN": "保留天数"
+  },
+  "EQH": {
+    "es": "MXI",
+    "zh-CN": "等高"
+  },
+  "EQL": {
+    "es": "MNI",
+    "zh-CN": "等低"
+  },
+  "Each confirmed swing low starts a support zone and each confirmed swing high a resistance zone, an ATR(200) multiple wide, from the confirming close. Marks a test (opens inside and closes away on the zone's side), the breakout (a close through it), retests of the broken zone (opens inside and closes on the broken side) and zones that expire untested. Only opens and closes trigger events; wicks do not. Heuristic.": {
+    "es": "Cada mínimo confirmado inicia una zona de soporte y cada máximo confirmado una zona de resistencia, de un ancho en múltiplos de ATR(200), desde el cierre que lo confirma. Marca las pruebas (abre adentro y cierra alejándose del lado de la zona), la ruptura (un cierre que la atraviesa), las re-pruebas de la zona rota (abre adentro y cierra del lado roto) y las zonas que vencen sin prueba. Solo las aperturas y los cierres disparan eventos; las mechas no. Heurístico.",
+    "zh-CN": "每个已确认的摆动低点从确认收盘起开启一个支撑区，每个已确认的摆动高点开启一个阻力区，宽度为 ATR(200) 的倍数。标记测试（开盘在区内、收盘向区域一侧离开）、突破（收盘穿越区域）、已破区域的回测（开盘在区内、收盘在已破一侧）以及未经测试而到期的区域。只有开盘价和收盘价触发事件，影线不触发。启发式。"
+  },
+  "Equal highs": {
+    "es": "Máximos iguales",
+    "zh-CN": "等高点"
+  },
+  "Equal highs: top edge": {
+    "es": "Máximos iguales: borde superior",
+    "zh-CN": "等高点：上边缘"
+  },
+  "Equal highs: bottom edge": {
+    "es": "Máximos iguales: borde inferior",
+    "zh-CN": "等高点：下边缘"
+  },
+  "Equal highs and lows": {
+    "es": "Máximos y mínimos iguales",
+    "zh-CN": "等高点与等低点"
+  },
+  "Equal highs and lows with breakout FVG": {
+    "es": "Máximos y mínimos iguales con FVG de ruptura",
+    "zh-CN": "等高等低点与突破 FVG"
+  },
+  "Equal lows": {
+    "es": "Mínimos iguales",
+    "zh-CN": "等低点"
+  },
+  "Equal lows: top edge": {
+    "es": "Mínimos iguales: borde superior",
+    "zh-CN": "等低点：上边缘"
+  },
+  "Equal lows: bottom edge": {
+    "es": "Mínimos iguales: borde inferior",
+    "zh-CN": "等低点：下边缘"
+  },
+  "Every confirmed swing high and low becomes a liquidity level from the close that confirms it. A wick sweep is a bar that trades through an unbroken level and closes back on its original side; a retest sweep is a bar that, after a close has broken the level, trades back through it and closes on the broken side again. Each sweep draws the swept area from the sweeping bar until a close goes through it or it ages out. Heuristic; a sweep is known at the sweeping bar's close.": {
+    "es": "Cada máximo y mínimo confirmado se convierte en un nivel de liquidez desde el cierre que lo confirma. Un barrido por mecha es una vela que atraviesa un nivel no roto y cierra de vuelta en su lado original; un barrido por re-prueba es una vela que, después de que un cierre rompió el nivel, vuelve a atravesarlo y cierra otra vez del lado roto. Cada barrido dibuja el área barrida desde la vela del barrido hasta que un cierre la atraviesa o vence por edad. Heurístico; un barrido se conoce al cierre de la vela que barre.",
+    "zh-CN": "每个已确认的摆动高点和低点从确认它的收盘起成为流动性水平。影线扫荡是指K线穿过未被突破的水平后收回原来一侧；回测扫荡是指在收盘突破该水平之后，K线再次反向穿过它并重新收在已突破一侧。每次扫荡从扫荡K线起绘制被扫区域，直到有收盘穿越它或因时长到期。启发式；扫荡在扫荡K线收盘时得知。"
+  },
+  "Extend the swept area until broken": {
+    "es": "Alargar el área barrida hasta que se rompa",
+    "zh-CN": "延伸被扫区域直至被突破"
+  },
+  "FVG": {
+    "es": "FVG",
+    "zh-CN": "FVG"
+  },
+  "FVG ATR length": {
+    "es": "ATR del FVG",
+    "zh-CN": "FVG 的 ATR 长度"
+  },
+  "FVG projection (bars)": {
+    "es": "Proyección del FVG (velas)",
+    "zh-CN": "FVG 投影（K线数）"
+  },
+  "Fair value gap": {
+    "es": "Hueco de valor justo",
+    "zh-CN": "公允价值缺口"
+  },
+  "Fair value gap: top edge": {
+    "es": "Hueco de valor justo: borde superior",
+    "zh-CN": "公允价值缺口：上边缘"
+  },
+  "Fair value gap: bottom edge": {
+    "es": "Hueco de valor justo: borde inferior",
+    "zh-CN": "公允价值缺口：下边缘"
+  },
+  "Fair value gaps at least an ATR multiple wide, redrawn smaller as price fills them and removed once filled. Each live gap takes a structural level: the first confirmed candle-body swing on its far side (for a bullish gap, a body low above the unfilled part). The close that cuts through that level is the breakout: breaking a bullish gap's level is bearish, and the reverse. Heuristic; levels exist from the close that confirms the body swing.": {
+    "es": "Huecos de valor justo de al menos un múltiplo de ATR, redibujados más chicos a medida que el precio los rellena y quitados al rellenarse. Cada hueco vivo toma un nivel estructural: el primer swing de cuerpo de vela confirmado del otro lado (para un hueco alcista, un mínimo de cuerpo por encima de la parte sin rellenar). El cierre que atraviesa ese nivel es la ruptura: romper el nivel de un hueco alcista es bajista, y al revés. Heurístico; los niveles existen desde el cierre que confirma el swing de cuerpo.",
+    "zh-CN": "宽度至少为 ATR 倍数的公允价值缺口，随着价格回补而缩小重绘，完全回补后移除。每个存续缺口取一个结构水平：其远侧第一个已确认的K线实体摆动点（对于看涨缺口，是位于未回补部分上方的实体低点）。收盘穿越该水平即为突破：跌破看涨缺口的水平为看跌，反之亦然。启发式；水平从确认实体摆动的收盘起存在。"
+  },
+  "Gap fill breakouts": {
+    "es": "Rupturas al rellenar huecos",
+    "zh-CN": "缺口回补突破"
+  },
+  "Gap level break (+1 bullish, -1 bearish)": {
+    "es": "Ruptura del nivel del hueco (+1 alcista, -1 bajista)",
+    "zh-CN": "缺口水平突破（+1 看涨，-1 看跌）"
+  },
+  "Gap structure level": {
+    "es": "Nivel estructural del hueco",
+    "zh-CN": "缺口结构水平"
+  },
+  "Gaps": {
+    "es": "Huecos",
+    "zh-CN": "缺口"
+  },
+  "Hypothetical exit (+1 target, -1 stop)": {
+    "es": "Salida hipotética (+1 objetivo, -1 stop)",
+    "zh-CN": "假设离场（+1 目标，-1 止损）"
+  },
+  "Hypothetical long": {
+    "es": "Compra hipotética",
+    "zh-CN": "假设做多"
+  },
+  "Hypothetical position": {
+    "es": "Posición hipotética",
+    "zh-CN": "假设持仓"
+  },
+  "Hypothetical short": {
+    "es": "Venta hipotética",
+    "zh-CN": "假设做空"
+  },
+  "Hypothetical signal (+1 long, -1 short)": {
+    "es": "Señal hipotética (+1 compra, -1 venta)",
+    "zh-CN": "假设信号（+1 做多，-1 做空）"
+  },
+  "Hypothetical signals": {
+    "es": "Señales hipotéticas",
+    "zh-CN": "假设信号"
+  },
+  "Hypothetical signals, not orders; closed bars only": {
+    "es": "Señales hipotéticas, no órdenes; solo velas cerradas",
+    "zh-CN": "假设信号，并非订单；仅限已收盘K线"
+  },
+  "Hypothetical stop": {
+    "es": "Stop hipotético",
+    "zh-CN": "假设止损"
+  },
+  "Hypothetical stop at the signal bar": {
+    "es": "Stop hipotético en la vela de la señal",
+    "zh-CN": "信号K线的假设止损"
+  },
+  "Hypothetical target": {
+    "es": "Objetivo hipotético",
+    "zh-CN": "假设目标"
+  },
+  "Hypothetical target at the signal bar": {
+    "es": "Objetivo hipotético en la vela de la señal",
+    "zh-CN": "信号K线的假设目标"
+  },
+  "In session": {
+    "es": "En la sesión",
+    "zh-CN": "处于交易时段"
+  },
+  "Invalid sweep": {
+    "es": "Barrido no válido",
+    "zh-CN": "无效扫荡"
+  },
+  "Inverse FVG": {
+    "es": "FVG invertido",
+    "zh-CN": "反转 FVG"
+  },
+  "Inverse FVG edge (ATR fallback)": {
+    "es": "Borde del FVG invertido (o ATR)",
+    "zh-CN": "反转 FVG 边缘（备选 ATR）"
+  },
+  "Invert the signals": {
+    "es": "Invertir las señales",
+    "zh-CN": "反转信号"
+  },
+  "Labels (wick / retest)": {
+    "es": "Etiquetas (mecha / re-prueba)",
+    "zh-CN": "标签（影线 / 回测）"
+  },
+  "Last signal": {
+    "es": "Última señal",
+    "zh-CN": "最近信号"
+  },
+  "Last signal price": {
+    "es": "Precio de la última señal",
+    "zh-CN": "最近信号价格"
+  },
+  "Last sweep": {
+    "es": "Último barrido",
+    "zh-CN": "最近扫荡"
+  },
+  "Liquidity high": {
+    "es": "Máximo de liquidez",
+    "zh-CN": "流动性高点"
+  },
+  "Liquidity levels": {
+    "es": "Niveles de liquidez",
+    "zh-CN": "流动性水平"
+  },
+  "Liquidity low": {
+    "es": "Mínimo de liquidez",
+    "zh-CN": "流动性低点"
+  },
+  "Liquidity sweeps": {
+    "es": "Barridos de liquidez",
+    "zh-CN": "流动性扫荡"
+  },
+  "Liquidity sweeps (wick and retest)": {
+    "es": "Barridos de liquidez (mecha y re-prueba)",
+    "zh-CN": "流动性扫荡（影线与回测）"
+  },
+  "Liquidity zones where two confirmed swing highs (or lows) are nearly equal, known from the close that confirms the second swing. A close through the zone by a bar whose body is at least an ATR fraction is a breakout candidate; it is confirmed at the next close only if the three bars leave a fair value gap, which is then projected until filled or for a set number of bars. Zones also end on a close through them without a large body, or by age. Heuristic.": {
+    "es": "Zonas de liquidez donde dos máximos (o mínimos) confirmados quedan casi iguales, conocidas desde el cierre que confirma el segundo swing. Un cierre a través de la zona de una vela con cuerpo de al menos una fracción de ATR es una ruptura candidata; se confirma en el cierre siguiente solo si las tres velas dejan un hueco de valor justo, que luego se proyecta hasta rellenarse o durante una cantidad de velas. Las zonas también terminan con un cierre a través sin cuerpo grande, o por edad. Heurístico.",
+    "zh-CN": "两个已确认的摆动高点（或低点）几乎相等时形成的流动性区域，从确认第二个摆动点的收盘起得知。实体至少为 ATR 一定比例的K线收盘穿越该区域即为候选突破；只有当这三根K线留下公允价值缺口时，才会在下一根K线收盘时确认，随后该缺口被投影直至回补或达到设定的K线数。区域也会因无大实体的收盘穿越或时长到期而结束。启发式。"
+  },
+  "Live FVGs drawn": {
+    "es": "FVG vivos dibujados",
+    "zh-CN": "绘制的存续 FVG"
+  },
+  "Live equal-high zones": {
+    "es": "Zonas vivas de máximos iguales",
+    "zh-CN": "存续等高区"
+  },
+  "Live equal-low zones": {
+    "es": "Zonas vivas de mínimos iguales",
+    "zh-CN": "存续等低区"
+  },
+  "Live gaps": {
+    "es": "Huecos vivos",
+    "zh-CN": "存续缺口"
+  },
+  "Live gaps at most": {
+    "es": "Huecos vivos como máximo",
+    "zh-CN": "最多存续缺口数"
+  },
+  "Live liquidity levels": {
+    "es": "Niveles de liquidez vivos",
+    "zh-CN": "存续流动性水平"
+  },
+  "Live zones at most": {
+    "es": "Zonas vivas como máximo",
+    "zh-CN": "最多存续区域数"
+  },
+  "Long signals": {
+    "es": "Señales de compra",
+    "zh-CN": "做多信号"
+  },
+  "Maximum bars between the swings": {
+    "es": "Velas como máximo entre los dos swings",
+    "zh-CN": "两个摆动点之间的最大K线数"
+  },
+  "Maximum difference (%)": {
+    "es": "Diferencia máxima (%)",
+    "zh-CN": "最大差异（%）"
+  },
+  "Maximum gap age for a break (bars)": {
+    "es": "Edad máxima del hueco para una ruptura (velas)",
+    "zh-CN": "可计突破的最大缺口时长（K线数）"
+  },
+  "Maximum sweep (ATR)": {
+    "es": "Barrido máximo (ATR)",
+    "zh-CN": "最大扫荡幅度（ATR）"
+  },
+  "Maximum zone age (bars)": {
+    "es": "Edad máxima de la zona (velas)",
+    "zh-CN": "区域最大时长（K线数）"
+  },
+  "Midpoint line": {
+    "es": "Línea del 50 %",
+    "zh-CN": "中点线"
+  },
+  "Minimum FVG (ATR)": {
+    "es": "FVG mínimo (ATR)",
+    "zh-CN": "最小 FVG（ATR）"
+  },
+  "Minimum bars between marks": {
+    "es": "Velas mínimas entre marcas",
+    "zh-CN": "标记之间的最少K线数"
+  },
+  "Minimum body (ATR)": {
+    "es": "Cuerpo mínimo (ATR)",
+    "zh-CN": "最小实体（ATR）"
+  },
+  "Minimum size (ATR)": {
+    "es": "Tamaño mínimo (ATR)",
+    "zh-CN": "最小尺寸（ATR）"
+  },
+  "New zone (+1 equal highs, -1 equal lows, 2 both)": {
+    "es": "Zona nueva (+1 máximos iguales, -1 mínimos iguales, 2 ambas)",
+    "zh-CN": "新区域（+1 等高点，-1 等低点，2 两者）"
+  },
+  "On a return to the FVG midpoint": {
+    "es": "Al volver al 50 % del FVG",
+    "zh-CN": "回到 FVG 中点时"
+  },
+  "Prior-day high": {
+    "es": "Máximo del día anterior",
+    "zh-CN": "前一日高点"
+  },
+  "Prior-day level sweep (+1 low swept, -1 high swept, 2 both)": {
+    "es": "Barrido de nivel del día anterior (+1 mínimo barrido, -1 máximo barrido, 2 ambos)",
+    "zh-CN": "前一日水平扫荡（+1 扫低点，-1 扫高点，2 两者）"
+  },
+  "Prior-day levels": {
+    "es": "Niveles del día anterior",
+    "zh-CN": "前一日水平"
+  },
+  "Prior-day low": {
+    "es": "Mínimo del día anterior",
+    "zh-CN": "前一日低点"
+  },
+  "Prior-day sweep FVG (hypothetical)": {
+    "es": "FVG tras barrido del día anterior (hipotético)",
+    "zh-CN": "前一日扫荡 FVG（假设）"
+  },
+  "Prior-day sweep with FVG signals": {
+    "es": "Barrido del día anterior con señales FVG",
+    "zh-CN": "前一日扫荡与 FVG 信号"
+  },
+  "Resistance tests / retests": {
+    "es": "Pruebas / re-pruebas de la resistencia",
+    "zh-CN": "阻力测试 / 回测"
+  },
+  "Resistance zone": {
+    "es": "Zona de resistencia",
+    "zh-CN": "阻力区"
+  },
+  "Resistance zone: top edge": {
+    "es": "Zona de resistencia: borde superior",
+    "zh-CN": "阻力区：上边缘"
+  },
+  "Resistance zone: bottom edge": {
+    "es": "Zona de resistencia: borde inferior",
+    "zh-CN": "阻力区：下边缘"
+  },
+  "Retest": {
+    "es": "Re-prueba",
+    "zh-CN": "回测"
+  },
+  "Retest sweep (+1 bullish, -1 bearish)": {
+    "es": "Barrido por re-prueba (+1 alcista, -1 bajista)",
+    "zh-CN": "回测扫荡（+1 看涨，-1 看跌）"
+  },
+  "Retest sweeps (bullish / bearish)": {
+    "es": "Barridos por re-prueba (alcistas / bajistas)",
+    "zh-CN": "回测扫荡（看涨 / 看跌）"
+  },
+  "Session high": {
+    "es": "Máximo de la sesión",
+    "zh-CN": "时段高点"
+  },
+  "Session low": {
+    "es": "Mínimo de la sesión",
+    "zh-CN": "时段低点"
+  },
+  "Session sweep and inverse FVG": {
+    "es": "Barrido de sesión e FVG invertido",
+    "zh-CN": "时段扫荡与反转 FVG"
+  },
+  "Session sweep with inverse FVG": {
+    "es": "Barrido de sesión con FVG invertido",
+    "zh-CN": "时段扫荡与反转 FVG 信号"
+  },
+  "Short signals": {
+    "es": "Señales de venta",
+    "zh-CN": "做空信号"
+  },
+  "Show the FVGs": {
+    "es": "Mostrar los FVG",
+    "zh-CN": "显示 FVG"
+  },
+  "Signal timing": {
+    "es": "Momento de la señal",
+    "zh-CN": "信号时机"
+  },
+  "Signals": {
+    "es": "Señales",
+    "zh-CN": "信号"
+  },
+  "Size filter (ATR)": {
+    "es": "Filtro de tamaño (ATR)",
+    "zh-CN": "尺寸过滤（ATR）"
+  },
+  "Stop (ATR)": {
+    "es": "Stop (ATR)",
+    "zh-CN": "止损（ATR）"
+  },
+  "Stop ATR length": {
+    "es": "ATR del stop",
+    "zh-CN": "止损 ATR 长度"
+  },
+  "Stop reached": {
+    "es": "Stop alcanzado",
+    "zh-CN": "触及止损"
+  },
+  "Strict (one valid sweep per session)": {
+    "es": "Estricto (un barrido válido por sesión)",
+    "zh-CN": "严格（每个时段一次有效扫荡）"
+  },
+  "Support tests / retests": {
+    "es": "Pruebas / re-pruebas del soporte",
+    "zh-CN": "支撑测试 / 回测"
+  },
+  "Support zone": {
+    "es": "Zona de soporte",
+    "zh-CN": "支撑区"
+  },
+  "Support zone: top edge": {
+    "es": "Zona de soporte: borde superior",
+    "zh-CN": "支撑区：上边缘"
+  },
+  "Support zone: bottom edge": {
+    "es": "Zona de soporte: borde inferior",
+    "zh-CN": "支撑区：下边缘"
+  },
+  "Sweep direction (+1 bullish, -1 bearish)": {
+    "es": "Dirección del barrido (+1 alcista, -1 bajista)",
+    "zh-CN": "扫荡方向（+1 看涨，-1 看跌）"
+  },
+  "Swept area": {
+    "es": "Área barrida",
+    "zh-CN": "被扫区域"
+  },
+  "Swept area: top edge": {
+    "es": "Área barrida: borde superior",
+    "zh-CN": "被扫区域：上边缘"
+  },
+  "Swept area: bottom edge": {
+    "es": "Área barrida: borde inferior",
+    "zh-CN": "被扫区域：下边缘"
+  },
+  "Swept area lifetime (bars)": {
+    "es": "Velas que vive un área barrida",
+    "zh-CN": "被扫区域存续K线数"
+  },
+  "Swept areas": {
+    "es": "Áreas barridas",
+    "zh-CN": "被扫区域"
+  },
+  "Target (ATR)": {
+    "es": "Objetivo (ATR)",
+    "zh-CN": "目标（ATR）"
+  },
+  "Target reached": {
+    "es": "Objetivo alcanzado",
+    "zh-CN": "达到目标"
+  },
+  "Targets / stops": {
+    "es": "Objetivos / stops",
+    "zh-CN": "目标 / 止损"
+  },
+  "Test and retest marks": {
+    "es": "Marcas de prueba y re-prueba",
+    "zh-CN": "测试与回测标记"
+  },
+  "The high and low of each completed exchange-session day stay as levels until first touched. When price sweeps one, the first fair value gap in the signal's direction within the window gives a hypothetical signal, either when the gap forms or on a return to its midpoint, with stop and target in ATR, an optional EMA trend filter and running target/stop statistics. The first, possibly partial, day of the history gives no levels. Heuristic; signals are hypothetical, known at the signal bar's close, and never place orders.": {
+    "es": "El máximo y el mínimo de cada día de sesión de la bolsa ya terminado quedan como niveles hasta que se tocan por primera vez. Cuando el precio barre uno, el primer hueco de valor justo en la dirección de la señal dentro de la ventana da una señal hipotética, al formarse el hueco o al volver a su 50 %, con stop y objetivo en ATR, un filtro de tendencia EMA opcional y estadísticas de objetivos y stops. El primer día del historial, posiblemente parcial, no da niveles. Heurístico; las señales son hipotéticas, se conocen al cierre de la vela de la señal y nunca colocan órdenes.",
+    "zh-CN": "每个已结束的交易所时段日的最高价和最低价保留为水平，直到首次被触及。当价格扫过其中之一时，窗口内第一个与信号方向一致的公允价值缺口给出假设信号（在缺口形成时或回到其中点时），止损和目标以 ATR 计，可选 EMA 趋势过滤，并统计目标/止损。历史中第一天（可能不完整）不产生水平。启发式；信号为假设，在信号K线收盘时得知，绝不下单。"
+  },
+  "The range of one trading session in its own time zone (daylight saving followed). After the session, a bar that takes its high or low (no farther than an ATR multiple) is a sweep; a close back inside the range within the validity window makes it valid. A close through the trendline drawn from the session's opposite extreme then gives a hypothetical signal, with a stop at the widest inverse FVG since the sweep (or one ATR) and a target in ATR. Strict mode allows one valid sweep per session and cancels on a close outside the range. Heuristic study; signals are hypothetical, known at the signal bar's close, and never place orders.": {
+    "es": "El rango de una sesión de operación en su propia zona horaria (sigue el horario de verano). Después de la sesión, una vela que toma su máximo o su mínimo (no más allá de un múltiplo de ATR) es un barrido; un cierre de vuelta dentro del rango dentro de la ventana de validez lo hace válido. Luego, un cierre a través de la línea de tendencia trazada desde el extremo opuesto de la sesión da una señal hipotética, con stop en el FVG invertido más ancho desde el barrido (o a un ATR) y objetivo en ATR. El modo estricto admite un barrido válido por sesión y cancela con un cierre fuera del rango. Estudio heurístico; las señales son hipotéticas, se conocen al cierre de la vela de la señal y nunca colocan órdenes.",
+    "zh-CN": "某一交易时段在其本地时区内的区间（遵循夏令时）。时段结束后，突破其高点或低点（不超过 ATR 倍数）的K线即为扫荡；在有效窗口内收盘回到区间内则扫荡有效。随后收盘穿越从时段相反极值画出的趋势线给出假设信号，止损位于扫荡以来最宽的反转 FVG（或一个 ATR），目标以 ATR 计。严格模式下每个时段只允许一次有效扫荡，收盘在区间外即取消。启发式研究；信号为假设，在信号K线收盘时得知，绝不下单。"
+  },
+  "Trend EMA length": {
+    "es": "Longitud de la EMA de tendencia",
+    "zh-CN": "趋势 EMA 长度"
+  },
+  "Trend filter (EMA)": {
+    "es": "Filtro de tendencia (EMA)",
+    "zh-CN": "趋势过滤（EMA）"
+  },
+  "Unfilled gap": {
+    "es": "Hueco sin rellenar",
+    "zh-CN": "未回补缺口"
+  },
+  "Unfilled gap: top edge": {
+    "es": "Hueco sin rellenar: borde superior",
+    "zh-CN": "未回补缺口：上边缘"
+  },
+  "Unfilled gap: bottom edge": {
+    "es": "Hueco sin rellenar: borde inferior",
+    "zh-CN": "未回补缺口：下边缘"
+  },
+  "Untouched prior-day levels": {
+    "es": "Niveles del día anterior sin tocar",
+    "zh-CN": "未触及的前一日水平"
+  },
+  "Valid / invalid sweeps": {
+    "es": "Barridos válidos / no válidos",
+    "zh-CN": "有效 / 无效扫荡"
+  },
+  "Valid session sweep (+1 low swept, -1 high swept)": {
+    "es": "Barrido de sesión válido (+1 mínimo barrido, -1 máximo barrido)",
+    "zh-CN": "有效时段扫荡（+1 扫低点，-1 扫高点）"
+  },
+  "Valid sweep": {
+    "es": "Barrido válido",
+    "zh-CN": "有效扫荡"
+  },
+  "Volume in the zone": {
+    "es": "Volumen en la zona",
+    "zh-CN": "区域内成交量"
+  },
+  "When the FVG forms": {
+    "es": "Al formarse el FVG",
+    "zh-CN": "FVG 形成时"
+  },
+  "Wick sweep (+1 bullish, -1 bearish)": {
+    "es": "Barrido por mecha (+1 alcista, -1 bajista)",
+    "zh-CN": "影线扫荡（+1 看涨，-1 看跌）"
+  },
+  "Wick sweeps (bullish / bearish)": {
+    "es": "Barridos por mecha (alcistas / bajistas)",
+    "zh-CN": "影线扫荡（看涨 / 看跌）"
+  },
+  "Wicks and retests": {
+    "es": "Mechas y re-pruebas",
+    "zh-CN": "影线与回测"
+  },
+  "Wicks only": {
+    "es": "Solo mechas",
+    "zh-CN": "仅影线"
+  },
+  "Width (× ATR 200)": {
+    "es": "Ancho (× ATR 200)",
+    "zh-CN": "宽度（× ATR 200）"
+  },
+  "Zone lifetime (bars)": {
+    "es": "Velas que vive una zona",
+    "zh-CN": "区域存续K线数"
+  },
+  "Zone test (+1 support held, -1 resistance held)": {
+    "es": "Prueba de zona (+1 soporte sostenido, -1 resistencia sostenida)",
+    "zh-CN": "区域测试（+1 支撑守住，-1 阻力守住）"
+  },
+  "Zones": {
+    "es": "Zonas",
+    "zh-CN": "区域"
+  },
+  "Structure shifts with sweeps": {
+    "es": "Cambios de estructura con barridos",
+    "zh-CN": "结构转换与扫荡"
+  },
+  "Internal structure from swings confirmed a swing length of closed bars later: BOS when a close breaks the last swing in the trend direction, CHoCH when it breaks against the trend. A sweep is a wick through the last unbroken swing with a close back inside. The protected level is the opposite swing the trend must hold (alertable); a close beyond it removes it. Heuristic; every event is known at its closing bar.": {
+    "es": "Estructura interna a partir de swings confirmados una longitud de swing de velas cerradas después: BOS cuando un cierre rompe el último swing a favor de la tendencia, CHoCH cuando lo rompe en contra. Un barrido es una mecha que atraviesa el último swing sin romper con un cierre de vuelta adentro. El nivel protegido es el swing opuesto que la tendencia debe sostener (admite alertas); un cierre más allá lo elimina. Heurístico; cada evento se conoce en su vela de cierre.",
+    "zh-CN": "内部结构基于在摆动长度根已收盘K线之后确认的摆动点：收盘价顺趋势突破最近摆动点为 BOS，逆趋势突破为 CHoCH。扫荡是影线穿过最近未被突破的摆动点而收盘回到其内侧。保护位是趋势必须守住的反向摆动点（可设提醒）；收盘越过它即移除。启发式；每个事件在其收盘K线时才可知。"
+  },
+  "Internal structure length": {
+    "es": "Longitud de la estructura interna",
+    "zh-CN": "内部结构长度"
+  },
+  "Ignore breaks with a rejecting wick": {
+    "es": "Ignorar rupturas con una mecha de rechazo",
+    "zh-CN": "忽略带拒绝影线的突破"
+  },
+  "BOS": {
+    "es": "BOS",
+    "zh-CN": "BOS"
+  },
+  "CHoCH": {
+    "es": "CHoCH",
+    "zh-CN": "CHoCH"
+  },
+  "Protected level": {
+    "es": "Nivel protegido",
+    "zh-CN": "保护位"
+  },
+  "Internal structure trend (+1 / -1)": {
+    "es": "Tendencia de la estructura interna (+1 / -1)",
+    "zh-CN": "内部结构趋势（+1 / -1）"
+  },
+  "Break at this close (+1/-1 BOS, +2/-2 CHoCH)": {
+    "es": "Ruptura en este cierre (+1/-1 BOS, +2/-2 CHoCH)",
+    "zh-CN": "本次收盘的突破（+1/-1 BOS，+2/-2 CHoCH）"
+  },
+  "Sweep at this close (+1 low swept, -1 high swept)": {
+    "es": "Barrido en este cierre (+1 mínimo barrido, -1 máximo barrido)",
+    "zh-CN": "本次收盘的扫荡（+1 扫低点，-1 扫高点）"
+  },
+  "Internal swing high": {
+    "es": "Máximo de swing interno",
+    "zh-CN": "内部摆动高点"
+  },
+  "Internal swing low": {
+    "es": "Mínimo de swing interno",
+    "zh-CN": "内部摆动低点"
+  },
+  "Sweep": {
+    "es": "Barrido",
+    "zh-CN": "扫荡"
+  },
+  "Protected": {
+    "es": "Protegido",
+    "zh-CN": "保护"
+  },
+  "Protected swing": {
+    "es": "Swing protegido",
+    "zh-CN": "受保护摆动点"
+  },
+  "Internal structure": {
+    "es": "Estructura interna",
+    "zh-CN": "内部结构"
+  },
+  "BOS / CHoCH / sweeps": {
+    "es": "BOS / CHoCH / barridos",
+    "zh-CN": "BOS / CHoCH / 扫荡"
+  },
+  "Anchored market structure (3 tiers)": {
+    "es": "Estructura de mercado anclada (3 niveles)",
+    "zh-CN": "锚定市场结构（3 层）"
+  },
+  "Short-term swings (confirmed a swing strength of closed bars later), intermediate swings (a short-term swing more extreme than its two same-side neighbours) and long-term swings (the same over intermediate swings), with each tier's BOS / CHoCH on closes. A break is validated by an ATR band around the broken level: the first later close outside the band confirms it (in the break direction) or invalidates it (on the other side). Structure boxes span the bars inside the band; heuristic, every shape is known at its closing bar.": {
+    "es": "Swings de corto plazo (confirmados una fuerza de swing de velas cerradas después), swings intermedios (un swing de corto plazo más extremo que sus dos vecinos del mismo lado) y swings de largo plazo (lo mismo sobre los intermedios), con el BOS / CHoCH de cada nivel en los cierres. Una ruptura se valida con una banda de ATR alrededor del nivel roto: el primer cierre posterior fuera de la banda la confirma (en la dirección de la ruptura) o la invalida (del otro lado). Las cajas de estructura abarcan las velas dentro de la banda; heurístico, cada forma se conoce en su vela de cierre.",
+    "zh-CN": "短期摆动点（在摆动强度根已收盘K线之后确认）、中期摆动点（比同侧两个相邻短期摆动点更极端的短期摆动点）和长期摆动点（在中期摆动点上同理），以及各层按收盘判定的 BOS / CHoCH。突破由被突破价位周围的 ATR 带验证：此后第一根收盘在带外的K线，若在突破方向则确认，若在另一侧则作废。结构框覆盖带内的K线；启发式，每个图形在其收盘K线时才可知。"
+  },
+  "Short-term swing strength (bars each side)": {
+    "es": "Fuerza del swing de corto plazo (velas a cada lado)",
+    "zh-CN": "短期摆动强度（每侧K线数）"
+  },
+  "Validation ATR length": {
+    "es": "Longitud del ATR de validación",
+    "zh-CN": "验证 ATR 长度"
+  },
+  "Validation band (ATR)": {
+    "es": "Banda de validación (ATR)",
+    "zh-CN": "验证带（ATR）"
+  },
+  "Short term": {
+    "es": "Corto plazo",
+    "zh-CN": "短期"
+  },
+  "Intermediate term": {
+    "es": "Plazo intermedio",
+    "zh-CN": "中期"
+  },
+  "Long term": {
+    "es": "Largo plazo",
+    "zh-CN": "长期"
+  },
+  "Short-term swings": {
+    "es": "Swings de corto plazo",
+    "zh-CN": "短期摆动点"
+  },
+  "Short-term structure": {
+    "es": "Estructura de corto plazo",
+    "zh-CN": "短期结构"
+  },
+  "Intermediate swings": {
+    "es": "Swings intermedios",
+    "zh-CN": "中期摆动点"
+  },
+  "Intermediate structure": {
+    "es": "Estructura intermedia",
+    "zh-CN": "中期结构"
+  },
+  "Long-term swings": {
+    "es": "Swings de largo plazo",
+    "zh-CN": "长期摆动点"
+  },
+  "Long-term structure": {
+    "es": "Estructura de largo plazo",
+    "zh-CN": "长期结构"
+  },
+  "Validate breaks": {
+    "es": "Validar las rupturas",
+    "zh-CN": "验证突破"
+  },
+  "Labels": {
+    "es": "Etiquetas",
+    "zh-CN": "标签"
+  },
+  "Structure boxes": {
+    "es": "Cajas de estructura",
+    "zh-CN": "结构框"
+  },
+  "Tint the break bar": {
+    "es": "Teñir la vela de ruptura",
+    "zh-CN": "为突破K线着色"
+  },
+  "Short-term trend (+1 / -1)": {
+    "es": "Tendencia de corto plazo (+1 / -1)",
+    "zh-CN": "短期趋势（+1 / -1）"
+  },
+  "Intermediate trend (+1 / -1)": {
+    "es": "Tendencia intermedia (+1 / -1)",
+    "zh-CN": "中期趋势（+1 / -1）"
+  },
+  "Long-term trend (+1 / -1)": {
+    "es": "Tendencia de largo plazo (+1 / -1)",
+    "zh-CN": "长期趋势（+1 / -1）"
+  },
+  "Highest-tier break at this close (direction x tier 1..3)": {
+    "es": "Ruptura del nivel más alto en este cierre (dirección x nivel 1..3)",
+    "zh-CN": "本次收盘最高层级的突破（方向 x 层级 1..3）"
+  },
+  "Highest-tier break validated at this close (direction x tier 1..3)": {
+    "es": "Ruptura del nivel más alto validada en este cierre (dirección x nivel 1..3)",
+    "zh-CN": "本次收盘被验证的最高层级突破（方向 x 层级 1..3）"
+  },
+  "Highest-tier break invalidated at this close (direction x tier 1..3)": {
+    "es": "Ruptura del nivel más alto invalidada en este cierre (dirección x nivel 1..3)",
+    "zh-CN": "本次收盘被作废的最高层级突破（方向 x 层级 1..3）"
+  },
+  "ITH": {
+    "es": "MI",
+    "zh-CN": "中高"
+  },
+  "ITL": {
+    "es": "mI",
+    "zh-CN": "中低"
+  },
+  "LTH": {
+    "es": "MLP",
+    "zh-CN": "长高"
+  },
+  "LTL": {
+    "es": "mLP",
+    "zh-CN": "长低"
+  },
+  "ST BOS": {
+    "es": "CP BOS",
+    "zh-CN": "短期 BOS"
+  },
+  "ST CHoCH": {
+    "es": "CP CHoCH",
+    "zh-CN": "短期 CHoCH"
+  },
+  "IT BOS": {
+    "es": "PI BOS",
+    "zh-CN": "中期 BOS"
+  },
+  "IT CHoCH": {
+    "es": "PI CHoCH",
+    "zh-CN": "中期 CHoCH"
+  },
+  "LT BOS": {
+    "es": "LP BOS",
+    "zh-CN": "长期 BOS"
+  },
+  "LT CHoCH": {
+    "es": "LP CHoCH",
+    "zh-CN": "长期 CHoCH"
+  },
+  "Long-term swing high": {
+    "es": "Máximo de swing de largo plazo",
+    "zh-CN": "长期摆动高点"
+  },
+  "Long-term swing low": {
+    "es": "Mínimo de swing de largo plazo",
+    "zh-CN": "长期摆动低点"
+  },
+  "Anchored structure": {
+    "es": "Estructura anclada",
+    "zh-CN": "锚定结构"
+  },
+  "Short-term trend": {
+    "es": "Tendencia de corto plazo",
+    "zh-CN": "短期趋势"
+  },
+  "Intermediate trend": {
+    "es": "Tendencia intermedia",
+    "zh-CN": "中期趋势"
+  },
+  "Long-term trend": {
+    "es": "Tendencia de largo plazo",
+    "zh-CN": "长期趋势"
+  },
+  "Short-term last break": {
+    "es": "Última ruptura de corto plazo",
+    "zh-CN": "短期最近突破"
+  },
+  "Intermediate last break": {
+    "es": "Última ruptura intermedia",
+    "zh-CN": "中期最近突破"
+  },
+  "Long-term last break": {
+    "es": "Última ruptura de largo plazo",
+    "zh-CN": "长期最近突破"
+  },
+  "BOS (validating)": {
+    "es": "BOS (validando)",
+    "zh-CN": "BOS（验证中）"
+  },
+  "CHoCH (validating)": {
+    "es": "CHoCH (validando)",
+    "zh-CN": "CHoCH（验证中）"
+  },
+  "BOS validated": {
+    "es": "BOS validado",
+    "zh-CN": "BOS 已验证"
+  },
+  "BOS invalidated": {
+    "es": "BOS invalidado",
+    "zh-CN": "BOS 已作废"
+  },
+  "CHoCH validated": {
+    "es": "CHoCH validado",
+    "zh-CN": "CHoCH 已验证"
+  },
+  "CHoCH invalidated": {
+    "es": "CHoCH invalidado",
+    "zh-CN": "CHoCH 已作废"
+  },
+  "Structure regime oscillator": {
+    "es": "Oscilador de régimen de estructura",
+    "zh-CN": "结构状态振荡器"
+  },
+  "A 0-100 oscillator in its own panel from the three-tier anchored structure: each tier is above 50 in a bullish regime and below 50 in a bearish one, placed by where the close sits in the closing range since the break that started the regime; tiers are smoothed and weighted. The cycle is the oscillator minus its EMA (histogram around 50); 50-line and cycle crosses are marked. Heuristic; every value uses only closes up to its bar.": {
+    "es": "Un oscilador de 0 a 100 en su propio panel a partir de la estructura anclada de tres niveles: cada nivel está por encima de 50 en un régimen alcista y por debajo de 50 en uno bajista, ubicado según dónde está el cierre dentro del rango de cierres desde la ruptura que inició el régimen; los niveles se suavizan y ponderan. El ciclo es el oscilador menos su EMA (histograma alrededor de 50); se marcan los cruces de la línea de 50 y del ciclo. Heurístico; cada valor usa solo cierres hasta su vela.",
+    "zh-CN": "基于三层锚定结构、在独立面板中显示的 0-100 振荡器：每层在看涨状态下高于 50，在看跌状态下低于 50，其位置取决于收盘价在开启该状态的突破以来的收盘区间中的位置；各层经平滑并加权。周期为振荡器减去其 EMA（围绕 50 的柱状图）；标记 50 线穿越和周期穿越。启发式；每个值只使用截至其K线的收盘价。"
+  },
+  "Short-term weight": {
+    "es": "Peso del corto plazo",
+    "zh-CN": "短期权重"
+  },
+  "Intermediate weight": {
+    "es": "Peso del plazo intermedio",
+    "zh-CN": "中期权重"
+  },
+  "Long-term weight": {
+    "es": "Peso del largo plazo",
+    "zh-CN": "长期权重"
+  },
+  "Smoothing (bars)": {
+    "es": "Suavizado (velas)",
+    "zh-CN": "平滑（K线数）"
+  },
+  "Cycle EMA length": {
+    "es": "Longitud de la EMA del ciclo",
+    "zh-CN": "周期 EMA 长度"
+  },
+  "Cycle histogram": {
+    "es": "Histograma del ciclo",
+    "zh-CN": "周期柱状图"
+  },
+  "Structure crosses (50)": {
+    "es": "Cruces de la estructura (50)",
+    "zh-CN": "结构穿越（50）"
+  },
+  "Cycle crosses": {
+    "es": "Cruces del ciclo",
+    "zh-CN": "周期穿越"
+  },
+  "Short-term line": {
+    "es": "Línea del corto plazo",
+    "zh-CN": "短期线"
+  },
+  "Intermediate line": {
+    "es": "Línea del plazo intermedio",
+    "zh-CN": "中期线"
+  },
+  "Long-term line": {
+    "es": "Línea del largo plazo",
+    "zh-CN": "长期线"
+  },
+  "Structure regime": {
+    "es": "Régimen de estructura",
+    "zh-CN": "结构状态"
+  },
+  "Short-term regime": {
+    "es": "Régimen de corto plazo",
+    "zh-CN": "短期状态"
+  },
+  "Intermediate regime": {
+    "es": "Régimen intermedio",
+    "zh-CN": "中期状态"
+  },
+  "Long-term regime": {
+    "es": "Régimen de largo plazo",
+    "zh-CN": "长期状态"
+  },
+  "Cycle (oscillator minus its EMA)": {
+    "es": "Ciclo (oscilador menos su EMA)",
+    "zh-CN": "周期（振荡器减去其 EMA）"
+  },
+  "50-line cross at this close (+1 up / -1 down)": {
+    "es": "Cruce de la línea de 50 en este cierre (+1 arriba / -1 abajo)",
+    "zh-CN": "本次收盘穿越 50 线（+1 向上 / -1 向下）"
+  },
+  "Cycle cross at this close (+1 up / -1 down)": {
+    "es": "Cruce del ciclo en este cierre (+1 arriba / -1 abajo)",
+    "zh-CN": "本次收盘的周期穿越（+1 向上 / -1 向下）"
+  },
+  "Closed bars only; each value uses closes up to its bar": {
+    "es": "Solo velas cerradas; cada valor usa los cierres hasta su vela",
+    "zh-CN": "仅限已收盘K线；每个值使用截至其K线的收盘价"
+  },
+  "Structure scatter panel": {
+    "es": "Panel de dispersión de la estructura",
+    "zh-CN": "结构散点面板"
+  },
+  "From alternating confirmed swings, measures each impulse (percent move) and its retracement (fraction of the impulse) and plots them as a scatter panel, with the current leg highlighted. Bars are painted by the percentile of the current leg against the retained legs; BOS / CHoCH are marked and a table shows the averages. Each leg is known when the swing ending its retracement is confirmed.": {
+    "es": "A partir de swings confirmados alternados, mide cada impulso (movimiento porcentual) y su retroceso (fracción del impulso) y los dibuja como un panel de dispersión, con el tramo actual resaltado. Las velas se pintan según el percentil del tramo actual frente a los tramos conservados; se marcan los BOS / CHoCH y una tabla muestra los promedios. Cada tramo se conoce cuando se confirma el swing que termina su retroceso.",
+    "zh-CN": "根据交替的已确认摆动点，测量每段推动（百分比涨跌）及其回撤（推动的比例），并以散点面板绘制，当前波段高亮显示。K线按当前波段相对于保留波段的百分位着色；标记 BOS / CHoCH，并以表格显示平均值。每个波段在结束其回撤的摆动点确认时才可知。"
+  },
+  "Pivot bars each side": {
+    "es": "Velas a cada lado del pivote",
+    "zh-CN": "枢轴每侧K线数"
+  },
+  "Retained legs (percentile sample)": {
+    "es": "Tramos conservados (muestra del percentil)",
+    "zh-CN": "保留波段数（百分位样本）"
+  },
+  "Paint bars by percentile": {
+    "es": "Pintar las velas por percentil",
+    "zh-CN": "按百分位为K线着色"
+  },
+  "Percentile of": {
+    "es": "Percentil de",
+    "zh-CN": "百分位依据"
+  },
+  "Scatter panel": {
+    "es": "Panel de dispersión",
+    "zh-CN": "散点面板"
+  },
+  "Structure breaks": {
+    "es": "Rupturas de estructura",
+    "zh-CN": "结构突破"
+  },
+  "Impulse": {
+    "es": "Impulso",
+    "zh-CN": "推动"
+  },
+  "Retracement": {
+    "es": "Retroceso",
+    "zh-CN": "回撤"
+  },
+  "Leg percentile colors": {
+    "es": "Colores por percentil del tramo",
+    "zh-CN": "波段百分位颜色"
+  },
+  "Current leg percentile (0-100)": {
+    "es": "Percentil del tramo actual (0-100)",
+    "zh-CN": "当前波段百分位（0-100）"
+  },
+  "Structure trend (+1 / -1)": {
+    "es": "Tendencia de la estructura (+1 / -1)",
+    "zh-CN": "结构趋势（+1 / -1）"
+  },
+  "Structure scatter": {
+    "es": "Dispersión de la estructura",
+    "zh-CN": "结构散点"
+  },
+  "Measured legs": {
+    "es": "Tramos medidos",
+    "zh-CN": "已测量波段"
+  },
+  "Average impulse": {
+    "es": "Impulso medio",
+    "zh-CN": "平均推动"
+  },
+  "Average retracement": {
+    "es": "Retroceso medio",
+    "zh-CN": "平均回撤"
+  },
+  "Current leg": {
+    "es": "Tramo actual",
+    "zh-CN": "当前波段"
+  },
+  "Current leg percentile": {
+    "es": "Percentil del tramo actual",
+    "zh-CN": "当前波段百分位"
+  },
+  "Breaks up / down": {
+    "es": "Rupturas arriba / abajo",
+    "zh-CN": "向上 / 向下突破"
+  },
+  "Impulse (%) →": {
+    "es": "Impulso (%) →",
+    "zh-CN": "推动（%）→"
+  },
+  "↑ Retracement": {
+    "es": "↑ Retroceso",
+    "zh-CN": "↑ 回撤"
+  },
+  "Structure trend panel": {
+    "es": "Panel de tendencia de la estructura",
+    "zh-CN": "结构趋势面板"
+  },
+  "BOS / CHoCH on the chart period or a higher period, liquidity sweeps (a wick through a confirmed swing with a close back), active fair value gaps and trend bar painting. A higher-period bar is used only from the close of the first chart bar after it completes. The dashboard shows the structure trend of six periods (chart to week) from completed bars only. Heuristic.": {
+    "es": "BOS / CHoCH en el período del gráfico o en uno mayor, barridos de liquidez (una mecha que atraviesa un swing confirmado con un cierre de vuelta), fair value gaps activos y velas pintadas por la tendencia. Una vela de período mayor se usa solo desde el cierre de la primera vela del gráfico posterior a su finalización. El tablero muestra la tendencia de estructura de seis períodos (del gráfico a la semana) solo con velas completas. Heurístico.",
+    "zh-CN": "在图表周期或更高周期上的 BOS / CHoCH、流动性扫荡（影线穿过已确认摆动点而收盘回到内侧）、活跃的公允价值缺口，以及按趋势为K线着色。更高周期的K线仅在其完成后的第一根图表K线收盘起才被使用。仪表板仅根据已完成K线显示六个周期（从图表周期到周线）的结构趋势。启发式。"
+  },
+  "Structure": {
+    "es": "Estructura",
+    "zh-CN": "结构"
+  },
+  "Structure period": {
+    "es": "Período de la estructura",
+    "zh-CN": "结构周期"
+  },
+  "Swing length": {
+    "es": "Longitud del swing",
+    "zh-CN": "摆动长度"
+  },
+  "Paint bars by trend": {
+    "es": "Pintar las velas por la tendencia",
+    "zh-CN": "按趋势为K线着色"
+  },
+  "Liquidity": {
+    "es": "Liquidez",
+    "zh-CN": "流动性"
+  },
+  "Liquidity period": {
+    "es": "Período de la liquidez",
+    "zh-CN": "流动性周期"
+  },
+  "Maximum active FVG": {
+    "es": "FVG activos como máximo",
+    "zh-CN": "最多活跃 FVG 数"
+  },
+  "Trend colors": {
+    "es": "Colores de la tendencia",
+    "zh-CN": "趋势颜色"
+  },
+  "Structure trend of the selected period (+1 / -1)": {
+    "es": "Tendencia de estructura del período elegido (+1 / -1)",
+    "zh-CN": "所选周期的结构趋势（+1 / -1）"
+  },
+  "Break known at this close (+1/-1 BOS, +2/-2 CHoCH)": {
+    "es": "Ruptura conocida en este cierre (+1/-1 BOS, +2/-2 CHoCH)",
+    "zh-CN": "本次收盘得知的突破（+1/-1 BOS，+2/-2 CHoCH）"
+  },
+  "Bullish minus bearish periods": {
+    "es": "Períodos alcistas menos bajistas",
+    "zh-CN": "看涨周期数减看跌周期数"
+  },
+  "Bullish FVG": {
+    "es": "FVG alcista",
+    "zh-CN": "看涨 FVG"
+  },
+  "Bearish FVG": {
+    "es": "FVG bajista",
+    "zh-CN": "看跌 FVG"
+  },
+  "Bullish FVG: top edge": {
+    "es": "FVG alcista: borde superior",
+    "zh-CN": "看涨 FVG：上沿"
+  },
+  "Bullish FVG: bottom edge": {
+    "es": "FVG alcista: borde inferior",
+    "zh-CN": "看涨 FVG：下沿"
+  },
+  "Bearish FVG: top edge": {
+    "es": "FVG bajista: borde superior",
+    "zh-CN": "看跌 FVG：上沿"
+  },
+  "Bearish FVG: bottom edge": {
+    "es": "FVG bajista: borde inferior",
+    "zh-CN": "看跌 FVG：下沿"
+  },
+  "Trend alignment": {
+    "es": "Alineación de la tendencia",
+    "zh-CN": "趋势一致性"
+  },
+  "1 day": {
+    "es": "1 día",
+    "zh-CN": "1 天"
+  },
+  "1 week": {
+    "es": "1 semana",
+    "zh-CN": "1 周"
+  },
+  "Alignment": {
+    "es": "Alineación",
+    "zh-CN": "一致性"
+  },
+  "Mixed": {
+    "es": "Mixta",
+    "zh-CN": "混合"
+  },
+  "Bullish / bearish periods": {
+    "es": "Períodos alcistas / bajistas",
+    "zh-CN": "看涨 / 看跌周期"
+  },
+  "Wave extensions": {
+    "es": "Extensiones de ondas",
+    "zh-CN": "波浪延伸"
+  },
+  "Builds a zigzag from confirmed swings and checks five-wave impulses against the rules (wave 2 stays beyond the start, wave 3 is not the shortest, wave 4 does not overlap wave 1, waves 3 and 5 make new extremes). The extended wave (1, 3 or 5) is marked, wave-5 targets (equality with wave 1 and 0.618 of waves 1-3) are projected while wave 4 forms, and a 38.2-61.8 % retracement zone follows an extension. Heuristic; a pattern exists only from the confirmation of its last pivot.": {
+    "es": "Arma un zigzag con swings confirmados y comprueba impulsos de cinco ondas con las reglas (la onda 2 no pasa el inicio, la onda 3 no es la más corta, la onda 4 no se superpone con la onda 1, las ondas 3 y 5 marcan nuevos extremos). Se marca la onda extendida (1, 3 o 5), se proyectan los objetivos de la onda 5 (igualdad con la onda 1 y 0.618 de las ondas 1-3) mientras se forma la onda 4, y una zona de retroceso del 38.2-61.8 % sigue a una extensión. Heurístico; un patrón existe solo desde la confirmación de su último pivote.",
+    "zh-CN": "用已确认的摆动点构建之字形，并按规则检查五浪推动（第 2 浪不越过起点，第 3 浪不是最短，第 4 浪不与第 1 浪重叠，第 3 浪和第 5 浪创出新极值）。标记延伸浪（1、3 或 5），在第 4 浪形成时投射第 5 浪目标（与第 1 浪等长以及第 1-3 浪的 0.618），并在延伸后给出 38.2-61.8 % 的回撤区。启发式；形态只在其最后一个枢轴确认后才存在。"
+  },
+  "Sub-wave length": {
+    "es": "Longitud de las sub-ondas",
+    "zh-CN": "子浪长度"
+  },
+  "Extension ratio": {
+    "es": "Razón de extensión",
+    "zh-CN": "延伸比率"
+  },
+  "Require sub-waves in the extended wave": {
+    "es": "Exigir sub-ondas en la onda extendida",
+    "zh-CN": "要求延伸浪内含子浪"
+  },
+  "Equality tolerance (%)": {
+    "es": "Tolerancia de igualdad (%)",
+    "zh-CN": "等长容差（%）"
+  },
+  "Wave-5 targets": {
+    "es": "Objetivos de la onda 5",
+    "zh-CN": "第 5 浪目标"
+  },
+  "Extended wave-5 watch": {
+    "es": "Aviso de onda 5 extendida",
+    "zh-CN": "第 5 浪延伸提示"
+  },
+  "Retracement zone": {
+    "es": "Zona de retroceso",
+    "zh-CN": "回撤区"
+  },
+  "Wave labels": {
+    "es": "Nombres de las ondas",
+    "zh-CN": "浪标签"
+  },
+  "Wave path": {
+    "es": "Camino de las ondas",
+    "zh-CN": "浪路径"
+  },
+  "Neutral": {
+    "es": "Neutral",
+    "zh-CN": "中性"
+  },
+  "Impulse confirmed at this close (+1 / -1)": {
+    "es": "Impulso confirmado en este cierre (+1 / -1)",
+    "zh-CN": "本次收盘确认的推动浪（+1 / -1）"
+  },
+  "Extended wave of the impulse confirmed at this close (0, 1, 3, 5)": {
+    "es": "Onda extendida del impulso confirmado en este cierre (0, 1, 3, 5)",
+    "zh-CN": "本次收盘确认的推动浪中的延伸浪（0、1、3、5）"
+  },
+  "Wave-5 target: equality with wave 1": {
+    "es": "Objetivo de la onda 5: igualdad con la onda 1",
+    "zh-CN": "第 5 浪目标：与第 1 浪等长"
+  },
+  "Wave-5 target: 0.618 of waves 1-3": {
+    "es": "Objetivo de la onda 5: 0.618 de las ondas 1-3",
+    "zh-CN": "第 5 浪目标：第 1-3 浪的 0.618"
+  },
+  "Zone reached": {
+    "es": "Zona alcanzada",
+    "zh-CN": "已到达区域"
+  },
+  "Wave 5 = wave 1": {
+    "es": "Onda 5 = onda 1",
+    "zh-CN": "第 5 浪 = 第 1 浪"
+  },
+  "Wave 5 = 0.618 × waves 1-3": {
+    "es": "Onda 5 = 0.618 × ondas 1-3",
+    "zh-CN": "第 5 浪 = 0.618 × 第 1-3 浪"
+  },
+  "Wave 5 target (equality)": {
+    "es": "Objetivo de la onda 5 (igualdad)",
+    "zh-CN": "第 5 浪目标（等长）"
+  },
+  "Wave 5 target (0.618)": {
+    "es": "Objetivo de la onda 5 (0.618)",
+    "zh-CN": "第 5 浪目标（0.618）"
+  },
+  "Watch: possible extended wave 5": {
+    "es": "Atención: posible onda 5 extendida",
+    "zh-CN": "注意：第 5 浪可能延伸"
+  },
+  "Ext. 1": {
+    "es": "Ext. 1",
+    "zh-CN": "延伸 1"
+  },
+  "Ext. 3": {
+    "es": "Ext. 3",
+    "zh-CN": "延伸 3"
+  },
+  "Ext. 5": {
+    "es": "Ext. 5",
+    "zh-CN": "延伸 5"
+  },
+  "Extension retracement zone": {
+    "es": "Zona de retroceso de la extensión",
+    "zh-CN": "延伸回撤区"
+  },
+  "Extension retracement zone: top edge": {
+    "es": "Zona de retroceso de la extensión: borde superior",
+    "zh-CN": "延伸回撤区：上沿"
+  },
+  "Extension retracement zone: bottom edge": {
+    "es": "Zona de retroceso de la extensión: borde inferior",
+    "zh-CN": "延伸回撤区：下沿"
+  },
+  "Bullish / bearish impulses": {
+    "es": "Impulsos alcistas / bajistas",
+    "zh-CN": "看涨 / 看跌推动浪"
+  },
+  "Extended wave 1 / 3 / 5": {
+    "es": "Onda extendida 1 / 3 / 5",
+    "zh-CN": "延伸浪 1 / 3 / 5"
+  },
+  "Last impulse": {
+    "es": "Último impulso",
+    "zh-CN": "最近推动浪"
+  },
+  "Extended wave": {
+    "es": "Onda extendida",
+    "zh-CN": "延伸浪"
+  },
+  "Wave 1": {
+    "es": "Onda 1",
+    "zh-CN": "第 1 浪"
+  },
+  "Wave 3": {
+    "es": "Onda 3",
+    "zh-CN": "第 3 浪"
+  },
+  "Wave 5": {
+    "es": "Onda 5",
+    "zh-CN": "第 5 浪"
+  },
+  "None": {
+    "es": "Ninguna",
+    "zh-CN": "无"
+  },
+  "Wave 4 in progress": {
+    "es": "Onda 4 en formación",
+    "zh-CN": "第 4 浪形成中"
+  },
+  "Possible extended wave 5": {
+    "es": "Posible onda 5 extendida",
+    "zh-CN": "第 5 浪可能延伸"
+  },
+  "Targets projected": {
+    "es": "Objetivos proyectados",
+    "zh-CN": "已投射目标"
+  },
+  "Market sessions (Sydney, Tokyo, London, New York)": {
+    "es": "Sesiones del mercado (Sídney, Tokio, Londres, Nueva York)",
+    "zh-CN": "市场时段（悉尼、东京、伦敦、纽约）"
+  },
+  "Session map (Asia, London, New York)": {
+    "es": "Mapa de sesiones (Asia, Londres, Nueva York)",
+    "zh-CN": "时段地图（亚洲、伦敦、纽约）"
+  },
+  "Asian session sweeps": {
+    "es": "Barridos de la sesión asiática",
+    "zh-CN": "亚洲时段扫荡"
+  },
+  "Session sweeps (Asia, London, New York)": {
+    "es": "Barridos de sesión (Asia, Londres, Nueva York)",
+    "zh-CN": "时段扫荡（亚洲、伦敦、纽约）"
+  },
+  "Session gaps and fills": {
+    "es": "Huecos de sesión y su relleno",
+    "zh-CN": "时段跳空与回补"
+  },
+  "Up to four world sessions in their own time zones (daylight saving followed automatically), boxed around their high and low with the session name. Optional midline, per-session VWAP with ±1σ bands (measured volume at price; a bar estimate only when enabled), overlap shading and the forming session extended to its scheduled end. A session's box, midline and alertable high/low levels exist only from the close of its last bar (or of the first bar after it); while it forms, its outline grows from closed bars only. Weekends and holidays without bars form no session.": {
+    "es": "Hasta cuatro sesiones mundiales, cada una en su zona horaria (el horario de verano se sigue automáticamente), en cajas alrededor de su máximo y su mínimo con el nombre de la sesión. Opcional: línea media, VWAP de cada sesión con bandas de ±1σ (volumen medido por precio; una estimación de la vela solo si se activa), sombreado de los solapamientos y la sesión en formación alargada hasta su fin programado. La caja, la línea media y los niveles de máximo/mínimo con alerta de una sesión existen solo desde el cierre de su última vela (o de la primera vela posterior); mientras se forma, su contorno crece solo con velas cerradas. Los fines de semana y los festivos sin velas no forman sesión.",
+    "zh-CN": "最多四个全球时段，各自使用其时区（自动遵循夏令时），以方框框出最高价和最低价并标注时段名称。可选：中线、每个时段的 VWAP 及 ±1σ 带（按价位实测成交量；仅在启用时使用K线估算）、重叠区域着色，以及将正在形成的时段延伸到其计划结束时间。时段的方框、中线和可提醒的高/低价位仅从其最后一根K线（或其后第一根K线）收盘时才存在；形成期间，轮廓仅根据已收盘K线增长。没有K线的周末和节假日不形成时段。"
+  },
+  "Asia (19:00–04:00 New York time), London and New York boxed around their high and low with a name on each and their overlaps shaded, each in its own time zone with daylight saving followed. Shows which session built the range, where they overlapped and how far the current one has gone; the forming session grows from closed bars only and a box is final from the close of the session's last bar.": {
+    "es": "Asia (19:00–04:00 hora de Nueva York), Londres y Nueva York en cajas alrededor de su máximo y su mínimo, con un nombre en cada una y sus solapamientos sombreados, cada una en su zona horaria y siguiendo el horario de verano. Muestra qué sesión armó el rango, dónde se solaparon y cuánto lleva la actual; la sesión en formación crece solo con velas cerradas y una caja es definitiva desde el cierre de la última vela de la sesión.",
+    "zh-CN": "亚洲（纽约时间 19:00–04:00）、伦敦和纽约时段以方框框出最高价和最低价，各自标注名称并为重叠部分着色，每个时段使用其时区并遵循夏令时。显示是哪个时段构建了区间、它们在何处重叠以及当前时段已走了多远；正在形成的时段仅根据已收盘K线增长，方框从该时段最后一根K线收盘时起才确定。"
+  },
+  "The Asian range (19:00–04:00 New York time, daylight saving followed) becomes final at the close of its last bar. Outside it, the first sweep of each side is tagged; an internal change of character (CHoCH) against the sweep within the allowed bars gives a hypothetical entry at that close, with an optional EMA trend filter, the stop at the sweep extreme and the target in multiples of the risk. Sweeps, entries and exits are known at the close of the bar that shows them. Heuristic signals, not orders.": {
+    "es": "El rango asiático (19:00–04:00 hora de Nueva York, siguiendo el horario de verano) queda definitivo al cierre de su última vela. Fuera de él se marca el primer barrido de cada lado; un cambio de carácter interno (CHoCH) en contra del barrido dentro de las velas permitidas da una entrada hipotética en ese cierre, con un filtro de tendencia EMA opcional, el stop en el extremo del barrido y el objetivo en múltiplos del riesgo. Los barridos, entradas y salidas se conocen al cierre de la vela que los muestra. Señales heurísticas, no órdenes.",
+    "zh-CN": "亚洲区间（纽约时间 19:00–04:00，遵循夏令时）在其最后一根K线收盘时确定。区间之外，每一侧的首次扫荡会被标记；在允许的K线数内出现与扫荡方向相反的内部结构转变（CHoCH）时，在该收盘给出假设性入场，可选 EMA 趋势过滤，止损位于扫荡极值，目标为风险的倍数。扫荡、入场和离场在显示它们的K线收盘时才可知。这是启发式信号，不是订单。"
+  },
+  "When a session (Asia = Tokyo 09:00–18:00, London 08:00–17:00, New York morning 08:00–13:00 and afternoon 13:00–19:00, each in its own time zone) completes, its high and low become defended. A bar that trades through a defended level after opening on the original side builds a sweep zone one ATR(21) margin deep; a decisive close beyond it kills the zone (a break) and a stall for the set number of bars ends it and re-arms. Optional changes of character (CHoCH) and fair value gaps. Everything is known at the close of the bar that shows it. Needs bars of 5 minutes or less.": {
+    "es": "Cuando una sesión (Asia = Tokio 09:00–18:00, Londres 08:00–17:00, mañana de Nueva York 08:00–13:00 y tarde 13:00–19:00, cada una en su zona horaria) termina, su máximo y su mínimo quedan defendidos. Una vela que atraviesa un nivel defendido después de abrir del lado original arma una zona de barrido con un margen ATR(21) de profundidad; un cierre decidido más allá mata la zona (una ruptura) y un estancamiento durante el número de velas indicado la termina y vuelve a armarla. Opcional: cambios de carácter (CHoCH) y huecos de valor justo. Todo se conoce al cierre de la vela que lo muestra. Requiere velas de 5 minutos o menos.",
+    "zh-CN": "当一个时段（亚洲 = 东京 09:00–18:00、伦敦 08:00–17:00、纽约上午 08:00–13:00 和下午 13:00–19:00，各自使用其时区）结束时，其最高价和最低价成为防守位。K线在原侧开盘后穿越防守位，会建立一个深度为 ATR(21) 边距的扫荡区；收盘果断越过该区则区域失效（突破），在设定K线数内停滞则区域结束并重新布防。可选结构转变（CHoCH）和公允价值缺口。所有内容在显示它的K线收盘时才可知。需要 5 分钟或更短的K线。"
+  },
+  "The gap between each exchange session's first open and the prior session's close (from the chart's session calendar): bullish or bearish, overlapping the prior bar or clean beyond its wick. Marks the bar that fills it (trades back to the prior close), the maximum adverse excursion and statistics of how many gaps fill and how many reverse. A gap is known at the close of the session's first bar; its statistics count once the session has ended.": {
+    "es": "El hueco entre la primera apertura de cada sesión del mercado y el cierre de la sesión anterior (según el calendario de sesiones del gráfico): alcista o bajista, solapado con la vela anterior o limpio más allá de su mecha. Marca la vela que lo rellena (vuelve a operar en el cierre anterior), la máxima desviación en contra y estadísticas de cuántos huecos se rellenan y cuántos se dan vuelta. Un hueco se conoce al cierre de la primera vela de la sesión; sus estadísticas cuentan cuando la sesión ha terminado.",
+    "zh-CN": "每个交易所时段首个开盘价与前一时段收盘价之间的跳空（依据图表的时段日历）：看涨或看跌，与前一根K线重叠或干净地越过其影线。标记回补它的K线（回到前收盘价成交）、最大不利偏移，以及有多少跳空被回补、多少发生反转的统计。跳空在该时段首根K线收盘时可知；其统计在时段结束后计入。"
+  },
+  "Sessions completed at this close (bit mask of slots 1-4)": {
+    "es": "Sesiones completadas en este cierre (máscara de bits de los espacios 1-4)",
+    "zh-CN": "本次收盘完成的时段（槽位 1-4 的位掩码）"
+  },
+  "Hypothetical entry (+1 long, -1 short)": {
+    "es": "Entrada hipotética (+1 compra, -1 venta)",
+    "zh-CN": "假设性入场（+1 做多，-1 做空）"
+  },
+  "Hypothetical position after this close (+1 long, -1 short, 0 flat)": {
+    "es": "Posición hipotética tras este cierre (+1 comprado, -1 vendido, 0 fuera)",
+    "zh-CN": "本次收盘后的假设性持仓（+1 多头，-1 空头，0 空仓）"
+  },
+  "Asian range sweep (+1 low swept, -1 high swept)": {
+    "es": "Barrido del rango asiático (+1 mínimo barrido, -1 máximo barrido)",
+    "zh-CN": "亚洲区间扫荡（+1 扫低点，-1 扫高点）"
+  },
+  "Sweep zone built (+1 below a defended low, -1 above a defended high)": {
+    "es": "Zona de barrido armada (+1 bajo un mínimo defendido, -1 sobre un máximo defendido)",
+    "zh-CN": "建立扫荡区（+1 位于防守低点下方，-1 位于防守高点上方）"
+  },
+  "Sweep zone broken (+1 upward, -1 downward)": {
+    "es": "Zona de barrido rota (+1 hacia arriba, -1 hacia abajo)",
+    "zh-CN": "扫荡区被突破（+1 向上，-1 向下）"
+  },
+  "Session gap at this bar (+1 up, -1 down)": {
+    "es": "Hueco de sesión en esta vela (+1 al alza, -1 a la baja)",
+    "zh-CN": "本K线的时段跳空（+1 向上，-1 向下）"
+  },
+  "Session gap filled at this bar (+1 gap up filled, -1 gap down filled)": {
+    "es": "Hueco de sesión rellenado en esta vela (+1 hueco al alza rellenado, -1 hueco a la baja rellenado)",
+    "zh-CN": "本K线回补时段跳空（+1 向上跳空已回补，-1 向下跳空已回补）"
+  },
+  "Show": {
+    "es": "Mostrar",
+    "zh-CN": "显示"
+  },
+  "VWAP": {
+    "es": "VWAP",
+    "zh-CN": "VWAP"
+  },
+  "Color": {
+    "es": "Color",
+    "zh-CN": "颜色"
+  },
+  "Session 1": {
+    "es": "Sesión 1",
+    "zh-CN": "时段 1"
+  },
+  "Session 2": {
+    "es": "Sesión 2",
+    "zh-CN": "时段 2"
+  },
+  "Session 3": {
+    "es": "Sesión 3",
+    "zh-CN": "时段 3"
+  },
+  "Session 4": {
+    "es": "Sesión 4",
+    "zh-CN": "时段 4"
+  },
+  "Fill opacity (%)": {
+    "es": "Opacidad del relleno (%)",
+    "zh-CN": "填充不透明度（%）"
+  },
+  "Session names": {
+    "es": "Nombres de las sesiones",
+    "zh-CN": "时段名称"
+  },
+  "Midline": {
+    "es": "Línea media",
+    "zh-CN": "中线"
+  },
+  "Alertable high/low of the last completed session": {
+    "es": "Máximo/mínimo con alerta de la última sesión completada",
+    "zh-CN": "上一个已完成时段的可提醒高/低点"
+  },
+  "Shade session overlaps": {
+    "es": "Sombrear los solapamientos de sesiones",
+    "zh-CN": "为时段重叠着色"
+  },
+  "Overlap": {
+    "es": "Solapamiento",
+    "zh-CN": "重叠"
+  },
+  "Show the forming session": {
+    "es": "Mostrar la sesión en formación",
+    "zh-CN": "显示正在形成的时段"
+  },
+  "Extend the forming session to its scheduled end": {
+    "es": "Alargar la sesión en formación hasta su fin programado",
+    "zh-CN": "将正在形成的时段延伸至计划结束时间"
+  },
+  "±1σ VWAP bands": {
+    "es": "Bandas de ±1σ del VWAP",
+    "zh-CN": "VWAP ±1σ 带"
+  },
+  "VWAP width": {
+    "es": "Grosor del VWAP",
+    "zh-CN": "VWAP 线宽"
+  },
+  "Estimate VWAP from the bar (HLC3) when volume at price is missing": {
+    "es": "Estimar el VWAP con la vela (HLC3) si falta el volumen por precio",
+    "zh-CN": "缺少按价位成交量时用K线（HLC3）估算 VWAP"
+  },
+  "Asia": {
+    "es": "Asia",
+    "zh-CN": "亚洲"
+  },
+  "Sydney high": {
+    "es": "Máximo de Sídney",
+    "zh-CN": "悉尼高点"
+  },
+  "Sydney low": {
+    "es": "Mínimo de Sídney",
+    "zh-CN": "悉尼低点"
+  },
+  "Tokyo high": {
+    "es": "Máximo de Tokio",
+    "zh-CN": "东京高点"
+  },
+  "Tokyo low": {
+    "es": "Mínimo de Tokio",
+    "zh-CN": "东京低点"
+  },
+  "London high": {
+    "es": "Máximo de Londres",
+    "zh-CN": "伦敦高点"
+  },
+  "London low": {
+    "es": "Mínimo de Londres",
+    "zh-CN": "伦敦低点"
+  },
+  "New York high": {
+    "es": "Máximo de Nueva York",
+    "zh-CN": "纽约高点"
+  },
+  "New York low": {
+    "es": "Mínimo de Nueva York",
+    "zh-CN": "纽约低点"
+  },
+  "Asia high": {
+    "es": "Máximo de Asia",
+    "zh-CN": "亚洲高点"
+  },
+  "Asia low": {
+    "es": "Mínimo de Asia",
+    "zh-CN": "亚洲低点"
+  },
+  "Market sessions": {
+    "es": "Sesiones del mercado",
+    "zh-CN": "市场时段"
+  },
+  "Break by wick (otherwise by close)": {
+    "es": "Ruptura por mecha (si no, por cierre)",
+    "zh-CN": "按影线突破（否则按收盘）"
+  },
+  "Sweep tags": {
+    "es": "Etiquetas de barrido",
+    "zh-CN": "扫荡标签"
+  },
+  "Trade": {
+    "es": "Operación",
+    "zh-CN": "交易"
+  },
+  "Close when a new session starts": {
+    "es": "Cerrar al empezar una nueva sesión",
+    "zh-CN": "新时段开始时平仓"
+  },
+  "Stop (× risk)": {
+    "es": "Stop (× riesgo)",
+    "zh-CN": "止损（× 风险）"
+  },
+  "Target (× risk)": {
+    "es": "Objetivo (× riesgo)",
+    "zh-CN": "目标（× 风险）"
+  },
+  "Bars allowed after the sweep": {
+    "es": "Velas permitidas después del barrido",
+    "zh-CN": "扫荡后允许的K线数"
+  },
+  "Stop buffer (ticks)": {
+    "es": "Margen del stop (ticks)",
+    "zh-CN": "止损缓冲（跳动点）"
+  },
+  "Session box": {
+    "es": "Caja de la sesión",
+    "zh-CN": "时段方框"
+  },
+  "Trade boxes": {
+    "es": "Cajas de las operaciones",
+    "zh-CN": "交易方框"
+  },
+  "Session background": {
+    "es": "Fondo de la sesión",
+    "zh-CN": "时段背景"
+  },
+  "Session close": {
+    "es": "Cierre de sesión",
+    "zh-CN": "时段平仓"
+  },
+  "Target": {
+    "es": "Objetivo",
+    "zh-CN": "目标"
+  },
+  "Asia sweep": {
+    "es": "Barrido de Asia",
+    "zh-CN": "亚洲扫荡"
+  },
+  "Position": {
+    "es": "Posición",
+    "zh-CN": "持仓"
+  },
+  "Flat": {
+    "es": "Fuera",
+    "zh-CN": "空仓"
+  },
+  "Entries": {
+    "es": "Entradas",
+    "zh-CN": "入场次数"
+  },
+  "Asia range": {
+    "es": "Rango de Asia",
+    "zh-CN": "亚洲区间"
+  },
+  "Extras": {
+    "es": "Extras",
+    "zh-CN": "附加"
+  },
+  "Sweep zones above": {
+    "es": "Zonas de barrido arriba",
+    "zh-CN": "上方扫荡区"
+  },
+  "Margin above (ATR 21)": {
+    "es": "Margen arriba (ATR 21)",
+    "zh-CN": "上方边距（ATR 21）"
+  },
+  "Sweep zones below": {
+    "es": "Zonas de barrido abajo",
+    "zh-CN": "下方扫荡区"
+  },
+  "Margin below (ATR 21)": {
+    "es": "Margen abajo (ATR 21)",
+    "zh-CN": "下方边距（ATR 21）"
+  },
+  "Stalled bars to re-arm": {
+    "es": "Velas estancadas para volver a armar",
+    "zh-CN": "重新布防所需停滞K线数"
+  },
+  "One sweep per session": {
+    "es": "Un barrido por sesión",
+    "zh-CN": "每个时段一次扫荡"
+  },
+  "Asia (Tokyo 09:00–18:00)": {
+    "es": "Asia (Tokio 09:00–18:00)",
+    "zh-CN": "亚洲（东京 09:00–18:00）"
+  },
+  "London (08:00–17:00)": {
+    "es": "Londres (08:00–17:00)",
+    "zh-CN": "伦敦（08:00–17:00）"
+  },
+  "New York morning (08:00–13:00)": {
+    "es": "Mañana de Nueva York (08:00–13:00)",
+    "zh-CN": "纽约上午（08:00–13:00）"
+  },
+  "New York afternoon (13:00–19:00)": {
+    "es": "Tarde de Nueva York (13:00–19:00)",
+    "zh-CN": "纽约下午（13:00–19:00）"
+  },
+  "Changes of character (CHoCH)": {
+    "es": "Cambios de carácter (CHoCH)",
+    "zh-CN": "结构转变（CHoCH）"
+  },
+  "Pivot length": {
+    "es": "Largo de los pivotes",
+    "zh-CN": "枢轴长度"
+  },
+  "Fair value gap filter (ATR 144)": {
+    "es": "Filtro de huecos de valor justo (ATR 144)",
+    "zh-CN": "公允价值缺口过滤（ATR 144）"
+  },
+  "Session boxes": {
+    "es": "Cajas de las sesiones",
+    "zh-CN": "时段方框"
+  },
+  "Session sweeps": {
+    "es": "Barridos de sesión",
+    "zh-CN": "时段扫荡"
+  },
+  "Bar period": {
+    "es": "Período de las velas",
+    "zh-CN": "K线周期"
+  },
+  "Use bars of 5 minutes or less": {
+    "es": "Usar velas de 5 minutos o menos",
+    "zh-CN": "请使用 5 分钟或更短的K线"
+  },
+  "New York AM": {
+    "es": "Nueva York mañana",
+    "zh-CN": "纽约上午"
+  },
+  "New York PM": {
+    "es": "Nueva York tarde",
+    "zh-CN": "纽约下午"
+  },
+  "Buy-side sweep zone": {
+    "es": "Zona de barrido arriba",
+    "zh-CN": "买方扫荡区"
+  },
+  "Sell-side sweep zone": {
+    "es": "Zona de barrido abajo",
+    "zh-CN": "卖方扫荡区"
+  },
+  "Buy-side sweep zone: top edge": {
+    "es": "Zona de barrido arriba: borde superior",
+    "zh-CN": "买方扫荡区：上沿"
+  },
+  "Buy-side sweep zone: bottom edge": {
+    "es": "Zona de barrido arriba: borde inferior",
+    "zh-CN": "买方扫荡区：下沿"
+  },
+  "Sell-side sweep zone: top edge": {
+    "es": "Zona de barrido abajo: borde superior",
+    "zh-CN": "卖方扫荡区：上沿"
+  },
+  "Sell-side sweep zone: bottom edge": {
+    "es": "Zona de barrido abajo: borde inferior",
+    "zh-CN": "卖方扫荡区：下沿"
+  },
+  "Break": {
+    "es": "Ruptura",
+    "zh-CN": "突破"
+  },
+  "Defended high": {
+    "es": "Máximo defendido",
+    "zh-CN": "防守高点"
+  },
+  "Defended low": {
+    "es": "Mínimo defendido",
+    "zh-CN": "防守低点"
+  },
+  "Defended session": {
+    "es": "Sesión defendida",
+    "zh-CN": "防守时段"
+  },
+  "Sweeps up / down": {
+    "es": "Barridos arriba / abajo",
+    "zh-CN": "向上 / 向下扫荡"
+  },
+  "Upper zone": {
+    "es": "Zona superior",
+    "zh-CN": "上方区域"
+  },
+  "Lower zone": {
+    "es": "Zona inferior",
+    "zh-CN": "下方区域"
+  },
+  "Overlapping the prior bar": {
+    "es": "Solapado con la vela anterior",
+    "zh-CN": "与前一根K线重叠"
+  },
+  "Clean (beyond the prior wick)": {
+    "es": "Limpio (más allá de la mecha anterior)",
+    "zh-CN": "干净（越过前一根影线）"
+  },
+  "Prior session close level": {
+    "es": "Nivel del cierre de la sesión anterior",
+    "zh-CN": "前一时段收盘价位"
+  },
+  "Maximum adverse excursion": {
+    "es": "Máxima desviación en contra",
+    "zh-CN": "最大不利偏移"
+  },
+  "Gap": {
+    "es": "Hueco",
+    "zh-CN": "跳空"
+  },
+  "Session gap": {
+    "es": "Hueco de sesión",
+    "zh-CN": "时段跳空"
+  },
+  "Session gap: top edge": {
+    "es": "Hueco de sesión: borde superior",
+    "zh-CN": "时段跳空：上沿"
+  },
+  "Session gap: bottom edge": {
+    "es": "Hueco de sesión: borde inferior",
+    "zh-CN": "时段跳空：下沿"
+  },
+  "Prior session close": {
+    "es": "Cierre de la sesión anterior",
+    "zh-CN": "前一时段收盘价"
+  },
+  "Session gaps": {
+    "es": "Huecos de sesión",
+    "zh-CN": "时段跳空"
+  },
+  "Bullish gaps filled": {
+    "es": "Huecos alcistas rellenados",
+    "zh-CN": "看涨跳空回补"
+  },
+  "Bearish gaps filled": {
+    "es": "Huecos bajistas rellenados",
+    "zh-CN": "看跌跳空回补"
+  },
+  "Bullish gaps reversed": {
+    "es": "Huecos alcistas que dan vuelta",
+    "zh-CN": "看涨跳空反转"
+  },
+  "Bearish gaps reversed": {
+    "es": "Huecos bajistas que dan vuelta",
+    "zh-CN": "看跌跳空反转"
+  },
+  "Average bars to fill": {
+    "es": "Velas promedio hasta el relleno",
+    "zh-CN": "平均回补K线数"
+  },
+  "Current gap": {
+    "es": "Hueco actual",
+    "zh-CN": "当前跳空"
+  },
+  "Bullish · filled": {
+    "es": "Alcista · rellenado",
+    "zh-CN": "看涨 · 已回补"
+  },
+  "Bullish · open": {
+    "es": "Alcista · abierto",
+    "zh-CN": "看涨 · 未回补"
+  },
+  "Bearish · filled": {
+    "es": "Bajista · rellenado",
+    "zh-CN": "看跌 · 已回补"
+  },
+  "Bearish · open": {
+    "es": "Bajista · abierto",
+    "zh-CN": "看跌 · 未回补"
+  },
+  "Bars to fill": {
+    "es": "Velas hasta el relleno",
+    "zh-CN": "回补所需K线数"
+  },
+  "Value area reversion": {
+    "es": "Reversión al área de valor",
+    "zh-CN": "价值区回归"
+  },
+  "A volume profile per exchange session. When a close leaves the value area and, within a few bars, closes back inside it, the reversion is marked: against the previous session's value area (triangles) and against the developing session's value area (circles). The previous value area exists from the first bar after that session completed; the developing value area uses only the session's earlier closed bars. A signal is final at the close that re-enters. Heuristic mean-reversion cue, not a forecast.": {
+    "es": "Un perfil de volumen por sesión de la bolsa. Cuando un cierre sale del área de valor y, en pocas velas, vuelve a cerrar dentro, se marca la reversión: contra el área de valor de la sesión anterior (triángulos) y contra la de la sesión en formación (círculos). El área de valor anterior existe desde la primera vela después de que esa sesión terminó; la de la sesión en formación usa solo las velas ya cerradas de la sesión. Una señal es definitiva al cierre que vuelve a entrar. Indicio heurístico de reversión a la media, no un pronóstico.",
+    "zh-CN": "每个交易所交易时段一个成交量分布。当收盘价离开价值区并在几根K线内重新收回区内时，标记回归：相对前一交易时段的价值区（三角形）以及相对正在形成的交易时段价值区（圆点）。前一价值区自该时段结束后的第一根K线起存在；形成中的价值区仅使用该时段此前已收盘的K线。信号在重新进入的那根K线收盘时确定。启发式均值回归提示，并非预测。"
+  },
+  "Profile level alerts (POC, VAH, VAL)": {
+    "es": "Alertas de niveles del perfil (POC, VAH, VAL)",
+    "zh-CN": "分布水平提醒（POC、VAH、VAL）"
+  },
+  "The POC, VAH and VAL of the exchange session or week volume profile — the developing one (through the last closed bar) or the previous completed one — as alertable levels and step series, with a mark where a close crosses a level that was in force at the previous close. The previous period's levels exist from the first bar after it completed; crosses are final at the crossing close.": {
+    "es": "El POC, el VAH y el VAL del perfil de volumen de la sesión de la bolsa o de la semana —el que está en formación (hasta la última vela cerrada) o el anterior completo— como niveles con alerta y series escalonadas, con una marca donde un cierre cruza un nivel vigente en el cierre anterior. Los niveles del período anterior existen desde la primera vela después de que terminó; los cruces son definitivos al cierre que cruza.",
+    "zh-CN": "交易所交易时段或周成交量分布的 POC、VAH 和 VAL——形成中的（截至最后一根已收盘K线）或上一个完整周期的——作为可设置提醒的水平和阶梯序列，并在收盘价穿越上一收盘时有效的水平处做标记。上一周期的水平自其结束后的第一根K线起存在；穿越在穿越的那根K线收盘时确定。"
+  },
+  "Profile tails (thin volume zones)": {
+    "es": "Colas del perfil (zonas de poco volumen)",
+    "zh-CN": "分布尾部（薄量区域）"
+  },
+  "From the volume profile of the last N closed bars, the upper and lower tails: the outermost rows whose volume is below a percentage of the POC volume. The upper tail is a supply zone and the lower tail a demand zone, recomputed at every close (series give the zone edges). Heuristic thin-auction zones from observed footprint rows; available once the window is full.": {
+    "es": "Del perfil de volumen de las últimas N velas cerradas, las colas superior e inferior: las filas extremas cuyo volumen es menor que un porcentaje del volumen del POC. La cola superior es una zona de oferta y la inferior una de demanda, recalculadas en cada cierre (las series dan los bordes de las zonas). Zonas heurísticas de subasta fina a partir de filas de footprint observadas; disponibles cuando la ventana está completa.",
+    "zh-CN": "根据最近 N 根已收盘K线的成交量分布，找出上下尾部：成交量低于 POC 成交量某一百分比的最外侧价格行。上尾为供给区，下尾为需求区，每次收盘重新计算（序列给出区域边界）。基于已观测足迹行的启发式薄拍卖区域；窗口填满后可用。"
+  },
+  "Volume profile and value area (with hour map)": {
+    "es": "Perfil de volumen y área de valor (con mapa por hora)",
+    "zh-CN": "成交量分布与价值区（含小时热图）"
+  },
+  "The volume profile of the last N closed bars drawn at the price axis with the POC and value area highlighted and dotted lines across the window, plus a heat map of volume by exchange-time hour (columns) and session day (rows). Profile rows come from observed footprint; the levels are those of the last closed bar.": {
+    "es": "El perfil de volumen de las últimas N velas cerradas dibujado junto al eje de precios, con el POC y el área de valor resaltados y líneas punteadas a lo largo de la ventana, más un mapa de calor del volumen por hora de la bolsa (columnas) y día de sesión (filas). Las filas del perfil vienen del footprint observado; los niveles son los de la última vela cerrada.",
+    "zh-CN": "最近 N 根已收盘K线的成交量分布，贴着价格轴绘制，突出显示 POC 和价值区，并在窗口内绘制虚线；另附按交易所时间小时（列）和交易时段日期（行）的成交量热图。分布行来自已观测足迹；水平为最后一根已收盘K线时的数值。"
+  },
+  "Sliding volume profile": {
+    "es": "Perfil de volumen deslizante",
+    "zh-CN": "滑动成交量分布"
+  },
+  "The volume profile of the last N closed bars, updated at every close: its POC and value-area edges as lines (available once the window is full) and the current profile drawn right of the last bar. Profile rows come from observed footprint.": {
+    "es": "El perfil de volumen de las últimas N velas cerradas, actualizado en cada cierre: su POC y los bordes del área de valor como líneas (disponibles cuando la ventana está completa) y el perfil actual dibujado a la derecha de la última vela. Las filas del perfil vienen del footprint observado.",
+    "zh-CN": "最近 N 根已收盘K线的成交量分布，每次收盘更新：其 POC 和价值区边界以线显示（窗口填满后可用），当前分布绘制在最后一根K线右侧。分布行来自已观测足迹。"
+  },
+  "Volume heat hours": {
+    "es": "Horas calientes de volumen",
+    "zh-CN": "成交量热点小时"
+  },
+  "Each clock hour of the exchange time zone (DST-correct) as a box over its range, tinted by its volume compared with the average of the preceding hours; hours at or above the hot multiple get a solid border and a \"2.3x\" label. An hour is final at the close of its last bar (or, when the bar length is unknown, at the first bar of the next hour).": {
+    "es": "Cada hora del reloj en la zona horaria de la bolsa (con el horario de verano correcto) como una caja sobre su rango, teñida según su volumen comparado con el promedio de las horas anteriores; las horas que alcanzan o superan el múltiplo caliente llevan borde sólido y una etiqueta «2.3x». Una hora es definitiva al cierre de su última vela (o, cuando se desconoce la duración de la vela, en la primera vela de la hora siguiente).",
+    "zh-CN": "交易所时区的每个整点小时（正确处理夏令时）以覆盖其价格范围的方框显示，按其成交量相对之前若干小时平均值着色；达到或超过热点倍数的小时带实线边框和“2.3x”标签。一个小时在其最后一根K线收盘时确定（若K线时长未知，则在下一小时的第一根K线时确定）。"
+  },
+  "Execution benchmarks (TWAP, VWAP, POV)": {
+    "es": "Evaluación de ejecución (TWAP, VWAP, POV)",
+    "zh-CN": "执行基准（TWAP、VWAP、POV）"
+  },
+  "Simulates, in every window (hour, 4 hours, session, week, month of the exchange calendar), a parent order worked three ways: TWAP (equal parts per bar), VWAP (by the typical volume share of each bar position, learned only from earlier windows) and POV (a percentage of each bar's volume). Fills are at each bar's typical price; average prices are compared with the arrival price, the window VWAP and the window TWAP in basis points (positive = worse for the side). A window's result is available at its last close. A simulation, not an execution forecast.": {
+    "es": "Simula, en cada ventana (hora, 4 horas, sesión, semana, mes del calendario de la bolsa), una orden padre trabajada de tres formas: TWAP (partes iguales por vela), VWAP (según la proporción típica de volumen de cada posición de vela, aprendida solo de ventanas anteriores) y POV (un porcentaje del volumen de cada vela). Las ejecuciones son al precio típico de cada vela; los precios promedio se comparan con el precio de llegada, el VWAP de la ventana y el TWAP de la ventana en puntos básicos (positivo = peor para el lado). El resultado de una ventana está disponible en su último cierre. Una simulación, no un pronóstico de ejecución.",
+    "zh-CN": "在每个窗口（交易所日历的小时、4 小时、交易时段、周、月）中模拟一笔母单的三种执行方式：TWAP（每根K线等量）、VWAP（按每个K线位置的典型成交量占比，仅从更早的窗口学习）和 POV（每根K线成交量的一个百分比）。成交价为每根K线的典型价格；平均价格与到达价、窗口 VWAP 和窗口 TWAP 比较，以基点表示（正值 = 对该方向更差）。窗口结果在其最后一根K线收盘时可用。这是模拟，而非执行预测。"
+  },
+  "Signals against the previous session": {
+    "es": "Señales contra la sesión anterior",
+    "zh-CN": "相对前一交易时段的信号"
+  },
+  "Signals against the developing session": {
+    "es": "Señales contra la sesión en formación",
+    "zh-CN": "相对形成中交易时段的信号"
+  },
+  "Maximum bars outside before re-entry": {
+    "es": "Máximo de velas fuera antes de volver a entrar",
+    "zh-CN": "重新进入前在区外的最大K线数"
+  },
+  "Minimum session bars for the developing value area": {
+    "es": "Mínimo de velas de la sesión para el área de valor en formación",
+    "zh-CN": "形成中价值区所需的最少时段K线数"
+  },
+  "Developing period": {
+    "es": "Período en formación",
+    "zh-CN": "形成中周期"
+  },
+  "Previous period": {
+    "es": "Período anterior",
+    "zh-CN": "上一周期"
+  },
+  "Levels of": {
+    "es": "Niveles de",
+    "zh-CN": "水平来源"
+  },
+  "Mark the crosses": {
+    "es": "Marcar los cruces",
+    "zh-CN": "标记穿越"
+  },
+  "Bars in the profile": {
+    "es": "Velas del perfil",
+    "zh-CN": "分布K线数"
+  },
+  "Tail threshold (% of POC volume)": {
+    "es": "Umbral de la cola (% del volumen del POC)",
+    "zh-CN": "尾部阈值（POC 成交量的 %）"
+  },
+  "Fill the zones": {
+    "es": "Rellenar las zonas",
+    "zh-CN": "填充区域"
+  },
+  "Days in the hour map (0 = off)": {
+    "es": "Días del mapa por hora (0 = no)",
+    "zh-CN": "小时热图天数（0 = 关闭）"
+  },
+  "Profile width (px)": {
+    "es": "Ancho del perfil (px)",
+    "zh-CN": "分布宽度（像素）"
+  },
+  "Hour map": {
+    "es": "Mapa por hora",
+    "zh-CN": "小时热图"
+  },
+  "Draw the current profile": {
+    "es": "Dibujar el perfil actual",
+    "zh-CN": "绘制当前分布"
+  },
+  "Hours in the average": {
+    "es": "Horas del promedio",
+    "zh-CN": "平均值包含的小时数"
+  },
+  "Hot from (× average)": {
+    "es": "Caliente desde (× promedio)",
+    "zh-CN": "热点阈值（× 平均）"
+  },
+  "% of typical window volume": {
+    "es": "% del volumen típico de la ventana",
+    "zh-CN": "典型窗口成交量的 %"
+  },
+  "Units": {
+    "es": "Unidades",
+    "zh-CN": "单位数量"
+  },
+  "Sizing": {
+    "es": "Tamaño",
+    "zh-CN": "规模方式"
+  },
+  "Parent order": {
+    "es": "Orden padre",
+    "zh-CN": "母单"
+  },
+  "Size (% of typical window volume)": {
+    "es": "Tamaño (% del volumen típico de la ventana)",
+    "zh-CN": "规模（典型窗口成交量的 %）"
+  },
+  "Size (units)": {
+    "es": "Tamaño (unidades)",
+    "zh-CN": "规模（单位）"
+  },
+  "Schedule bars (0 = typical window length)": {
+    "es": "Velas del programa (0 = duración típica de la ventana)",
+    "zh-CN": "计划K线数（0 = 典型窗口长度）"
+  },
+  "POV participation (%)": {
+    "es": "Participación del POV (%)",
+    "zh-CN": "POV 参与率（%）"
+  },
+  "Earlier windows for the volume profile": {
+    "es": "Ventanas anteriores para el perfil de volumen",
+    "zh-CN": "用于成交量分布的更早窗口数"
+  },
+  "Benchmark lines": {
+    "es": "Líneas de referencia",
+    "zh-CN": "基准线"
+  },
+  "Average fill prices": {
+    "es": "Precios promedio de ejecución",
+    "zh-CN": "平均成交价"
+  },
+  "Shade the scheduled bars": {
+    "es": "Sombrear las velas del programa",
+    "zh-CN": "为计划K线加底色"
+  },
+  "POC": {
+    "es": "POC",
+    "zh-CN": "POC"
+  },
+  "VAH": {
+    "es": "VAH",
+    "zh-CN": "VAH"
+  },
+  "VAL": {
+    "es": "VAL",
+    "zh-CN": "VAL"
+  },
+  "Reversion vs previous value area (+1 up, -1 down)": {
+    "es": "Reversión contra el área de valor anterior (+1 arriba, -1 abajo)",
+    "zh-CN": "相对前一价值区的回归（+1 向上，-1 向下）"
+  },
+  "Reversion vs developing value area (+1 up, -1 down)": {
+    "es": "Reversión contra el área de valor en formación (+1 arriba, -1 abajo)",
+    "zh-CN": "相对形成中价值区的回归（+1 向上，-1 向下）"
+  },
+  "Previous session VAH": {
+    "es": "VAH de la sesión anterior",
+    "zh-CN": "前一交易时段 VAH"
+  },
+  "Previous session VAL": {
+    "es": "VAL de la sesión anterior",
+    "zh-CN": "前一交易时段 VAL"
+  },
+  "Previous session POC": {
+    "es": "POC de la sesión anterior",
+    "zh-CN": "前一交易时段 POC"
+  },
+  "Developing VAH": {
+    "es": "VAH en formación",
+    "zh-CN": "形成中 VAH"
+  },
+  "Developing VAL": {
+    "es": "VAL en formación",
+    "zh-CN": "形成中 VAL"
+  },
+  "Previous VAH": {
+    "es": "VAH anterior",
+    "zh-CN": "前 VAH"
+  },
+  "Previous VAL": {
+    "es": "VAL anterior",
+    "zh-CN": "前 VAL"
+  },
+  "Previous POC": {
+    "es": "POC anterior",
+    "zh-CN": "前 POC"
+  },
+  "Bullish reversions": {
+    "es": "Reversiones alcistas",
+    "zh-CN": "看涨回归"
+  },
+  "Bearish reversions": {
+    "es": "Reversiones bajistas",
+    "zh-CN": "看跌回归"
+  },
+  "Previous value area": {
+    "es": "Área de valor anterior",
+    "zh-CN": "前一价值区"
+  },
+  "Level crosses at this close (up minus down)": {
+    "es": "Cruces de niveles en este cierre (arriba menos abajo)",
+    "zh-CN": "本次收盘的水平穿越（向上减向下）"
+  },
+  "Profile POC": {
+    "es": "POC del perfil",
+    "zh-CN": "分布 POC"
+  },
+  "Profile VAH": {
+    "es": "VAH del perfil",
+    "zh-CN": "分布 VAH"
+  },
+  "Profile VAL": {
+    "es": "VAL del perfil",
+    "zh-CN": "分布 VAL"
+  },
+  "Supply tail low": {
+    "es": "Cola de oferta: mínimo",
+    "zh-CN": "供给尾部下沿"
+  },
+  "Supply tail high": {
+    "es": "Cola de oferta: máximo",
+    "zh-CN": "供给尾部上沿"
+  },
+  "Demand tail low": {
+    "es": "Cola de demanda: mínimo",
+    "zh-CN": "需求尾部下沿"
+  },
+  "Demand tail high": {
+    "es": "Cola de demanda: máximo",
+    "zh-CN": "需求尾部上沿"
+  },
+  "Rolling profile POC": {
+    "es": "POC del perfil móvil",
+    "zh-CN": "滚动分布 POC"
+  },
+  "Rolling profile VAH": {
+    "es": "VAH del perfil móvil",
+    "zh-CN": "滚动分布 VAH"
+  },
+  "Rolling profile VAL": {
+    "es": "VAL del perfil móvil",
+    "zh-CN": "滚动分布 VAL"
+  },
+  "Finished hour volume ratio": {
+    "es": "Relación de volumen de la hora terminada",
+    "zh-CN": "已结束小时的成交量比率"
+  },
+  "TWAP vs window VWAP (bps)": {
+    "es": "TWAP contra el VWAP de la ventana (pb)",
+    "zh-CN": "TWAP 相对窗口 VWAP（基点）"
+  },
+  "TWAP vs arrival (bps)": {
+    "es": "TWAP contra la llegada (pb)",
+    "zh-CN": "TWAP 相对到达价（基点）"
+  },
+  "TWAP (last / average)": {
+    "es": "TWAP (último / promedio)",
+    "zh-CN": "TWAP（最近 / 平均）"
+  },
+  "VWAP vs window VWAP (bps)": {
+    "es": "VWAP contra el VWAP de la ventana (pb)",
+    "zh-CN": "VWAP 相对窗口 VWAP（基点）"
+  },
+  "VWAP vs arrival (bps)": {
+    "es": "VWAP contra la llegada (pb)",
+    "zh-CN": "VWAP 相对到达价（基点）"
+  },
+  "VWAP (last / average)": {
+    "es": "VWAP (último / promedio)",
+    "zh-CN": "VWAP（最近 / 平均）"
+  },
+  "POV vs window VWAP (bps)": {
+    "es": "POV contra el VWAP de la ventana (pb)",
+    "zh-CN": "POV 相对窗口 VWAP（基点）"
+  },
+  "POV vs arrival (bps)": {
+    "es": "POV contra la llegada (pb)",
+    "zh-CN": "POV 相对到达价（基点）"
+  },
+  "POV (last / average)": {
+    "es": "POV (último / promedio)",
+    "zh-CN": "POV（最近 / 平均）"
+  },
+  "Simulated fills at bar typical prices; VWAP schedule from earlier windows only": {
+    "es": "Ejecuciones simuladas al precio típico de cada vela; programa VWAP solo de ventanas anteriores",
+    "zh-CN": "以K线典型价格模拟成交；VWAP 计划仅来自更早的窗口"
+  },
+  "Execution benchmarks (bps vs window VWAP)": {
+    "es": "Evaluación de ejecución (pb contra el VWAP de la ventana)",
+    "zh-CN": "执行基准（相对窗口 VWAP 的基点）"
+  },
+  "Current window filled (TWAP)": {
+    "es": "Ventana actual ejecutada (TWAP)",
+    "zh-CN": "当前窗口已成交（TWAP）"
+  },
+  "Windows evaluated": {
+    "es": "Ventanas evaluadas",
+    "zh-CN": "已评估窗口"
+  },
+  "Session preset": {
+    "es": "Sesión predefinida",
+    "zh-CN": "预设交易时段"
+  },
+  "Session bands": {
+    "es": "Bandas de la sesión",
+    "zh-CN": "交易时段条带"
+  },
+  "Week bands": {
+    "es": "Bandas de la semana",
+    "zh-CN": "周条带"
+  },
+  "Month bands": {
+    "es": "Bandas del mes",
+    "zh-CN": "月条带"
+  },
+  "Quarter bands": {
+    "es": "Bandas del trimestre",
+    "zh-CN": "季度条带"
+  },
+  "Year bands": {
+    "es": "Bandas del año",
+    "zh-CN": "年条带"
+  },
+  "Show the second band": {
+    "es": "Mostrar la segunda banda",
+    "zh-CN": "显示第二条带"
+  },
+  "First band (deviations)": {
+    "es": "Primera banda (desviaciones)",
+    "zh-CN": "第一条带（标准差倍数）"
+  },
+  "Second band (deviations)": {
+    "es": "Segunda banda (desviaciones)",
+    "zh-CN": "第二条带（标准差倍数）"
+  },
+  "Price at the end of the line": {
+    "es": "Precio al final de la línea",
+    "zh-CN": "线末价格"
+  },
+  "Day VWAP +first band": {
+    "es": "VWAP Día +primera banda",
+    "zh-CN": "日 VWAP +第一条带"
+  },
+  "Day VWAP +second band": {
+    "es": "VWAP Día +segunda banda",
+    "zh-CN": "日 VWAP +第二条带"
+  },
+  "Day VWAP -first band": {
+    "es": "VWAP Día -primera banda",
+    "zh-CN": "日 VWAP -第一条带"
+  },
+  "Day VWAP -second band": {
+    "es": "VWAP Día -segunda banda",
+    "zh-CN": "日 VWAP -第二条带"
+  },
+  "Week VWAP +first band": {
+    "es": "VWAP Semana +primera banda",
+    "zh-CN": "周 VWAP +第一条带"
+  },
+  "Week VWAP +second band": {
+    "es": "VWAP Semana +segunda banda",
+    "zh-CN": "周 VWAP +第二条带"
+  },
+  "Week VWAP -first band": {
+    "es": "VWAP Semana -primera banda",
+    "zh-CN": "周 VWAP -第一条带"
+  },
+  "Week VWAP -second band": {
+    "es": "VWAP Semana -segunda banda",
+    "zh-CN": "周 VWAP -第二条带"
+  },
+  "Month VWAP +first band": {
+    "es": "VWAP Mes +primera banda",
+    "zh-CN": "月 VWAP +第一条带"
+  },
+  "Month VWAP +second band": {
+    "es": "VWAP Mes +segunda banda",
+    "zh-CN": "月 VWAP +第二条带"
+  },
+  "Month VWAP -first band": {
+    "es": "VWAP Mes -primera banda",
+    "zh-CN": "月 VWAP -第一条带"
+  },
+  "Month VWAP -second band": {
+    "es": "VWAP Mes -segunda banda",
+    "zh-CN": "月 VWAP -第二条带"
+  },
+  "Quarter VWAP +first band": {
+    "es": "VWAP Trimestre +primera banda",
+    "zh-CN": "季度 VWAP +第一条带"
+  },
+  "Quarter VWAP +second band": {
+    "es": "VWAP Trimestre +segunda banda",
+    "zh-CN": "季度 VWAP +第二条带"
+  },
+  "Quarter VWAP -first band": {
+    "es": "VWAP Trimestre -primera banda",
+    "zh-CN": "季度 VWAP -第一条带"
+  },
+  "Quarter VWAP -second band": {
+    "es": "VWAP Trimestre -segunda banda",
+    "zh-CN": "季度 VWAP -第二条带"
+  },
+  "Year VWAP +first band": {
+    "es": "VWAP Año +primera banda",
+    "zh-CN": "年 VWAP +第一条带"
+  },
+  "Year VWAP +second band": {
+    "es": "VWAP Año +segunda banda",
+    "zh-CN": "年 VWAP +第二条带"
+  },
+  "Year VWAP -first band": {
+    "es": "VWAP Año -primera banda",
+    "zh-CN": "年 VWAP -第一条带"
+  },
+  "Year VWAP -second band": {
+    "es": "VWAP Año -segunda banda",
+    "zh-CN": "年 VWAP -第二条带"
+  },
+  "{0}: top edge": {
+    "es": "{0}: borde superior",
+    "zh-CN": "{0}：上沿"
+  },
+  "{0}: bottom edge": {
+    "es": "{0}: borde inferior",
+    "zh-CN": "{0}：下沿"
+  },
+  "Pivot {0}": {
+    "es": "Pivote {0}",
+    "zh-CN": "枢轴 {0}"
+  },
+  "The profile grid is not configured.": {
+    "es": "La grilla del perfil no está configurada.",
+    "zh-CN": "成交量分布网格尚未配置。"
+  },
+  "{0} (last / average)": {
+    "es": "{0} (último / promedio)",
+    "zh-CN": "{0}（最近 / 平均）"
+  },
+  "{0} VWAP +first band": {
+    "es": "VWAP {0} +primera banda",
+    "zh-CN": "{0} VWAP +第一带"
+  },
+  "{0} VWAP -first band": {
+    "es": "VWAP {0} -primera banda",
+    "zh-CN": "{0} VWAP -第一带"
+  },
+  "{0} VWAP +second band": {
+    "es": "VWAP {0} +segunda banda",
+    "zh-CN": "{0} VWAP +第二带"
+  },
+  "{0} VWAP -second band": {
+    "es": "VWAP {0} -segunda banda",
+    "zh-CN": "{0} VWAP -第二带"
+  },
+  "{0} vs arrival (bps)": {
+    "es": "{0} contra la llegada (pb)",
+    "zh-CN": "{0} 相对到达价（基点）"
+  },
+  "{0} vs window VWAP (bps)": {
+    "es": "{0} contra el VWAP de la ventana (pb)",
+    "zh-CN": "{0} 相对窗口 VWAP（基点）"
+  },
+  "filled": {
+    "es": "rellenado",
+    "zh-CN": "已回补"
+  },
+  "open": {
+    "es": "abierto",
+    "zh-CN": "未回补"
   }
 }
