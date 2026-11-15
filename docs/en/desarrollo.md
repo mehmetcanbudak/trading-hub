@@ -90,7 +90,7 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 |---|---|
 | trading, accounts, strategies, live, data, connections, settings | Navigate and capture the section. |
 | english | English windows/dialogs, safety copy and related localization assertions using isolated fixtures. |
-| safety | Financial-safety and protection-aware quit scenarios, including pending close/cancel acknowledgment and changed Tradovate contexts; fake providers only. |
+| safety | Financial-safety and protection-aware quit scenarios, including pending close/cancel acknowledgment and changed Tradovate contexts; fake providers only. Ends with the opt-in local market-data API on: loopback-only binding, Host/Origin refusal, read-only surface, no keys in `/connections`, a live stream closed by the owned shutdown drain, the port refusing afterwards and no restart after shutdown. |
 | ib-excursions, ib-excursions-import | Actual live excursion consumer after a corrected entry price or same-length/preserved-mtime IB history replacement; owned synthetic bars only. |
 | ib-data-refresh | Actual Data refresh remains responsive while an owned public import holds publication; the UI releases the import and displays the complete new day index. |
 | ib-live-trades | Actual rendered live trade table refresh after a same-length/preserved-mtime IB replacement; its MAE/MFE must match the validated service, not an older per-view result. |
@@ -103,6 +103,7 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 | live-excursions | Actual excursion service recalculates MAE/MFE from owned raw history after correcting the same entry execution; no broker data or model calls. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
 | venues | Public crypto market and aggregate connection setup against a loopback fake (OKX listing test, spot/perpetual filter, composite-book option), and a fixture aggregate chart with CVD by market and the derivatives pane. |
+| workbench | Every Workbench panel through the real page on offline fixtures (three-venue fake aggregate with prints and recorded depth, in-process derivatives HTTP and liquidation sockets with a deliberately failing Bybit long/short request, third-party levels fixture, fixture and unconfigured options hubs): multi-venue tape with thresholds, highlights, partial-venue coverage and observed/unobserved liquidations; recorded-depth heat map and the recording-off state; liquidation map estimate, third-party levels and leverage grid; derivatives table with dash gaps; options connect state and GEX/walls/max pain/expected move; toolbox position size and liquidation price; a detached panel window. Repeat with `TRADINGHUB_LANG=es` and `zh-CN`. |
 | panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
 | dom-book | DOM book-reading features (auto tick, notional, size/total/changes/recent columns, marks, stats, mirror), the DOM trading lock and the tape notional filter; restores defaults. |
 | footprint | Footprint text colors and editor. |
@@ -124,7 +125,7 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 | kvp-depth-history | Real archive/cache/provenance and depth sink/writer/selected-reader/heatmap/Orderbook Delta consumers, corrections, gaps, stale/quota/I/O coverage. |
 | kvp-providers | Actual Longbridge/aggregate/Bybit configured consumers against loopback/injected fakes, truthful account fields, owned ACKs and credential retirement. |
 | kvp-replay-alerts | Actual practice/reveal/end/result and compiled-strategy consumers, isolated run journals, causal availability, notification consent/persistence/retry/revocation. |
-| kvp-shutdown, kvp-shutdown-platform | **Standalone processes only:** real default terminal drains held Bybit, cached Longbridge requests/PKCE loopback/browser callbacks, Pine/compiler/pending-start and global private-store work; new requests/second red-close cannot force replacement/desktop exit early. |
+| kvp-shutdown, kvp-shutdown-platform | **Standalone processes only:** real default terminal drains held Bybit, cached Longbridge requests/PKCE loopback/browser callbacks, Pine/compiler/pending-start and global private-store work; new requests/second red-close cannot force replacement/desktop exit early. The opt-in local market-data API is on when the quit starts and must be closed (port refusing) once the shared shutdown completes. |
 | ordinary-shutdown | **Standalone, macOS/POSIX fixture:** actual ordinary assistant, held fake CLI and redirected stream. Protected Quit cannot replace or exit before its final save and callback. |
 | research-freshness | Actual strategy view and market-context consumers after same-metadata price corrections, middle-day deletion and combined-source changes. |
 | research-accounting | Real compiled strategy and local history through walk-forward, saved history, reports and MCP standard IO. Exact commissions, complete/partial/unavailable money and captured input evidence. |

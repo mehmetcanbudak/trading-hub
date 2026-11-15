@@ -1483,6 +1483,13 @@ internal static partial class SafetyScene
                     svc.Settings.KeepInMenuBar = keepInMenuBar;
                 }
             });
+
+            // last: the owned drain permanently closes the local API for this process
+            Part("quit with the local market-data API on", () =>
+            {
+                Reopen();
+                LocalApiQuit(svc, pump, Check, "sim", inst.Symbol);
+            });
         }
         finally
         {

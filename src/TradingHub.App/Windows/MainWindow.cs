@@ -35,6 +35,12 @@ public sealed class MainWindow : Window
         new("accounts", "Account", MaterialIconKind.WalletOutline, static window => new AccountsView(window._svc, window.SetStatus, window), new KeyGesture(Key.D5, Keys.Command)),
         new("strategies", "Backtesting", MaterialIconKind.FlaskOutline, static window => new StrategiesView(window._svc, window.SetStatus), new KeyGesture(Key.D2, Keys.Command)),
         new("live", "Live", MaterialIconKind.AccessPoint, static window => new LiveView(window._svc, window.SetStatus, window), new KeyGesture(Key.D7, Keys.Command)),
+        new("workbench", "Workbench", MaterialIconKind.ViewDashboardOutline, static window =>
+        {
+            var workbench = new Views.Workbench.WorkbenchView(window._svc, window.SetStatus, window);
+            workbench.RestoreWindows();
+            return workbench;
+        }, new KeyGesture(Key.D6, Keys.Command)),
         new("data", "Data", MaterialIconKind.DatabaseOutline, static window => new DataView(window._svc, window.SetStatus, window), new KeyGesture(Key.D3, Keys.Command)),
         new("connections", "Connections", MaterialIconKind.LanConnect, static window => new ConnectionsView(window._svc, window.SetStatus), new KeyGesture(Key.D4, Keys.Command)),
         new("settings", "Settings", MaterialIconKind.CogOutline, static window => new SettingsView(window._svc, window.SetStatus), new KeyGesture(Key.OemComma, Keys.Command)),
@@ -189,6 +195,7 @@ public sealed class MainWindow : Window
             }
 
             Trading.CloseFloating();
+            (Page("workbench") as Views.Workbench.WorkbenchView)?.CloseForShutdown();
         };
         Closed += (_, _) =>
         {

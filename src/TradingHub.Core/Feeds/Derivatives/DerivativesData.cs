@@ -44,7 +44,7 @@ public sealed record DerivativesTransport(
 /// only while a stream is connected; observed windows are recorded with the events so earlier periods remain unknown.
 /// Binance's forceOrder stream publishes at most one liquidation per symbol per second, so it is a sample.
 /// </summary>
-public sealed class DerivativesData : IDisposable
+public sealed partial class DerivativesData : IDisposable
 {
     public const string Binance = "binance";
     public const string Bybit = "bybit";

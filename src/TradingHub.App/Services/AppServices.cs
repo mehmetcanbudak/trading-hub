@@ -398,6 +398,7 @@ public sealed partial class AppServices
         InitializeKvpProviders();
         InitializeDerivatives(networkFactory);
         InitializeExternalData(networkFactory);
+        ApplyLocalApi();
         // las que corrían al cerrar Trading Hub (enseguida el guardado periódico las marca detenidas): para reanudarlas al abrir
         RunningAtLastClose = TradingHub.Strategies.LiveStore.LoadRunners().Where(i => i.Running && !LiveEntry.IsManaged(i.Source)).ToList();
         Hub.RecordLive = Settings.RecordLiveData;
@@ -976,6 +977,7 @@ public sealed partial class AppServices
         try
         {
             var workDrain = CloseOwnedAsync(Work.StopAsync, "Error closing ordinary work");
+            var localApiDrain = CloseOwnedAsync(ShutdownLocalApiAsync, "Error closing the local market-data API");
             var recordingDrain = CloseOwnedAsync(Hub.StopRecordingAsync, "Error closing recorded history");
             Close(() => StopLiveForQuit(QuitMode.CancelStops));
             TradingHub.Strategies.LiveStrategyRunner.Started -= OnRunnerStarted;
@@ -985,6 +987,7 @@ public sealed partial class AppServices
             var historyDrain = CloseOwnedAsync(ShutdownHistoryArchivesAsync, "Error closing history archives");
             var operationsDrain = CloseOwnedAsync(ShutdownOperationsAsync, "Error closing background history");
             await workDrain;
+            await localApiDrain;
             var researchDrain = CloseOwnedAsync(() => TradingViewResearchService.DisposeDefaultAsync().AsTask(), "Error closing authorized research");
             var scriptDrain = CloseOwnedAsync(() => Scripts?.DisposeAsync().AsTask() ?? Task.CompletedTask, "Error closing custom indicator monitoring");
             var providerDrain = CloseOwnedAsync(ShutdownKvpProvidersAsync, "Error closing provider sessions");
