@@ -339,27 +339,44 @@
     <Setter Property="Foreground" Value="{StaticResource SoftHoverFg}" />
   </Style>
 
-  <!-- barra de dibujos de cada gráfico (compacta, como ATAS) -->
-  <Style Selector="ToggleButton.tool">
+  <!-- drawing bar of each chart: large buttons with the group arrow on the right -->
+  <Style Selector="ToggleButton.dtool, Button.dtool">
     <Setter Property="Padding" Value="0" />
-    <Setter Property="Width" Value="30" />
-    <Setter Property="Height" Value="28" />
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="34" />
     <Setter Property="MinHeight" Value="0" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Foreground" Value="{StaticResource Text1Brush}" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
-  <Style Selector="Button.toolmore">
+  <Style Selector="ToggleButton.dtool:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.dtool:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource Bg3Brush}" />
+    <Setter Property="Foreground" Value="{StaticResource Text0Brush}" />
+  </Style>
+  <Style Selector="ToggleButton.dtool:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+  </Style>
+  <Style Selector="Button.dmore">
     <Setter Property="Padding" Value="0" />
-    <Setter Property="Width" Value="30" />
-    <Setter Property="Height" Value="11" />
+    <Setter Property="Width" Value="10" />
+    <Setter Property="Height" Value="34" />
     <Setter Property="MinHeight" Value="0" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Opacity" Value="0.55" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.dmore:pointerover">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="Button.dmore:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource Bg3Brush}" />
   </Style>
 
   <Style Selector="Button.icon, ToggleButton.icon">

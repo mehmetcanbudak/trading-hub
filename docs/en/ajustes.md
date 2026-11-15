@@ -63,10 +63,12 @@ Bindings apply to the active chart in Trading or detached windows. While typing,
 | Group | Actions / defaults |
 |---|---|
 | Trading | Buy/sell market, buy bid, sell ask, close, reverse, cancel all, close 25%/50%, breakeven, apply brackets, next/previous quick quantity. Intentionally unassigned. |
-| Chart | 1m/5m/15m/1h/4h/daily (⌥1–⌥6), Candles/Footprint/Heikin Ashi, auto scale, latest price, horizontal line (⌥H), cursor; configurable rectangle zoom/reset/session/clock/help/quick-entry navigation. |
+| Chart | 1m/5m/15m/1h/4h/daily (⌥1–⌥6), Candles/Footprint/Heikin Ashi, auto scale, latest price, cursor and drawing tools: horizontal line (⌥H), horizontal ray (⌥J), vertical line (⌥V), cross line (⌥C), Fibonacci (⌥F), rectangle (⌥⇧R), brush (⌥B), text (⌥N), trend line (⌥⇧T); configurable rectangle zoom/reset/session/clock/help/quick-entry navigation. |
 | Windows | One/four-chart layouts, next/previous tab (⌃Tab / ⌃⇧Tab), detach chart, toggle DOM, chart Chart Trader (⌥T), right panel. |
 
 Click a binding and press keys. Esc cancels; Delete clears it. Reusing a combination unassigns its previous action and displays a notice. **Restore defaults** resets bindings. Real-order confirmations still apply to hotkey actions when enabled.
+
+Drawing preferences live on each chart's drawing bar rather than in Settings: magnet (off/weak/strong), keep drawing, draw with a gesture (off by default), the selected-drawing bar after drawing and favorite tools are shared by all charts; lock and hide drawings are saved per chart. Whole-chart wheel zoom is a per-chart option in **Chart settings → Axes** (off by default). See [Charts](./graficos.md#drawings).
 
 Committed text on a focused chart opens explicit symbol/period entry; numeric-symbol ambiguity remains visible. IME preedit, popup focus and stale searches cannot become trading hotkeys. These navigation controls add no keyboard order submission or new confirmation gestures. See [Charts](./graficos.md#instrument-and-history).
 

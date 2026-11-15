@@ -12,7 +12,7 @@ using Rectangle = System.Drawing.Rectangle;
 namespace TradingHub.Charting.Rendering;
 
 /// <summary>Estado de interacción que afecta al dibujo (mouse, objeto en construcción, mensajes).</summary>
-public sealed class ChartRenderState
+public sealed partial class ChartRenderState
 {
     public float? MouseX { get; set; }
     public float? MouseY { get; set; }
@@ -100,7 +100,7 @@ public sealed record BracketDrag(Order? Entry, BracketRole Role, PendingBracket?
 public sealed record BracketHandle(SKRect Rect, BracketDrag Drag, bool IsButton);
 
 /// <summary>Dibuja un gráfico completo sobre un SKCanvas (sin depender de la UI).</summary>
-public sealed class ChartRenderer
+public sealed partial class ChartRenderer
 {
     private readonly FootprintRenderer _footprint = new();
     private readonly CandleRenderer _candles = new();
@@ -200,6 +200,7 @@ public sealed class ChartRenderer
             canvas.DrawRect(rectangle, _fill);
             canvas.DrawRect(rectangle, _stroke);
         }
+        DrawInk(canvas, model, layout, state);
         model.ClearDirty();
         return layout;
     }
@@ -380,11 +381,21 @@ public sealed class ChartRenderer
         _series.RenderDrawingObjects(canvas, model, layout, main, slots);
 
         int decimals = Instrument_Decimals(model);
-        foreach (var d in model.Drawings)
+        if (!model.Settings.HideDrawings)
         {
-            var runtime = d.Kind is DrawingKind.AnchoredVwap or DrawingKind.FixedRangeProfile ? state.DrawingRuntimeFor(d) : null;
-            d.Render(canvas, layout, model.Series, model.Theme, decimals, runtime, model.Data.Trades, model.DataGeneration, model.Settings.BlindReplay);
+            using var faded = state.InkVictims is { Count: > 0 } ? new SKPaint { Color = SKColors.White.WithAlpha(60) } : null;
+            foreach (var d in model.Drawings)
+            {
+                var runtime = d.Kind is DrawingKind.AnchoredVwap or DrawingKind.FixedRangeProfile ? state.DrawingRuntimeFor(d) : null;
+                // what a scribble in progress would erase is shown faded
+                bool victim = faded != null && state.InkVictims!.Contains(d);
+                if (victim) canvas.SaveLayer(faded);
+                d.Render(canvas, layout, model.Series, model.Theme, decimals, runtime, model.Data.Trades, model.DataGeneration, model.Settings.BlindReplay);
+                if (victim) canvas.Restore();
+            }
         }
+
+        state.Measure?.Render(canvas, layout, model.Series, model.Theme, decimals, null);
 
         if (model.Settings.ShowLastPriceLine && model.Series.Count > 0)
         {

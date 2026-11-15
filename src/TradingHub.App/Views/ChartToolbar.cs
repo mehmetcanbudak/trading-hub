@@ -36,6 +36,7 @@ internal sealed class ChartToolbar : UserControl
     private bool _syncing;
     private readonly LinkButton _link;
     private readonly TextBlock _clock = new() { FontFamily = Ui.MonoFont, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Border _clockHost = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _practiceLabel = new() { Text = "Practice", FontWeight = Avalonia.Media.FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, IsVisible = false };
 
     /// <summary>Todos los períodos del selector, por grupo.</summary>
@@ -113,42 +114,119 @@ internal sealed class ChartToolbar : UserControl
         }
     }
 
+    // indicators: the button shows how many the chart has, next to the favorites star
+    private readonly TextBlock _indicatorCount = new() { FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Border _indicatorBadge = new() { Padding = new Thickness(6, 0), CornerRadius = new CornerRadius(8), MinWidth = 18, VerticalAlignment = VerticalAlignment.Center };
+
+    /// <summary>Width below which labels collapse to icons, and below which pinned periods fold into the period menu.</summary>
+    internal const double CompactWidth = 1700, NarrowWidth = 1380;
+
+    /// <summary>The thin separator between groups.</summary>
+    private static Control Sep() => new Border { Width = 1, Height = 22, Margin = new Thickness(2, 0), Background = Ui.Line, VerticalAlignment = VerticalAlignment.Center };
+
+    private static StackPanel Group(params Control[] items)
+    {
+        var g = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var c in items)
+        {
+            c.VerticalAlignment = VerticalAlignment.Center;
+            g.Children.Add(c);
+        }
+
+        return g;
+    }
+
+    private static Button LabeledButton(MaterialIconKind icon, string text, string tip, out TextBlock label, params Control[] extra)
+    {
+        label = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center };
+        var content = Ui.H(6, Ui.Icon(icon, 17), label);
+        foreach (var c in extra) content.Children.Add(c);
+        var b = new Button { Content = content, Padding = new Thickness(8, 4) };
+        ToolTip.SetTip(b, tip);
+        Avalonia.Automation.AutomationProperties.SetName(b, text);
+        return b;
+    }
+
     private Control Build(Control[] rightControls)
     {
         ToolTip.SetTip(_layoutBox, "Footprint bar composition");
+        _clockHost.Child = _clock;
 
-        // se acomoda en dos líneas si la ventana es angosta (nunca corta botones)
-        var left = new WrapPanel { ItemSpacing = 8, LineSpacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var c in new Control[] { _link, Picker, _practiceLabel, _historyBox, Ui.Divider(true), Ui.H(4, _periodsHost, _periodMenu), _layoutBox, _stepBox })
+        // analysis next to the chart style: indicators (with count), favorites, navigation, practice
+        _indicatorBadge.Child = _indicatorCount;
+        _indicatorBadge.Background = Ui.Bg3;
+        var indicators = LabeledButton(MaterialIconKind.FunctionVariant, "Indicators", "Chart indicators and library (the number: how many this chart has)", out var indicatorsText, _indicatorBadge);
+        indicators.Click += (_, _) => _host.OpenIndicators(_chart);
+        Button? favorites = null;
+        favorites = Ui.IconButton(MaterialIconKind.StarOutline, "Favorite indicators and chart templates (in Indicators, right-click → Add to favorites)", () => _host.ShowFavoritesMenu(_chart, favorites!));
+        Avalonia.Automation.AutomationProperties.SetName(favorites, "Favorite indicators and chart templates");
+        Button? navigation = null;
+        navigation = LabeledButton(MaterialIconKind.Magnify, "View", "Chart navigation and clock", out var navigationText);
+        navigation.Click += (_, _) => _host.ShowChartNavigation(_chart, navigation!);
+        Avalonia.Automation.AutomationProperties.SetName(navigation, "Chart navigation and clock");
+        var practice = LabeledButton(MaterialIconKind.Play, "Practice replay…", "Practice replay", out var practiceText);
+        practice.Click += (_, _) => _host.OpenPracticeDialog();
+
+        // tighter buttons so the bar fits one row
+        foreach (var b in new Button[] { _styleBox, _stepBox, _historyBox }) b.Padding = new Thickness(8, 4);
+        _layoutBox.Padding = new Thickness(8, 4, 4, 4);
+
+        var screenshot = Ui.IconButton(MaterialIconKind.CameraOutline, "Chart screenshot (PNG in Pictures)", () => _host.SaveChartImage(_chart));
+        var fullScreen = Ui.IconButton(MaterialIconKind.Fullscreen, "Full screen", () => _host.ToggleFullScreen(_chart));
+        var linkHost = new Border { Child = _link, VerticalAlignment = VerticalAlignment.Center };
+
+        // narrow windows collapse labels and secondary buttons and fold the pinned periods into the period menu (the
+        // bar stays one row; each chart header keeps its own link button)
+        SizeChanged += (_, e) => Compact(e.NewSize.Width);
+        void Compact(double width)
+        {
+            bool wide = width >= CompactWidth, roomy = width >= NarrowWidth;
+            indicatorsText.IsVisible = navigationText.IsVisible = practiceText.IsVisible = wide;
+            _periodsHost.IsVisible = _clockHost.IsVisible = roomy;
+            linkHost.IsVisible = screenshot.IsVisible = fullScreen.IsVisible = roomy;
+            _layoutBox.MinWidth = wide ? 150 : 120;
+            _layoutBox.MaxWidth = wide ? 190 : 130;
+        }
+
+        // wraps a whole group only if even the compact bar cannot fit (never cuts buttons)
+        var left = new WrapPanel { ItemSpacing = 6, LineSpacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var c in new Control[]
+                 {
+                     Group(linkHost, Picker, _practiceLabel), Sep(),
+                     Group(_periodsHost, _periodMenu, _historyBox), Sep(),
+                     Group(_styleBox, _layoutBox, _stepBox), Sep(),
+                     Group(indicators, favorites, navigation, _clockHost, practice),
+                 })
         {
             c.VerticalAlignment = VerticalAlignment.Center;
             left.Children.Add(c);
         }
 
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
-        right.Children.Add(_styleBox);
-        right.Children.Add(Ui.Button("Indicators", MaterialIconKind.FunctionVariant, () => _host.OpenIndicators(_chart)));
-        right.Children.Add(Ui.IconButton(MaterialIconKind.ViewColumnOutline, "Edit footprint columns", () => _host.OpenFootprintEditor(_chart)));
-        right.Children.Add(Ui.IconButton(MaterialIconKind.PaletteOutline, "Chart settings: background, candle and axis colors…", () => _host.OpenChartSettings(_chart)));
-        Button? navigation = null;
-        navigation = Ui.Button("View", MaterialIconKind.Magnify, () => _host.ShowChartNavigation(_chart, navigation!));
-        Avalonia.Automation.AutomationProperties.SetName(navigation, "Chart navigation and clock");
-        right.Children.Add(navigation);
-        right.Children.Add(_clock);
-        right.Children.Add(Ui.Button("Practice replay…", MaterialIconKind.Play, () => _host.OpenPracticeDialog()));
+        // right: chart actions (strategies, settings, screenshot, full screen), then the window controls
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         Button? strategies = null;
         strategies = Ui.IconButton(MaterialIconKind.RobotOutline, "Chart strategies: historical and live entry/exit marks, visual-only or executing on an account", () => _host.ShowStrategyMenu(_chart, strategies!));
         right.Children.Add(strategies);
-        Button? templates = null;
-        templates = Ui.IconButton(MaterialIconKind.BookmarkMultipleOutline, "Chart templates: save appearance, colors and indicators and apply to other charts", () => _host.ShowChartTemplates(_chart, templates!));
-        right.Children.Add(templates);
+        right.Children.Add(Ui.IconButton(MaterialIconKind.PaletteOutline, "Chart settings: background, candle and axis colors…", () => _host.OpenChartSettings(_chart)));
+        right.Children.Add(screenshot);
+        right.Children.Add(fullScreen);
         foreach (var c in rightControls) right.Children.Add(c);
 
-        var bar = new DockPanel { Margin = new Thickness(12, 8), LastChildFill = true };
+        var bar = new DockPanel { Margin = new Thickness(10, 6), LastChildFill = true };
         DockPanel.SetDock(right, Dock.Right);
         bar.Children.Add(right);
         bar.Children.Add(left);
         return new Border { Child = bar }.Classes("toolbar");
+    }
+
+    /// <summary>How many indicators the chart has (on the button).</summary>
+    private void UpdateIndicatorCount()
+    {
+        int n = _chart?.Model?.Indicators.Count ?? 0;
+        string text = n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (_indicatorCount.Text == text) return;
+        _indicatorCount.Text = text;
+        _indicatorCount.Foreground = n > 0 ? Ui.Accent : Ui.Text2;
     }
 
     private void Hook()
@@ -375,6 +453,7 @@ internal sealed class ChartToolbar : UserControl
             // rango a medida (desde una fecha): muestra los días
             if (Math.Abs(near.Hours - hours) > hours * 0.05) _historyBox.ShowText(SpanText(hours));
         }
+        UpdateIndicatorCount();
         _syncing = false;
         _link.Refresh();
         _host.UpdateTitles(c);
@@ -385,6 +464,7 @@ internal sealed class ChartToolbar : UserControl
     {
         var model = _chart?.Model;
         if (model == null) return;
+        UpdateIndicatorCount();
         var data = model.Data;
         decimal change = 0;
         if (model.Series.Count > 0)
@@ -403,148 +483,6 @@ internal sealed class ChartToolbar : UserControl
             _clock.Text = model.Settings.BlindReplay ? model.Settings.ReplayElapsed(utc) :
                 TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), model.Settings.TimeZone).ToString("HH:mm:ss", TradingHub.Common.UiCulture.Current);
             ToolTip.SetTip(_clock, model.Settings.BlindReplay ? "Practice elapsed time" : model.Settings.TimeZone.Id + (data.Feed is TradingHub.Feeds.ReplayFeed ? " · replay clock" : " · local system clock"));
-        }
-    }
-}
-
-/// <summary>
-/// Barra de dibujos de cada gráfico (a la izquierda, como en ATAS): herramientas agrupadas; la flechita de
-/// abajo de un grupo abre sus variantes (líneas, posiciones…) y el botón queda con la última usada.
-/// </summary>
-internal sealed class DrawingToolStrip : UserControl
-{
-    private sealed class Group
-    {
-        public required ToggleButton Button;
-        public required DrawingKind?[] Kinds;
-        public DrawingKind? Current;
-    }
-
-    private static readonly Dictionary<DrawingKind, (MaterialIconKind Icon, string Name)> Info = new()
-    {
-        [DrawingKind.HorizontalLine] = (MaterialIconKind.Minus, "Horizontal line"),
-        [DrawingKind.HorizontalRay] = (MaterialIconKind.ArrowRightThin, "Horizontal ray"),
-        [DrawingKind.VerticalLine] = (MaterialIconKind.DragVertical, "Vertical line"),
-        [DrawingKind.TrendLine] = (MaterialIconKind.ChartLineVariant, "Trend line"),
-        [DrawingKind.Ray] = (MaterialIconKind.ArrowTopRightThin, "Ray"),
-        [DrawingKind.ExtendedLine] = (MaterialIconKind.ArrowExpandHorizontal, "Extended line"),
-        [DrawingKind.Rectangle] = (MaterialIconKind.RectangleOutline, "Rectangle / zone"),
-        [DrawingKind.FibRetracement] = (MaterialIconKind.FormatLineSpacing, "Fibonacci retracement"),
-        [DrawingKind.Ruler] = (MaterialIconKind.RulerSquare, "Ruler (measure)"),
-        [DrawingKind.LongPosition] = (MaterialIconKind.TrendingUp, "Long position (entry, stop, target)"),
-        [DrawingKind.ShortPosition] = (MaterialIconKind.TrendingDown, "Short position (entry, stop, target)"),
-        [DrawingKind.Text] = (MaterialIconKind.FormatText, "Text"),
-        [DrawingKind.AnchoredVwap] = (MaterialIconKind.Anchor, "Anchored VWAP with volume-weighted deviation"),
-        [DrawingKind.FixedRangeProfile] = (MaterialIconKind.ChartBar, "Fixed-range volume / delta profile"),
-    };
-
-    private readonly List<Group> _groups = new();
-
-    public DrawingToolStrip()
-    {
-        var panel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 1, Margin = new Thickness(3, 6) };
-        DrawingKind?[][] groups =
-        {
-            new DrawingKind?[] { null },
-            new DrawingKind?[] { DrawingKind.HorizontalLine, DrawingKind.HorizontalRay, DrawingKind.VerticalLine, DrawingKind.TrendLine, DrawingKind.Ray, DrawingKind.ExtendedLine },
-            new DrawingKind?[] { DrawingKind.Rectangle },
-            new DrawingKind?[] { DrawingKind.FibRetracement },
-            new DrawingKind?[] { DrawingKind.AnchoredVwap, DrawingKind.FixedRangeProfile },
-            new DrawingKind?[] { DrawingKind.LongPosition },
-            new DrawingKind?[] { DrawingKind.ShortPosition },
-            new DrawingKind?[] { DrawingKind.Ruler },
-            new DrawingKind?[] { DrawingKind.Text },
-        };
-        foreach (var kinds in groups)
-        {
-            var g = new Group { Button = new ToggleButton().Classes("tool"), Kinds = kinds, Current = kinds[0] };
-            UpdateButton(g);
-            g.Button.Click += (_, _) =>
-            {
-                Check(g.Current);
-                ToolSelected?.Invoke(g.Current);
-            };
-            _groups.Add(g);
-            panel.Children.Add(g.Button);
-            if (kinds.Length > 1)
-            {
-                var more = new Button { Content = Ui.Icon(MaterialIconKind.ChevronDown, 11, Ui.Text2) }.Classes("toolmore");
-                ToolTip.SetTip(more, "More tools in this group");
-                more.Click += (_, _) => ShowGroup(g, more);
-                panel.Children.Add(more);
-            }
-        }
-
-        panel.Children.Add(new Border { Height = 1, Margin = new Thickness(4, 6) }.Classes("divider"));
-        var clear = new Button { Content = Ui.Icon(MaterialIconKind.DeleteSweepOutline, 17) }.Classes("icon");
-        clear.Width = 30;
-        clear.Height = 28;
-        clear.MinHeight = 0;
-        ToolTip.SetTip(clear, "Delete all drawings for this instrument");
-        clear.Click += (_, _) => ClearRequested?.Invoke();
-        panel.Children.Add(clear);
-        _groups[0].Button.IsChecked = true;
-        Content = new Border
-        {
-            Child = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Hidden },
-            Background = Ui.Bg1,
-            BorderBrush = Ui.Line,
-            BorderThickness = new Thickness(0, 0, 1, 0),
-        };
-    }
-
-    public event Action<DrawingKind?>? ToolSelected;
-    public event Action? ClearRequested;
-
-    private static void UpdateButton(Group g)
-    {
-        if (g.Current is { } k)
-        {
-            g.Button.Content = Ui.Icon(Info[k].Icon, 17);
-            ToolTip.SetTip(g.Button, Info[k].Name);
-            Avalonia.Automation.AutomationProperties.SetName(g.Button, Info[k].Name);
-        }
-        else
-        {
-            g.Button.Content = Ui.Icon(MaterialIconKind.CursorDefaultOutline, 17);
-            ToolTip.SetTip(g.Button, "Cursor (Esc)");
-            Avalonia.Automation.AutomationProperties.SetName(g.Button, "Cursor (Esc)");
-        }
-    }
-
-    private void ShowGroup(Group g, Control anchor)
-    {
-        var menu = new MenuFlyout { Placement = PlacementMode.RightEdgeAlignedTop };
-        foreach (var k in g.Kinds.OfType<DrawingKind>())
-        {
-            var kind = k;
-            var item = new MenuItem { Header = Info[kind].Name, Icon = Ui.Icon(Info[kind].Icon, 16) };
-            item.Click += (_, _) =>
-            {
-                g.Current = kind;
-                UpdateButton(g);
-                Check(kind);
-                ToolSelected?.Invoke(kind);
-            };
-            menu.Items.Add(item);
-        }
-
-        menu.ShowAt(anchor);
-    }
-
-    /// <summary>Marca la herramienta activa (null = cursor); el grupo pasa a mostrarla.</summary>
-    public void Check(DrawingKind? kind)
-    {
-        foreach (var g in _groups)
-        {
-            bool has = g.Kinds.Contains(kind);
-            if (has && kind != null && !Equals(g.Current, kind))
-            {
-                g.Current = kind;
-                UpdateButton(g);
-            }
-
-            g.Button.IsChecked = has;
         }
     }
 }

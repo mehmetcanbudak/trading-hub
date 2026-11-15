@@ -6,21 +6,25 @@ Charts live in **Trading** (⌘1). Each has drawing tools on the left and its ow
 
 ## Chart toolbar
 
+The toolbar is one row of groups: instrument · periods and history · chart style and footprint controls · analysis.
+
 | Control | Action |
 |---|---|
 | Link color | Join a color group; see [Linked charts](#link-charts-by-color). |
 | Instrument (⌘K) | Symbol, price and session change; click to select another instrument. |
-| History | Choose how much history to load. |
-| Periods | Favorite periods and the full period selector. |
-| Footprint template / ticks per row | Available in footprint style. |
-| Chart style | Candles, Bars, Line, Heikin Ashi or Footprint. |
-| Indicators | Open indicator settings (⌘I). |
-| Tool icons | Footprint editor, chart settings, chart strategies and templates. |
+| Periods / History | Favorite periods, the full period selector (the arrow) and how much history to load. |
+| Chart style | Candles, Bars, Line, Heikin Ashi or Footprint; footprint adds its template and ticks-per-row controls. |
+| Indicators | Open indicator settings (⌘I); the badge shows how many indicators the chart has. |
+| ★ | Favorite indicators (one click adds one) and chart templates. In **Indicators**, right-click a library item → **Add to favorites**. |
+| View | Navigation, rectangle zoom, reset, clock/time zone and shortcuts; the clock follows it. |
+| ▶ | Practice replay. |
+| Robot / palette | Chart strategies and chart settings. |
+| Camera / full screen | Save a PNG of the chart (double resolution) in **Pictures/Trading Hub**; toggle full screen for the chart's window. |
 | Layout | Number and arrangement of charts in this tab. |
 | Panels | Show/hide the right panel, Chart Trader, DOM and tape; open DOM settings. |
 | Detach / **+** | Detach the chart (⇧⌘D) or create a tab (⌘T). |
 
-The toolbar wraps into two rows in narrower windows.
+In narrower windows the toolbar stays one row: button labels become icons; below about 1,380 pixels the pinned periods fold into the period selector, and the clock, toolbar link color, screenshot and full-screen buttons are hidden (each chart header keeps its own link control). Only an extremely narrow window wraps a whole group to a second row, never cutting buttons.
 
 ## Instrument and history
 
@@ -75,7 +79,7 @@ Footprint adds two controls:
 
 ### Footprint editor
 
-Open with ⇧⌘F, the column icon or **Right-click → Edit footprint**. Changes appear immediately.
+Open with ⇧⌘F, **Edit columns** in the footprint template selector or **Right-click → Edit footprint**. Changes appear immediately.
 
 1. Choose a starting template.
 2. Add left-to-right **Ladder**, **Profile**, **Cells**, **Spacer** or **Bar** columns. Arrows reorder and the trash button removes them.
@@ -91,14 +95,16 @@ Open with ⇧⌘F, the column icon or **Right-click → Edit footprint**. Change
 
 | Gesture | Result |
 |---|---|
-| Wheel | Horizontal zoom around the pointer. |
+| Wheel | Horizontal zoom around the pointer. With **Chart settings → Axes → Wheel zooms the whole chart** the price range zooms by the same proportion around the pointer, like an image (off by default). |
 | ⇧ + wheel / horizontal gesture | Pan through time. |
 | Wheel on price axis / ⌘ + wheel | Vertical zoom. |
+| + / − keys | Zoom around the chart center with the same rule as the wheel. |
+| ⇧ + drag on empty space | Measure like the ruler without saving a drawing; the next click clears it. |
 | Drag price axis / double-click | Change scale / restore automatic scale. |
 | Drag time axis / double-click | Change bar width / return to latest data. |
 | Lower-right return button | Appears after scrolling back; returns to latest data. |
 
-See [First steps](./primeros-pasos.md#keyboard-shortcuts) for keys. **Chart → Auto scale** is ⌥⌘A; **Latest price** is ⌘End.
+See [First steps](./primeros-pasos.md#keyboard-shortcuts) for keys. **Chart → Auto scale** is ⌥⌘A; **Latest price** is ⌘End. Zoom always stays inside the bar-width bounds; when the bar width reaches its limit, whole-chart zoom stops scaling price too.
 
 The selected deep-zoom path permits a minimum width of 0.1 pixel per candle. Dense rendering reduces visible candles into per-pixel OHLC/close-extrema geometry; the final visible candle supplies the deliberate color policy, not the aggregate bucket's net direction. This is rendering only: analytic bars, strategy inputs and stored history are not downsampled. Normal pointer-focal zoom, live-edge behavior and time panning remain in effect. The actual 50,000-candle scene passed in the unmerged fixture worktree; it does not certify every GPU/native host (see [dashboard](./TRANSLATION_STATUS.md#unmerged-non-kvp-adoption--2026-11-04)).
 
@@ -119,22 +125,32 @@ Charts in the same red, green, blue, yellow, purple or orange group can share in
 
 Open the palette icon or **Chart settings** from the context menu. Tabs cover background, candles, axes, price, footprint and trades. They also configure grid, bar data, last-price line, session boundaries and entry/exit line width/style. Each color has a palette, code and opacity; changed colors are marked. **Reset all** restores defaults; **Apply to all charts** copies the appearance.
 
-The context menu controls the **Chart legend**—instrument, OHLC and indicator names—and **Mark my trades**, showing fill triangles and entry-to-exit lines, including previous days.
+The context menu controls the **Chart legend**—instrument, OHLC and indicator names—and **Mark my trades**, showing fill triangles and entry-to-exit lines, including previous days. Only one chart context menu is open at a time: another right-click closes the previous menu first, so an older menu's order prices cannot stay on screen.
 
 ## Drawings
 
-Tools include cursor (Esc), horizontal line/ray, vertical line, trend line, ray, extended line, rectangle/zone, Fibonacci retracement, long/short position, ruler and text. Group arrows reveal variants. **The final tool deletes all instrument drawings without confirmation.**
+The drawing bar on the left groups the tools: cursor (Esc); trend line, ray, extended line, horizontal line/ray, vertical line and cross line; rectangle/zone and ellipse; Fibonacci retracement; brush, highlighter and path; arrow; anchored VWAP and fixed-range profile; long position, short position and ruler; text. The small arrow to the right of a button (or a right-click on it) opens its group; the button keeps the last tool used.
 
-- Hold ⇧ to snap a point to a bar's high, low, open or close.
-- Drawings are shared by charts of the same instrument and saved automatically.
+- **Double-click** a tool to keep it active after each drawing (a dot marks it; Esc releases it). **Keep drawing** keeps every tool active.
+- **Magnet:** weak snaps a point to the bar's high, low, open or close when the pointer is within about 14 pixels; strong always snaps; the arrow chooses the mode. Holding ⇧ always snaps.
+- **Lock all** keeps drawings selectable but unmovable; **Hide all** hides them while they stay saved and their alerts keep running. Both are saved per chart. The eye's arrow also hides the indicators.
+- **Delete** removes the selected drawing (Delete key); its arrow can delete all drawings of the instrument **without confirmation**. The star groups favorite tools together on the bar.
+- A selected drawing shows a floating bar with color, width, line style, lock, quick price alert (horizontal lines, rays and cross lines), settings and delete. The bar can wait for a click instead of appearing right after drawing.
+- **Path:** one click per point; double-click, a click on the previous point or Enter finishes; Esc keeps the points already placed. **Brush** and **highlighter** draw freehand and move as a whole.
+- Shortcuts: ⌥H horizontal line, ⌥J horizontal ray, ⌥V vertical line, ⌥C cross line, ⌥F Fibonacci, ⌥⇧R rectangle, ⌥B brush, ⌥N text and ⌥⇧T trend line (⌥T keeps showing/hiding the Chart Trader). All are editable in Settings → Keyboard shortcuts.
+- Drawings are shared by charts of the same instrument and saved automatically. New drawing kinds are stored with new numbers, so older drawing files read unchanged.
 - Double-click to edit color, width/style, fill, text, extensions, Fibonacci levels, exact prices, visibility, period restriction and locking. Save the style as the default, duplicate or delete the drawing.
 - Long/short position tools start with a 1:2 risk/reward stop and target. Entering quantity adds monetary estimates and marks target/stop touches. If both are touched in a bar, the conservative stop outcome is used.
+
+**Draw with a gesture** (off by default; the gesture button on the drawing bar turns it on, and holding that button shows the guide): hold the mouse button still on empty chart space until the ring fills (about a third of a second), then trace a shape without releasing. A horizontal or vertical stroke makes that line, a diagonal a trend line (a ray when it reaches the right edge), a loop an ellipse, a box a rectangle, a stroke with a hook an arrow, a Z a Fibonacci retracement between the first and last strokes, and any other shape a path. A scribble over drawings erases the ones it crosses, except locked ones; the chip that appears offers **Undo**. After a shape, the chip switches the same stroke to related kinds or deletes it. Moving before the ring fills pans the chart as usual; Esc cancels a stroke.
+
+Order lines, stop/target handles and buttons, the legend, indicators and existing drawings always take the press first: a gesture can only start on empty chart space, never changes orders and is cancelled by a right-click, lost focus or any confirmation dialog.
 
 The extended position drawing can size from account risk using instrument point value, allowed quantity step, account/risk denomination and explicit estimated fees. Zero stop distance, insufficient risk or incompatible/unknown currency conversion produces no false tradable quantity. Monetary calculations support zero/negative prices where meaningful; percentage-of-entry labels are omitted when the entry is nonpositive. This is a sizing estimate, not an order, an FX service or a guarantee of executable liquidity.
 
 **Anchored VWAP** and **Fixed-range volume / delta profile** use available trade/provenance inputs. Range endpoints are inclusive UTC instants; the profile uses bounded sparse decimal rows rather than an array spanning every possible price tick. POC/value-area and raw volume totals are separate from display scaling. Corrections, source/provider, period, row size and resolution invalidate results. Shared drawing parameters do not share mutable calculator/geometry state between charts; clones calculate independently. Volume-bar split fractions are consumed once, including repeated forming-bar updates. CPU calculation is retained; no GPU prerequisite or unmeasured Metal claim applies.
 
-**Price alerts:** right-click a price to create a dotted horizontal alert. Horizontal lines/rays can also enable **Alert when price touches**. Crossing triggers the optional alert sound and a status message, then disables the alert.
+**Price alerts:** right-click a price to create a dotted horizontal alert. Horizontal lines/rays and cross lines can also enable **Alert when price touches**. Crossing triggers the optional alert sound and a status message, then disables the alert.
 
 The title-bar bell or **Go → Alerts / delivery status** opens unified local price, indicator, strategy, risk and execution notifications. External webhook/Telegram destinations require explicit consent and secret-store configuration; local notification delivery does not depend on external success. Practice notifications do not egress. See [Alert delivery](./ajustes.md#local-and-external-alerts) for pending/retry/revoke semantics.
 
@@ -142,7 +158,7 @@ The title-bar bell or **Go → Alerts / delivery status** opens unified local pr
 
 The **Indicators** window (⌘I) has three columns:
 
-1. **Library:** search, then double-click or **Add to chart**.
+1. **Library:** search, then double-click or **Add to chart**. Right-click an item → **Add to favorites** to star it; the toolbar ★ adds favorites with one click.
 2. **On chart:** show/hide, move between the price panel and a separate panel, or remove.
 3. **Settings:** indicator properties and templates—save, apply and choose defaults for newly added instances.
 
@@ -152,7 +168,7 @@ Custom C# indicators use **Code → Indicator editor** (⇧⌘E) or the library'
 
 ## Chart templates
 
-The bookmark icon or context menu lets you:
+The toolbar star or the context menu lets you:
 
 - save this chart's style, footprint, colors, visibility and indicators—**not** instrument or period;
 - apply a saved template;

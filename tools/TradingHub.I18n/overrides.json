@@ -13594,5 +13594,429 @@
   "Kept ownership context {0}: {1}": {
     "es": "Se conservó el contexto de propiedad {0}: {1}",
     "zh-CN": "已保留所有权上下文 {0}：{1}"
+  },
+  "A Z → Fibonacci retracement (between the first and last strokes)": {
+    "es": "Una Z → retroceso de Fibonacci (entre el primer y el último trazo)",
+    "zh-CN": "Z 形 → 斐波那契回撤（位于第一笔和最后一笔之间）"
+  },
+  "A box → rectangle": {
+    "es": "Una caja → rectángulo",
+    "zh-CN": "方框 → 矩形"
+  },
+  "A loop → ellipse": {
+    "es": "Un lazo → elipse",
+    "zh-CN": "圈形 → 椭圆"
+  },
+  "A scribble over drawings → erases the drawings it touches": {
+    "es": "Un garabato sobre los dibujos → borra los dibujos que toca",
+    "zh-CN": "在绘图上乱涂 → 擦除所触及的绘图"
+  },
+  "A stroke with a small hook at the end → arrow": {
+    "es": "Un trazo con un pequeño gancho al final → flecha",
+    "zh-CN": "末端带小钩的笔画 → 箭头"
+  },
+  "Add to favorites (the chart toolbar star)": {
+    "es": "Agregar a favoritos (la estrella de la barra del gráfico)",
+    "zh-CN": "加入收藏（图表工具栏的星标）"
+  },
+  "Alt+B": {
+    "es": "Alt+B",
+    "zh-CN": "Alt+B"
+  },
+  "Alt+C": {
+    "es": "Alt+C",
+    "zh-CN": "Alt+C"
+  },
+  "Alt+F": {
+    "es": "Alt+F",
+    "zh-CN": "Alt+F"
+  },
+  "Alt+J": {
+    "es": "Alt+J",
+    "zh-CN": "Alt+J"
+  },
+  "Alt+N": {
+    "es": "Alt+N",
+    "zh-CN": "Alt+N"
+  },
+  "Alt+Shift+R": {
+    "es": "Alt+Shift+R",
+    "zh-CN": "Alt+Shift+R"
+  },
+  "Alt+Shift+T": {
+    "es": "Alt+Shift+T",
+    "zh-CN": "Alt+Shift+T"
+  },
+  "Alt+V": {
+    "es": "Alt+V",
+    "zh-CN": "Alt+V"
+  },
+  "Any other shape → path": {
+    "es": "Cualquier otra forma → trayectoria",
+    "zh-CN": "其他任意形状 → 路径"
+  },
+  "Arrow": {
+    "es": "Flecha",
+    "zh-CN": "箭头"
+  },
+  "Brush": {
+    "es": "Pincel",
+    "zh-CN": "画笔"
+  },
+  "Brush (freehand)": {
+    "es": "Pincel (a mano alzada)",
+    "zh-CN": "画笔（手绘）"
+  },
+  "Chart indicators and library (the number: how many this chart has)": {
+    "es": "Indicadores del gráfico y biblioteca (el número: cuántos tiene este gráfico)",
+    "zh-CN": "图表指标与指标库（数字：此图表上的指标数量）"
+  },
+  "Chart screenshot (PNG in Pictures)": {
+    "es": "Captura del gráfico (PNG en Imágenes)",
+    "zh-CN": "图表截图（PNG，保存到“图片”）"
+  },
+  "Choose favorites": {
+    "es": "Elegir favoritas",
+    "zh-CN": "选择收藏"
+  },
+  "Could not save the screenshot: {0}": {
+    "es": "No se pudo guardar la captura: {0}",
+    "zh-CN": "无法保存截图：{0}"
+  },
+  "Cross line": {
+    "es": "Línea cruzada",
+    "zh-CN": "十字线"
+  },
+  "Delete all": {
+    "es": "Borrar todos",
+    "zh-CN": "全部删除"
+  },
+  "Delete drawing (Delete key)": {
+    "es": "Borrar dibujo (tecla Suprimir)",
+    "zh-CN": "删除绘图（Delete 键）"
+  },
+  "Delete it": {
+    "es": "Borrarlo",
+    "zh-CN": "删除它"
+  },
+  "Delete the selected drawing": {
+    "es": "Borrar el dibujo seleccionado",
+    "zh-CN": "删除所选绘图"
+  },
+  "Delete the selected drawing (Delete key); the arrow: delete all": {
+    "es": "Borrar el dibujo seleccionado (tecla Suprimir); la flecha: borrar todos",
+    "zh-CN": "删除所选绘图（Delete 键）；箭头：全部删除"
+  },
+  "Diagonal → trend line (to the right edge: ray)": {
+    "es": "Diagonal → línea de tendencia (hasta el borde derecho: rayo)",
+    "zh-CN": "斜线 → 趋势线（延伸到右边缘：射线）"
+  },
+  "Double-click: keep it active": {
+    "es": "Doble clic: mantenerla activa",
+    "zh-CN": "双击：保持激活"
+  },
+  "Draw Fibonacci retracement": {
+    "es": "Dibujar retroceso de Fibonacci",
+    "zh-CN": "绘制斐波那契回撤"
+  },
+  "Draw cross line": {
+    "es": "Dibujar línea cruzada",
+    "zh-CN": "绘制十字线"
+  },
+  "Draw horizontal ray": {
+    "es": "Dibujar rayo horizontal",
+    "zh-CN": "绘制水平射线"
+  },
+  "Draw rectangle": {
+    "es": "Dibujar rectángulo",
+    "zh-CN": "绘制矩形"
+  },
+  "Draw trend line": {
+    "es": "Dibujar línea de tendencia",
+    "zh-CN": "绘制趋势线"
+  },
+  "Draw vertical line": {
+    "es": "Dibujar línea vertical",
+    "zh-CN": "绘制垂直线"
+  },
+  "Draw with a gesture": {
+    "es": "Dibujar con un gesto",
+    "zh-CN": "手势绘图"
+  },
+  "Draw with a gesture: hold still on empty chart space, then trace the shape": {
+    "es": "Dibujar con un gesto: mantené apretado sin moverte sobre un espacio vacío del gráfico y trazá la forma",
+    "zh-CN": "手势绘图：在图表空白处按住不动，然后描绘形状"
+  },
+  "Draw with a gesture: hold still on the chart until the ring fills, then trace the shape · hold this button to see the gestures": {
+    "es": "Dibujar con un gesto: mantené apretado sin moverte sobre el gráfico hasta que se llene el anillo y trazá la forma · mantené apretado este botón para ver los gestos",
+    "zh-CN": "手势绘图：在图表上按住不动直到圆环填满，然后描绘形状 · 按住此按钮可查看手势"
+  },
+  "Draw with the brush": {
+    "es": "Dibujar con el pincel",
+    "zh-CN": "用画笔绘制"
+  },
+  "Drawing settings (also double-click)": {
+    "es": "Configuración del dibujo (también con doble clic)",
+    "zh-CN": "绘图设置（也可双击）"
+  },
+  "Drawings hidden (still saved)": {
+    "es": "Dibujos ocultos (siguen guardados)",
+    "zh-CN": "绘图已隐藏（仍会保存）"
+  },
+  "Drawings locked: they can be selected but not moved": {
+    "es": "Dibujos bloqueados: se pueden seleccionar, pero no mover",
+    "zh-CN": "绘图已锁定：可以选择但不能移动"
+  },
+  "Drawings shown": {
+    "es": "Dibujos visibles",
+    "zh-CN": "绘图已显示"
+  },
+  "Drawings unlocked": {
+    "es": "Dibujos desbloqueados",
+    "zh-CN": "绘图已解锁"
+  },
+  "Ellipse": {
+    "es": "Elipse",
+    "zh-CN": "椭圆"
+  },
+  "Erased one drawing": {
+    "es": "Se borró un dibujo",
+    "zh-CN": "已擦除一个绘图"
+  },
+  "Erased {0} drawings": {
+    "es": "Se borraron {0} dibujos",
+    "zh-CN": "已擦除 {0} 个绘图"
+  },
+  "Favorite drawing tools": {
+    "es": "Herramientas de dibujo favoritas",
+    "zh-CN": "收藏的绘图工具"
+  },
+  "Favorite indicators": {
+    "es": "Indicadores favoritos",
+    "zh-CN": "收藏的指标"
+  },
+  "Favorite indicators and chart templates": {
+    "es": "Indicadores favoritos y plantillas de gráfico",
+    "zh-CN": "收藏的指标和图表模板"
+  },
+  "Favorite indicators and chart templates (in Indicators, right-click → Add to favorites)": {
+    "es": "Indicadores favoritos y plantillas de gráfico (en Indicadores, clic derecho → Agregar a favoritos)",
+    "zh-CN": "收藏的指标和图表模板（在“指标”中右键 → 加入收藏）"
+  },
+  "Favorite tools": {
+    "es": "Herramientas favoritas",
+    "zh-CN": "收藏的工具"
+  },
+  "Full screen": {
+    "es": "Pantalla completa",
+    "zh-CN": "全屏"
+  },
+  "Gesture drawing off": {
+    "es": "Dibujar con un gesto, apagado",
+    "zh-CN": "手势绘图已关闭"
+  },
+  "Gestures": {
+    "es": "Gestos",
+    "zh-CN": "手势"
+  },
+  "Gray": {
+    "es": "Gris",
+    "zh-CN": "灰色"
+  },
+  "Hide all": {
+    "es": "Ocultar todo",
+    "zh-CN": "全部隐藏"
+  },
+  "Hide all drawings (they stay saved and their alerts keep running); the arrow: hide indicators": {
+    "es": "Ocultar todos los dibujos (siguen guardados y sus alertas siguen activas); la flecha: ocultar los indicadores",
+    "zh-CN": "隐藏所有绘图（仍会保存，其提醒继续运行）；箭头：隐藏指标"
+  },
+  "Hide drawings": {
+    "es": "Ocultar los dibujos",
+    "zh-CN": "隐藏绘图"
+  },
+  "Hide drawings or indicators": {
+    "es": "Ocultar dibujos o indicadores",
+    "zh-CN": "隐藏绘图或指标"
+  },
+  "Hide indicators": {
+    "es": "Ocultar los indicadores",
+    "zh-CN": "隐藏指标"
+  },
+  "Highlighter": {
+    "es": "Resaltador",
+    "zh-CN": "荧光笔"
+  },
+  "Hold the mouse button still on empty chart space until the ring fills. Without releasing, trace the shape:": {
+    "es": "Mantené apretado el botón del mouse sin moverlo sobre un espacio vacío del gráfico hasta que se llene el anillo. Sin soltar, trazá la forma:",
+    "zh-CN": "在图表空白处按住鼠标键不动，直到圆环填满。不要松开，描绘出形状："
+  },
+  "Horizontal stroke → horizontal line": {
+    "es": "Trazo horizontal → línea horizontal",
+    "zh-CN": "水平笔画 → 水平线"
+  },
+  "Indicator library…": {
+    "es": "Biblioteca de indicadores…",
+    "zh-CN": "指标库…"
+  },
+  "Indicators hidden (the drawing bar eye shows them again)": {
+    "es": "Indicadores ocultos (el ojo de la barra de dibujos los vuelve a mostrar)",
+    "zh-CN": "指标已隐藏（绘图栏上的眼睛图标可重新显示）"
+  },
+  "Indicators shown": {
+    "es": "Indicadores visibles",
+    "zh-CN": "指标已显示"
+  },
+  "Keep drawing: the tool stays active after each drawing (Esc releases it; double-click a tool to keep only that one)": {
+    "es": "Seguir dibujando: la herramienta queda activa después de cada dibujo (Esc la suelta; doble clic en una herramienta mantiene solo esa)",
+    "zh-CN": "连续绘图：每次绘图后工具保持激活（Esc 释放；双击某个工具仅保持该工具）"
+  },
+  "Kept: stays active after each drawing (Esc releases it)": {
+    "es": "Fija: sigue activa después de cada dibujo (Esc la suelta)",
+    "zh-CN": "已固定：每次绘图后保持激活（Esc 释放）"
+  },
+  "Line width": {
+    "es": "Grosor de la línea",
+    "zh-CN": "线宽"
+  },
+  "Lock all drawings (they can be selected but not moved)": {
+    "es": "Bloquear todos los dibujos (se pueden seleccionar, pero no mover)",
+    "zh-CN": "锁定所有绘图（可以选择但不能移动）"
+  },
+  "Magnet": {
+    "es": "Imán",
+    "zh-CN": "磁吸"
+  },
+  "Magnet off": {
+    "es": "Imán apagado",
+    "zh-CN": "磁吸已关闭"
+  },
+  "Magnet off (Shift turns it on while held)": {
+    "es": "Imán apagado (Shift lo activa mientras lo mantenés apretado)",
+    "zh-CN": "磁吸已关闭（按住 Shift 时临时开启）"
+  },
+  "No magnet": {
+    "es": "Sin imán",
+    "zh-CN": "无磁吸"
+  },
+  "None yet: choose them below and they appear together on the bar": {
+    "es": "Todavía no hay: elegilas abajo y aparecen juntas en la barra",
+    "zh-CN": "暂无：在下方选择后会集中显示在工具栏上"
+  },
+  "None yet: in Indicators, right-click a library item → Add to favorites": {
+    "es": "Todavía no hay: en Indicadores, clic derecho en un elemento de la biblioteca → Agregar a favoritos",
+    "zh-CN": "暂无：在“指标”中右键点击指标库条目 → 加入收藏"
+  },
+  "Order lines, stop/target handles and the Chart Trader always take the click first; a gesture only starts on empty chart space. When you release, a chip lets you switch the drawing type (line to ray, rectangle to ellipse…) or delete it. With the magnet, points snap to bars. Esc cancels the stroke.": {
+    "es": "Las líneas de órdenes, los manejadores de stop/objetivo y el Chart Trader siempre toman el clic primero; un gesto solo empieza en un espacio vacío del gráfico. Al soltar, una barrita permite cambiar el tipo de dibujo (de línea a rayo, de rectángulo a elipse…) o borrarlo. Con el imán, los puntos se pegan a las velas. Esc cancela el trazo.",
+    "zh-CN": "订单线、止损/目标手柄和 Chart Trader 始终优先响应点击；手势只会在图表空白处开始。松开后会出现一个小工具条，可切换绘图类型（线改为射线、矩形改为椭圆…）或删除。启用磁吸时，点会吸附到K线。Esc 取消笔画。"
+  },
+  "Path (one click per point; double-click or Enter finishes)": {
+    "es": "Trayectoria (un clic por punto; doble clic o Enter termina)",
+    "zh-CN": "路径（每个点单击一次；双击或回车结束）"
+  },
+  "Pink": {
+    "es": "Rosa",
+    "zh-CN": "粉色"
+  },
+  "Practice replay": {
+    "es": "Replay de práctica",
+    "zh-CN": "练习回放"
+  },
+  "Restore what the scribble erased": {
+    "es": "Restaurar lo que borró el garabato",
+    "zh-CN": "恢复被乱涂擦除的内容"
+  },
+  "Ruler (measure; also Shift + drag)": {
+    "es": "Regla (medir; también Shift + arrastrar)",
+    "zh-CN": "标尺（测量；也可 Shift + 拖动）"
+  },
+  "Same stroke, another drawing type": {
+    "es": "Mismo trazo, otro tipo de dibujo",
+    "zh-CN": "相同笔画，换一种绘图类型"
+  },
+  "Screenshot saved: {0}": {
+    "es": "Captura guardada: {0}",
+    "zh-CN": "截图已保存：{0}"
+  },
+  "Select a drawing to delete it (or use the arrow to delete all)": {
+    "es": "Seleccioná un dibujo para borrarlo (o usá la flecha para borrar todos)",
+    "zh-CN": "选择一个绘图以删除（或使用箭头全部删除）"
+  },
+  "Show all": {
+    "es": "Mostrar todo",
+    "zh-CN": "全部显示"
+  },
+  "Show the drawing bar (color, width…) as soon as a drawing is finished": {
+    "es": "Mostrar la barra del dibujo (color, grosor…) apenas se termina un dibujo",
+    "zh-CN": "绘图完成后立即显示绘图工具条（颜色、线宽…）"
+  },
+  "Show the gestures…": {
+    "es": "Ver los gestos…",
+    "zh-CN": "查看手势…"
+  },
+  "Sky": {
+    "es": "Celeste",
+    "zh-CN": "天蓝"
+  },
+  "Strong magnet (always)": {
+    "es": "Imán fuerte (siempre)",
+    "zh-CN": "强磁吸（始终）"
+  },
+  "Strong magnet on": {
+    "es": "Imán fuerte activado",
+    "zh-CN": "强磁吸已开启"
+  },
+  "Strong magnet: points always snap to the bar's high, low, open or close": {
+    "es": "Imán fuerte: los puntos siempre se pegan al máximo, mínimo, apertura o cierre de la vela",
+    "zh-CN": "强磁吸：点始终吸附到K线的最高价、最低价、开盘价或收盘价"
+  },
+  "Switch to:": {
+    "es": "Cambiar a:",
+    "zh-CN": "切换为："
+  },
+  "The scribble touched no drawing": {
+    "es": "El garabato no tocó ningún dibujo",
+    "zh-CN": "乱涂没有触及任何绘图"
+  },
+  "Undo": {
+    "es": "Deshacer",
+    "zh-CN": "撤销"
+  },
+  "Unlock (can be moved)": {
+    "es": "Desbloquear (se puede mover)",
+    "zh-CN": "解锁（可移动）"
+  },
+  "Vertical stroke → vertical line": {
+    "es": "Trazo vertical → línea vertical",
+    "zh-CN": "垂直笔画 → 垂直线"
+  },
+  "Weak magnet (when the pointer is close)": {
+    "es": "Imán débil (cuando el puntero está cerca)",
+    "zh-CN": "弱磁吸（指针靠近时）"
+  },
+  "Weak magnet on": {
+    "es": "Imán débil activado",
+    "zh-CN": "弱磁吸已开启"
+  },
+  "Weak magnet: points snap to the bar's high, low, open or close when the pointer is close": {
+    "es": "Imán débil: los puntos se pegan al máximo, mínimo, apertura o cierre de la vela cuando el puntero está cerca",
+    "zh-CN": "弱磁吸：指针靠近时，点吸附到K线的最高价、最低价、开盘价或收盘价"
+  },
+  "Weak or strong magnet": {
+    "es": "Imán débil o fuerte",
+    "zh-CN": "弱磁吸或强磁吸"
+  },
+  "Wheel zooms the whole chart (price and time together, like an image)": {
+    "es": "La rueda acerca el gráfico entero (precio y tiempo a la vez, como una imagen)",
+    "zh-CN": "滚轮缩放整个图表（价格和时间同时缩放，如同图片）"
+  },
+  "Write a text": {
+    "es": "Escribir un texto",
+    "zh-CN": "输入文本"
+  },
+  "{0} stays active after each drawing (Esc releases it)": {
+    "es": "{0} queda activa después de cada dibujo (Esc la suelta)",
+    "zh-CN": "{0} 在每次绘图后保持激活（Esc 释放）"
   }
 }

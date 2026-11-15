@@ -168,12 +168,36 @@ public sealed class IndicatorsWindow : Window
                     row.Children.Add(badge);
                 }
 
+                // favorites carry a star (the chart toolbar star adds them with one click)
+                bool favorite = _svc.Settings.FavoriteIndicators.Contains(i.Type.FullName!);
+                if (favorite)
+                {
+                    var star = Ui.Icon(MaterialIconKind.Star, 13, Ui.Accent);
+                    star.Margin = new Thickness(0, 0, 6, 0);
+                    star.VerticalAlignment = VerticalAlignment.Center;
+                    DockPanel.SetDock(star, Dock.Left);
+                    row.Children.Add(star);
+                }
+
                 row.Children.Add(new TextBlock { Text = i.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
                 var item = new ListBoxItem { Content = row, Tag = i };
                 if (!string.IsNullOrWhiteSpace(i.Description)) ToolTip.SetTip(item, i.Description);
+                var info = i;
+                var toggle = new MenuItem { Header = favorite ? "Remove from favorites" : "Add to favorites (the chart toolbar star)", Icon = Ui.Icon(favorite ? MaterialIconKind.StarOffOutline : MaterialIconKind.StarOutline, 16) };
+                toggle.Click += (_, _) => ToggleFavorite(info);
+                item.ContextMenu = new ContextMenu { ItemsSource = new List<Control> { toggle } };
                 _available.Items.Add(item);
             }
         }
+    }
+
+    /// <summary>Adds or removes a library indicator from the favorites the chart toolbar star offers.</summary>
+    private void ToggleFavorite(IndicatorInfo info)
+    {
+        var list = _svc.Settings.FavoriteIndicators;
+        if (!list.Remove(info.Type.FullName!)) list.Add(info.Type.FullName!);
+        _svc.Settings.Save();
+        FillAvailable();
     }
 
     private void FillOnChart()

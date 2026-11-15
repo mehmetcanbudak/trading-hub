@@ -29,7 +29,7 @@ public enum InputModifiers
 /// Interacción con el gráfico (independiente de la UI): desplazar, hacer zoom, escalar ejes,
 /// dibujar y mover objetos, y reenviar el mouse a los indicadores.
 /// </summary>
-public sealed class ChartController
+public sealed partial class ChartController
 {
     private enum DragMode
     {
@@ -43,6 +43,9 @@ public sealed class ChartController
         MoveOrder,
         Bracket,
         RectangleZoom,
+        Freehand,
+        Ink,
+        Measure,
     }
 
     private readonly ChartModel _model;
@@ -112,8 +115,10 @@ public sealed class ChartController
 
     public void CancelInteraction()
     {
-        if ((_drag == DragMode.CreateDrawing || _pendingSecondClick) && _active != null) _model.Drawings.Remove(_active);
+        if ((_drag is DragMode.CreateDrawing or DragMode.Freehand || _pendingSecondClick) && _active != null) _model.Drawings.Remove(_active);
         if (_drag == DragMode.MoveDrawing && _active != null && _startPoints != null) _active.Points = _startPoints;
+        ResetInk();
+        if (_drag == DragMode.Measure) _state.Measure = null;
         _drag = DragMode.None;
         _dragOrder = null;
         _active = null;
@@ -220,6 +225,13 @@ public sealed class ChartController
         _downY = _lastY = y;
         _state.MouseX = x;
         _state.MouseY = y;
+        ResetInk();
+        // a Shift + drag measurement stays until the next click
+        if (_state.Measure != null)
+        {
+            _state.Measure = null;
+            _model.Invalidate();
+        }
 
         // eje de precios
         if (button == PointerButton.Left && l.PriceAxis.Contains(x, y))
@@ -334,6 +346,12 @@ public sealed class ChartController
 
         if (button == PointerButton.Left && ActiveTool is { } tool && l.Main.Rect.Contains(x, y))
         {
+            if (tool is DrawingKind.Brush or DrawingKind.Highlighter)
+            {
+                StartFreehand(l, tool, x, y);
+                return;
+            }
+
             var pt = PointAt(x, y, mods);
             _active = new ChartDrawing { Kind = tool, Points = { pt }, Color = _model.Theme.DrawingDefault };
             if (DrawingDefaults?.Invoke(tool) is { } template) _active.CopyStyleFrom(template);
@@ -369,12 +387,13 @@ public sealed class ChartController
         if (button == PointerButton.Left)
         {
             // ¿tocó un objeto dibujado?
-            for (int i = _model.Drawings.Count - 1; i >= 0; i--)
+            for (int i = _model.Settings.HideDrawings ? -1 : _model.Drawings.Count - 1; i >= 0; i--)
             {
                 var d = _model.Drawings[i];
                 if (!d.HitTest(l, _model.Series, _state.FindDrawingRuntime(d), x, y, out int handle)) continue;
                 foreach (var o in _model.Drawings) o.Selected = false;
                 d.Selected = true;
+                DrawingSelected?.Invoke(d);
                 if (clicks == 2) // un triple clic no abre dos paneles
                 {
                     DrawingDoubleClicked?.Invoke(d);
@@ -382,7 +401,7 @@ public sealed class ChartController
                     return;
                 }
 
-                if (!d.Locked)
+                if (!d.Locked && !_model.Settings.LockDrawings)
                 {
                     _active = d;
                     _activeHandle = handle;
@@ -405,10 +424,24 @@ public sealed class ChartController
                 return;
             }
 
+            // Shift + drag measures like the ruler without saving anything
+            if ((mods & InputModifiers.Shift) != 0 && ActiveTool == null && l.Main.Rect.Contains(x, y))
+            {
+                var m0 = PointAt(x, y, InputModifiers.None);
+                _state.Measure = new ChartDrawing { Kind = DrawingKind.Ruler, Points = { m0, m0 } };
+                _drag = DragMode.Measure;
+                _model.Invalidate();
+                return;
+            }
+
             _drag = DragMode.Pan;
             _startScroll = _model.Viewport.ScrollBars;
             _startTop = l.Main.Top;
             _startBottom = l.Main.Bottom;
+            _startAuto = _model.Viewport.AutoScale;
+            // Holding still on empty chart space may become a gesture drawing. This is the last branch of MouseDown:
+            // order lines, stop/target handles, legend, indicators and drawings have all declined the press already.
+            ArmInk(l, x, y, clicks);
         }
     }
 
@@ -419,9 +452,20 @@ public sealed class ChartController
         _state.MouseY = y;
         if (l == null) return;
         var vp = _model.Viewport;
+        // moving beyond the slop while holding is a chart drag, never a gesture
+        if (_inkCandidate && (Math.Abs(x - _downX) > InkRecognizer.HoldSlop || Math.Abs(y - _downY) > InkRecognizer.HoldSlop)) DisarmInk();
 
         switch (_drag)
         {
+            case DragMode.Ink:
+                InkMove(x, y);
+                break;
+            case DragMode.Freehand when _active != null:
+                FreehandMove(l, x, y);
+                break;
+            case DragMode.Measure when _state.Measure is { } measure:
+                measure.Points[1] = PointAt(x, y, InputModifiers.None);
+                break;
             case DragMode.RectangleZoom when _zoomLayout is { } zoom:
             {
                 float endX = Math.Clamp(x, zoom.Main.Rect.Left, zoom.Main.Rect.Right);
@@ -519,6 +563,28 @@ public sealed class ChartController
 
     public void MouseUp(float x, float y, PointerButton button, InputModifiers mods)
     {
+        if (_drag == DragMode.Ink)
+        {
+            CommitInk(x, y);
+            return;
+        }
+
+        DisarmInk();
+        if (_drag == DragMode.Freehand)
+        {
+            FinishFreehand();
+            return;
+        }
+
+        if (_drag == DragMode.Measure)
+        {
+            _drag = DragMode.None;
+            // a Shift + click without dragging leaves nothing
+            if (Math.Abs(x - _downX) < 3 && Math.Abs(y - _downY) < 3) _state.Measure = null;
+            _model.Invalidate();
+            return;
+        }
+
         if (_drag == DragMode.RectangleZoom)
         {
             MouseMove(x, y, mods);
@@ -541,6 +607,16 @@ public sealed class ChartController
             {
                 _drag = DragMode.None;
                 _pendingSecondClick = true;
+                return;
+            }
+
+            // path: the first leg may be dragged and the path continues with clicks (double-click finishes)
+            if (_active.Kind == DrawingKind.Path)
+            {
+                _active.Points.Add(_active.Points[^1]);
+                _drag = DragMode.None;
+                _pendingSecondClick = true;
+                _model.Invalidate();
                 return;
             }
 
@@ -586,12 +662,34 @@ public sealed class ChartController
         _model.Invalidate();
     }
 
-    /// <summary>Segundo clic de una herramienta de dos puntos (modo clic-clic).</summary>
-    public bool TryCompletePending(float x, float y, InputModifiers mods)
+    /// <summary>Second click of a two-point tool (click-click mode); on a path, one more point (a double-click finishes).</summary>
+    public bool TryCompletePending(float x, float y, InputModifiers mods, int clicks = 1)
     {
         if (!_pendingSecondClick || _active == null) return false;
         if (L is not { } layout || !layout.Main.Rect.Contains(x, y)) return false;
-        _active.Points[^1] = PointAt(x, y, mods);
+        var p = PointAt(x, y, mods);
+        _active.Points[^1] = p;
+        if (_active.Kind == DrawingKind.Path)
+        {
+            // a click on the previous point (or the second click of a double-click) finishes
+            bool onPrevious = false;
+            if (_active.Points.Count >= 2)
+            {
+                var prev = _active.Points[^2];
+                onPrevious = Math.Abs(ChartDrawing.XOf(layout, _model.Series, prev.Time) - x) < 5 && Math.Abs(layout.Main.Y(prev.Price) - y) < 5;
+            }
+
+            if (clicks < 2 && !onPrevious)
+            {
+                _active.Points.Add(p);
+                _model.Invalidate();
+                return true;
+            }
+
+            FinishPath();
+            return true;
+        }
+
         _pendingSecondClick = false;
         FinishDrawing();
         _active = null;
@@ -609,7 +707,7 @@ public sealed class ChartController
     private void FinishDrawing()
     {
         _drag = DragMode.None;
-        if (!StickyTool) ActiveTool = null;
+        if (!StickyTool && (KeepTool == null || KeepTool != ActiveTool)) ActiveTool = null;
         ToolFinished?.Invoke();
         DrawingsChanged?.Invoke();
     }
@@ -641,19 +739,8 @@ public sealed class ChartController
             return;
         }
 
-        // zoom horizontal alrededor del mouse
-        double before = l.BarAtExact(x);
-        double newWidth = Math.Clamp(vp.BarWidth * Math.Pow(1.12, dy), ChartViewport.MinBarWidth, ChartViewport.MaxBarWidth);
-        if (Math.Abs(newWidth - vp.BarWidth) < 1e-9) return;
-        bool followingLive = l.ScrollBars <= 0.01;
-        vp.BarWidth = newWidth;
-        if (!followingLive)
-        {
-            // mantiene fija la barra bajo el mouse: x = R - (N-1-b+M-S+0.5)*W  =>  S = N-1-b+M+0.5-(R-x)/W
-            vp.ScrollBars = (l.Count - 1 - before + vp.RightMarginBars + 0.5) - (l.Plot.Right - x) / newWidth;
-        }
-
-        _model.Invalidate();
+        // zoom around the mouse: time and (when enabled) price in the same proportion
+        ZoomAround(l, x, y, Math.Pow(1.12, dy));
     }
 
     public void Leave()
@@ -680,7 +767,31 @@ public sealed class ChartController
                 _model.Invalidate();
                 return true;
             }
+            case "Return" or "Enter" when _pendingSecondClick && _active?.Kind == DrawingKind.Path:
+                if (_active.Points.Count > 2) _active.Points.RemoveAt(_active.Points.Count - 1);
+                FinishPath();
+                return true;
             case "Escape":
+                // cancels the gesture in progress
+                if (_drag == DragMode.Ink || _inkCandidate)
+                {
+                    CancelInteraction();
+                    return true;
+                }
+
+                // a path keeps the points it already has
+                if (_pendingSecondClick && _active is { Kind: DrawingKind.Path, Points.Count: > 2 })
+                {
+                    _active.Points.RemoveAt(_active.Points.Count - 1);
+                    FinishPath();
+                    ActiveTool = null;
+                    KeepTool = null;
+                    ToolFinished?.Invoke();
+                    return true;
+                }
+
+                _state.Measure = null;
+                KeepTool = null;
                 bool wasDrawing = ActiveTool != null || _active != null;
                 CancelInteraction();
                 ActiveTool = null;
@@ -705,13 +816,11 @@ public sealed class ChartController
                 return true;
             case "Add":
             case "OemPlus":
-                vp.BarWidth = Math.Min(ChartViewport.MaxBarWidth, vp.BarWidth * 1.2);
-                _model.Invalidate();
+                if (L is { } lp) ZoomAround(lp, lp.Main.Rect.MidX, lp.Main.Rect.MidY, 1.2);
                 return true;
             case "Subtract":
             case "OemMinus":
-                vp.BarWidth = Math.Max(ChartViewport.MinBarWidth, vp.BarWidth / 1.2);
-                _model.Invalidate();
+                if (L is { } lm) ZoomAround(lm, lm.Main.Rect.MidX, lm.Main.Rect.MidY, 1 / 1.2);
                 return true;
         }
 
@@ -726,19 +835,24 @@ public sealed class ChartController
         var series = _model.Series;
         var time = ChartDrawing.TimeAt(l, series, x);
         double price = l.Main.ValueAt(y);
-        // imán: con Shift se pega al máximo/mínimo/cierre más cercano de la vela
-        if ((mods & InputModifiers.Shift) != 0)
+        // magnet: snaps to the bar's nearest high/low/open/close; Shift or the strong magnet always, the weak magnet only
+        // when the pointer is close
+        bool snapped = false;
+        if (series.Count > 0 && ((mods & InputModifiers.Shift) != 0 || Magnet != MagnetMode.Off))
         {
             int bar = Math.Clamp(l.BarAt(x), 0, Math.Max(0, series.Count - 1));
-            if (series.Count > 0)
+            var c = series[bar];
+            var candidates = new[] { c.HighTicks, c.LowTicks, c.OpenTicks, c.CloseTicks }.Select(t => (double)series.TicksToPrice(t));
+            double best = candidates.OrderBy(p => Math.Abs(l.Main.Y(p) - y)).First();
+            if ((mods & InputModifiers.Shift) != 0 || Magnet == MagnetMode.Strong || Math.Abs(l.Main.Y(best) - y) <= WeakMagnetPixels)
             {
-                var c = series[bar];
-                var candidates = new[] { c.HighTicks, c.LowTicks, c.OpenTicks, c.CloseTicks }.Select(t => (double)series.TicksToPrice(t));
-                price = candidates.OrderBy(p => Math.Abs(l.Main.Y(p) - y)).First();
+                price = best;
                 time = series[bar].Time;
+                snapped = true;
             }
         }
-        else
+
+        if (!snapped)
         {
             double tick = (double)_model.Instrument.TickSize;
             if (tick > 0) price = Math.Round(price / tick, MidpointRounding.AwayFromZero) * tick;
@@ -814,7 +928,7 @@ public sealed class ChartController
         else if (_drag == DragMode.Pan) Cursor = StdCursor.SizeAll;
         else if (_drag == DragMode.RectangleZoom || RectangleZoomSelected) Cursor = StdCursor.Cross;
         else if (_drag is DragMode.MoveOrder or DragMode.Bracket || (ActiveTool == null && (OrderAt(x, y) != null || HandleAt(x, y, false) != null))) Cursor = StdCursor.SizeNS;
-        else if (_model.Drawings.Any(d => d.HitTest(l, _model.Series, _state.FindDrawingRuntime(d), x, y, out _))) Cursor = StdCursor.Hand;
+        else if (!_model.Settings.HideDrawings && _model.Drawings.Any(d => d.HitTest(l, _model.Series, _state.FindDrawingRuntime(d), x, y, out _))) Cursor = StdCursor.Hand;
         else
         {
             var c = IndicatorCursor(x, y);
