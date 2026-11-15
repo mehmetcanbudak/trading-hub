@@ -2141,7 +2141,8 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             {
                 if (!t.CancelRequested || t.CancelQueued || !t.Accepted || t.SubmissionUnknown || t.Busy > 0) continue;
                 t.CancelQueued = true;
-                Enqueue(t, () => CancelAsync(t));
+                var turn = _sendTurns.Take();
+                Enqueue(t, () => InTurnAsync(turn, () => CancelAsync(t, turn)));
             }
         }
     }
@@ -2175,14 +2176,24 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             if (_byClient.TryGetValue(intent.ClientOrderId, out var existing)) return existing.Order;
             _byOrder[order] = t;
             SetClientIdentity(t, intent);
-            t.Last = Task.Run(() => SubmitAsync(t, type, qty, px, reduceOnly));
+            // The send turn is taken where the order is issued, so this broker's requests reach Binance in issue order.
+            var turn = _sendTurns.Take();
+            t.Last = Task.Run(() => InTurnAsync(turn, () => SubmitAsync(t, turn, type, qty, px, reduceOnly)));
         }
 
         Publish();
         return order;
     }
 
-    private async Task SubmitAsync(Tracked t, OrderTypes type, decimal qty, decimal price, bool reduceOnly)
+    /// <summary>Runs a request in the send turn its caller took where it was issued; releases the turn once it finished
+    /// (answered, refused or failed), so the next request is sent only after this one's reply.</summary>
+    private static async Task InTurnAsync(NativeSendTurns.Turn turn, Func<Task> request)
+    {
+        try { await request().ConfigureAwait(false); }
+        finally { turn.Release(); }
+    }
+
+    private async Task SubmitAsync(Tracked t, NativeSendTurns.Turn turn, OrderTypes type, decimal qty, decimal price, bool reduceOnly)
     {
         var order = t.Order;
         BinanceOpenOrder? placed = null;
@@ -2190,8 +2201,10 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         string? error = null;
         bool rejected = false;
         bool submissionStarted = false;
+        bool inOrder = true;
         try
         {
+            inOrder = await turn.WaitAsync(reduceOnly || t.Intent!.Request.Protective, _cts.Token).ConfigureAwait(false);
             await WaitForNativeReplayAsync().ConfigureAwait(false);
             Task<BinanceOpenOrder>? placement = null;
             Task<BinanceAlgoOrder>? algoPlacement = null;
@@ -2240,7 +2253,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             }
         }
 
-        LastError = error;
+        LastError = error ?? (inOrder ? null : NativeSendTurns.UnsettledMessage);
         DispatchQueuedReprices();
         Publish();
         QueueDeferredCancels();
@@ -2356,7 +2369,8 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         else order.Price = price;
         order.QuantityToFill = total;
         order.Unfilled = Math.Max(0, remaining);
-        Enqueue(tracked, () => ReplaceAsync(tracked, intent, predecessor, type, price, total));
+        var turn = _sendTurns.Take(); // issue order; an amendment (cancel then place) waits a bounded time like a close
+        Enqueue(tracked, () => InTurnAsync(turn, () => ReplaceAsync(tracked, turn, intent, predecessor, type, price, total)));
     }
 
     private void RejectQueuedReprice(Tracked tracked, string reason)
@@ -2383,7 +2397,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             }
     }
 
-    private async Task ReplaceAsync(Tracked t, PreparedOrderIntent intent, Order predecessor, OrderTypes type, decimal price, decimal total)
+    private async Task ReplaceAsync(Tracked t, NativeSendTurns.Turn turn, PreparedOrderIntent intent, Order predecessor, OrderTypes type, decimal price, decimal total)
     {
         var order = t.Order;
         long oldId, oldAlgoId;
@@ -2404,8 +2418,10 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         string? startError;
         Task? algoCancellation = null;
         Task<BinanceOpenOrder>? cancellation = null;
+        bool inOrder = true;
         try
         {
+            inOrder = await turn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false);
             await WaitForNativeReplayAsync().ConfigureAwait(false);
             lock (_gate)
             {
@@ -2676,7 +2692,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             }
         }
 
-        LastError = error;
+        LastError = error ?? (inOrder ? null : NativeSendTurns.UnsettledMessage);
         DispatchQueuedReprices();
         Publish();
         QueueDeferredCancels();
@@ -2718,14 +2734,23 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         CancelUntracked(() => _client.CancelOrderAsync(Instrument.Symbol, id, _cts.Token));
     }
 
-    private void CancelUntracked(Func<Task> cancel) => _ = Task.Run(async () =>
+    private void CancelUntracked(Func<Task> cancel)
     {
-        try { await cancel().ConfigureAwait(false); }
-        catch (Exception ex) { LastError = ex.Message; }
-        PublishAccountChanged();
-    });
+        var turn = _sendTurns.Take();
+        _ = Task.Run(() => InTurnAsync(turn, async () =>
+        {
+            try
+            {
+                bool inOrder = await turn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false);
+                await cancel().ConfigureAwait(false);
+                if (!inOrder) LastError = NativeSendTurns.UnsettledMessage;
+            }
+            catch (Exception ex) { LastError = ex.Message; }
+            PublishAccountChanged();
+        }));
+    }
 
-    private async Task CancelAsync(Tracked t)
+    private async Task CancelAsync(Tracked t, NativeSendTurns.Turn turn)
     {
         long id = 0, algoId = 0;
         bool pastCancel;
@@ -2765,9 +2790,10 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         }
 
         BinanceOpenOrder? canceled = null;
-        bool algoCanceled = false, terminalObserved = false;
+        bool algoCanceled = false, terminalObserved = false, inOrder = true;
         try
         {
+            inOrder = await turn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false);
             if (algoId != 0)
             {
                 await _client.CancelAlgoOrderAsync(algoId, _cts.Token).ConfigureAwait(false);
@@ -2814,6 +2840,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
                 t.Order.State is (OrderStates.Done or OrderStates.Failed) && !t.ReplacementPending)
                 RecordNativeTerminal(t.Order);
         }
+        if (!inOrder) LastError = NativeSendTurns.UnsettledMessage;
 
         Publish();
         PublishAccountChanged();
@@ -2834,9 +2861,13 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
                 t.CancelPassedTrigger = false;
                 RejectQueuedReprice(t, "Cancellation superseded the queued price update.");
             }
-        _ = Task.Run(async () =>
+        var turn = _sendTurns.Take(); // where Cancel all was issued: after this broker's earlier requests were answered
+        _ = Task.Run(() => InTurnAsync(turn, async () =>
         {
             var errors = new List<string>();
+            bool inOrder;
+            try { inOrder = await turn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; } // disposed
             try { await _client.CancelAllAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false); }
             catch (Exception ex) { errors.Add(ex.Message); }
 
@@ -2848,11 +2879,16 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             }
 
             if (errors.Count > 0) LastError = string.Join("; ", errors);
+            else if (!inOrder) LastError = NativeSendTurns.UnsettledMessage;
             QueueDeferredCancels();
             PublishAccountChanged();
-        });
+        }));
     }
 
+    /// <summary>This broker's requests, in issue order: Binance answers each before the next is sent.</summary>
+    private readonly NativeSendTurns _sendTurns = new();
+
+    internal int QueuedSends => _sendTurns.Waiting;
 
     private async Task WaitForNativeReplayAsync()
     {

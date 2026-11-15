@@ -385,24 +385,25 @@ public sealed class AccountCenter
     /// Cancels an active order. A cancel never adds exposure, so it stays available on real accounts even with real
     /// orders disabled (the Account page confirms it first).
     /// </summary>
-    public async Task CancelAsync(AccountEntry a, OrderLine o)
+    /// <returns>null normally; a status-bar note when the cancel was sent before an earlier order's outcome settled.</returns>
+    public async Task<string?> CancelAsync(AccountEntry a, OrderLine o)
     {
-        if (!o.Active) return;
+        if (!o.Active) return null;
         if (o.Ref is (SimBroker b, Order order))
         {
             b.Cancel(order);
-            return;
+            return null;
         }
         if (o.Ref is (BybitTradingSession bybit, Order bybitOrder))
         {
             // Same FIFO lane as the chart's gestures on this account; the durable commit runs off the UI thread.
             await _svc.OrderLanes.RunAsync(bybit.OrderContext, "Cancel order", () => { bybit.Cancel(bybitOrder); return true; });
-            return;
+            return null;
         }
         if (a.Kind == AccountKind.Replay && o.Ref is (ITradingAccount replay, Order replayOrder))
         {
             replay.Cancel(replayOrder);
-            return;
+            return null;
         }
 
         // Native accounts: the same FIFO lane as the chart's gestures on this account, so the cancel starts only after
@@ -412,10 +413,12 @@ public sealed class AccountCenter
                 () => rithmic.Session.CancelAsync(rithmic.Account, rithmic.Basket, CancellationToken.None)).ConfigureAwait(false);
         else if (a.Kind == AccountKind.Tradovate && o.Ref is TradingHub.Feeds.Tradovate.TradovateOrderState tv)
         {
+            // Tradovate also sends it in the account's send-turn order, after earlier requests were answered.
             var session = _svc.TradovateSessionFor(a.Profile!);
-            await InLaneAsync(_svc.TradovateContextFor(a.Profile!, session, a.Id, tv.AccountId), "Cancel order",
-                () => session.CancelAsync(tv.Id, CancellationToken.None)).ConfigureAwait(false);
+            return await InLaneAsync(_svc.TradovateContextFor(a.Profile!, session, a.Id, tv.AccountId), "Cancel order",
+                () => session.CancelAsync(tv.AccountId, tv.Id, CancellationToken.None)).ConfigureAwait(false);
         }
+        return null;
     }
 
     /// <summary>
@@ -464,11 +467,11 @@ public sealed class AccountCenter
 
         if (a.Kind == AccountKind.Tradovate && p.Ref is TradingHub.Feeds.Tradovate.TradovatePositionState tp)
         {
-            // Tradovate cancela las órdenes del contrato y cierra a mercado en un solo pedido
+            // Tradovate cancels the contract's orders and closes at market in one request, sent in the account's send-turn
+            // order: after the venue answered every earlier request.
             var session = _svc.TradovateSessionFor(a.Profile!);
-            await InLaneAsync(_svc.TradovateContextFor(a.Profile!, session, a.Id, tp.AccountId), "Close position",
+            return await InLaneAsync(_svc.TradovateContextFor(a.Profile!, session, a.Id, tp.AccountId), "Close position",
                 () => session.LiquidateAsync(tp.AccountId, tp.ContractId, CancellationToken.None)).ConfigureAwait(false);
-            return null;
         }
 
         // In the account's order lane: the close starts after every chart gesture issued before it.

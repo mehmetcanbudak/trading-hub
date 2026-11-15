@@ -578,7 +578,10 @@ public sealed class AccountsView : UserControl
             {
                 var g = new Grid { ColumnDefinitions = new ColumnDefinitions(OrderColumns) };
                 OrderRow? self = null;
-                var cancel = ActionButton("Cancel", "Cancel the order in the REAL account?", "Cancel order", () => _svc.AccountCenter.CancelAsync(entry, self!.Line!), "Canceling order…", entry.IsReal);
+                var cancel = ActionButton("Cancel", "Cancel the order in the REAL account?", "Cancel order", async () =>
+                {
+                    if (await _svc.AccountCenter.CancelAsync(entry, self!.Line!) is { } note) _status(note);
+                }, "Canceling order…", entry.IsReal);
                 Grid.SetColumn(cancel, 9);
                 g.Children.Add(cancel);
                 row = self = new OrderRow

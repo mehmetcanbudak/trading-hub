@@ -77,6 +77,7 @@ public sealed class TradovateTradingSession : IDisposable
     private readonly object _gate = new();
     private readonly Dictionary<long, TradovateAccount> _accounts = new();
     private readonly Dictionary<long, TradovateOrderState> _orders = new();
+    private readonly Dictionary<long, NativeSendTurns> _sendTurns = new();
     private readonly Dictionary<long, JsonElement> _versions = new();
     private readonly Dictionary<(long, long), TradovatePositionState> _positions = new();
     private readonly Dictionary<long, TradovateFill> _fills = new();
@@ -631,12 +632,21 @@ public sealed class TradovateTradingSession : IDisposable
         ex is TradovateOrderRejectedException ||
         ex is TradovateException { Status: 400 or 401 or 403 or 404 or 405 or 422 or 429 };
 
-    public async Task CancelAsync(long orderId, CancellationToken ct)
+    /// <summary>Cancels an order. Sent in the account's send-turn order: after earlier requests were answered, or after
+    /// <see cref="NativeSendTurns.ReducingWait"/>, then returning <see cref="NativeSendTurns.UnsettledMessage"/>.</summary>
+    public async Task<string?> CancelAsync(long accountId, long orderId, CancellationToken ct)
     {
-        var res = await _conn.PostAsync("/order/cancelorder", new JsonObject { ["orderId"] = orderId }, ct).ConfigureAwait(false);
-        if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateException("Tradovate did not cancel order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
-        if (Str(res, "failureReason") != "Success" && Long(res, "commandId") == 0)
-            throw new InvalidOperationException("Tradovate cancel acceptance is unknown: no command acknowledgment returned.");
+        var turn = SendTurns(accountId).Take();
+        try
+        {
+            bool inOrder = await turn.WaitAsync(bounded: true, ct).ConfigureAwait(false);
+            var res = await _conn.PostAsync("/order/cancelorder", new JsonObject { ["orderId"] = orderId }, ct).ConfigureAwait(false);
+            if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateException("Tradovate did not cancel order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
+            if (Str(res, "failureReason") != "Success" && Long(res, "commandId") == 0)
+                throw new InvalidOperationException("Tradovate cancel acceptance is unknown: no command acknowledgment returned.");
+            return inOrder ? null : NativeSendTurns.UnsettledMessage;
+        }
+        finally { turn.Release(); }
     }
 
     public async Task ModifyAsync(TradovateOrderState o, int qty, decimal price, CancellationToken ct)
@@ -648,8 +658,33 @@ public sealed class TradovateTradingSession : IDisposable
         if (Str(res, "failureReason") is { Length: > 0 } r && r != "Success") throw new TradovateOrderRejectedException("Tradovate did not modify order: " + (Str(res, "failureText") is { Length: > 0 } t ? t : r));
     }
 
-    public async Task LiquidateAsync(long accountId, long contractId, CancellationToken ct) =>
-        await _conn.PostAsync("/order/liquidateposition", new JsonObject { ["accountId"] = accountId, ["contractId"] = contractId, ["admin"] = false }, ct).ConfigureAwait(false);
+    /// <summary>Liquidates a contract's position, in the account's send-turn order like <see cref="CancelAsync"/>.</summary>
+    public async Task<string?> LiquidateAsync(long accountId, long contractId, CancellationToken ct)
+    {
+        var turn = SendTurns(accountId).Take();
+        try
+        {
+            bool inOrder = await turn.WaitAsync(bounded: true, ct).ConfigureAwait(false);
+            await _conn.PostAsync("/order/liquidateposition", new JsonObject { ["accountId"] = accountId, ["contractId"] = contractId, ["admin"] = false }, ct).ConfigureAwait(false);
+            return inOrder ? null : NativeSendTurns.UnsettledMessage;
+        }
+        finally { turn.Release(); }
+    }
+
+    /// <summary>
+    /// The send turns of one native account, shared by every broker (instrument) and the Accounts page: each order
+    /// request takes its turn where it is issued and is sent only after earlier requests of that account were answered.
+    /// </summary>
+    internal NativeSendTurns SendTurns(long accountId)
+    {
+        lock (_sendTurns)
+        {
+            if (!_sendTurns.TryGetValue(accountId, out var turns)) _sendTurns[accountId] = turns = new NativeSendTurns();
+            return turns;
+        }
+    }
+
+    internal int QueuedSends(long accountId) => SendTurns(accountId).Waiting;
 
     public void Dispose() => _life.Cancel();
 }
@@ -1334,16 +1369,22 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
     private sealed record PendingLeg(Order Order, PreparedOrderIntent Intent, OrderDirections Direction, OrderTypes Type, decimal Price, int Quantity);
 
+    /// <summary>A reducing request waits for earlier sends only up to <see cref="NativeSendTurns.ReducingWait"/>.</summary>
+    private static bool Reducing(PreparedOrderIntent intent) => intent.Request.ReduceOnly || intent.Request.Protective;
+
     private void DispatchSingle(PendingLeg leg)
     {
         var (order, intent, dir, type, price, q) = leg;
         string clientOrderId = intent.ClientOrderId;
+        // Taken where the order is issued, so the account's requests reach Tradovate in issue order.
+        var turn = _session.SendTurns(_account.Id).Take();
         _ = Task.Run(async () =>
         {
             bool placementStarted = false;
             try
             {
                 var (_, contract) = await ContractAsync().ConfigureAwait(false);
+                bool inOrder = await turn.WaitAsync(Reducing(intent), _cts.Token).ConfigureAwait(false);
                 await WaitForNativeReplayAsync().ConfigureAwait(false);
                 decimal px = price > 0 ? Instrument.RoundPrice(price) : 0;
                 string ot = type == OrderTypes.Market ? "Market" : type == OrderTypes.Stop ? "Stop" : "Limit";
@@ -1369,7 +1410,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                     BindNative(order, id);
                 }
 
-                LastError = null;
+                LastError = inOrder ? null : NativeSendTurns.UnsettledMessage;
             }
             catch (Exception ex)
             {
@@ -1391,6 +1432,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                     }
                 }
             }
+            finally { turn.Release(); }
 
             Sync();
         });
@@ -1546,12 +1588,14 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
     private void DispatchLinked(PendingLeg stop, PendingLeg target)
     {
+        var turn = _session.SendTurns(_account.Id).Take(); // issue order, as for a single order
         _ = Task.Run(async () =>
         {
             bool placementStarted = false;
             try
             {
                 var (_, contract) = await ContractAsync().ConfigureAwait(false);
+                bool inOrder = await turn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false); // protection reduces
                 await WaitForNativeReplayAsync().ConfigureAwait(false);
                 decimal stopPrice = Instrument.RoundPrice(stop.Price), targetPrice = Instrument.RoundPrice(target.Price);
                 bool automated = stop.Intent.Owner.Kind == OrderOwnerKind.Strategy;
@@ -1578,7 +1622,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                     _byId[id] = stop.Order;
                     BindNative(stop.Order, id);
                 }
-                LastError = null;
+                LastError = inOrder ? null : NativeSendTurns.UnsettledMessage;
             }
             catch (Exception ex)
             {
@@ -1601,6 +1645,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                         }
                 }
             }
+            finally { turn.Release(); }
 
             Sync();
         });
@@ -1643,7 +1688,9 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
     {
         try
         {
-            await _session.CancelAsync(IdOf(order), CancellationToken.None).ConfigureAwait(false);
+            // The session takes this cancel's send turn before its first await, i.e. where Sync issued it.
+            if (await _session.CancelAsync(_account.Id, IdOf(order), CancellationToken.None).ConfigureAwait(false) is { } unsettled)
+                LastError = unsettled;
             lock (_gate)
             {
                 // CommandResult acknowledges the request, not the native cancellation.
@@ -1748,11 +1795,13 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         var replacement = new Replacement(intent, Instrument.RoundPrice(intent.Request.Price), totalQuantity);
         _replacements.Add(order, replacement);
         _session.TrackReplacement(order);
+        var turn = _session.SendTurns(_account.Id).Take(); // issue order; an amendment waits a bounded time like a close
         _ = Task.Run(async () =>
         {
             bool submissionStarted = false;
             try
             {
+                bool inOrder = await turn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false);
                 Task? submission = null;
                 while (submission == null)
                 {
@@ -1788,7 +1837,12 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                             }
                         }
                     }
-                    if (submission == null) await Task.Delay(100, _cts.Token).ConfigureAwait(false);
+                    if (submission == null)
+                    {
+                        // Not sendable yet (unknown or unreported order): later requests need not wait for it.
+                        turn.Release();
+                        await Task.Delay(100, _cts.Token).ConfigureAwait(false);
+                    }
                 }
                 await submission.ConfigureAwait(false);
                 lock (_gate)
@@ -1796,6 +1850,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                     if (_disposed) return;
                     BindNative(order, IdOf(order));
                 }
+                if (!inOrder) LastError = NativeSendTurns.UnsettledMessage;
             }
             catch (Exception ex)
             {
@@ -1817,6 +1872,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                     }
                 }
             }
+            finally { turn.Release(); }
 
             // Apply authoritative values even on rejection; optimistic caller fields
             // and successful command submission are never amendment acknowledgments.

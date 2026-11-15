@@ -87,19 +87,64 @@ public sealed partial class AccountsRithmicCloseRegressionTests
         }
     }
 
+    /// <summary>
+    /// Why a Rithmic buy cannot follow an Accounts close to the venue: while the close reserves the contract (here its
+    /// position report is held after its sell filled), a buy reaching native admission is refused as new exposure.
+    /// </summary>
+    [Fact]
+    public async Task Rithmic_buy_admitted_while_a_close_reserves_the_contract_is_refused()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 100 };
+        server.SeedPosition(true, 2, 100);
+        await using var fixture = new AccountsCloseFixture(server);
+        await fixture.StartAsync();
+        fixture.Profile.AllowRealOrders = true;
+        var chart = fixture.Chart("ES");
+        await Until(() => chart.PositionReady && chart.OrdersReady);
+        var row = fixture.Position();
+        var positionRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.PositionUpdateRelease = positionRelease;
+        Task<string?>? close = null;
+        Order? buy = null;
+        try
+        {
+            close = fixture.Center.CloseAsync(fixture.Account, row);
+            await server.PositionUpdateRequested.Task.WaitAsync(Deadline);
+            await Until(() => fixture.Session.OrdersOf("ACC1").Any(order => !order.IsBuy && order.PriceType == 2 && order.Done));
+            Assert.Equal(2m, fixture.Net);
+            buy = OrderActions.Manual(chart, OrderTypes.Market, OrderDirections.Buy, 1);
+            await Until(() => buy.Status == OrderStatus.Rejected, () => $"buy {buy.Status}, {chart.LastError}");
+            Assert.Contains("A bounded Rithmic close reserves this native contract; new exposure is disabled.", chart.LastError);
+            Assert.Single(Tags(server));
+        }
+        finally
+        {
+            positionRelease.TrySetResult();
+            if (close != null) await close.WaitAsync(Deadline);
+        }
+        Assert.Null(await close);
+        await Until(() => fixture.Net == 0);
+        Assert.Single(Tags(server)); // the refused buy never reached the venue
+    }
+
     [Fact]
     public async Task Accounts_tradovate_cancel_and_close_run_after_a_chart_market_buy_queued_behind_a_slow_durable_write()
     {
         using var tradovate = new FakeTradovate();
         var normalHttp = tradovate.Server.OnHttp!;
-        Task? g1 = null;
-        var arrivals = new List<(string Route, bool BuyHandedOff)>();
-        tradovate.Server.OnHttp = request =>
+        var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var arrivals = new List<string>(); // order requests in arrival order
+        tradovate.Server.OnHttpAsync = async (request, _) =>
         {
             if (request.Route is "/v1/order/placeorder" or "/v1/order/cancelorder" or "/v1/order/liquidateposition")
-                lock (arrivals) arrivals.Add((request.Route, Volatile.Read(ref g1)?.IsCompleted == true));
+            {
+                lock (arrivals) arrivals.Add(request.Route);
+                // The buy's request reached the venue; its reply is still outstanding.
+                if (request.Route == "/v1/order/placeorder") await buyReply.Task;
+            }
             return request.Route == "/v1/order/liquidateposition" ? (200, "{}") : normalHttp(request);
         };
+        string[] Arrivals() { lock (arrivals) return arrivals.ToArray(); }
         using var feed = new TradovateFeed(() => tradovate.Settings());
         using var session = new TradovateTradingSession(feed.Connection);
         using var rithmic = new FakeRithmicServer();
@@ -133,8 +178,7 @@ public sealed partial class AccountsRithmicCloseRegressionTests
         using var durableWrite = new ManualResetEventSlim();
         var g0 = lanes.RunAsync(chart, "Slow durable write", () => durableWrite.Wait(Deadline));
         var buy = lanes.RunAsync(chart, "Buy MKT 1", () => OrderActions.Manual(chart, OrderTypes.Market, OrderDirections.Buy, 1));
-        Volatile.Write(ref g1, buy);
-        Task? cancel = null;
+        Task<string?>? cancel = null;
         Task<string?>? close = null;
         try
         {
@@ -143,23 +187,26 @@ public sealed partial class AccountsRithmicCloseRegressionTests
             Assert.Equal(new[] { "Slow durable write", "Buy MKT 1", "Cancel order", "Close position" }, lanes.Pending);
             Assert.False(cancel.IsCompleted);
             Assert.False(close.IsCompleted);
-            lock (arrivals) Assert.Empty(arrivals);
+            Assert.Empty(Arrivals());
         }
         finally { durableWrite.Set(); }
 
-        Assert.True(await g0.WaitAsync(Deadline));
-        await buy.WaitAsync(Deadline);
-        await cancel.WaitAsync(Deadline);
+        try
+        {
+            Assert.True(await g0.WaitAsync(Deadline));
+            await buy.WaitAsync(Deadline);
+            await Until(() => Arrivals().Length > 0);
+            // The Accounts cancel and close queue behind the buy's request until the venue answers it.
+            await Until(() => Arrivals().Length > 1 || session.QueuedSends(101) > 0);
+            Assert.Equal(new[] { "/v1/order/placeorder" }, Arrivals());
+        }
+        finally { buyReply.TrySetResult(); }
+
+        Assert.Null(await cancel.WaitAsync(Deadline));
         Assert.Null(await close.WaitAsync(Deadline));
         Assert.Empty(lanes.Pending);
-        await Until(() => { lock (arrivals) return arrivals.Count == 3; });
-        lock (arrivals)
-        {
-            // The Accounts requests started only after the chart's buy had been handed to its account.
-            Assert.Equal(new[] { true, true }, arrivals.Where(a => a.Route != "/v1/order/placeorder").Select(a => a.BuyHandedOff));
-            Assert.Equal(new[] { "/v1/order/cancelorder", "/v1/order/liquidateposition", "/v1/order/placeorder" },
-                arrivals.Select(a => a.Route).OrderBy(route => route, StringComparer.Ordinal));
-        }
+        await Until(() => Arrivals().Length == 3);
+        Assert.Equal(new[] { "/v1/order/placeorder", "/v1/order/cancelorder", "/v1/order/liquidateposition" }, Arrivals());
     }
 
     private static T Private<T>(object target, string name) =>

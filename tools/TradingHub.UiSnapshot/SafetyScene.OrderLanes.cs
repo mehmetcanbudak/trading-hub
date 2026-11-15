@@ -206,10 +206,15 @@ internal static partial class SafetyScene
                 $"a gesture whose account call returns no message replaces its pending line with its label («{Shown()}»)");
 
             shown.Clear();
+            string crashLog = Path.Combine(AppPaths.Root, "crash.log");
+            int Logged() => File.Exists(crashLog) ? File.ReadAllText(crashLog).Split("Fixture broker refused the gesture.").Length - 1 : 0;
+            int loggedBefore = Logged();
             var failing = tv.AccountActionAsync(chart, _ => throw new InvalidOperationException("Fixture broker refused the gesture."), "Fixture failing gesture");
             Settle(failing);
-            check(failing.IsCompletedSuccessfully && shown.LastOrDefault() == "Fixture failing gesture failed with an error: Fixture broker refused the gesture.",
-                $"a gesture whose account call throws shows the failure instead of staying pending ({failing.Status}, «{Shown()}»)");
+            check(failing.IsCompletedSuccessfully &&
+                shown.LastOrDefault() == "Fixture failing gesture: error after submission; check orders and position: Fixture broker refused the gesture.",
+                $"a gesture whose account call throws shows the error without claiming nothing was sent ({failing.Status}, «{Shown()}»)");
+            check(Logged() == loggedBefore + 1, "the gesture's exception is written to the crash log");
 
             shown.Clear();
             using var durableWrite = new ManualResetEventSlim();

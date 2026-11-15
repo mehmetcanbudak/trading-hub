@@ -945,7 +945,8 @@ public sealed partial class TradingView
     /// Hands a gesture whose confirmations and permission checks already passed to its account's FIFO order lane. On a
     /// thread-safe native account the unchanged account call runs off the UI thread, so durable journaling never
     /// freezes the window, and the status bar shows it pending until it returns; other accounts run inline as before.
-    /// Exceptions from the account call are shown in the status line; the gesture then reports it was not sent.
+    /// An exception from the account call is written to the crash log, as an unobserved gesture failure was before, and
+    /// shown in the status line without claiming nothing was sent: the call may have submitted an order before failing.
     /// </summary>
     private async Task<(bool Sent, T Result)> OrderGestureAsync<T>(ITradingAccount acc, string label, Func<T> action)
     {
@@ -961,7 +962,8 @@ public sealed partial class TradingView
         }
         catch (Exception error)
         {
-            GestureStatus($"{label} failed with an error: {error.Message}");
+            CrashLog.Write(error);
+            GestureStatus($"{label}: error after submission; check orders and position: {error.Message}");
             return (false, default!);
         }
     }

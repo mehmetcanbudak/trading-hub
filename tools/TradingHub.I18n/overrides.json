@@ -22739,8 +22739,12 @@
     "es": "Hueco de protección: el exchange canceló el objetivo vinculado; se esperan sus ejecuciones y la posición para confirmar la posición restante.",
     "zh-CN": "保护缺口：交易场所取消了关联目标；正在等待成交和持仓报告以确认剩余持仓。"
   },
-  "{0} failed with an error: {1}": {
-    "es": "{0} falló con un error: {1}",
-    "zh-CN": "{0} 失败，发生错误：{1}"
+  "{0}: error after submission; check orders and position: {1}": {
+    "es": "{0}: error después del envío; revisá las órdenes y la posición: {1}",
+    "zh-CN": "{0}：提交后出错；请检查订单和持仓：{1}"
+  },
+  "An earlier order's outcome was still unsettled after 10 seconds; this reducing request was sent anyway. Check orders and position.": {
+    "es": "El resultado de una orden anterior seguía sin resolverse después de 10 segundos; esta solicitud de reducción se envió de todos modos. Revisá las órdenes y la posición.",
+    "zh-CN": "先前订单的结果在 10 秒后仍未确定；此减仓请求仍已发送。请检查订单和持仓。"
   }
 }
