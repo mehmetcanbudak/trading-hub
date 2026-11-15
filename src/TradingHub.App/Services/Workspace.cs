@@ -100,9 +100,16 @@ internal static partial class Workspace
             var props = base.CreateProperties(type, memberSerialization);
             return props.Where(p =>
             {
-                if (!p.Writable || !p.Readable) return false;
+                if (!p.Readable) return false;
                 var pi = type.GetProperty(p.UnderlyingName!, BindingFlags.Public | BindingFlags.Instance);
                 if (pi == null || pi.GetIndexParameters().Length > 0) return false;
+                // Read-only parts of a composite indicator (for example the VWAP suite) keep their own settings;
+                // loading fills the existing part instead of replacing it.
+                if (!p.Writable)
+                {
+                    if (!typeof(Indicator).IsAssignableFrom(pi.PropertyType)) return false;
+                    p.ObjectCreationHandling = ObjectCreationHandling.Reuse;
+                }
                 if (pi.GetCustomAttribute<BrowsableAttribute>() is { Browsable: false }) return false;
                 if (typeof(Indicator).IsAssignableFrom(type) && pi.DeclaringType == typeof(Indicator) && pi.Name != nameof(Indicator.IsVisible)) return false;
                 return true;

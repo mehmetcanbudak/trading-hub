@@ -123,6 +123,54 @@ internal static class KvpPerformanceScene
                     "measured rendering used the actual selected per-chart drawing calculator");
             }
 
+            // Neighbouring timeframes build off the UI thread: the owner only captures a store view, keeps pumping
+            // frames, and a later switch restores the admitted aggregation instead of re-reading the history.
+            {
+                var neighbourInstrument = new Instrument { FeedId = "neighbour-" + Guid.NewGuid().ToString("N"), Symbol = "NEIGHBOUR-PREBUILD", TickSize = 0.25m, VolumeStep = 1 };
+                using var neighbourData = new InstrumentData(neighbourInstrument, new TradingHub.Feeds.SimulatedFeed());
+                const int neighbourTrades = 400_000;
+                for (int i = 0; i < neighbourTrades; i++)
+                    neighbourData.Trades.Add(new Trade(i + 1, now.AddSeconds(i * 3 - neighbourTrades * 3L), -50 + (i * 53 % 1600) * 0.25m, 1 + i % 4,
+                        i % 2 == 0 ? TradeSide.Buy : TradeSide.Sell));
+                long constructed = Stopwatch.GetTimestamp();
+                using var neighbourModel = new ChartModel(neighbourData, ChartPeriod.M15, new ChartSettings { TimeZoneId = "UTC" });
+                double ownerRebuild = Stopwatch.GetElapsedTime(constructed).TotalMilliseconds;
+                var builds = neighbourModel.NeighbourBuilds;
+                bool stillBuildingAfterConstruction = !builds.Completion.IsCompleted;
+                double worstFrameGap = 0; int frames = 0;
+                DateTime deadline = DateTime.UtcNow.AddSeconds(120);
+                while (!builds.Completion.IsCompleted && DateTime.UtcNow < deadline)
+                {
+                    long frameStart = Stopwatch.GetTimestamp();
+                    pump(0.02);
+                    worstFrameGap = Math.Max(worstFrameGap, Stopwatch.GetElapsedTime(frameStart).TotalMilliseconds - 20);
+                    frames++;
+                }
+                Check(builds.Completion.IsCompleted && builds.AdmittedCount == 2 && builds.LastError == null,
+                    $"both neighbours were admitted to the shared aggregation cache ({builds.AdmittedCount}, {builds.LastError ?? "no error"})");
+                Check(!stillBuildingAfterConstruction || frames > 0, $"the UI dispatcher kept pumping {frames} frames during background aggregation; worst extra frame delay {worstFrameGap:0.#} ms");
+                int hourStep = CandleSeries.BaseStep(0, CandleSeries.SuggestPriceStep(neighbourData.Trades, neighbourInstrument, ChartPeriod.H1, 150));
+                var hourProbe = new CandleSeries(neighbourInstrument, ChartPeriod.H1, hourStep);
+                Check(CandleSeriesCache.Shared.Contains(hourProbe, neighbourData.Trades, neighbourData.Feed.Id), "the H1 neighbour is restorable for this exact history generation");
+                timings.Add(Measure("Cold H1 aggregation a switch would otherwise run on the UI thread", () =>
+                {
+                    var cold = new CandleSeries(neighbourInstrument, ChartPeriod.H1, hourStep);
+                    cold.Rebuild(neighbourData.Trades);
+                }, warmups: 1, repetitions: 5));
+                timings.Add(Measure("Switch M15 → prebuilt H1 → M15 on the UI thread (restored aggregations)", () =>
+                {
+                    neighbourModel.SetPeriod(ChartPeriod.H1);
+                    if (neighbourModel.Series.HasPendingTrades(neighbourData.Trades)) throw new InvalidDataException("H1 was not restored complete.");
+                    neighbourModel.SetPeriod(ChartPeriod.M15);
+                }, warmups: 1, repetitions: 5));
+                depthMeasurements.Add(new
+                {
+                    scope = "Background neighbour-timeframe aggregation (400,000 prints, M15 chart, H1/M5 neighbours)",
+                    ownerThreadChartConstructionMilliseconds = ownerRebuild, stillBuildingAfterConstruction, pumpedFrames = frames, worstExtraFrameDelayMilliseconds = worstFrameGap,
+                    builds.AdmittedCount, builds.CancelledCount, builds.DroppedCount,
+                });
+            }
+
             // The real framed writer reports disk bytes, saved/dropped coverage and projections. A burst
             // is deliberately labelled as such rather than claimed as an entitled provider update rate.
             long writerAllocated = GC.GetTotalAllocatedBytes(precise: true);

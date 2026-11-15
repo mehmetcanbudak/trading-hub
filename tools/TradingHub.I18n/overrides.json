@@ -13594,5 +13594,193 @@
   "Kept ownership context {0}: {1}": {
     "es": "Se conservó el contexto de propiedad {0}: {1}",
     "zh-CN": "已保留所有权上下文 {0}：{1}"
+  },
+  "All loaded history": {
+    "es": "Todo el historial cargado",
+    "zh-CN": "全部已加载历史"
+  },
+  "Anchored": {
+    "es": "Anclado",
+    "zh-CN": "锚定"
+  },
+  "Anchored VWAP settings": {
+    "es": "Ajustes del VWAP anclado",
+    "zh-CN": "锚定 VWAP 设置"
+  },
+  "Anchored VWAP with bands": {
+    "es": "VWAP anclado con desvíos",
+    "zh-CN": "锚定 VWAP（含标准差带）"
+  },
+  "Automatic merge rule": {
+    "es": "Regla de unión automática",
+    "zh-CN": "自动合并规则"
+  },
+  "Background aggregation of {0} {1} failed: {2}": {
+    "es": "Falló la agregación en segundo plano de {0} {1}: {2}",
+    "zh-CN": "{0} {1} 的后台聚合失败：{2}"
+  },
+  "Buyer color (delta / bid-ask)": {
+    "es": "Color comprador (delta / bid-ask)",
+    "zh-CN": "买方颜色（Delta / 买卖价）"
+  },
+  "Chart menu of {0} failed: {1}": {
+    "es": "Falló el menú del gráfico de {0}: {1}",
+    "zh-CN": "{0} 的图表菜单失败：{1}"
+  },
+  "Claire": {
+    "es": "Claire",
+    "zh-CN": "Claire"
+  },
+  "Duplicate VWAP suite series identity {0}.": {
+    "es": "Identidad de serie duplicada en el conjunto VWAP: {0}.",
+    "zh-CN": "VWAP 组合中的序列标识重复：{0}。"
+  },
+  "Full range (low to high)": {
+    "es": "Rango completo (mínimo a máximo)",
+    "zh-CN": "完整区间（最低到最高）"
+  },
+  "Invalid merge range \"{0}\"; expected yyyy-MM-ddTHH:mm:ssZ..yyyy-MM-ddTHH:mm:ssZ.": {
+    "es": "Rango de unión no válido «{0}»; se esperaba yyyy-MM-ddTHH:mm:ssZ..yyyy-MM-ddTHH:mm:ssZ.",
+    "zh-CN": "合并区间无效“{0}”；应为 yyyy-MM-ddTHH:mm:ssZ..yyyy-MM-ddTHH:mm:ssZ。"
+  },
+  "Label merged profiles": {
+    "es": "Rotular los perfiles unidos",
+    "zh-CN": "标注已合并的分布"
+  },
+  "Manual merges (UTC period start..end; separated by ;)": {
+    "es": "Uniones manuales (inicio..fin de período en UTC; separadas por ;)",
+    "zh-CN": "手动合并（UTC 周期开始..结束；以 ; 分隔）"
+  },
+  "Merged automatically · {0} periods": {
+    "es": "Unido automáticamente · {0} períodos",
+    "zh-CN": "自动合并 · {0} 个周期"
+  },
+  "Merged · {0} periods": {
+    "es": "Unido · {0} períodos",
+    "zh-CN": "已合并 · {0} 个周期"
+  },
+  "Merging": {
+    "es": "Unión de perfiles",
+    "zh-CN": "合并"
+  },
+  "Minimum overlap to merge (%)": {
+    "es": "Superposición mínima para unir (%)",
+    "zh-CN": "合并所需最小重叠（%）"
+  },
+  "Multi-period": {
+    "es": "Múltiples períodos",
+    "zh-CN": "多周期"
+  },
+  "Multi-period VWAP settings": {
+    "es": "Ajustes del VWAP de múltiples períodos",
+    "zh-CN": "多周期 VWAP 设置"
+  },
+  "Neighbours overlap by at least the minimum percent": {
+    "es": "Los vecinos se superponen al menos el porcentaje mínimo",
+    "zh-CN": "相邻分布至少按最小百分比重叠"
+  },
+  "Next POC inside the current value area": {
+    "es": "El siguiente POC dentro del área de valor actual",
+    "zh-CN": "下一个 POC 位于当前价值区内"
+  },
+  "One VWAP with selectable parts: anchored VWAP with up to three bands, bar-based Claire rolling/anchored VWAPs, simultaneous session/week/month/quarter/year VWAPs, prior and closing levels, rolling window and local-time session window. Each part keeps its own coverage labels and settings.": {
+    "es": "Un solo VWAP con partes seleccionables: VWAP anclado con hasta tres desvíos, VWAP Claire móviles/anclados basados en velas, VWAP simultáneos de sesión/semana/mes/trimestre/año, niveles anteriores y de cierre, ventana móvil y ventana de sesión en hora local. Cada parte conserva sus propias etiquetas de cobertura y ajustes.",
+    "zh-CN": "一个可选择组成部分的 VWAP：最多三条标准差带的锚定 VWAP、基于K线的 Claire 滚动/锚定 VWAP、同时显示的交易时段/周/月/季/年 VWAP、前期及收盘价位、滚动窗口以及本地时间交易时段窗口。每个部分保留各自的覆盖标签和设置。"
+  },
+  "One volume profile for session, week, month, quarter, year or all history: ticks per row or price grouping, volume/delta/bid-ask view, untested POCs, and head-to-tail merging from the chart's right-click menu or by overlap. Observed and measured rows only unless estimates are enabled.": {
+    "es": "Un solo perfil de volumen por sesión, semana, mes, trimestre, año o todo el historial: ticks por fila o agrupación de precios, vista de volumen/delta/bid-ask, POC no testeados y unión de perfiles consecutivos desde el menú del clic derecho del gráfico o por superposición. Solo filas observadas y medidas salvo que se activen las estimaciones.",
+    "zh-CN": "一个适用于交易时段、周、月、季、年或全部历史的成交量分布：每行最小价位数或价格分组、成交量/Delta/买卖价视图、未测试 POC，以及通过图表右键菜单或按重叠首尾相接合并。除非启用估算，否则仅使用观测和实测行。"
+  },
+  "Overlap measured on": {
+    "es": "Superposición medida sobre",
+    "zh-CN": "重叠的计算依据"
+  },
+  "Part settings": {
+    "es": "Ajustes de cada parte",
+    "zh-CN": "各部分设置"
+  },
+  "Parts": {
+    "es": "Partes",
+    "zh-CN": "组成部分"
+  },
+  "Prior": {
+    "es": "Anterior",
+    "zh-CN": "前期"
+  },
+  "Prior and closing VWAP settings": {
+    "es": "Ajustes del VWAP anterior y de cierre",
+    "zh-CN": "前期及收盘 VWAP 设置"
+  },
+  "Profile view": {
+    "es": "Vista del perfil",
+    "zh-CN": "分布视图"
+  },
+  "Profiles: cancel the marked merge start": {
+    "es": "Perfiles: cancelar el inicio de unión marcado",
+    "zh-CN": "分布：取消已标记的合并起点"
+  },
+  "Profiles: mark this profile as the merge start": {
+    "es": "Perfiles: marcar este perfil como inicio de la unión",
+    "zh-CN": "分布：将此分布标记为合并起点"
+  },
+  "Profiles: merge from the marked start to this profile": {
+    "es": "Perfiles: unir desde el inicio marcado hasta este perfil",
+    "zh-CN": "分布：从已标记的起点合并到此分布"
+  },
+  "Profiles: merge neighbours automatically": {
+    "es": "Perfiles: unir los vecinos automáticamente",
+    "zh-CN": "分布：自动合并相邻分布"
+  },
+  "Profiles: remove all manual merges": {
+    "es": "Perfiles: quitar todas las uniones manuales",
+    "zh-CN": "分布：移除所有手动合并"
+  },
+  "Profiles: split this merged profile": {
+    "es": "Perfiles: separar este perfil unido",
+    "zh-CN": "分布：拆分此合并分布"
+  },
+  "Profiles: stop merging neighbours automatically": {
+    "es": "Perfiles: dejar de unir los vecinos automáticamente",
+    "zh-CN": "分布：停止自动合并相邻分布"
+  },
+  "Rolling": {
+    "es": "Móvil",
+    "zh-CN": "滚动"
+  },
+  "Rolling VWAP settings": {
+    "es": "Ajustes del VWAP móvil",
+    "zh-CN": "滚动 VWAP 设置"
+  },
+  "Seller color (delta / bid-ask)": {
+    "es": "Color vendedor (delta / bid-ask)",
+    "zh-CN": "卖方颜色（Delta / 买卖价）"
+  },
+  "Session window": {
+    "es": "Ventana de sesión",
+    "zh-CN": "交易时段窗口"
+  },
+  "Session-window VWAP settings": {
+    "es": "Ajustes del VWAP de ventana de sesión",
+    "zh-CN": "交易时段窗口 VWAP 设置"
+  },
+  "VWAP Claire (bar-based 30 / 90 / 365 days)": {
+    "es": "VWAP Claire (basado en velas, 30 / 90 / 365 días)",
+    "zh-CN": "VWAP Claire（基于K线，30 / 90 / 365 天）"
+  },
+  "VWAP Claire settings": {
+    "es": "Ajustes del VWAP Claire",
+    "zh-CN": "VWAP Claire 设置"
+  },
+  "VWAP suite": {
+    "es": "Conjunto VWAP",
+    "zh-CN": "VWAP 组合"
+  },
+  "Value area (VAL to VAH)": {
+    "es": "Área de valor (VAL a VAH)",
+    "zh-CN": "价值区（VAL 至 VAH）"
+  },
+  "closed-profile-rows-v1;frame={0};row={1};effective={2};estimate={3};inferred={4};va={5};outer={6};zone={7}": {
+    "es": "closed-profile-rows-v1;frame={0};row={1};effective={2};estimate={3};inferred={4};va={5};outer={6};zone={7}",
+    "zh-CN": "closed-profile-rows-v1;frame={0};row={1};effective={2};estimate={3};inferred={4};va={5};outer={6};zone={7}"
   }
 }

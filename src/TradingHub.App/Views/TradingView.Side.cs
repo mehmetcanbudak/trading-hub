@@ -1130,6 +1130,7 @@ public sealed partial class TradingView
             items.Add(new Separator());
         }
 
+        items.AddRange(IndicatorMenuItems(tab, x, y));
         items.Add(Item("Indicators…", MaterialIconKind.FunctionVariant, () => OpenIndicators(tab)));
         items.Add(Item("Edit footprint…", MaterialIconKind.ViewColumnOutline, () => OpenFootprintEditor(tab)));
         items.Add(Item("Chart settings…", MaterialIconKind.PaletteOutline, () => OpenChartSettings(tab)));

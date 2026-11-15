@@ -94,6 +94,35 @@ public sealed class CandleSeriesCache
         }
     }
 
+    /// <summary>True when an entry exists for this series shape and the store's current correction generation.</summary>
+    public bool Contains(CandleSeries series, TradeStore store, string providerScope)
+    {
+        var key = CacheKey.Create(series, store, providerScope);
+        lock (_sync) return _entries.ContainsKey(key);
+    }
+
+    /// <summary>
+    /// Admits a speculative background aggregation built from <paramref name="view"/>. It never evicts an entry: when the
+    /// cache is full the prebuilt result is dropped, and an admitted one is placed least-recently-used so later real use
+    /// displaces it first. Safe from any thread; the store is only used for its immutable instrument.
+    /// </summary>
+    internal bool AdmitPrebuilt(CandleSeries series, TradeStore store, TradeStoreView view, string providerScope)
+    {
+        var key = CacheKey.Create(series, store.Instrument, view.Identity, view.CorrectionRevision, providerScope);
+        lock (_sync)
+            if (_entries.ContainsKey(key) || _entries.Count >= _maxEntries) return false;
+        var snapshot = series.CaptureAggregationSnapshot(view, _maxBytes, key.EstimatedBytes());
+        if (snapshot == null) return false;
+        lock (_sync)
+        {
+            if (_entries.ContainsKey(key) || _entries.Count >= _maxEntries || _retainedBytes > _maxBytes - snapshot.EstimatedBytes) return false;
+            var node = _lru.AddFirst(new Entry(key, snapshot));
+            _entries.Add(key, node);
+            _retainedBytes += snapshot.EstimatedBytes;
+            return true;
+        }
+    }
+
     private sealed record Entry(CacheKey Key, CandleSeries.AggregationSnapshot Snapshot);
 
     private readonly record struct InstrumentKey(string Symbol, string FeedId, string Exchange,
@@ -111,10 +140,13 @@ public sealed class CandleSeriesCache
         ChartPeriod Period, int PriceStep, TimeSpan SessionStart, TimeZoneInfo TimeZone, string ZoneDisplayName,
         string ZoneStandardName, string ZoneDaylightName, Guid StoreIdentity, long StoreCorrectionRevision)
     {
-        internal static CacheKey Create(CandleSeries series, TradeStore store, string providerScope) => new(providerScope,
-            InstrumentKey.Create(series.Instrument), InstrumentKey.Create(store.Instrument), series.Period, series.PriceStep,
+        internal static CacheKey Create(CandleSeries series, TradeStore store, string providerScope) =>
+            Create(series, store.Instrument, store.Identity, store.CorrectionRevision, providerScope);
+
+        internal static CacheKey Create(CandleSeries series, Instrument storeInstrument, Guid storeIdentity, long storeCorrectionRevision, string providerScope) => new(providerScope,
+            InstrumentKey.Create(series.Instrument), InstrumentKey.Create(storeInstrument), series.Period, series.PriceStep,
             series.Session.Start, series.Session.TimeZone, series.Session.TimeZone.DisplayName,
-            series.Session.TimeZone.StandardName, series.Session.TimeZone.DaylightName, store.Identity, store.CorrectionRevision);
+            series.Session.TimeZone.StandardName, series.Session.TimeZone.DaylightName, storeIdentity, storeCorrectionRevision);
 
         internal long EstimatedBytes() => 1024 + StringBytes(ProviderScope) + Instrument.EstimatedBytes() + StoreInstrument.EstimatedBytes() +
             StringBytes(TimeZone.Id) + StringBytes(TimeZone.DisplayName) + StringBytes(TimeZone.StandardName) + StringBytes(TimeZone.DaylightName) +

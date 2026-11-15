@@ -124,10 +124,12 @@ public class PriorClosingVwap : Indicator
             _prior.Set(b, state.Prior.Mean, available); _upper.Set(b, state.Prior.Mean + width, available && Sigma > 0); _lower.Set(b, state.Prior.Mean - width, available && Sigma > 0);
         }
     }
+    /// <summary>False when a composite (the VWAP suite) draws one combined fidelity legend for all its parts.</summary>
+    internal bool DrawLegend { get; set; } = true;
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (ChartInfo == null) return;
-        FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Prior VWAP: {Status}", Color.Goldenrod);
+        if (DrawLegend) FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Prior VWAP: {Status}", Color.Goldenrod);
         if (!ShowClosingLevels) return;
         for (int i = Math.Max(0, _closed.Count - Keep); i < _closed.Count; i++)
         {
