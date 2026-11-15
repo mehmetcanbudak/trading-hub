@@ -103,7 +103,13 @@ internal static partial class SafetyScene
         {
             Press(own, MouseButton.Right);
             pump(0.3);
-            check(real.ActiveOrders.Contains(working), "off: a right-click cancel on the DOM leaves the order working");
+            // Headless MouseDown(Right)/Alt-click does not reach the DOM's cancel branch even on the base code (verified
+            // against caa4ea7), so the cancel gesture is also driven at the DOM's own gesture router: the same gate and
+            // the same TradingView listener a real right-click reaches.
+            var gestures = Field<DomOrderGestures>(dom, "_gestures");
+            var blocked = gestures.Press(dom.Dom, (float)own.X, (float)own.Y, rightButton: true, alt: false, clickCount: 1);
+            pump(0.3);
+            check(blocked == DomPressResult.Blocked && real.ActiveOrders.Contains(working), "off: a right-click cancel on the DOM leaves the order working");
             var from = dom.TranslatePoint(own, window) ?? default;
             var to = dom.TranslatePoint(new Point(own.X, own.Y + 3 * dom.Dom.RowHeight), window) ?? default;
             window.MouseDown(from, MouseButton.Left);
@@ -125,9 +131,9 @@ internal static partial class SafetyScene
         pump(0.3);
         if (working != null && Cell(DomColumn.BuyOrders, p => p == bidPrice) is { } again)
         {
-            Press(again, MouseButton.Right);
+            var routed = Field<DomOrderGestures>(dom, "_gestures").Press(dom.Dom, (float)again.X, (float)again.Y, rightButton: true, alt: false, clickCount: 1);
             pump(0.5);
-            check(!real.ActiveOrders.Contains(working), "on again: a right-click cancel on the DOM cancels the order as before");
+            check(routed == DomPressResult.Routed && !real.ActiveOrders.Contains(working), $"on again: a right-click cancel on the DOM cancels the order as before (status «{status()}»)");
         }
         foreach (var o in real.ActiveOrders.ToList()) real.Cancel(o);
         check(svc.Settings.DomTrading && dom.TradingEnabled, "the switch is restored to its default");
