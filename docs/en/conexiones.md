@@ -126,6 +126,7 @@ Uses the Rithmic credentials supplied by AMP. A new profile starts disabled with
 3. Enter API **CID** and **Secret**, obtained through Tradovate Settings → API Access.
 4. Review instrument-search product roots; each resolves to the active monthly contract.
 5. Explicitly allow real Tradovate orders if needed and set a maximum order size.
+6. Optionally switch on **Exchange-side protection (Tradovate OCO)** under **Stops and targets**. It is off by default. When on, a whole-position stop and target are sent as one Tradovate OCO, so Tradovate cancels the other leg when one fills even if Trading Hub is closed. Partial targets and lone stops stay app-managed, and a refused OCO falls back to separate orders with a visible reason. See [Exchange-side protection](./operar.md#exchange-side-protection) and its [demo checklist](./native-protection-demo-checklist.md).
 
 Accounts appear in Chart Trader and Accounts. CME futures charts from Rithmic or Tradovate can use them. API market data requires the appropriate separate CME/API entitlement; without it, an entitled data connection can supply the chart while Tradovate handles execution. Tradovate Trader using the same username can interrupt the app's data session.
 

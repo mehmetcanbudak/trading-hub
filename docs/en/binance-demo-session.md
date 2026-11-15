@@ -51,4 +51,4 @@ Stop immediately if an unexpected order appears, two stops are working at once, 
 
 ## Not covered
 
-Real-money behavior, mainnet liquidity and latency, and Binance Spot.
+Real-money behavior, mainnet liquidity and latency, and Binance Spot. Binance connections keep app-managed stops and targets; the [exchange-side protection decisions](./native-protection-demo-checklist.md#venue-decisions) explain why Binance's linked contracts are not used, and that page holds the Tradovate demo checklist.

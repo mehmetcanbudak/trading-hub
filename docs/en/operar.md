@@ -92,7 +92,24 @@ With the template enabled, a new position gets client-coordinated stop/target or
 
 **Apply to position** replaces the current position's stop/targets with the template. You can also drag SL/TP handles from a position or pending entry, or drag from the position line toward profit for a target and toward loss for a stop.
 
-None of the integrated live-account adapters currently submits broker-native OCO groups. Safe native amendments or sequenced replacements retain one tracked handle and wait for actual working-state acknowledgment; an optimistic price/quantity update is not confirmation. Unknown placement replies are reconciled by exact client identity instead of blindly retried. Client-managed sibling cancellation, trailing and resizing require the application and connection to remain operational; broker orders left after Quit have no app-managed OCO protection. Verify authorized demo-account behavior before relying on real trading.
+By default every connection's protection is **app-managed**: the stop and targets are separate working orders, and Trading Hub cancels the remaining ones and resizes them. Safe native amendments or sequenced replacements retain one tracked handle and wait for actual working-state acknowledgment; an optimistic price/quantity update is not confirmation. Unknown placement replies are reconciled by exact client identity instead of blindly retried. Sibling cancellation, trailing and resizing require the application and connection to remain operational; broker orders left after Quit have no app-managed OCO protection.
+
+### Exchange-side protection
+
+A Tradovate connection can opt in to **Exchange-side protection (Tradovate OCO)** under **Connections → Tradovate → Stops and targets**. It is off by default. When it is on and the position's protection is exactly one stop and one target, each for the whole position, both are sent in one [`placeOCO`](https://partner.tradovate.com/api/rest-api-endpoints/orders/place-oco) request. When one fills, Tradovate cancels the other even if Trading Hub is closed or disconnected. Chart Trader shows **Exchange-side protection** once Tradovate reports both legs in one OCO group, and **App-managed protection** otherwise. Automatic SL/TP, Chart Trader brackets and a live strategy's stop loss and take profit use it.
+
+- Each leg keeps its own client order ID, saved ownership and acknowledgment rules. An unknown reply is reconciled from those IDs and never sent again.
+- Moving a leg is a native amendment of that leg. Position increases and partial exits resize the legs natively while Trading Hub runs.
+- Partial targets, a stop without a target, or a target that does not cover the whole position stay app-managed. Chart Trader says why.
+- If Tradovate refuses the OCO, both legs are sent again as separate app-managed orders and the reason stays visible. Linking stays off for that session until the option is switched off and on again.
+- If Tradovate cancels one leg because the other filled partly, or because Trading Hub removed the other, the remaining position gets an app-managed replacement. A cancellation that nobody in Trading Hub requested, such as **Cancel all**, is respected as it is for app-managed orders.
+- After a restart, chart protection that is still working at Tradovate is re-owned from the saved client IDs and adopted. It is never placed a second time. A strategy re-adopts its own kept stop and target as before.
+
+Tradovate documents neither reduce-only orders nor how OCO legs follow partial fills. While Trading Hub is closed, a leg that is larger than the remaining position is not resized. These behaviours are verified against a fake venue only; follow the [demo checklist](./native-protection-demo-checklist.md) before relying on them with real money.
+
+Binance, Bybit and Rithmic connections stay app-managed. Their documented linked contracts do not fit these ownership and resizing rules; the [checklist](./native-protection-demo-checklist.md#venues-that-stay-app-managed) records why.
+
+Verify authorized demo-account behavior before relying on real trading.
 
 ## Cross trading
 

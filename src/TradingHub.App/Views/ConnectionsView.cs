@@ -466,7 +466,8 @@ internal sealed partial class ConnectionsView : UserControl, IPage
             allowReal,
             confirm,
             Ui.Field("Maximum order quantity (0 = no limit)", maxQty),
-            warn);
+            warn,
+            AppManagedProtectionNote());
     }
 
     private Control BybitAccount(ConnectionProfile p, List<Action> apply)
@@ -510,8 +511,13 @@ internal sealed partial class ConnectionsView : UserControl, IPage
             Note(MaterialIconKind.ShieldKeyOutline, $"Both API credentials are stored in {Os.SecretStore}. Use contract-trading permission without withdrawals. Keys must belong to the selected environment."),
             Ui.Field("Environment", environment), TwoColumns(Ui.Field("API key", key), Ui.Field("API secret", secret)), forget,
             allow, confirm, Ui.Field("Maximum new order quantity (0 = no local limit)", maximum),
-            Note(MaterialIconKind.AlertOutline, "REAL orders use actual money. Native reduce-only applies account-wide, not to one strategy; local sibling cancellation is not atomic OCO. Market orders can partially fill or cancel without a fill."));
+            Note(MaterialIconKind.AlertOutline, "REAL orders use actual money. Native reduce-only applies account-wide, not to one strategy; local sibling cancellation is not atomic OCO. Market orders can partially fill or cancel without a fill."),
+            AppManagedProtectionNote());
     }
+
+    /// <summary>Venues without an adopted linked stop/target contract (see Trading → Stops and targets in the guide).</summary>
+    private static Control AppManagedProtectionNote() =>
+        Note(MaterialIconKind.ShieldSyncOutline, "Stops and targets on this connection are app-managed: Trading Hub does not use a venue-linked stop/target contract here.");
 
     private Control LongbridgeSection(ConnectionProfile p, List<Action> apply)
     {
@@ -774,6 +780,7 @@ internal sealed partial class ConnectionsView : UserControl, IPage
             Note(MaterialIconKind.ShieldCheckOutline, "Rithmic accounts appear in Chart Trader when the connection is active. Paper accounts trade directly; real accounts need this authorization and request confirmation."),
             allowReal,
             TwoColumns(confirm, Ui.Field("Maximum order quantity (0 = no limit)", maxQty)),
+            AppManagedProtectionNote(),
             Ui.H3("Advanced"),
             TwoColumns(Ui.Field("Application name", app, "Some systems require an approved application name."), Ui.Field("Products available in search", products, "Search the active monthly contract for each product (e.g. ES → ESZ6).")));
     }
@@ -802,6 +809,7 @@ internal sealed partial class ConnectionsView : UserControl, IPage
         var allowReal = new CheckBox { Content = "Allow orders on real Tradovate accounts", IsChecked = p.AllowRealOrders };
         var confirm = new CheckBox { Content = "Confirm each real-money order", IsChecked = p.ConfirmOrders };
         var maxQty = new NumericUpDown { Value = p.MaxOrderQuantity, Minimum = 0, Maximum = 10000, Increment = 1, FormatString = "0", Width = 140 };
+        var exchangeSide = new CheckBox { Content = "Exchange-side protection (Tradovate OCO)", IsChecked = p.ExchangeSideProtection };
         void Update()
         {
             allowReal.IsEnabled = demo.IsChecked != true;
@@ -824,6 +832,7 @@ internal sealed partial class ConnectionsView : UserControl, IPage
             p.AllowRealOrders = !p.Testnet && allowReal.IsChecked == true;
             p.ConfirmOrders = confirm.IsChecked != false;
             p.MaxOrderQuantity = maxQty.Value ?? 0;
+            p.ExchangeSideProtection = exchangeSide.IsChecked == true;
         });
         return Ui.V(14,
             Ui.H2("Tradovate account"),
@@ -838,6 +847,9 @@ internal sealed partial class ConnectionsView : UserControl, IPage
             allowReal,
             confirm,
             Ui.Field("Maximum order quantity (0 = no limit)", maxQty),
+            Ui.H3("Stops and targets"),
+            exchangeSide,
+            Note(MaterialIconKind.ShieldLinkVariantOutline, "Off by default. When on, a stop and a target that together cover the whole position are sent as one Tradovate OCO: when one fills, Tradovate cancels the other even if Trading Hub is closed. Partial targets, a lone stop or a refused OCO stay app-managed. Tradovate documents neither reduce-only orders nor how OCO legs follow partial fills, so keep Trading Hub running to resize the remaining leg."),
             Note(MaterialIconKind.ShieldCheckOutline, "Tradovate allows one data session per user. Opening Tradovate Trader with the same user can disconnect Trading Hub, and vice versa."));
     }
 

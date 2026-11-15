@@ -132,6 +132,9 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private bool _protectionRefresh, _refreshTarget;
     private (int Side, decimal Price)? _refreshStopBound;
     private (int Side, decimal Stop, decimal Target)? _localProtectionPrices;
+    // Protective orders sent as one venue-linked pair, and whether this position fell back to separate app-managed ones.
+    private readonly HashSet<StrategyOrder> _linkedProtection = new();
+    private bool _linkFallback;
     private (StrategyOrder Order, decimal Price, string? IntentId)? _provisionalStop;
 
     // Observed user exits are not adopted or booked as strategy orders. Once an actual reduction happens,
@@ -1255,10 +1258,19 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
                 Executed?.Invoke(this, ExecutedText(so, filled));
                 if (!so.IsProtective && IsRunning) _strategy.InternalFilled(so);
                 ForgetTerminalExecutionOrder(o.Id);
+                _linkedProtection.Remove(so);
             }
             else if (o.Canceled || o.State == OrderStates.Failed)
             {
                 if (o.State == OrderStates.Failed) Log($"Rejected: {Describe(so)} ({_account.LastError})");
+                // A refused venue-linked pair falls back to separate app-managed protection for this position at once.
+                if (_linkedProtection.Remove(so) && o.State == OrderStates.Failed && IsRunning && !_closing)
+                {
+                    if (!_linkFallback) Log("Exchange-side protection was refused: app-managed stop loss and take profit are placed instead.");
+                    _linkFallback = true;
+                    _protectionRefresh = true;
+                    _refreshTarget = true;
+                }
                 so.State = StrategyOrderState.Canceled;
                 _orders.Remove(so);
                 changed = true;
@@ -1805,7 +1817,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     private void PlaceProtection(bool stop, bool target)
     {
         decimal pos = LocalPosition;
-        if (pos == 0) { _refreshStopBound = null; _provisionalStop = null; return; }
+        if (pos == 0) { _refreshStopBound = null; _provisionalStop = null; _linkFallback = false; return; }
         decimal qty = Math.Abs(pos);
         int stopTicks = _strategy.StopLossTicks > 0 ? _strategy.StopLossTicks : _strategy.TrailingStopTicks;
         if ((!stop || stopTicks <= 0) && (!target || _strategy.TakeProfitTicks <= 0)) return;
@@ -1819,9 +1831,13 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
             return;
         }
         var prices = ProtectionPrices(pos);
+        // An opted-in venue receives a whole-position stop and target as one linked group; otherwise they go separately.
+        var native = stop && target && prices.Stop > 0 && prices.Target > 0 && !_linkFallback &&
+            _account is INativeProtection n && (n.NativeProtection & NativeProtectionFeatures.LinkedStopAndTarget) != 0 ? n : null;
         _placing++;
         try
         {
+            using var link = native?.LinkProtection();
             var exit = pos > 0 ? OrderSide.Sell : OrderSide.Buy;
             if (stop && prices.Stop > 0)
             {
@@ -1838,6 +1854,11 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
 
             if (target && prices.Target > 0)
                 _tp = Protective(exit, StrategyOrderType.Limit, qty, prices.Target, "Take profit");
+            if (link != null && _sl is { IsActive: true } linkedStop && _tp is { IsActive: true } linkedTarget)
+            {
+                _linkedProtection.Add(linkedStop);
+                _linkedProtection.Add(linkedTarget);
+            }
             _refreshStopBound = null;
         }
         finally { _placing--; }

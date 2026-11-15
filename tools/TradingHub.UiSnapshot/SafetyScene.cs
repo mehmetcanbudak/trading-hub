@@ -400,6 +400,8 @@ internal static partial class SafetyScene
             DomTradingSwitch(window, pump, tv, chart, real, Check, Shot, Status);
         });
 
+        Part("exchange-side protection status", () => ExchangeSideProtection(window, pump, tv, chart, cache, Check, Shot));
+
         Part("live strategy guards", () =>
         {
             realProfile.AllowRealOrders = true;
