@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Reflection;
 using System.Text.Json;
+using TradingHub.Common;
 using TradingHub.Common.Logging;
 using TradingHub.Data;
 using TradingHub.Feeds;
@@ -259,8 +260,8 @@ public sealed partial class AppSettings
     {
         try
         {
-            Directory.CreateDirectory(AppPaths.Root);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+            DurableFile.EnsureDirectory(AppPaths.Root);
+            DurableFile.ReplaceAtomically(FilePath, JsonSerializer.Serialize(this, Json));
         }
         catch (Exception ex)
         {

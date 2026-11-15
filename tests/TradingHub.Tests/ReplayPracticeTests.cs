@@ -94,8 +94,15 @@ public sealed class ReplayPracticeTests
             second.Feed!.SeekForward(Start.AddSeconds(2));
             await UntilAsync(() => second.ClockUtc == Start.AddSeconds(2), hub.PumpAll);
             second.Account.Market(OrderDirections.Buy, 2);
-            var a = registry.End(first);
-            var b = registry.End(second);
+            var recorder = new DurabilityRecorder();
+            ReplayResult a, b;
+            using (recorder.Install())
+            {
+                a = registry.End(first);
+                b = registry.End(second);
+            }
+            recorder.AssertAtomicReplace(Path.Combine(root, "results", a.RunId.ToString("N") + ".json"));
+            recorder.AssertAtomicReplace(Path.Combine(root, "results", b.RunId.ToString("N") + ".json"));
             Assert.Equal(95.9m, a.RealizedNet); // 100 gross less 2.00 entry and 2.10 exit fees
             Assert.Equal(192.2m, b.RealizedNet); // 200 gross less 4.00 entry and 3.80 exit fees
             Assert.Equal(179m, normalPortfolio.RealizedPnL); // (119 - 101) * 10 less two 0.50 fees

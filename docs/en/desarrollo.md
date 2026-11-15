@@ -65,6 +65,8 @@ EnglishLocalizationTests additionally checks SDK defaults/overrides, legacy disp
 
 Execution regressions cover native client-ID reuse, accepted-versus-unsent replacement lineage, current-child adoption, interrupted first native-index publication, corrected prices/fees, durable deduplication and restart projection. `AccountSnapshot` captures fills, analysis and `HistoryRevision` from one journal snapshot; view caches must use that revision rather than execution count. An inactive runner with no close/order work uses the committed ledger for display without replacing an active runner's book. Fake-venue and owned-filesystem proofs are not authenticated provider or physical power-loss certification.
 
+**Storage durability.** Safety-critical state goes through `TradingHub.Common.DurableFile`: order ownership (`execution-state` intents, receipts, projections, native indexes, including bounded closes), account execution journals, live ledgers with their `.wal`, `.id` and `.executions` authorities, runner/portfolio/proposal state, Bybit order state, connection profiles and the isolated test credential file, alert state, settings, workspace and drawings, storage-location control files and relocation copies, and replay results. Whole-file state is written to a unique same-directory `*.tmp`, flushed to the drive (one Darwin `F_FULLFSYNC`, `FlushFileBuffers` on Windows, `fsync` elsewhere), atomically renamed over the target, and only then is the parent directory synchronized (macOS/Linux) before the write is acknowledged. Append journals flush after every committed record and synchronize the parent directory once a new name appears. Market-data caches keep their own policies. `DurableStateWriterTests` installs an observing `DurabilityOperations` through the flow-scoped `DurableFile.Use` seam to prove file flush before rename and directory sync after it for each writer, and models a power cut by undoing renames whose directory was never synchronized. `TRADINGHUB_DURABILITY_BENCHMARK=1 dotnet test tests/TradingHub.Tests --filter FullyQualifiedName~DurabilityLatencyBenchmark --logger "console;verbosity=detailed"` reports writer latency on the temp volume. These are simulated power cuts, not a physical power-cut test, and do not certify drive firmware.
+
 ```bash
 dotnet test tests/TradingHub.Tests --filter FullyQualifiedName~SmartWalkForward
 python3 tools/check_english_translation.py
@@ -256,6 +258,7 @@ LiveStrategyRunner.Guard accepts ILiveOrderGuard to inspect exposure-increasing 
 - Validate provider work with fake servers and simulation first.
 - New built-in user-facing text is English. Keep persisted IDs, parser aliases, JSON/CSV contracts, filenames and generated localization keys stable. SDK English overrides belong in Strings.English.cs, not generated Strings.g.cs.
 - Review every non-text change; do not update validation baselines merely to silence a failure. Check the [localization dashboard](./TRANSLATION_STATUS.md) and report untested real-broker/hardware behavior explicitly.
+- Write safety-critical state only through `DurableFile`; never `File.WriteAllText` or a hand-rolled temporary/rename for order, account, ledger, connection, alert, settings or workspace state.
 
 ## Selected non-KVP reproduction
 

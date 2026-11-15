@@ -768,16 +768,11 @@ public sealed class AlertCenter : IAsyncDisposable
     {
         if (_unreadable) return false;
         if (!_dirty) return true;
-        string temporary = _path + ".pending-" + Guid.NewGuid().ToString("N");
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                JsonSerializer.Serialize(stream, StoredStateLocked());
-                stream.Flush(flushToDisk: true);
-            }
-            File.Move(temporary, _path, overwrite: true);
+            DurableFile.EnsureDirectory(Path.GetDirectoryName(_path)!);
+            // Deliveries become pending only after the flush, atomic rename and directory synchronization succeed.
+            DurableFile.ReplaceAtomically(_path, stream => JsonSerializer.Serialize(stream, StoredStateLocked()));
             for (int i = 0; i < _state.Deliveries.Count; i++)
                 if (_state.Deliveries[i].State == NotificationDeliveryState.AwaitingPersistence)
                     _state.Deliveries[i] = _state.Deliveries[i] with { State = NotificationDeliveryState.Pending, Status = "Durable encrypted pending delivery." };
@@ -787,7 +782,6 @@ public sealed class AlertCenter : IAsyncDisposable
         catch
         {
             _status = "Alert persistence failed. Local history remains in memory; external sends are blocked until storage recovers.";
-            try { File.Delete(temporary); } catch { }
             return false;
         }
     }

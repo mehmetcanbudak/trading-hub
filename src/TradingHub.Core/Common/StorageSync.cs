@@ -10,8 +10,11 @@ public static class StorageSync
     private const int Interrupted = 4;
     private const int DarwinFullSync = 51;
 
-    /// <summary>Retains Flush(true) for native files and the supplied flush contract for other streams.
-    /// Returns true only when an additional Darwin full-drive-flush request was accepted.</summary>
+    /// <summary>Persists a native file with exactly one drive-flush request: Darwin F_FULLFSYNC (falling back to fsync
+    /// where the filesystem lacks it) or Flush(true) elsewhere; other streams use their own flush contract.
+    /// Returns true only when a Darwin full-drive-flush request was accepted.</summary>
+    /// <remarks>.NET 10's Flush(true) itself issues F_FULLFSYNC on macOS, so calling it before an explicit F_FULLFSYNC
+    /// paid for two drive cache flushes. The explicit request keeps the guarantee independent of runtime internals.</remarks>
     public static bool Flush(Stream stream)
     {
         if (stream is not FileStream file)
@@ -19,8 +22,12 @@ public static class StorageSync
             stream.Flush();
             return false;
         }
-        file.Flush(flushToDisk: true);
-        if (!OperatingSystem.IsMacOS()) return false;
+        if (!OperatingSystem.IsMacOS())
+        {
+            file.Flush(flushToDisk: true);
+            return false;
+        }
+        file.Flush(flushToDisk: false); // hand buffered bytes to the OS before the drive flush
         bool retained = false;
         var handle = file.SafeFileHandle;
         try
@@ -31,8 +38,11 @@ public static class StorageSync
             {
                 int error = Marshal.GetLastPInvokeError();
                 if (error == Interrupted) continue;
-                // Some filesystems do not implement full-drive flush. The managed disk flush above still completed.
-                if (error is 22 or 45 or 78) return false; // EINVAL, ENOTSUP, ENOSYS on Darwin.
+                if (error is 22 or 45 or 78) // EINVAL, ENOTSUP, ENOSYS: no full-drive flush on this filesystem.
+                {
+                    file.Flush(flushToDisk: true); // fsync; its errors remain visible
+                    return false;
+                }
                 throw Failure("Full file synchronization", error);
             }
             return true;

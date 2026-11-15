@@ -25,6 +25,30 @@ Personal data, credentials, the upstream checkpoint, the historical English audi
 
 The [development guide](./desarrollo.md#native-execution-ownership), [backtesting guide](./backtesting.md), [strategy guide](./estrategias.md#files-and-compilation) and [data guide](./datos.md#interactive-brokers-bars-and-offline-history) describe the resulting contracts.
 
+## Storage durability (`fp/durability`)
+
+Before this change, journaling was process-crash consistent: execution journals, order ownership and ledger intents were flushed, but runner, portfolio, settings and workspace state was rewritten in place, and Bybit order, alert and replay state was renamed without synchronizing its directory. Every safety-critical state writer now uses one helper, `TradingHub.Common.DurableFile`:
+
+- **Whole-file state** (order ownership including bounded closes, Bybit order state, connection profiles and the isolated credential file, alerts, settings, workspace and drawings, runner/portfolio/proposal state, ledger authorities, storage-location control files, replay results): unique same-directory temporary, one drive flush, atomic rename, then parent-directory synchronization before acknowledgment.
+- **Append journals** (account executions, live-ledger records after their published write-ahead intent): a drive flush after each committed record; the directory is synchronized once a new name appears. Existing leases and write-ahead ordering are unchanged.
+- **Relocation:** copied files are flushed, and every staged directory and the destination parent are synchronized before the location authority switches.
+- `StorageSync.Flush` now issues exactly one drive flush on macOS. .NET 10's `Flush(true)` already sends `F_FULLFSYNC`, so the previous `Flush(true)` plus explicit `F_FULLFSYNC` paid for two drive cache flushes.
+
+**Guarantee:** on macOS/Linux, acknowledged state is designed to survive power loss on storage that honors drive-flush requests. An interrupted write leaves the previous complete file plus an ignored `*.tmp`. Windows uses `FlushFileBuffers`, but it has no directory-handle synchronization, so renames rely on NTFS metadata journaling. Failures propagate or block new exposure as before; for example, an unsynchronized Bybit save refuses the create before transport. Market-data caches are out of scope.
+
+**Evidence:** `DurableStateWriterTests` uses the injected `DurabilityOperations` seam to prove file flush before rename and directory sync after rename for each writer. Its simulated power cuts undo unsynchronized renames, leave truncated or complete temporaries and lose unsynchronized journal names, and recovery reads the previous committed state without phantom intents or orders. No physical power-cut test was performed, and drive or firmware behavior is not certified.
+
+**Measured latency** (internal Apple SSD, 200 samples after 10 warmups, `DurabilityLatencyBenchmark`; machine shared with concurrent agents). Medians in milliseconds:
+
+| Writer | Before (one run) | After (three runs) |
+|---|---|---|
+| `AccountJournal.Add` | 4.05 | 4.03 to 4.06 |
+| `OrderContext.Prepare` (durable intent) | 10.89 | 9.94 to 11.33 |
+| `LiveStore.AppendFill` (WAL and record) | 13.76 | 10.29 to 11.12; one contended run 32.4 |
+| Append with explicit flush plus directory sync | 7.90 | 4.03 to 4.07 |
+
+A single drive flush dominates, at about 4 ms. A directory sync on APFS costs less than run-to-run noise. Order-path latency did not rise, so no fsync batching was introduced. Settings, workspace, drawings and runner/portfolio saves now cost one drive flush each, where they previously had none. Workspace and drawings skip rewriting content that this process has already committed.
+
 ## Current verification
 
 | Gate | Observed result |

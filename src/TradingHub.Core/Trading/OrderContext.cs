@@ -1381,7 +1381,7 @@ internal sealed partial class OrderOwnershipJournal
         lease.ReleaseFile();
         File.Delete(Path.Combine(candidate, ".lease"));
         Directory.Delete(candidate);
-        StorageSync.SyncDirectory(Path.GetDirectoryName(candidate)!);
+        DurableFile.SyncDirectory(Path.GetDirectoryName(candidate)!);
     }
 
     public OwnedOrderIntent SaveIntent(OwnedOrderIntent intent)
@@ -1653,9 +1653,7 @@ internal sealed partial class OrderOwnershipJournal
     public void Acknowledge(ExecutionReceipt receipt)
     {
         using var lease = Acquire();
-        string path = ReceiptPath(receipt.Id);
-        File.Delete(path);
-        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.Delete(ReceiptPath(receipt.Id));
     }
     public ExecutionProjectionCheckpoint? Projected(ExecutionIdentity identity)
     {
@@ -1694,7 +1692,7 @@ internal sealed partial class OrderOwnershipJournal
             try { mutex.WaitOne(); }
             catch (AbandonedMutexException) { }
             owned = true;
-            if (create) EnsureDirectory(root);
+            if (create) DurableFile.EnsureDirectory(root);
             return new(mutex, new FileStream(Path.Combine(root, ".lease"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
         }
         catch
@@ -1719,22 +1717,6 @@ internal sealed partial class OrderOwnershipJournal
             finally { mutex.ReleaseMutex(); mutex.Dispose(); }
         }
     }
-    private static void EnsureDirectory(string directory)
-    {
-        var missing = new Stack<string>();
-        string? parent = directory;
-        while (parent != null && !Directory.Exists(parent))
-        {
-            missing.Push(parent);
-            parent = Path.GetDirectoryName(parent);
-        }
-        while (missing.Count > 0)
-        {
-            string path = missing.Pop();
-            Directory.CreateDirectory(path);
-            if (Path.GetDirectoryName(path) is { } existingParent) StorageSync.SyncDirectory(existingParent);
-        }
-    }
     private string ProjectionPath(ExecutionIdentity identity) => Path.Combine(_root, "projected",
         OrderContext.Hash(JsonSerializer.Serialize(identity)) + ".json");
     private string IntentPath(string id) => Path.Combine(_root, "intent", OrderContext.Hash(id) + ".json");
@@ -1750,20 +1732,9 @@ internal sealed partial class OrderOwnershipJournal
     }
     private static void Write<T>(string path, T value)
     {
-        string directory = Path.GetDirectoryName(path)!;
-        EnsureDirectory(directory);
-        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                JsonSerializer.Serialize(file, new Envelope<T>(1, value, OrderContext.Hash(JsonSerializer.Serialize(value))));
-                StorageSync.Flush(file);
-            }
-            File.Move(temporary, path, overwrite: true);
-            StorageSync.SyncDirectory(directory);
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        DurableFile.EnsureDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.ReplaceAtomically(path, file =>
+            JsonSerializer.Serialize(file, new Envelope<T>(1, value, OrderContext.Hash(JsonSerializer.Serialize(value)))));
     }
 }
 

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using TradingHub.Common;
 using TradingHub.Market;
 using TradingHub.Trading;
 
@@ -1102,7 +1103,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         if (_statePath == null) return;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_statePath))!);
+            DurableFile.EnsureDirectory(Path.GetDirectoryName(Path.GetFullPath(_statePath))!);
             _lease = new FileStream(_statePath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             if (!File.Exists(_statePath)) return;
             var state = ReadState(_statePath);
@@ -1140,7 +1141,6 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
     {
         if (_statePath == null) return true;
         if (_lease == null || _storageError != null) return false;
-        string temporary = _statePath + ".pending";
         try
         {
             var orders = _byLink.Values.Select(t => new SavedOrder(t.Symbol, t.LinkId, t.Own, t.Order.ExchangeOrderId, t.Order.Direction,
@@ -1152,12 +1152,8 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                     _byLink.Values.Any(t => t.Order.State == OrderStates.Active || t.Sending || t.OperationBusy) ||
                     _executions.Keys.Any(key => !_publishedExecutions.Contains(key))), _flattening.Values.ToList()));
             string data = JsonSerializer.Serialize(new Envelope(payload, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)))));
-            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-            {
-                byte[] bytes = Encoding.UTF8.GetBytes(data);
-                stream.Write(bytes); stream.Flush(true);
-            }
-            File.Move(temporary, _statePath, true);
+            // Acknowledged only after the file flush, atomic rename and directory synchronization all succeed.
+            DurableFile.ReplaceAtomically(_statePath, data);
             return true;
         }
         catch (Exception ex)

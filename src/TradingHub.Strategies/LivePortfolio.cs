@@ -768,7 +768,7 @@ public static class LiveStore
             string path = LedgerPath(root, key);
             using var lease = AcquireLedger(path);
             CompleteDeletion(path);
-            return EnsureGeneration(path, out _, static directory => StorageSync.SyncDirectory(directory));
+            return EnsureGeneration(path, out _);
         }
     }
 
@@ -909,17 +909,11 @@ public static class LiveStore
     private static void EnsureAuthorityMarker(string path, Guid generation, string identity)
     {
         string directory = AuthorityDirectory(path, generation);
-        if (!Directory.Exists(directory))
-        {
-            Directory.CreateDirectory(directory);
-            StorageSync.SyncDirectory(directory);
-            StorageSync.SyncDirectory(Path.GetDirectoryName(directory)!);
-            StorageSync.SyncDirectory(Path.GetDirectoryName(Path.GetDirectoryName(directory)!)!);
-        }
+        DurableFile.EnsureDirectory(directory);
         string marker = Path.Combine(directory, identity + ".pending");
         if (Exists(marker)) return;
-        using (var stream = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.None)) StorageSync.Flush(stream);
-        StorageSync.SyncDirectory(directory);
+        using (var stream = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.None)) DurableFile.Flush(stream);
+        DurableFile.SyncDirectory(directory);
     }
 
     private static void WriteAuthority(string path, string identity, PhysicalAuthority authority)
@@ -927,13 +921,7 @@ public static class LiveStore
         string file = Path.Combine(AuthorityDirectory(path, authority.Generation), identity + ".json");
         string payload = JsonSerializer.Serialize(authority);
         var envelope = new AuthorityEnvelope(payload, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))));
-        using (var stream = new FileStream(file + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            JsonSerializer.Serialize(stream, envelope);
-            StorageSync.Flush(stream);
-        }
-        File.Move(file + ".tmp", file, overwrite: true);
-        StorageSync.SyncDirectory(Path.GetDirectoryName(file)!);
+        DurableFile.ReplaceAtomically(file, stream => JsonSerializer.Serialize(stream, envelope));
     }
 
     private static bool CommittedPhysicalHeadEquals(string path, Guid generation, LiveFill head)
@@ -963,7 +951,7 @@ public static class LiveStore
         if (authority.CommittedRevision < authority.Revision)
         {
             bool recoveringAttempt = authority.AttemptedRevision == head.Revision;
-            string? error = SavePendingLeased(path, null, OpenLedger, static directory => StorageSync.SyncDirectory(directory));
+            string? error = SavePendingLeased(path, null, OpenLedger);
             if (error != null) throw new IOException(error);
             if (!recoveringAttempt || !CommittedPhysicalHeadEquals(path, authority.Generation,
                 head.Fill with { ProjectionRevision = head.Revision }))
@@ -972,8 +960,7 @@ public static class LiveStore
                 // revision can need the rare history check; ordinary new heads never scan old fills.
                 authority = authority with { AttemptedRevision = head.Revision };
                 WriteAuthority(path, identity, authority);
-                error = SavePendingLeased(path, head.Fill with { ProjectionRevision = head.Revision }, OpenLedger,
-                    static directory => StorageSync.SyncDirectory(directory));
+                error = SavePendingLeased(path, head.Fill with { ProjectionRevision = head.Revision }, OpenLedger);
                 if (error != null) throw new IOException(error);
             }
             WriteAuthority(path, identity, authority with
@@ -987,8 +974,7 @@ public static class LiveStore
         if (authority.CommittedRevision < authority.Revision || Exists(marker))
             AccountExecutionProjector.QueueCommittedFinancialFact(path, authority.Generation,
                 head.Fill with { ProjectionRevision = head.Revision });
-        File.Delete(marker);
-        StorageSync.SyncDirectory(AuthorityDirectory(path, authority.Generation));
+        DurableFile.Delete(marker);
     }
 
     private static void RecoverAuthoritiesLeased(string path, Guid generation)
@@ -1005,8 +991,7 @@ public static class LiveStore
             if (authority == null)
             {
                 // Marker publication precedes the first atomic admission. No authorized fact exists in this crash gap.
-                File.Delete(marker);
-                StorageSync.SyncDirectory(directory);
+                DurableFile.Delete(marker);
             }
             else CompleteAuthorityLeased(path, identity, authority);
         }
@@ -1065,8 +1050,7 @@ public static class LiveStore
                     return new(ExecutionProjectionStatus.Error, "Ledger event requires a durable scoped owner and matching history generation.");
                 RecoverAuthoritiesLeased(path, expectedGeneration);
                 handedToWal = true;
-                string? error = SavePendingLeased(path, execution, OpenLedger,
-                    static directory => StorageSync.SyncDirectory(directory));
+                string? error = SavePendingLeased(path, execution, OpenLedger);
                 return error == null ? new(ExecutionProjectionStatus.Applied) : new(ExecutionProjectionStatus.Error, error);
             }
             catch (Exception ex)
@@ -1113,7 +1097,7 @@ public static class LiveStore
             CompleteDeletion(path);
             if (!CurrentGeneration(path, expectedGeneration)) return false;
             RecoverAuthoritiesLeased(path, expectedGeneration);
-            if (SavePendingLeased(path, null, OpenLedger, static directory => StorageSync.SyncDirectory(directory)) is { } error)
+            if (SavePendingLeased(path, null, OpenLedger) is { } error)
                 throw new IOException(error);
             if (AccountExecutionProjector.HasQueuedFinancialFactUnderResetFence(path, expectedGeneration)) return false;
             var ledger = ReadLedgerLeased(path, key, expectedGeneration, pointValue);
@@ -1127,8 +1111,8 @@ public static class LiveStore
     {
         AccountExecutionProjector.RetireLedgerObservers(path);
         using (var marker = new FileStream(path + ".delete", FileMode.OpenOrCreate, FileAccess.Write, FileShare.None))
-            StorageSync.Flush(marker);
-        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
+            DurableFile.Flush(marker);
+        DurableFile.SyncDirectory(Path.GetDirectoryName(path)!);
         Pending.Remove(path);
         CompleteDeletion(path);
     }
@@ -1143,7 +1127,8 @@ public static class LiveStore
     /// Appends a ledger event; identical legacy fills remain distinct. Returns null only after the durable intent,
     /// main-file write, disk flush, close and commit cleanup succeed. Failures retain ordered pending events in this process;
     /// a published intent also survives process exit. Recovery replays its byte range; execution identities govern projection.
-    /// This is a single-filesystem process-crash guarantee, not power-loss durability or exactly-once broker-event delivery.
+    /// This is a single-filesystem guarantee against process crashes and, through drive flushes and directory synchronization
+    /// (<see cref="DurableFile"/>), against power loss on storage that honors them; not exactly-once broker-event delivery.
     /// </summary>
     public static string? AppendFill(string key, LiveFill f) => AppendFill(key, f, OpenLedger);
     public static string? AppendFill(string root, string key, LiveFill fill) => SavePending(root, key, fill, OpenLedger);
@@ -1156,15 +1141,14 @@ public static class LiveStore
     public static string? SavePendingLedgerEvents(string root, string key) => SavePending(root, key, null, OpenLedger);
 
     // A per-call internal I/O adapter exercises the real public operation without reflection or global fault switches.
-    internal static string? AppendFill(string key, LiveFill f, Func<string, Stream> openLedger, Action<string>? syncDirectory = null) =>
-        SavePending(key, f, openLedger, syncDirectory);
+    internal static string? AppendFill(string key, LiveFill f, Func<string, Stream> openLedger) =>
+        SavePending(key, f, openLedger);
 
-    private static string? SavePending(string key, LiveFill? f, Func<string, Stream> openLedger, Action<string>? syncDirectory = null) =>
-        SavePending(Root, key, f, openLedger, syncDirectory);
+    private static string? SavePending(string key, LiveFill? f, Func<string, Stream> openLedger) =>
+        SavePending(Root, key, f, openLedger);
 
-    private static string? SavePending(string root, string key, LiveFill? f, Func<string, Stream> openLedger, Action<string>? syncDirectory = null)
+    private static string? SavePending(string root, string key, LiveFill? f, Func<string, Stream> openLedger)
     {
-        syncDirectory ??= static directory => StorageSync.SyncDirectory(directory);
         lock (Gate)
         {
             string path = LedgerPath(root, key);
@@ -1173,7 +1157,7 @@ public static class LiveStore
                 using var lease = AcquireLedger(path);
                 CompleteDeletion(path);
                 RecoverAuthoritiesLeased(path, ReadGeneration(path));
-                return SavePendingLeased(path, f, openLedger, syncDirectory);
+                return SavePendingLeased(path, f, openLedger);
             }
             catch (Exception ex)
             {
@@ -1187,7 +1171,7 @@ public static class LiveStore
         }
     }
 
-    private static string? SavePendingLeased(string path, LiveFill? f, Func<string, Stream> openLedger, Action<string> syncDirectory)
+    private static string? SavePendingLeased(string path, LiveFill? f, Func<string, Stream> openLedger)
     {
             PendingLedger? pending = null;
             try
@@ -1206,7 +1190,7 @@ public static class LiveStore
                         return null;
                     }
                 }
-                Guid generation = EnsureGeneration(path, out bool newHistory, syncDirectory);
+                Guid generation = EnsureGeneration(path, out bool newHistory);
                 pending = PendingFor(path, generation, newHistory);
                 if (f != null) pending.Fills.Enqueue(f);
                 var intent = ReadIntent(path, generation);
@@ -1221,7 +1205,7 @@ public static class LiveStore
                         if (intent == null)
                         {
                             intent = CreateIntent(file, generation, pending.Fills.Peek());
-                            PublishIntent(path, intent, openLedger, syncDirectory, pending);
+                            PublishIntent(path, intent, openLedger, pending);
                         }
 
                         ValidateAppendRange(file, intent);
@@ -1230,21 +1214,20 @@ public static class LiveStore
                             if (file.Length > intent.Start) file.SetLength(intent.Start);
                             file.Position = intent.Start;
                             file.Write(intent.Bytes);
-                            FlushLedger(file);
+                            DurableFile.Flush(file);
                         }
                         catch
                         {
-                            try { file.SetLength(intent.Start); FlushLedger(file); }
+                            try { file.SetLength(intent.Start); DurableFile.Flush(file); }
                             catch { /* The journal still owns the entire uncommitted tail. */ }
                             throw;
                         }
                     }
                     // Make a newly created history name reachable before removing its recovery authority.
-                    syncDirectory(Path.GetDirectoryName(path)!);
+                    DurableFile.SyncDirectory(Path.GetDirectoryName(path)!);
 
                     // A reader takes the same cross-process lease and cannot observe commit cleanup in progress.
-                    File.Delete(path + ".wal");
-                    syncDirectory(Path.GetDirectoryName(path)!);
+                    DurableFile.Delete(path + ".wal");
                     if (pending.Intent?.Id == intent.Id)
                     {
                         pending.Fills.Dequeue();
@@ -1373,7 +1356,7 @@ public static class LiveStore
 
     private static LedgerLease AcquireLedger(string path)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.EnsureDirectory(Path.GetDirectoryName(path)!);
         string identity = Path.GetFullPath(path);
         if (OperatingSystem.IsWindows()) identity = identity.ToUpperInvariant();
         string name = "TradingHub.LiveLedger." + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
@@ -1395,8 +1378,6 @@ public static class LiveStore
             throw;
         }
     }
-
-    private static void FlushLedger(Stream file) => StorageSync.Flush(file);
 
     private static FileStream? OpenHistory(string path, bool allowUnwrittenDirectory = false)
     {
@@ -1425,9 +1406,8 @@ public static class LiveStore
         File.Delete(path + ".id");
         File.Delete(path + ".id.tmp");
         if (Directory.Exists(path + ".executions")) Directory.Delete(path + ".executions", recursive: true);
-        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
-        File.Delete(path + ".delete");
-        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.SyncDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.Delete(path + ".delete");
     }
 
     private static Guid ReadGeneration(string path)
@@ -1441,7 +1421,7 @@ public static class LiveStore
         catch (DirectoryNotFoundException) { return Guid.Empty; }
     }
 
-    private static Guid EnsureGeneration(string path, out bool created, Action<string> syncDirectory)
+    private static Guid EnsureGeneration(string path, out bool created)
     {
         var generation = ReadGeneration(path);
         created = generation == Guid.Empty;
@@ -1451,16 +1431,16 @@ public static class LiveStore
         if (!Exists(path))
         {
             using var history = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-            StorageSync.Flush(history);
+            DurableFile.Flush(history);
         }
         using (var file = new FileStream(path + ".id.tmp", FileMode.Create, FileAccess.Write, FileShare.None))
         {
             file.Write(Encoding.ASCII.GetBytes(generation.ToString("N")));
-            StorageSync.Flush(file);
+            DurableFile.Flush(file);
         }
-        File.Move(path + ".id.tmp", path + ".id");
-        syncDirectory(Path.GetDirectoryName(path)!);
-        syncDirectory(Path.GetDirectoryName(Path.GetDirectoryName(path)!)!);
+        DurableFile.Rename(path + ".id.tmp", path + ".id", overwrite: false);
+        DurableFile.SyncDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.SyncDirectory(Path.GetDirectoryName(Path.GetDirectoryName(path)!)!);
         return generation;
     }
 
@@ -1511,19 +1491,19 @@ public static class LiveStore
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
-    private static void PublishIntent(string path, AppendIntent intent, Func<string, Stream> openLedger, Action<string> syncDirectory, PendingLedger pending)
+    private static void PublishIntent(string path, AppendIntent intent, Func<string, Stream> openLedger, PendingLedger pending)
     {
         using (var journal = openLedger(path + ".wal.tmp"))
         {
             journal.SetLength(0);
             JsonSerializer.Serialize(journal, intent);
-            FlushLedger(journal);
+            DurableFile.Flush(journal);
         }
         // Same-directory publication: a process exit can leave an ignored temporary, never half a published intent.
-        File.Move(path + ".wal.tmp", path + ".wal");
+        DurableFile.Rename(path + ".wal.tmp", path + ".wal", overwrite: false);
         // Publication owns this queue head even when the following namespace confirmation fails.
         pending.Intent = intent;
-        syncDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.SyncDirectory(Path.GetDirectoryName(path)!);
     }
 
     private static AppendIntent? ReadIntent(string path, Guid generation)
@@ -1640,7 +1620,7 @@ public static class LiveStore
                 throw new IOException("The ledger no longer matches its pending intent's assigned byte range.");
             offset += count;
         }
-        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.SyncDirectory(Path.GetDirectoryName(path)!);
         pending.Fills.Dequeue();
         pending.Intent = null;
     }
@@ -1686,7 +1666,7 @@ public static class LiveStore
                 var json = JsonSerializer.Serialize(all.Values.ToList(), Json);
                 if (json == _lastRunnersJson && _lastRunnersPath == RunnersPath && File.Exists(RunnersPath)) return;
                 Directory.CreateDirectory(Root);
-                File.WriteAllText(RunnersPath, json);
+                DurableFile.ReplaceAtomically(RunnersPath, json);
                 _lastRunnersJson = json;
                 _lastRunnersPath = RunnersPath;
             }
@@ -1711,7 +1691,7 @@ public static class LiveStore
             var all = File.Exists(RunnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new() : new();
             all.RemoveAll(r => r.Key == key);
             Directory.CreateDirectory(Root);
-            File.WriteAllText(RunnersPath, JsonSerializer.Serialize(all, Json));
+            DurableFile.ReplaceAtomically(RunnersPath, JsonSerializer.Serialize(all, Json));
             _lastRunnersJson = null;
         }
     }
@@ -1734,7 +1714,7 @@ public static class LiveStore
                 if (all.FirstOrDefault(r => r.Key == info.Key) is { } saved) saved.ProtectionOrderIds = info.ProtectionOrderIds;
                 else all.Add(info);
                 Directory.CreateDirectory(root);
-                File.WriteAllText(runnersPath, JsonSerializer.Serialize(all, Json));
+                DurableFile.ReplaceAtomically(runnersPath, JsonSerializer.Serialize(all, Json));
                 _lastRunnersJson = null;
                 return null;
             }
@@ -1756,7 +1736,7 @@ public static class LiveStore
                 var info = all.FirstOrDefault(r => r.Key == key);
                 if (info == null) return;
                 change(info);
-                File.WriteAllText(RunnersPath, JsonSerializer.Serialize(all, Json));
+                DurableFile.ReplaceAtomically(RunnersPath, JsonSerializer.Serialize(all, Json));
                 _lastRunnersJson = null;
             }
             catch
@@ -1791,7 +1771,7 @@ public static class LiveStore
             try
             {
                 Directory.CreateDirectory(Root);
-                File.WriteAllText(PortfoliosPath, JsonSerializer.Serialize(list, Json));
+                DurableFile.ReplaceAtomically(PortfoliosPath, JsonSerializer.Serialize(list, Json));
             }
             catch
             {
@@ -1822,7 +1802,7 @@ public static class LiveStore
         lock (Gate)
         {
             Directory.CreateDirectory(Root);
-            File.WriteAllText(ProposalsPath, JsonSerializer.Serialize(list.OrderByDescending(p => p.CreatedUtc).Take(100).ToList(), Json));
+            DurableFile.ReplaceAtomically(ProposalsPath, JsonSerializer.Serialize(list.OrderByDescending(p => p.CreatedUtc).Take(100).ToList(), Json));
         }
     }
 

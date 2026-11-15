@@ -20,18 +20,22 @@ public sealed class LiveNamespaceRecoveryTests
         {
             string path = LiveStore.LedgerFile(key);
             bool failed = false;
-            void Synchronize(string directory)
+            var recorder = new DurabilityRecorder
             {
-                if (!failed && (stage == "generation" || File.Exists(path + ".wal")))
+                FailWhen = step =>
                 {
+                    // Fail the first namespace confirmation after the stage's publication (.id rename or .wal rename).
+                    if (failed || !step.StartsWith("sync:", StringComparison.Ordinal) ||
+                        !File.Exists(path + (stage == "generation" ? ".id" : ".wal"))) return false;
                     failed = true;
-                    throw new IOException("Owned post-publication namespace failure.");
-                }
-                StorageSync.SyncDirectory(directory);
-            }
+                    return true;
+                },
+            };
             var time = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
-            string? error = LiveStore.AppendFill(key, new LiveFill(time, true, 2m, 100m),
-                file => new FileStream(file, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0), Synchronize);
+            string? error;
+            using (recorder.Install())
+                error = LiveStore.AppendFill(key, new LiveFill(time, true, 2m, 100m),
+                    file => new FileStream(file, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, bufferSize: 0));
             Assert.NotNull(error);
             Assert.Equal(2m, LiveStore.LoadLedger(key, 10m).Position);
             Assert.Null(LiveStore.SavePendingLedgerEvents(key));

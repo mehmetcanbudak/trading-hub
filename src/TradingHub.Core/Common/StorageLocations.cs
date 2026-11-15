@@ -172,7 +172,7 @@ public sealed class StorageLocationStore
     public void CancelPending()
     {
         // The pending request is ours; this does not touch any data or approved root pointer.
-        File.Delete(ControlPath(PendingName));
+        DurableFile.Delete(ControlPath(PendingName));
     }
 
     public async Task<StorageRelocationResult> ApplyPendingAsync(CancellationToken ct,
@@ -193,7 +193,7 @@ public sealed class StorageLocationStore
             {
                 string stage = root.Destination + ".tradinghub-copy-" + Guid.NewGuid().ToString("N");
                 RejectLinks(stage);
-                Directory.CreateDirectory(stage);
+                DurableFile.EnsureDirectory(stage);
                 stages.Add(stage);
             }
             int completed = 0;
@@ -224,21 +224,26 @@ public sealed class StorageLocationStore
             if (!preview.Files.SequenceEqual(current.Files)) throw new IOException("Source files changed during relocation. Original locations remain authoritative.");
             ct.ThrowIfCancellationRequested();
             if (Read<StorageLocationSelection>(PendingName) != selection) throw new OperationCanceledException("Relocation approval was cancelled or changed.");
+            // Every copied name must be durable before the trees are published and the authority switches to them.
+            foreach (var file in preview.Files.Where(file => file.IsDirectory))
+                DurableFile.SyncDirectory(SafeChild(stages[file.RootIndex], file.RelativePath));
+            foreach (var stage in stages) DurableFile.SyncDirectory(stage);
             for (int r = 0; r < preview.Roots.Count; r++)
             {
                 RejectLinks(preview.Roots[r].Destination);
                 Directory.Move(stages[r], preview.Roots[r].Destination);
+                DurableFile.SyncDirectory(Path.GetDirectoryName(Path.GetFullPath(preview.Roots[r].Destination))!);
             }
             // This is the only authority switch, after every copied tree has passed verification.
             await AtomicWriteAsync(SelectionName, preview.Selection, ct).ConfigureAwait(false);
             result = new(true, false, "Storage relocation verified and activated. Original data was retained.");
-            try { File.Delete(ControlPath(PendingName)); }
+            try { DurableFile.Delete(ControlPath(PendingName)); }
             catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
         catch (OperationCanceledException)
         {
             result = new(false, true, "Storage relocation cancelled. Original locations remain active; original files were retained.");
-            try { File.Delete(ControlPath(PendingName)); }
+            try { DurableFile.Delete(ControlPath(PendingName)); }
             catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
         catch (Exception ex)
@@ -334,31 +339,20 @@ public sealed class StorageLocationStore
         return JsonSerializer.Deserialize<T>(File.ReadAllText(path), Json);
     }
     private string ControlPath(string name) => Path.Combine(_bootstrapRoot, name);
-    private async Task AtomicWriteAsync<T>(string name, T value, CancellationToken ct)
+    private Task AtomicWriteAsync<T>(string name, T value, CancellationToken ct)
     {
-        Directory.CreateDirectory(_bootstrapRoot);
-        string path = ControlPath(name), temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            await using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                await JsonSerializer.SerializeAsync(stream, value, Json, ct).ConfigureAwait(false);
-                await stream.FlushAsync(ct).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
-            }
-            ct.ThrowIfCancellationRequested();
-            File.Move(temp, path, overwrite: true);
-        }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
+        DurableFile.EnsureDirectory(_bootstrapRoot);
+        return DurableFile.ReplaceAtomicallyAsync(ControlPath(name),
+            (stream, token) => JsonSerializer.SerializeAsync(stream, value, Json, token), ct);
     }
     private static async Task CopyFileAsync(string source, string destination, CancellationToken ct)
     {
         RejectLinks(source);
         await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous | FileOptions.WriteThrough);
+        await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous);
         await input.CopyToAsync(output, ct).ConfigureAwait(false);
         await output.FlushAsync(ct).ConfigureAwait(false);
-        output.Flush(flushToDisk: true);
+        DurableFile.Flush(output);
     }
     private static async Task<(long Length, string Hash)> HashAsync(string path, CancellationToken ct)
     {

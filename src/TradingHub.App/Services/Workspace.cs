@@ -6,6 +6,7 @@ using Newtonsoft.Json.Serialization;
 using TradingHub.App.Views;
 using TradingHub.Charting;
 using TradingHub.Charting.Drawings;
+using TradingHub.Common;
 using TradingHub.Common.Logging;
 using TradingHub.Data;
 using TradingHub.Indicators;
@@ -271,6 +272,19 @@ internal static partial class Workspace
 
     private static bool Saveable(ChartTab t) => t.Model != null && !t.IsReplay;
 
+    // A durable replacement costs drive flushes on the UI thread; content this process already committed is not rewritten.
+    private static readonly Dictionary<string, string> Committed = new();
+
+    private static void ReplaceIfChanged(string path, string text)
+    {
+        lock (Committed)
+        {
+            if (Committed.TryGetValue(path, out var last) && last == text && File.Exists(path)) return;
+            DurableFile.ReplaceAtomically(path, text);
+            Committed[path] = text;
+        }
+    }
+
     public static void Save(TradingView w)
     {
         try
@@ -298,8 +312,8 @@ internal static partial class Workspace
                 });
             }
 
-            Directory.CreateDirectory(AppPaths.Root);
-            File.WriteAllText(AppPaths.WorkspaceFile, JsonConvert.SerializeObject(dto, Formatting.Indented, Settings));
+            DurableFile.EnsureDirectory(AppPaths.Root);
+            ReplaceIfChanged(AppPaths.WorkspaceFile, JsonConvert.SerializeObject(dto, Formatting.Indented, Settings));
             foreach (var t in w.Tabs.Where(Saveable)) SaveDrawings(t);
         }
         catch (Exception ex)
@@ -423,8 +437,8 @@ internal static partial class Workspace
         if (t.Model == null) return;
         try
         {
-            Directory.CreateDirectory(AppPaths.Drawings);
-            File.WriteAllText(DrawingsFile(t), System.Text.Json.JsonSerializer.Serialize(t.Model.Drawings));
+            DurableFile.EnsureDirectory(AppPaths.Drawings);
+            ReplaceIfChanged(DrawingsFile(t), System.Text.Json.JsonSerializer.Serialize(t.Model.Drawings));
         }
         catch (Exception ex)
         {
