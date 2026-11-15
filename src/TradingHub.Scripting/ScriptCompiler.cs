@@ -131,7 +131,7 @@ public sealed class ScriptCompiler
         return new ScriptCompileResult { Success = emit.Success, Diagnostics = Describe(emit.Diagnostics), Elapsed = sw.Elapsed };
     }
 
-    /// <summary>Compiles .cs files into a collectible in-memory assembly.</summary>
+    /// <summary>Compiles .cs indicator files and .kvs scripts into a collectible in-memory assembly.</summary>
     public ScriptCompileResult Compile(IReadOnlyList<string> files, string assemblyName) =>
         CompileCore(ReadSources(files), assemblyName);
 
@@ -157,13 +157,36 @@ public sealed class ScriptCompiler
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         cancellationToken.ThrowIfCancellationRequested();
-        var compilation = CreateCompilationCore(sources, assemblyName, cancellationToken: cancellationToken);
+        // KVS scripts become C# here, inside the one compile path: same references, sandbox and last-good publication.
+        var scriptErrors = new List<ScriptDiagnostic>();
+        var scripts = new Dictionary<string, ScriptSource>(StringComparer.Ordinal);
+        var csharp = new List<ScriptSource>();
+        foreach (var source in sources)
+        {
+            if (!KvsTranslator.IsScript(source.Path))
+            {
+                csharp.Add(source);
+                continue;
+            }
+
+            try
+            {
+                csharp.Add(new(source.Path, KvsTranslator.Translate(source.Text, Path.GetFileNameWithoutExtension(source.Path), source.Path)));
+                scripts[KvsTranslator.LinePath(source.Path)] = source;
+            }
+            catch (KvsException ex)
+            {
+                scriptErrors.Add(new ScriptDiagnostic(source.Path, ex.Line, ex.Column, "error", "KVS", ex.Message));
+            }
+        }
+
+        var compilation = CreateCompilationCore(csharp, assemblyName, cancellationToken: cancellationToken);
         using var pe = new MemoryStream();
         using var pdb = new MemoryStream();
         var emit = compilation.Emit(pe, pdb, cancellationToken: cancellationToken);
-        var diags = Describe(emit.Diagnostics);
+        var diags = scriptErrors.Concat(Describe(emit.Diagnostics, scripts)).ToList();
 
-        if (!emit.Success)
+        if (!emit.Success || scriptErrors.Count > 0)
             return new ScriptCompileResult { Success = false, Diagnostics = diags, Elapsed = sw.Elapsed };
 
         pe.Position = 0;
@@ -173,12 +196,24 @@ public sealed class ScriptCompiler
         return new ScriptCompileResult { Success = true, Assembly = asm, Diagnostics = diags, Elapsed = sw.Elapsed };
     }
 
-    private static IReadOnlyList<ScriptDiagnostic> Describe(IEnumerable<Diagnostic> diagnostics) => diagnostics
+    /// <summary>
+    /// KVS diagnostics arrive through <c>#line</c> mapping with the script line; their column is the statement start,
+    /// because generated C# columns do not correspond to script text.
+    /// </summary>
+    private static IReadOnlyList<ScriptDiagnostic> Describe(IEnumerable<Diagnostic> diagnostics, IReadOnlyDictionary<string, ScriptSource>? scripts = null) => diagnostics
         .Where(d => d.Severity == DiagnosticSeverity.Error || (d.Severity == DiagnosticSeverity.Warning && !IgnoredWarnings.Contains(d.Id)))
         .Select(d =>
         {
-            var span = d.Location.GetLineSpan();
-            return new ScriptDiagnostic(span.Path ?? "", span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1,
+            var span = d.Location.GetMappedLineSpan();
+            string path = span.Path ?? "";
+            int line = span.StartLinePosition.Line + 1, column = span.StartLinePosition.Character + 1;
+            if (span.HasMappedPath && scripts != null && scripts.TryGetValue(path, out var script))
+            {
+                path = script.Path;
+                column = KvsTranslator.StatementColumn(script.Text, line);
+            }
+
+            return new ScriptDiagnostic(path, line, column,
                 d.Severity == DiagnosticSeverity.Error ? "error" : "warning", d.Id, d.GetMessage(TradingHub.Common.UiCulture.Current));
         }).ToList();
 

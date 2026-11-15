@@ -21,7 +21,16 @@ Strategy indicator factories such as Sma/Ema/Rsi are a separate, simpler [API](.
 | RSI | Oscillators | Period. |
 | MACD | Oscillators | Fast/slow averages and signal. |
 
-Built-ins come from TradingHub.Indicators.Native and are grouped by category.
+Built-ins come from TradingHub.Indicators.Native.
+
+### Library groups
+
+The library lists **★ My indicators** first, then the default groups in this order: Moving averages, Trend and strength, Oscillators, Volatility and channels, Volume, Order flow (delta, CVD, footprint), Volume profile, VWAP, Order book, Derivatives (open interest, liquidations), Options, Market structure and key levels, Candles and patterns, Sessions, Macro and other tools. Empty default groups are hidden; any other category becomes its own group after these.
+
+- Click a group header to open or close it. Right-click a header to rename the group (empty restores the default name), create a new group below it, move the group up/down, sort it A → Z, delete a group you created (its indicators return to their default groups) or restore the default arrangement.
+- Right-click an indicator to add it, view/edit its source, **Move to group** (including a new group), or **Move up / Move down** (also Alt+↑ / Alt+↓). Drag an indicator onto another row or a group header to move it.
+- The arrangement is stored in `settings.json` (`IndicatorLibrary`). It never changes indicator types, saved charts or templates. While searching, only groups with matches are shown.
+- Studies join a group through their category attribute, for example `[Category(IndicatorCategories.Vwap)]`; the older Volume / Order flow, Trend and Levels categories map to Order flow, Trend and strength, and Market structure and key levels.
 
 ### Technical indicators
 
@@ -29,14 +38,14 @@ TradingHub.Indicators.Technical supports locally importing the public ATAS techn
 
 ## Custom indicators
 
-- Place C# files in `~/Documents/Trading Hub/Indicadores`. Subfolders are supported; bin/obj are ignored. The initial example is `DeltaPercentageExample.cs`, displayed as **Example: delta % per bar**.
+- Place C# files (`.cs`) or [KVS scripts](#kvs-scripts) (`.kvs`) in `~/Documents/Trading Hub/Indicadores`. Subfolders are supported; bin/obj are ignored. The example `DeltaPercentageExample.cs` (**Example: delta % per bar**) is written once into an empty folder; a hidden `.example-created` marker in that folder means deleting the example keeps it deleted, and an existing file is never replaced.
 - File create/save/delete/rename triggers recompilation after about 0.6 seconds without changes; **Code → Recompile indicators** forces it.
 - Files compile together. On failure the last successful assembly remains available and the first error is shown. Success reports compile duration.
 - Custom indicators appear first in **My indicators**, with a star/custom badge. Remove and re-add an already loaded instance to use updated code.
 
 ### Editor
 
-Open **Code → Indicator editor** (⇧⌘E on macOS, Ctrl+Shift+E on Windows) or the library code button. New creates a class-named template; **Save and compile** (⌘S / ⌘B; Ctrl+S / Ctrl+B on Windows) recompiles. Click diagnostics to jump to their line; the folder button opens the platform file manager.
+Open **Code → Indicator editor** (⇧⌘E on macOS, Ctrl+Shift+E on Windows) or the library code button. New creates a class-named template; the script button creates a KVS script from an English starter (EMA bands with an alert). **Save and compile** (⌘S / ⌘B; Ctrl+S / Ctrl+B on Windows) recompiles. Click diagnostics to jump to their line; the folder button opens the platform file manager. Renaming keeps the file's language: a `.kvs` file cannot be renamed to `.cs` or the reverse.
 
 ### Example
 
@@ -93,6 +102,50 @@ public class AverageRange : Indicator
 - Optional rendering: set EnableCustomDrawing and subscribe to DrawingLayouts.Final in the constructor. Override OnRender(RenderContext, DrawingLayouts); use ChartInfo.GetXByBar/GetYByPrice and context DrawLine/FillRectangle/DrawString. Visible indices are FirstVisibleBarNumber through LastVisibleBarNumber.
 
 The [Claude assistant](./asistente-claude.md) can also write indicators into this directory. **Untrusted C# executes in-process, not in a sandbox.**
+
+## KVS scripts
+
+KVS is a small declarative language for indicators: declare what goes in, what comes out and what is calculated on every bar. A `.kvs` file is translated to one C# indicator class and compiled **by the same compiler, in the same pass and with the same references as your C# files**; generated code never runs through any other path. Scripts appear under **My indicators** (category **KVS scripts**) as type `TradingHub.UserScripts.Kvs.Kvs_<file name>` (non-ASCII letters and symbols become `_`). Renaming the file therefore renames the type: saved charts keep referring to the old name.
+
+```js
+name "EMA bands"
+param length = 20 { min: 1, max: 500, description: "Average length (bars)" }
+param mult = 2
+input src = ohlcv.close
+input buys = trades.volume { side: "BUY" }
+output basis = line { overlay: true, color: "#f2b53a", width: 2 }
+output upper = line { overlay: true, color: "#3d8bfd" }
+level 0
+onBar {
+  basis = ema(src, length)
+  upper = basis + mult * stdev(src, length)
+  if (crossover(src, upper)) { alert("Closed above the band") }
+}
+```
+
+| Part | Meaning |
+|---|---|
+| `name "…"` | Library name (default: the file name). |
+| `param n = 20 { min, max, description }` | Setting shown in the indicator properties: a number or `true` / `false`. Changing it recalculates. |
+| `input x = …` | `ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time`, `trades.volume { side: "BUY" / "SELL" }`, `trades.buy`, `trades.sell`, `trades.delta`, `trades.count`, `book.bid` / `book.ask` / `book.delta { within: ticks }` (average resting size near the best price over the bar's recorded depth samples). `open`, `high`, `low`, `close`, `volume`, `hl2`, `hlc3`, `ohlc4`, `time`, `delta`, `buyvol`, `sellvol` and `trades` work without a declaration. |
+| `output x = line \| histogram \| dots { … }` | Options: `overlay: true` (on price; otherwise every output goes to a separate panel), `color`, `width`, `opacity`, `label`, `show_zero: true`, `color_by: "sign", colors: [positive, negative]`. |
+| `level 70 { color }` | Horizontal panel line. |
+| `onStart { }` / `onBar { }` | Run before a full recalculation / for every bar (the forming bar is recalculated on updates). |
+| `var x = …` | Variable; also a series, so `x[1]` is its previous-bar value. |
+| `x[n]` | Value of any series `n` bars ago (missing before the first bar). |
+| `if (…) { } else if (…) { } else { }`, `and`, `or`, `not`, `? :` | Conditions. |
+| `alert("…")` | In-app alert, once per bar and message, only on the last bar; recalculating does not repeat it. |
+
+Functions: `ema sma rma wma stdev highest lowest sum change cum crossover crossunder` and `abs min max sqrt log log10 exp pow round floor ceil sign nz na sin cos tan`; constants `bar_index`, `na`, `PI`. The wrun call form is accepted too: `param("n", 20, { min: 1 })`, `input("c", ohlcv.close)`, `output("x", line, overlay, { color: "#fff" })`, `function onBar() { … }` and `out_x(value)`.
+
+Semantics and data honesty:
+
+- Every function call keeps its own state, so call windowed functions on every bar (not only inside an `if`). `sma`, `wma`, `stdev`, `highest`, `lowest` and `sum` return `na` until their whole window has values; `ema` and `rma` start from the first value; `stdev` is the population deviation.
+- Missing values are `na` (NaN). Outputs do not draw `na`, and also hide exact zeros unless `show_zero: true`.
+- `trades.buy`, `trades.sell`, `trades.volume { side }` and `delta` are `na` on bars that have volume but no aggressor split, instead of an invented zero. `book.*` is `na` without usable recorded depth for the bar; nothing is estimated.
+- Names cannot reuse C# keywords or members of the indicator base class (for example `Name` or `Panel`), and each name is declared once.
+
+Errors: script errors report the `.kvs` line and column; C# errors in generated code (for example assigning a comparison to a number) are mapped back to the script line, at the statement's first column. Any error fails the whole compilation, so the last successful indicators stay loaded, as with C# files.
 
 ## Validation checklist
 
@@ -197,7 +250,14 @@ Completed-study cache defaults are **64 entries / 8 MiB**. Dedicated disk cache 
 
 ## Built-in source, editable forks and Pine review
 
-Use the library's **View source / edit** action. An exact built-in type opens its embedded source read-only. **Make editable copy** checks a Roslyn semantic type/dependency closure, preflights compilation without executing it and publishes a separate user type only after complete success. Unsupported dependencies are rejected before any partial source copy. Original resources, authorship, license notices, existing custom files and saved type identities remain unchanged.
+Use the library's **View source / edit** action or right-click **View source…**. An exact built-in type opens its embedded source read-only. **Make editable copy** (or right-click **Edit a copy…**, which reopens the existing copy if there is one) checks a Roslyn semantic type/dependency closure, preflights compilation without executing it and publishes a separate user type only after complete success. Unsupported dependencies are rejected before any partial source copy. Original resources, authorship, license notices, existing custom files and saved type identities remain unchanged; the original stays in the library and in saved charts.
+
+Each copy folder holds a `.source-copy.json` record of the original source documents it came from and of the files as generated. At startup, after an update:
+
+- an **untouched** copy whose original changed is regenerated from the new original under the **same type name** (charts using it keep working), but only after the new copy compiles with your other sources; the status bar lists the refreshed copies;
+- an **edited** copy (changed, added or removed files) whose original changed is never modified: an in-app notice appears and the library shows **original updated**. Right-click it to **Keep my edits and stop reminding me**, or to restore the new original; restoring moves your whole previous copy to `Indicator copy backups` next to the indicator folder first.
+
+Copies made before this tracking existed have no record and are left alone.
 
 Custom source supports save/recompile, conflict-aware filename rename and explicit deletion. Renaming the file does **not** rename its C# type or rewrite chart/template identities. The owned recursive exact-content monitor sees atomic saves and same-size/timestamp-preserved changes, debounces edits and retains the last-good catalog after compiler errors. Hiding the main window retains hot reload; true shutdown cancels and drains it without native watcher startup.
 

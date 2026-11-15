@@ -222,10 +222,27 @@ public sealed class UserScripts : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>Hidden marker in the indicator folder: the example was offered once and is never recreated.</summary>
+    public const string ExampleMarker = ".example-created";
+
+    /// <summary>
+    /// Writes the example only the first time the folder has no sources. The marker travels with the folder, so deleting
+    /// the example keeps it deleted; an existing user file is never replaced.
+    /// </summary>
     private void WriteExampleIfEmpty()
     {
-        if (Directory.EnumerateFiles(Folder, "*.cs", SearchOption.AllDirectories).Any()) return;
-        _sources.Create("DeltaPercentageExample.cs", ExampleSource);
+        string marker = Path.Combine(Folder, ExampleMarker);
+        if (File.Exists(marker)) return;
+        try
+        {
+            if (_sources.EditablePaths().Count == 0) _sources.Create("DeltaPercentageExample.cs", ExampleSource);
+            File.WriteAllBytes(marker, Array.Empty<byte>());
+            if (OperatingSystem.IsWindows()) File.SetAttributes(marker, File.GetAttributes(marker) | FileAttributes.Hidden);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            this.LogWarn("Could not write the indicator example: " + error.Message); // retried next start
+        }
     }
 
     public const string ExampleSource = """

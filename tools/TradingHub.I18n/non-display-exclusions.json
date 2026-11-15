@@ -11,9 +11,17 @@
     "locations": "TradingHub.App/Services/AppServices.cs:653 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:644 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:892 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
+  "Edited": {
+    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:255",
+    "reason": "Suffix of the default C# class name for an editable indicator copy. Generated identifiers stay English in every UI language."
+  },
   "Fee": {
     "locations": "TradingHub.Strategies/LivePortfolio.cs:1560 TradingHub.Strategies/LivePortfolio.cs:1565",
     "reason": "Existing imported-execution JSON property name, validated and decoded without renaming persisted records."
+  },
+  "Indicator copy backups": {
+    "locations": "TradingHub.App/Services/IndicatorSourceCopies.cs:59",
+    "reason": "Stable on-disk folder name for preserved previous copies, shown verbatim as a path. Translating it would scatter backups across language-specific folders."
   },
   "PORTFOLIO (closed trades; {0} accounting): net {1} · {2} trades · PF {3} · max drawdown {4} · ": {
     "locations": "TradingHub.App/Services/LiveRiskAgent.cs:242",
@@ -54,5 +62,9 @@
   "unresolved endpoint": {
     "locations": "TradingHub.App/Services/AppServices.cs:701",
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
+  },
+  "{0}Edited": {
+    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:255",
+    "reason": "Default C# class name of an editable indicator copy (original type name + English suffix), not a display label."
   }
 }

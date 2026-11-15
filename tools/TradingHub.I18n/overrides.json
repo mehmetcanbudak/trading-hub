@@ -13594,5 +13594,361 @@
   "Kept ownership context {0}: {1}": {
     "es": "Se conservó el contexto de propiedad {0}: {1}",
     "zh-CN": "已保留所有权上下文 {0}：{1}"
+  },
+  "Candles and patterns": {
+    "es": "Velas y patrones",
+    "zh-CN": "K线与形态"
+  },
+  "Click to open or close the group. Right-click to rename, reorder or create groups. Drag indicators here to move them.": {
+    "es": "Clic para abrir o cerrar el grupo. Clic derecho para renombrar, reordenar o crear grupos. Arrastra indicadores aquí para moverlos.",
+    "zh-CN": "单击展开或收起该组。右键可重命名、调整顺序或新建分组。把指标拖到这里即可移动。"
+  },
+  "Could not check editable indicator copies: ": {
+    "es": "No se pudieron revisar las copias editables de indicadores: ",
+    "zh-CN": "无法检查可编辑的指标副本："
+  },
+  "Could not check editable indicator copies: {0}": {
+    "es": "No se pudieron revisar las copias editables de indicadores: {0}",
+    "zh-CN": "无法检查可编辑的指标副本：{0}"
+  },
+  "Could not check the editable copy in {0}: {1}": {
+    "es": "No se pudo revisar la copia editable en {0}: {1}",
+    "zh-CN": "无法检查 {0} 中的可编辑副本：{1}"
+  },
+  "Could not make an editable copy: ": {
+    "es": "No se pudo crear una copia editable: ",
+    "zh-CN": "无法创建可编辑副本："
+  },
+  "Could not make an editable copy: {0}": {
+    "es": "No se pudo crear una copia editable: {0}",
+    "zh-CN": "无法创建可编辑副本：{0}"
+  },
+  "Could not restore the original: ": {
+    "es": "No se pudo restaurar el original: ",
+    "zh-CN": "无法恢复原版："
+  },
+  "Could not restore the original: {0}": {
+    "es": "No se pudo restaurar el original: {0}",
+    "zh-CN": "无法恢复原版：{0}"
+  },
+  "Could not update the copy record: ": {
+    "es": "No se pudo actualizar el registro de la copia: ",
+    "zh-CN": "无法更新副本记录："
+  },
+  "Could not update the copy record: {0}": {
+    "es": "No se pudo actualizar el registro de la copia: {0}",
+    "zh-CN": "无法更新副本记录：{0}"
+  },
+  "Could not write the indicator example: ": {
+    "es": "No se pudo escribir el indicador de ejemplo: ",
+    "zh-CN": "无法写入示例指标："
+  },
+  "Could not write the indicator example: {0}": {
+    "es": "No se pudo escribir el indicador de ejemplo: {0}",
+    "zh-CN": "无法写入示例指标：{0}"
+  },
+  "Create and move": {
+    "es": "Crear y mover",
+    "zh-CN": "创建并移动"
+  },
+  "Created a separate editable copy. The original stays available.": {
+    "es": "Se creó una copia editable aparte. El original sigue disponible.",
+    "zh-CN": "已创建独立的可编辑副本。原版仍然可用。"
+  },
+  "Default library arrangement": {
+    "es": "Organización predeterminada de la biblioteca",
+    "zh-CN": "默认指标库布局"
+  },
+  "Delete group (its indicators return to their default groups)": {
+    "es": "Eliminar grupo (sus indicadores vuelven a sus grupos predeterminados)",
+    "zh-CN": "删除分组（其中的指标回到各自的默认分组）"
+  },
+  "Derivatives (open interest, liquidations)": {
+    "es": "Derivados (interés abierto, liquidaciones)",
+    "zh-CN": "衍生品（持仓量、爆仓）"
+  },
+  "Edit a copy…": {
+    "es": "Editar una copia…",
+    "zh-CN": "编辑副本…"
+  },
+  "Edit source…": {
+    "es": "Editar código…",
+    "zh-CN": "编辑源代码…"
+  },
+  "Enter a group name.": {
+    "es": "Escribe un nombre de grupo.",
+    "zh-CN": "请输入分组名称。"
+  },
+  "Group name (empty restores the default name)": {
+    "es": "Nombre del grupo (vacío restaura el nombre predeterminado)",
+    "zh-CN": "分组名称（留空则恢复默认名称）"
+  },
+  "Group name (placed below this group)": {
+    "es": "Nombre del grupo (se coloca debajo de este grupo)",
+    "zh-CN": "分组名称（放在此分组下方）"
+  },
+  "Input side «{0}»: use BUY or SELL": {
+    "es": "Lado de la entrada «{0}»: usa BUY o SELL",
+    "zh-CN": "输入方向「{0}」：请使用 BUY 或 SELL"
+  },
+  "Input «{0}»: use ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time, trades.volume/buy/sell/delta/count or book.bid/ask/delta": {
+    "es": "Entrada «{0}»: usa ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time, trades.volume/buy/sell/delta/count o book.bid/ask/delta",
+    "zh-CN": "输入「{0}」：请使用 ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time、trades.volume/buy/sell/delta/count 或 book.bid/ask/delta"
+  },
+  "KVS script: {0}": {
+    "es": "Script KVS: {0}",
+    "zh-CN": "KVS 脚本：{0}"
+  },
+  "KVS scripts": {
+    "es": "Scripts KVS",
+    "zh-CN": "KVS 脚本"
+  },
+  "Keep my edits and stop reminding me": {
+    "es": "Conservar mis cambios y no volver a avisar",
+    "zh-CN": "保留我的修改，不再提醒"
+  },
+  "Keep the file extension; a C# source and a KVS script cannot be converted by renaming.": {
+    "es": "Conserva la extensión del archivo; un código C# y un script KVS no se convierten al renombrar.",
+    "zh-CN": "请保留文件扩展名；C# 源代码和 KVS 脚本不能通过重命名互相转换。"
+  },
+  "Macro and other tools": {
+    "es": "Macro y otras herramientas",
+    "zh-CN": "宏观及其他工具"
+  },
+  "Market structure and key levels": {
+    "es": "Estructura de mercado y niveles clave",
+    "zh-CN": "市场结构与关键价位"
+  },
+  "Missing «)» for «{0}(»": {
+    "es": "Falta «)» para «{0}(»",
+    "zh-CN": "「{0}(」缺少「)」"
+  },
+  "Missing «]» after «{0}[»": {
+    "es": "Falta «]» después de «{0}[»",
+    "zh-CN": "「{0}[」后缺少「]」"
+  },
+  "Move down": {
+    "es": "Bajar",
+    "zh-CN": "下移"
+  },
+  "Move group down": {
+    "es": "Bajar el grupo",
+    "zh-CN": "分组下移"
+  },
+  "Move group up": {
+    "es": "Subir el grupo",
+    "zh-CN": "分组上移"
+  },
+  "Move to group": {
+    "es": "Mover al grupo",
+    "zh-CN": "移到分组"
+  },
+  "Move up": {
+    "es": "Subir",
+    "zh-CN": "上移"
+  },
+  "Moving averages": {
+    "es": "Medias móviles",
+    "zh-CN": "移动平均线"
+  },
+  "Name of the new group": {
+    "es": "Nombre del grupo nuevo",
+    "zh-CN": "新分组名称"
+  },
+  "New KVS script": {
+    "es": "Nuevo script KVS",
+    "zh-CN": "新建 KVS 脚本"
+  },
+  "New KVS script (simple language: param / input / output / onBar)": {
+    "es": "Nuevo script KVS (lenguaje simple: param / input / output / onBar)",
+    "zh-CN": "新建 KVS 脚本（简易语言：param / input / output / onBar）"
+  },
+  "New group": {
+    "es": "Grupo nuevo",
+    "zh-CN": "新建分组"
+  },
+  "New group…": {
+    "es": "Grupo nuevo…",
+    "zh-CN": "新建分组…"
+  },
+  "Nothing may follow the brace that closes onBar / onStart": {
+    "es": "No puede haber nada después de la llave que cierra onBar / onStart",
+    "zh-CN": "结束 onBar / onStart 的大括号后面不能再有内容"
+  },
+  "Options": {
+    "es": "Opciones",
+    "zh-CN": "期权"
+  },
+  "Options go between braces: {{ key: value, … }}": {
+    "es": "Las opciones van entre llaves: {{ clave: valor, … }}",
+    "zh-CN": "选项需写在大括号内：{{ 键: 值, … }}"
+  },
+  "Order flow (delta, CVD, footprint)": {
+    "es": "Order flow (delta, CVD, footprint)",
+    "zh-CN": "订单流（Delta、CVD、足迹图）"
+  },
+  "Original restored. Your previous edits: {0}": {
+    "es": "Original restaurado. Tus cambios anteriores: {0}",
+    "zh-CN": "已恢复原版。你之前的修改：{0}"
+  },
+  "Output type «{0}»: use line, histogram or dots": {
+    "es": "Tipo de salida «{0}»: usa line, histogram o dots",
+    "zh-CN": "输出类型「{0}」：请使用 line、histogram 或 dots"
+  },
+  "Removes your groups, group names and ordering. Indicators on charts, saved charts and templates do not change.": {
+    "es": "Elimina tus grupos, nombres de grupo y orden. Los indicadores de los gráficos, los gráficos guardados y las plantillas no cambian.",
+    "zh-CN": "将移除你的分组、分组名称和排序。图表上的指标、已保存的图表和模板不会改变。"
+  },
+  "Rename": {
+    "es": "Renombrar",
+    "zh-CN": "重命名"
+  },
+  "Rename group": {
+    "es": "Renombrar grupo",
+    "zh-CN": "重命名分组"
+  },
+  "Rename group…": {
+    "es": "Renombrar grupo…",
+    "zh-CN": "重命名分组…"
+  },
+  "Replaces the edited copy {0} with the current original under the same type, so charts using it keep working. Your edited files are moved to the «{1}» folder next to your indicator folder.": {
+    "es": "Reemplaza la copia editada {0} por el original actual con el mismo tipo, así los gráficos que la usan siguen funcionando. Tus archivos editados se mueven a la carpeta «{1}» junto a tu carpeta de indicadores.",
+    "zh-CN": "用当前原版替换已编辑的副本 {0}，类型保持不变，使用它的图表可继续工作。你编辑过的文件会移到指标文件夹旁边的「{1}」文件夹。"
+  },
+  "Restore original": {
+    "es": "Restaurar original",
+    "zh-CN": "恢复原版"
+  },
+  "Restore the default library arrangement…": {
+    "es": "Restaurar la organización predeterminada de la biblioteca…",
+    "zh-CN": "恢复默认指标库布局…"
+  },
+  "Restore the updated original": {
+    "es": "Restaurar el original actualizado",
+    "zh-CN": "恢复更新后的原版"
+  },
+  "Saving recompiles custom C# and KVS scripts with the current Trading Hub compiler. Renaming a file never renames its types, series IDs, saved chart references or templates. Pine imports stay local text until you explicitly send the reviewed source.": {
+    "es": "Al guardar se recompilan el C# personalizado y los scripts KVS con el compilador actual de Trading Hub. Renombrar un archivo nunca cambia sus tipos, los ID de series, las referencias de gráficos guardados ni las plantillas. Las importaciones de Pine quedan como texto local hasta que envíes explícitamente el código revisado.",
+    "zh-CN": "保存时会用当前的 Trading Hub 编译器重新编译自定义 C# 和 KVS 脚本。重命名文件不会改变其类型、序列 ID、已保存图表的引用或模板。导入的 Pine 代码在你明确发送已审阅的源代码之前只作为本地文本保存。"
+  },
+  "Script name": {
+    "es": "Nombre del script",
+    "zh-CN": "脚本名称"
+  },
+  "Select a C# source or KVS script inside the configured indicator directory.": {
+    "es": "Selecciona un código C# o un script KVS dentro de la carpeta de indicadores configurada.",
+    "zh-CN": "请在已配置的指标文件夹中选择 C# 源代码或 KVS 脚本。"
+  },
+  "Sessions": {
+    "es": "Sesiones",
+    "zh-CN": "交易时段"
+  },
+  "Sort by name (A → Z)": {
+    "es": "Ordenar por nombre (A → Z)",
+    "zh-CN": "按名称排序（A → Z）"
+  },
+  "The block opened on line {0} is missing its closing brace": {
+    "es": "Al bloque abierto en la línea {0} le falta la llave de cierre",
+    "zh-CN": "第 {0} 行打开的代码块缺少结束大括号"
+  },
+  "The original of your edited indicator copy was updated: {0}. Your edits were kept. Right-click the copy in the indicator library to keep your edits or restore the new original.": {
+    "es": "Se actualizó el original de tu copia editada del indicador: {0}. Tus cambios se conservaron. Haz clic derecho en la copia en la biblioteca de indicadores para conservar tus cambios o restaurar el original nuevo.",
+    "zh-CN": "你编辑过的指标副本的原版已更新：{0}。你的修改已保留。在指标库中右键该副本，可选择保留修改或恢复新的原版。"
+  },
+  "The original source is not available in this version.": {
+    "es": "El código original no está disponible en esta versión.",
+    "zh-CN": "此版本中没有原版源代码。"
+  },
+  "The original source is not available in this version. Nothing was changed.": {
+    "es": "El código original no está disponible en esta versión. No se cambió nada.",
+    "zh-CN": "此版本中没有原版源代码。未做任何更改。"
+  },
+  "The original was updated: restore it (your edits move to a backup)…": {
+    "es": "El original se actualizó: restaurarlo (tus cambios pasan a una copia de seguridad)…",
+    "zh-CN": "原版已更新：恢复原版（你的修改会移到备份）…"
+  },
+  "The script has no output (output name = line {{ … }})": {
+    "es": "El script no tiene salidas (output nombre = line {{ … }})",
+    "zh-CN": "脚本没有输出（output 名称 = line {{ … }}）"
+  },
+  "There is no output «{0}»": {
+    "es": "No existe la salida «{0}»",
+    "zh-CN": "不存在输出「{0}」"
+  },
+  "This folder is not a tracked editable copy.": {
+    "es": "Esta carpeta no es una copia editable con seguimiento.",
+    "zh-CN": "此文件夹不是受跟踪的可编辑副本。"
+  },
+  "Trend and strength": {
+    "es": "Tendencia y fuerza",
+    "zh-CN": "趋势与强度"
+  },
+  "Unchanged indicator copies now follow their updated originals: {0}": {
+    "es": "Las copias de indicadores sin cambios ahora siguen a sus originales actualizados: {0}",
+    "zh-CN": "未修改的指标副本现已跟随更新后的原版：{0}"
+  },
+  "Unexpected statement «{0}»": {
+    "es": "Instrucción inesperada «{0}»",
+    "zh-CN": "意外的语句「{0}」"
+  },
+  "Unexpected «{0}» (expected name, param, input, output, level, onStart or onBar)": {
+    "es": "«{0}» inesperado (se esperaba name, param, input, output, level, onStart u onBar)",
+    "zh-CN": "意外的「{0}」（应为 name、param、input、output、level、onStart 或 onBar）"
+  },
+  "Unexpected «{0}» in an expression": {
+    "es": "«{0}» inesperado en una expresión",
+    "zh-CN": "表达式中出现意外的「{0}」"
+  },
+  "Unknown function «{0}» (available: {1})": {
+    "es": "Función desconocida «{0}» (disponibles: {1})",
+    "zh-CN": "未知函数「{0}」（可用：{1}）"
+  },
+  "Use letters or digits in the script name.": {
+    "es": "Usa letras o dígitos en el nombre del script.",
+    "zh-CN": "脚本名称请使用字母或数字。"
+  },
+  "View source…": {
+    "es": "Ver código…",
+    "zh-CN": "查看源代码…"
+  },
+  "Volatility and channels": {
+    "es": "Volatilidad y canales",
+    "zh-CN": "波动率与通道"
+  },
+  "original updated": {
+    "es": "original actualizado",
+    "zh-CN": "原版已更新"
+  },
+  "«{0}(…)» has an empty argument": {
+    "es": "«{0}(…)» tiene un argumento vacío",
+    "zh-CN": "「{0}(…)」有空参数"
+  },
+  "«{0}(…)» takes {1} argument(s)": {
+    "es": "«{0}(…)» recibe {1} argumento(s)",
+    "zh-CN": "「{0}(…)」需要 {1} 个参数"
+  },
+  "«{0}» is a parameter, not a series; it has no history": {
+    "es": "«{0}» es un parámetro, no una serie; no tiene historial",
+    "zh-CN": "「{0}」是参数而不是序列，没有历史值"
+  },
+  "«{0}» is a reserved name; choose another one": {
+    "es": "«{0}» es un nombre reservado; elige otro",
+    "zh-CN": "「{0}」是保留名称，请换一个"
+  },
+  "«{0}» is already declared": {
+    "es": "«{0}» ya está declarado",
+    "zh-CN": "「{0}」已声明"
+  },
+  "«{0}» is not a number": {
+    "es": "«{0}» no es un número",
+    "zh-CN": "「{0}」不是数字"
+  },
+  "«{0}» is not declared (param, input, output or var)": {
+    "es": "«{0}» no está declarado (param, input, output o var)",
+    "zh-CN": "「{0}」未声明（param、input、output 或 var）"
+  },
+  "«{0}» is not declared; declare it with output or var first": {
+    "es": "«{0}» no está declarado; decláralo antes con output o var",
+    "zh-CN": "「{0}」未声明，请先用 output 或 var 声明"
   }
 }
