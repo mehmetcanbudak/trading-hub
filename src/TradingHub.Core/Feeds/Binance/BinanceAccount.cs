@@ -2152,37 +2152,57 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
 
     /// <summary>
     /// Close position. Working orders are canceled (cancel-all), and this broker's market orders still in flight are part
-    /// of what is closed: the reduce-only market order takes its send turn here and is sized there, after the earlier
-    /// requests were answered, from the venue's position read once those orders ended. Unconfirmed within
-    /// <see cref="NativeSendTurns.ReducingWait"/>, it is sized from the best known position and reports
-    /// <see cref="NativeSendTurns.UnsettledMessage"/>.
+    /// of what is closed. The close takes its send turn here; there, after the earlier requests were answered, its side and
+    /// size come from the venue's position read once those orders ended (see <see cref="NativeSendTurns.PlanPositionOrder"/>).
     /// </summary>
-    public void Flatten()
-    {
-        var (earlier, before, expected) = ExpectedPosition();
-        CancelAll();
-        if (expected == 0) return;
-        var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
-        decimal quantity = Math.Abs(expected);
-        var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, direction, OrderTypes.Market,
-            quantity, 0, ReduceOnly: true, Comment: "Close", Protective: true, MaximumOwnedQuantity: Math.Max(Math.Abs(before), quantity)));
-        Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + NativeSendTurns.ReducingWait));
-    }
+    public void Flatten() => SendPositionOrder(reverse: false);
 
     /// <summary>
-    /// Reverse, as before one opposite market order of twice the position, ending at minus that position. The position
-    /// includes this broker's market orders still in flight: the order takes its send turn here and is sized there from
-    /// the venue position, like <see cref="Flatten"/> (unconfirmed: best known position and
-    /// <see cref="NativeSendTurns.UnsettledMessage"/>).
+    /// Reverse, as before one opposite market order of twice the position, ending at minus that position. Planned like
+    /// <see cref="Flatten"/> from the confirmed position in its send turn; refused when that position stays unconfirmed.
     /// </summary>
-    public void Reverse()
+    public void Reverse() => SendPositionOrder(reverse: true);
+
+    private void SendPositionOrder(bool reverse)
     {
         var (earlier, before, expected) = ExpectedPosition();
-        if (expected == 0) return;
-        var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
-        var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, direction, OrderTypes.Market,
-            2 * Math.Abs(expected), 0, Comment: "Reverse", MaximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(expected))));
-        Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + NativeSendTurns.ReducingWait, Reverse: true));
+        if (!reverse) CancelAll();
+        if (expected == 0 && earlier.Length == 0) return; // flat with nothing in flight
+        var until = DateTime.UtcNow + NativeSendTurns.ReducingWait;
+        var turn = _sendTurns.Take();
+        _ = Task.Run(async () =>
+        {
+            bool handed = false;
+            try
+            {
+                // A reverse adds exposure: it waits for earlier replies without the reducing bound.
+                bool inOrder = await turn.WaitAsync(bounded: !reverse, _cts.Token).ConfigureAwait(false);
+                await WaitForNativeReplayAsync().ConfigureAwait(false);
+                var (net, pending, confirmed) = await PositionAfterAsync(earlier, until).ConfigureAwait(false);
+                var plan = NativeSendTurns.PlanPositionOrder(reverse, expected, net, pending, confirmed);
+                if (plan.Refusal != null)
+                {
+                    LastError = plan.Refusal;
+                    PublishAccountChanged();
+                    return;
+                }
+                var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, plan.Direction, OrderTypes.Market,
+                    BinanceAccountClient.NormalizeWireNumber(plan.Quantity), 0, ReduceOnly: !reverse, Comment: reverse ? "Reverse" : "Close",
+                    Protective: !reverse, MaximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(net))));
+                handed = true;
+                Submit(intent, new HandedTurn(turn, inOrder && confirmed, plan.Note));
+            }
+            catch (Exception ex)
+            {
+                if (_cts.IsCancellationRequested) return;
+                LastError = ex.Message;
+                PublishAccountChanged();
+            }
+            finally
+            {
+                if (!handed) turn.Release();
+            }
+        });
     }
 
     /// <summary>This broker's own market orders in flight, the current position and the position including them.</summary>
@@ -2196,22 +2216,21 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         }
     }
 
-    /// <summary>An order sized in its send turn: the side it reduces, the market orders in flight when it was issued, how
-    /// long it waits for a position that includes them, and whether it reverses (twice that position) or closes it.</summary>
-    private sealed record CloseSizing(OrderDirections Direction, Tracked[] Earlier, DateTime Until, bool Reverse = false);
+    /// <summary>A send turn already taken and waited for by a position order, handed to the order it planned: whether it
+    /// went in order with a confirmed position, and the note to show once the order is accepted.</summary>
+    private sealed record HandedTurn(NativeSendTurns.Turn Turn, bool InOrder, string? Note);
 
     /// <summary>
-    /// The quantity a close sends: once every market order in flight when it was issued is known to have ended at Binance,
-    /// the venue's position on its side, read then; past the deadline, the best known position, unconfirmed.
+    /// The position a position order is planned from: once every market order in flight when it was issued is known to
+    /// have ended at Binance, the venue's position read then; past the deadline, the best known position, with the signed
+    /// unfilled quantity of those orders still working.
     /// </summary>
-    private async Task<(decimal Size, bool Confirmed)> CloseSizeAsync(CloseSizing sizing)
+    private async Task<(decimal Net, decimal Pending, bool Confirmed)> PositionAfterAsync(Tracked[] earlier, DateTime until)
     {
-        static decimal Side(CloseSizing sizing, decimal volume) =>
-            (sizing.Reverse ? 2 : 1) * (sizing.Direction == OrderDirections.Sell ? Math.Max(0, volume) : Math.Max(0, -volume));
         while (true)
         {
             bool settled = true;
-            foreach (var t in sizing.Earlier)
+            foreach (var t in earlier)
             {
                 long id;
                 lock (_gate)
@@ -2234,12 +2253,19 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
                 try
                 {
                     decimal volume = await ReadPositionVolumeAsync().ConfigureAwait(false);
-                    lock (_gate) Position.Volume = volume; // admission checks the position this close is sized from
-                    return (Side(sizing, volume), true);
+                    lock (_gate) Position.Volume = volume; // admission checks the position this order is planned from
+                    return (volume, 0, true);
                 }
                 catch (Exception) when (!_cts.IsCancellationRequested) { }
             }
-            if (DateTime.UtcNow >= sizing.Until) return (Side(sizing, Position.Volume), false);
+            if (DateTime.UtcNow >= until)
+            {
+                decimal pending;
+                lock (_gate)
+                    pending = earlier.Where(t => t.Order.State == OrderStates.Active)
+                        .Sum(t => (t.Order.Direction == OrderDirections.Buy ? 1 : -1) * t.Order.Unfilled);
+                return (Position.Volume, pending, false);
+            }
             await Task.Delay(50, _cts.Token).ConfigureAwait(false);
         }
     }
@@ -2254,10 +2280,14 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         return balances.FirstOrDefault(balance => balance.Asset == _spotBaseAsset)?.Wallet ?? 0;
     }
 
-    private Order Submit(PreparedOrderIntent intent, CloseSizing? sizing)
+    private Order Submit(PreparedOrderIntent intent, HandedTurn? handed)
     {
         lock (_gate)
-            if (_byClient.TryGetValue(intent.ClientOrderId, out var existing)) return existing.Order;
+            if (_byClient.TryGetValue(intent.ClientOrderId, out var existing))
+            {
+                handed?.Turn.Release();
+                return existing.Order;
+            }
         var request = intent.Request;
         var dir = request.Direction;
         var type = request.Type;
@@ -2269,6 +2299,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             ? BindOwnedOrder(order, intent) : "The prepared instrument does not match this broker.";
         if (bindingError != null)
         {
+            handed?.Turn.Release();
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
             LastError = bindingError;
@@ -2279,12 +2310,17 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         decimal px = BinanceAccountClient.NormalizeWireNumber(Instrument.RoundPrice(price));
         lock (_gate)
         {
-            if (_byClient.TryGetValue(intent.ClientOrderId, out var existing)) return existing.Order;
+            if (_byClient.TryGetValue(intent.ClientOrderId, out var existing))
+            {
+                handed?.Turn.Release();
+                return existing.Order;
+            }
             _byOrder[order] = t;
             SetClientIdentity(t, intent);
-            // The send turn is taken where the order is issued, so this broker's requests reach Binance in issue order.
-            var turn = _sendTurns.Take();
-            t.Last = Task.Run(() => InTurnAsync(turn, () => SubmitAsync(t, turn, type, qty, px, reduceOnly, sizing)));
+            // The send turn is taken where the order is issued, so this broker's requests reach Binance in issue order (a
+            // position order hands over the turn it took when it was issued).
+            var turn = handed?.Turn ?? _sendTurns.Take();
+            t.Last = Task.Run(() => InTurnAsync(turn, () => SubmitAsync(t, turn, type, qty, px, reduceOnly, handed)));
         }
 
         Publish();
@@ -2300,7 +2336,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     }
 
     private async Task SubmitAsync(Tracked t, NativeSendTurns.Turn turn, OrderTypes type, decimal qty, decimal price, bool reduceOnly,
-        CloseSizing? sizing)
+        HandedTurn? handed)
     {
         var order = t.Order;
         BinanceOpenOrder? placed = null;
@@ -2311,20 +2347,9 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         bool inOrder = true;
         try
         {
-            inOrder = await turn.WaitAsync(reduceOnly || t.Intent!.Request.Protective, _cts.Token).ConfigureAwait(false);
+            inOrder = await turn.WaitAsync(reduceOnly || t.Intent!.Request.Protective, _cts.Token).ConfigureAwait(false) &&
+                (handed?.InOrder ?? true);
             await WaitForNativeReplayAsync().ConfigureAwait(false);
-            if (sizing != null)
-            {
-                var (size, confirmed) = await CloseSizeAsync(sizing).ConfigureAwait(false);
-                inOrder &= confirmed;
-                qty = BinanceAccountClient.NormalizeWireNumber(size);
-                if (qty <= 0) throw new InvalidOperationException(confirmed ? "No open position." : NativeSendTurns.UnsettledMessage);
-                lock (_gate)
-                {
-                    order.QuantityToFill = qty;
-                    order.Unfilled = qty;
-                }
-            }
             Task<BinanceOpenOrder>? placement = null;
             Task<BinanceAlgoOrder>? algoPlacement = null;
             lock (_gate)
@@ -2372,7 +2397,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             }
         }
 
-        LastError = error ?? (inOrder ? null : NativeSendTurns.UnsettledMessage);
+        LastError = error ?? handed?.Note ?? (inOrder ? null : NativeSendTurns.UnsettledMessage);
         DispatchQueuedReprices();
         Publish();
         QueueDeferredCancels();
@@ -2488,7 +2513,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         else order.Price = price;
         order.QuantityToFill = total;
         order.Unfilled = Math.Max(0, remaining);
-        var turn = _sendTurns.Take(); // issue order; an amendment (cancel then place) waits a bounded time like a close
+        var turn = _sendTurns.Take(); // issue order; an amendment cancels then places
         Enqueue(tracked, () => InTurnAsync(turn, () => ReplaceAsync(tracked, turn, intent, predecessor, type, price, total)));
     }
 
@@ -2540,7 +2565,8 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         bool inOrder = true;
         try
         {
-            inOrder = await turn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false);
+            // Only a reducing amendment waits at most the reducing bound; an entry's waits for earlier replies.
+            inOrder = await turn.WaitAsync(intent.Request.ReduceOnly || intent.Request.Protective, _cts.Token).ConfigureAwait(false);
             await WaitForNativeReplayAsync().ConfigureAwait(false);
             lock (_gate)
             {
@@ -3008,6 +3034,10 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     private readonly NativeSendTurns _sendTurns = new();
 
     internal int QueuedSends => _sendTurns.Waiting;
+
+    /// <summary>Completes once every order request this broker already issued was answered, refused or failed. Quit awaits
+    /// it before the broker closes.</summary>
+    public Task SendsIdle => _sendTurns.WhenIdle;
 
     private async Task WaitForNativeReplayAsync()
     {

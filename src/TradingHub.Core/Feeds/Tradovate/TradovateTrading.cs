@@ -686,12 +686,25 @@ public sealed class TradovateTradingSession : IDisposable
     {
         lock (_sendTurns)
         {
-            if (!_sendTurns.TryGetValue(accountId, out var turns)) _sendTurns[accountId] = turns = new NativeSendTurns();
+            if (!_sendTurns.TryGetValue(accountId, out var turns)) _sendTurns[accountId] = turns = new NativeSendTurns(SendTurnWait);
             return turns;
         }
     }
 
     internal int QueuedSends(long accountId) => SendTurns(accountId).Waiting;
+
+    /// <summary>How long a reducing request waits for earlier ones (tests shorten it before the first request).</summary>
+    internal TimeSpan SendTurnWait { get; set; } = NativeSendTurns.ReducingWait;
+
+    /// <summary>Completes once every order request already issued on any account of this session was answered, refused
+    /// or failed. Quit awaits it before connections close.</summary>
+    public Task SendsIdle
+    {
+        get
+        {
+            lock (_sendTurns) return Task.WhenAll(_sendTurns.Values.Select(turns => turns.WhenIdle).ToArray());
+        }
+    }
 
     public void Dispose() => _life.Cancel();
 }
@@ -1342,37 +1355,58 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
     /// <summary>
     /// Close position. Working (non-market) orders are canceled; the account's market orders still in flight are part of
-    /// what is closed. The reducing market order takes its send turn here and is sized there, after the earlier requests
-    /// were answered, from a position confirmed to include those orders' fills. Unconfirmed within
-    /// <see cref="NativeSendTurns.ReducingWait"/>, it is sized from the best known position and reports
-    /// <see cref="NativeSendTurns.UnsettledMessage"/>.
+    /// what is closed. The close takes its send turn here; there, after the earlier requests were answered, its side and
+    /// size come from a position confirmed to include those orders' fills (see <see cref="NativeSendTurns.PlanPositionOrder"/>).
     /// </summary>
-    public void Flatten()
-    {
-        var (earlier, before, expected) = ExpectedPosition();
-        foreach (var working in _active.Where(o => o.Type != OrderTypes.Market).ToList()) Cancel(working);
-        if (expected == 0) return;
-        var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
-        decimal quantity = Math.Abs(expected);
-        var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, direction, OrderTypes.Market,
-            quantity, 0, ReduceOnly: true, Comment: "Close", Protective: true, MaximumOwnedQuantity: Math.Max(Math.Abs(before), quantity)));
-        Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + CloseConfirmationWait));
-    }
+    public void Flatten() => SendPositionOrder(reverse: false);
 
     /// <summary>
-    /// Reverse, as before one opposite market order of twice the position, ending at minus that position. The position
-    /// includes the account's market orders still in flight: the order takes its send turn here and is sized there from
-    /// the confirmed position, like <see cref="Flatten"/> (unconfirmed: best known position and
-    /// <see cref="NativeSendTurns.UnsettledMessage"/>).
+    /// Reverse, as before one opposite market order of twice the position, ending at minus that position. Planned like
+    /// <see cref="Flatten"/> from the confirmed position in its send turn; refused when that position stays unconfirmed.
     /// </summary>
-    public void Reverse()
+    public void Reverse() => SendPositionOrder(reverse: true);
+
+    private void SendPositionOrder(bool reverse)
     {
         var (earlier, before, expected) = ExpectedPosition();
-        if (expected == 0) return;
-        var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
-        var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, direction, OrderTypes.Market,
-            2 * Math.Abs(expected), 0, Comment: "Reverse", MaximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(expected))));
-        Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + CloseConfirmationWait, Reverse: true));
+        if (!reverse) foreach (var working in _active.Where(o => o.Type != OrderTypes.Market).ToList()) Cancel(working);
+        if (expected == 0 && earlier.Length == 0) return; // flat with nothing in flight
+        var until = DateTime.UtcNow + CloseConfirmationWait;
+        var turn = _session.SendTurns(_account.Id).Take();
+        _ = Task.Run(async () =>
+        {
+            bool handed = false;
+            try
+            {
+                await ContractAsync().ConfigureAwait(false);
+                // A reverse adds exposure: it waits for earlier replies without the reducing bound.
+                bool inOrder = await turn.WaitAsync(bounded: !reverse, _cts.Token).ConfigureAwait(false);
+                await WaitForNativeReplayAsync().ConfigureAwait(false);
+                var (net, pending, confirmed) = await PositionAfterAsync(earlier, until).ConfigureAwait(false);
+                var plan = NativeSendTurns.PlanPositionOrder(reverse, expected, net, pending, confirmed);
+                if (plan.Refusal != null)
+                {
+                    LastError = plan.Refusal;
+                    Changed?.Invoke();
+                    return;
+                }
+                var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, plan.Direction, OrderTypes.Market,
+                    plan.Quantity, 0, ReduceOnly: !reverse, Comment: reverse ? "Reverse" : "Close", Protective: !reverse,
+                    MaximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(net))));
+                handed = true;
+                Submit(intent, new HandedTurn(turn, inOrder && confirmed, plan.Note));
+            }
+            catch (Exception ex)
+            {
+                if (_cts.IsCancellationRequested) return;
+                LastError = ex.Message;
+                Changed?.Invoke();
+            }
+            finally
+            {
+                if (!handed) turn.Release();
+            }
+        });
     }
 
     /// <summary>The account's own market orders in flight, the current position and the position including them.</summary>
@@ -1386,14 +1420,18 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         }
     }
 
-    /// <summary>An order sized in its send turn: the side it reduces, the market orders in flight when it was issued, how
-    /// long it waits for a position that includes them, and whether it reverses (twice that position) or closes it.</summary>
-    private sealed record CloseSizing(OrderDirections Direction, Order[] Earlier, DateTime Until, bool Reverse = false);
+    /// <summary>A send turn already taken and waited for by a position order, handed to the order it planned: whether it
+    /// went in order with a confirmed position, and the note to show once the order is accepted.</summary>
+    private sealed record HandedTurn(NativeSendTurns.Turn Turn, bool InOrder, string? Note);
 
-    private Order Submit(PreparedOrderIntent intent, CloseSizing? sizing)
+    private Order Submit(PreparedOrderIntent intent, HandedTurn? handed)
     {
         lock (_gate)
-            if (_byClientId.TryGetValue(intent.ClientOrderId, out var existing)) return existing;
+            if (_byClientId.TryGetValue(intent.ClientOrderId, out var existing))
+            {
+                handed?.Turn.Release();
+                return existing;
+            }
         var request = intent.Request;
         var dir = request.Direction;
         var type = request.Type;
@@ -1405,6 +1443,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
             ? BindOwnedOrder(order, intent) : "The prepared instrument does not match this broker.";
         if (bindingError != null || !validQuantity)
         {
+            handed?.Turn.Release();
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
             LastError = bindingError ?? NativeFuturesQuantity.Error;
@@ -1417,41 +1456,46 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         string clientOrderId = intent.ClientOrderId;
         lock (_gate)
         {
-            if (_byClientId.TryGetValue(clientOrderId, out var existing)) return existing;
+            if (_byClientId.TryGetValue(clientOrderId, out var existing))
+            {
+                handed?.Turn.Release();
+                return existing;
+            }
             _byClientId.Add(clientOrderId, order);
             _pending.Add(order);
             _pendingSnapshot = _pending.ToArray();
             _intents[order] = intent;
         }
         Sync();
-        var leg = new PendingLeg(order, intent, dir, type, price, q, sizing);
+        var leg = new PendingLeg(order, intent, dir, type, price, q, handed);
         if (!TryDeferLinkedLeg(leg)) DispatchSingle(leg);
         return order;
     }
 
     private sealed record PendingLeg(Order Order, PreparedOrderIntent Intent, OrderDirections Direction, OrderTypes Type, decimal Price, int Quantity,
-        CloseSizing? Sizing = null);
+        HandedTurn? Handed = null);
 
     /// <summary>
-    /// The quantity a close sends: the position on its side once every market order in flight when it was issued has
-    /// ended and the reported position includes its fills; past the deadline, the best known position, unconfirmed.
+    /// The position a position order is planned from: confirmed once every market order in flight when it was issued has
+    /// ended and the reported position includes its fills; past the deadline, the best known position, with the signed
+    /// unfilled quantity of those orders still working.
     /// </summary>
-    private async Task<(decimal Size, bool Confirmed)> CloseSizeAsync(CloseSizing sizing)
+    private async Task<(decimal Net, decimal Pending, bool Confirmed)> PositionAfterAsync(Order[] earlier, DateTime until)
     {
         while (true)
         {
             bool settled = false;
-            decimal net = 0;
+            decimal net = 0, pending = 0;
             if (_contract is { } contract)
             {
-                settled = sizing.Earlier.All(o => o.State != OrderStates.Active && PositionReflects(o));
+                settled = earlier.All(o => o.State != OrderStates.Active && PositionReflects(o));
                 net = _session.PositionFor(_account.Id, contract.Id)?.Net ?? 0;
+                pending = earlier.Where(o => o.State == OrderStates.Active).Sum(o => (o.Direction == OrderDirections.Buy ? 1 : -1) * o.Unfilled);
             }
-            if (settled || DateTime.UtcNow >= sizing.Until)
+            if (settled || DateTime.UtcNow >= until)
             {
-                Sync(); // admission checks the position this close is sized from
-                decimal side = sizing.Direction == OrderDirections.Sell ? Math.Max(0, net) : Math.Max(0, -net);
-                return (sizing.Reverse ? 2 * side : side, settled);
+                Sync(); // admission checks the position this order is planned from
+                return (net, pending, settled);
             }
             await Task.Delay(20, _cts.Token).ConfigureAwait(false);
         }
@@ -1462,30 +1506,19 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
     private void DispatchSingle(PendingLeg leg)
     {
-        var (order, intent, dir, type, price, q, sizing) = leg;
+        var (order, intent, dir, type, price, q, handed) = leg;
         string clientOrderId = intent.ClientOrderId;
-        // Taken where the order is issued, so the account's requests reach Tradovate in issue order.
-        var turn = _session.SendTurns(_account.Id).Take();
+        // Taken where the order is issued, so the account's requests reach Tradovate in issue order (a position order
+        // hands over the turn it took when it was issued).
+        var turn = handed?.Turn ?? _session.SendTurns(_account.Id).Take();
         _ = Task.Run(async () =>
         {
             bool placementStarted = false;
             try
             {
                 var (_, contract) = await ContractAsync().ConfigureAwait(false);
-                bool inOrder = await turn.WaitAsync(Reducing(intent), _cts.Token).ConfigureAwait(false);
+                bool inOrder = await turn.WaitAsync(Reducing(intent), _cts.Token).ConfigureAwait(false) && (handed?.InOrder ?? true);
                 await WaitForNativeReplayAsync().ConfigureAwait(false);
-                if (sizing != null)
-                {
-                    var (size, confirmed) = await CloseSizeAsync(sizing).ConfigureAwait(false);
-                    inOrder &= confirmed;
-                    if (size <= 0 || !NativeFuturesQuantity.TryConvert(size, out q))
-                        throw new InvalidOperationException(confirmed ? "No open position." : NativeSendTurns.UnsettledMessage);
-                    lock (_gate)
-                    {
-                        order.QuantityToFill = size;
-                        order.Unfilled = size;
-                    }
-                }
                 decimal px = price > 0 ? Instrument.RoundPrice(price) : 0;
                 string ot = type == OrderTypes.Market ? "Market" : type == OrderTypes.Stop ? "Stop" : "Limit";
                 bool automated = intent.Owner.Kind == OrderOwnerKind.Strategy;
@@ -1510,7 +1543,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                     BindNative(order, id);
                 }
 
-                LastError = inOrder ? null : NativeSendTurns.UnsettledMessage;
+                LastError = handed?.Note ?? (inOrder ? null : NativeSendTurns.UnsettledMessage);
             }
             catch (Exception ex)
             {
@@ -1895,13 +1928,14 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         var replacement = new Replacement(intent, Instrument.RoundPrice(intent.Request.Price), totalQuantity);
         _replacements.Add(order, replacement);
         _session.TrackReplacement(order);
-        var turn = _session.SendTurns(_account.Id).Take(); // issue order; an amendment waits a bounded time like a close
+        var turn = _session.SendTurns(_account.Id).Take(); // issue order
         _ = Task.Run(async () =>
         {
             bool submissionStarted = false;
             try
             {
-                bool inOrder = await turn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false);
+                // Only a reducing amendment waits at most the reducing bound; an entry's waits for earlier replies.
+                bool inOrder = await turn.WaitAsync(Reducing(intent), _cts.Token).ConfigureAwait(false);
                 Task? submission = null;
                 while (submission == null)
                 {

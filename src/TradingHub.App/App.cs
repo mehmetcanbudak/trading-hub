@@ -223,6 +223,8 @@ internal sealed class QuitFlow(AppServices svc, Func<Window?> owner, IQuitTermin
         {
             // Manual gestures already handed over complete before strategies stop or connections close.
             await svc.OrderLanes.DrainAsync();
+            // ...and the native requests they issued (a Close waiting for an earlier reply) are sent and answered.
+            await svc.DrainNativeSendsAsync();
             await StopAsync(mode);
         }
         catch (Exception ex)

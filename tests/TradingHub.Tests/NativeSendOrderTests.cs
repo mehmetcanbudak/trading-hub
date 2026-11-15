@@ -266,6 +266,201 @@ public sealed class NativeSendOrderTests : IDisposable
         Assert.NotEqual(NativeSendTurns.UnsettledMessage, broker.LastError); // sized from a confirmed position
     }
 
+    /// <summary>A fake Tradovate account with an optional request interceptor, its session and one ES broker.</summary>
+    private sealed class TradovateRig : IDisposable
+    {
+        public FakeTradovate Fake { get; } = new() { TimestampPositions = true };
+        public TradovateFeed Feed { get; }
+        public TradovateTradingSession Session { get; }
+        public InstrumentData Data { get; }
+        public TradovateBroker Broker { get; private set; } = null!;
+        private readonly List<(string Route, string Action, int Quantity)> _arrivals = new();
+
+        /// <summary>Returns a reply to intercept the request, or null to let the fake venue answer it.</summary>
+        public Func<FakeRequest, (string Route, string Action, int Quantity), Task<(int Status, string Body)?>>? Intercept { get; set; }
+
+        public TradovateRig(int start)
+        {
+            if (start != 0) Fake.SeedPosition(start);
+            var normalHttp = Fake.Server.OnHttp!;
+            Fake.Server.OnHttpAsync = async (request, _) =>
+            {
+                if (request.Route.StartsWith("/v1/order/", StringComparison.Ordinal))
+                {
+                    var body = request.Body.Length > 0 ? JsonNode.Parse(request.Body) : null;
+                    var arrival = (request.Route, body?["action"]?.GetValue<string>() ?? "", body?["orderQty"]?.GetValue<int>() ?? 0);
+                    lock (_arrivals) _arrivals.Add(arrival);
+                    if (Intercept != null && await Intercept(request, arrival) is { } reply) return reply;
+                }
+                return normalHttp(request);
+            };
+            Feed = new TradovateFeed(() => Fake.Settings());
+            Session = new TradovateTradingSession(Feed.Connection);
+            Data = new InstrumentData(new Instrument
+            {
+                Symbol = "ES", FeedId = TradovateFeed.FeedId, Exchange = "CME", TickSize = 0.25m, VolumeStep = 1m, PointValue = 50m, QuoteAsset = "USD",
+            }, new SimulatedFeed()) { RecordLive = false };
+        }
+
+        public (string Route, string Action, int Quantity)[] Arrivals()
+        {
+            lock (_arrivals) return _arrivals.ToArray();
+        }
+
+        public (string Route, string Action, int Quantity)[] Placed(string action) =>
+            Arrivals().Where(arrival => arrival.Route == "/v1/order/placeorder" && arrival.Action == action).ToArray();
+
+        public async Task StartAsync(NativeOrderTestFixture orders, int start)
+        {
+            Session.Start();
+            await Until(() => Session.SnapshotReady, () => Session.StatusText);
+            Broker = orders.Tradovate(Data, Session, Assert.Single(Session.Accounts), "Tradovate rig");
+            await Until(() => Broker.PositionReady && Broker.OrdersReady && Broker.Position.Volume == start, () => Broker.LastError);
+        }
+
+        public void Dispose()
+        {
+            Broker?.Dispose();
+            Data.Dispose();
+            Session.Dispose();
+            Feed.Dispose();
+            Fake.Dispose();
+        }
+    }
+
+    /// <summary>Long 2 with a market sell of 1 still unanswered: an unconfirmed close never sends more than the position
+    /// left if that sell executes.</summary>
+    [Fact]
+    public async Task Tradovate_unconfirmed_close_never_exceeds_the_position_left_by_an_unsettled_sell()
+    {
+        using var rig = new TradovateRig(2);
+        var sellReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int holdSell = 1;
+        rig.Intercept = async (_, arrival) =>
+        {
+            if (arrival.Action == "Sell" && Interlocked.Exchange(ref holdSell, 0) == 1) await sellReply.Task;
+            return null;
+        };
+        rig.Session.SendTurnWait = TimeSpan.FromMilliseconds(100);
+        await rig.StartAsync(_orders, 2);
+        rig.Broker.CloseConfirmationWait = TimeSpan.FromMilliseconds(300);
+        try
+        {
+            OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Sell, 1);
+            await Until(() => rig.Placed("Sell").Length == 1, () => rig.Broker.LastError);
+            OrderActions.Flatten(rig.Broker);
+            await Until(() => rig.Placed("Sell").Length == 2, () => rig.Broker.LastError);
+            Assert.Equal(1, rig.Placed("Sell")[1].Quantity); // at most 2 - 1, on the long side
+            await Until(() => rig.Broker.LastError?.Contains(NativeSendTurns.UnsettledMessage, StringComparison.Ordinal) == true, () => rig.Broker.LastError);
+        }
+        finally { sellReply.TrySetResult(); }
+    }
+
+    /// <summary>A reverse waits for earlier replies without the reducing bound, so the earlier sell's outcome is made
+    /// unknown (an unreadable 503 reply: the sell stays working): the reverse then refuses instead of guessing twice the
+    /// position.</summary>
+    [Fact]
+    public async Task Tradovate_unconfirmed_reverse_is_refused_instead_of_guessing_twice_the_position()
+    {
+        using var rig = new TradovateRig(2);
+        int lose = 1;
+        rig.Intercept = (_, arrival) => Task.FromResult<(int, string)?>(
+            arrival.Action == "Sell" && Interlocked.Exchange(ref lose, 0) == 1 ? (503, "{}") : null);
+        await rig.StartAsync(_orders, 2);
+        rig.Broker.CloseConfirmationWait = TimeSpan.FromMilliseconds(300);
+        var sell = OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Sell, 1);
+        OrderActions.Reverse(rig.Broker);
+        await Until(() => rig.Broker.LastError?.Contains(NativeSendTurns.NotSentUnsettledMessage, StringComparison.Ordinal) == true,
+            () => rig.Broker.LastError);
+        Assert.Equal(OrderStates.Active, sell.State); // its outcome is still unknown
+        Assert.Single(rig.Placed("Sell"));
+        Assert.Empty(rig.Placed("Buy"));
+    }
+
+    /// <summary>A refused market sell in flight when Close position or Reverse is issued: the side and size come from the
+    /// confirmed position in the order's send turn, not from the expected position at issue.</summary>
+    [Theory]
+    [InlineData(1, "close")]   // expected flat at issue: the close still closes the long 1
+    [InlineData(2, "close")]   // expected short 1 at issue: the close sells the long 1 and reports the side change
+    [InlineData(2, "reverse")] // expected short 1 at issue: the reverse is refused with the side change
+    public async Task Tradovate_position_orders_choose_their_side_from_the_confirmed_position(int refusedSell, string operation)
+    {
+        using var rig = new TradovateRig(1);
+        var refusal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int refuse = 1;
+        rig.Intercept = async (_, arrival) =>
+        {
+            if (arrival.Action != "Sell" || Interlocked.Exchange(ref refuse, 0) != 1) return null;
+            await refusal.Task;
+            return (200, "{\"failureReason\":\"TradingLocked\",\"failureText\":\"Fixture refused the sell.\"}");
+        };
+        await rig.StartAsync(_orders, 1);
+        try
+        {
+            OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Sell, refusedSell);
+            if (operation == "close") OrderActions.Flatten(rig.Broker);
+            else OrderActions.Reverse(rig.Broker);
+        }
+        finally { refusal.TrySetResult(); }
+
+        if (operation == "close")
+        {
+            await Until(() => rig.Placed("Sell").Length == 2 && rig.Fake.NetPosition == 0 && rig.Broker.Position.Volume == 0,
+                () => $"{rig.Broker.LastError}; net {rig.Fake.NetPosition}, sells {string.Join(", ", rig.Placed("Sell").Select(s => s.Quantity))}");
+            Assert.Equal(1, rig.Placed("Sell")[1].Quantity);
+            Assert.Empty(rig.Placed("Buy"));
+            if (refusedSell == 2) Assert.Contains(NativeSendTurns.CloseSideChangedMessage, rig.Broker.LastError);
+        }
+        else
+        {
+            await Until(() => rig.Broker.LastError?.Contains(NativeSendTurns.ReverseSideChangedMessage, StringComparison.Ordinal) == true,
+                () => rig.Broker.LastError);
+            Assert.Single(rig.Placed("Sell"));
+            Assert.Empty(rig.Placed("Buy"));
+            Assert.Equal(1, rig.Fake.NetPosition);
+        }
+    }
+
+    /// <summary>An amendment of an entry order (it adds exposure) waits for earlier replies without the reducing bound: a
+    /// later bounded cancel has already given up waiting and been sent while the amendment still waits.</summary>
+    [Fact]
+    public async Task Tradovate_entry_amendment_waits_for_earlier_replies_without_the_reducing_bound()
+    {
+        using var rig = new TradovateRig(0);
+        var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int holdMarketBuy = 0, waitingAtMarker = -1;
+        bool modifiedAtMarker = true;
+        rig.Intercept = async (request, arrival) =>
+        {
+            if (arrival.Route == "/v1/order/placeorder" && arrival.Action == "Buy" &&
+                JsonNode.Parse(request.Body)!["orderType"]!.GetValue<string>() == "Market" && Interlocked.Exchange(ref holdMarketBuy, 0) == 1)
+                await buyReply.Task;
+            if (arrival.Route == "/v1/order/cancelorder" && JsonNode.Parse(request.Body)!["orderId"]!.GetValue<long>() == 999_999)
+            {
+                modifiedAtMarker = rig.Arrivals().Any(a => a.Route == "/v1/order/modifyorder");
+                waitingAtMarker = rig.Session.QueuedSends(101);
+            }
+            return null;
+        };
+        rig.Session.SendTurnWait = TimeSpan.FromMilliseconds(50);
+        await rig.StartAsync(_orders, 0);
+        var entry = OrderActions.Manual(rig.Broker, OrderTypes.Limit, OrderDirections.Buy, 1, 4000m);
+        await Until(() => entry.ExchangeOrderId.Length > 0 && rig.Broker.ActiveOrders.Contains(entry), () => rig.Broker.LastError);
+        try
+        {
+            Interlocked.Exchange(ref holdMarketBuy, 1);
+            OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Buy, 1);
+            await Until(() => rig.Placed("Buy").Length == 2, () => rig.Broker.LastError);
+            OrderActions.Reprice(rig.Broker, entry, 4001m);
+            // The marker cancel gives up its bounded wait behind the unanswered buy and is sent.
+            Assert.Equal(NativeSendTurns.UnsettledMessage, await rig.Session.CancelAsync(101, 999_999, CancellationToken.None).WaitAsync(Deadline));
+            Assert.False(modifiedAtMarker, "The entry amendment was sent while the earlier buy was unanswered.");
+            Assert.Equal(1, waitingAtMarker);
+        }
+        finally { buyReply.TrySetResult(); }
+        await Until(() => rig.Arrivals().Any(a => a.Route == "/v1/order/modifyorder"), () => rig.Broker.LastError);
+    }
+
     private static async Task Until(Func<bool> condition, Func<string?> diagnostics)
     {
         var deadline = DateTime.UtcNow + Deadline;

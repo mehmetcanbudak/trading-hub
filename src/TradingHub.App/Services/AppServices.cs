@@ -967,6 +967,26 @@ public sealed partial class AppServices
         return completion.Task;
     }
 
+    /// <summary>The longest quit waits for issued native order requests: a reducing request's wait for earlier replies,
+    /// its position confirmation, and its own HTTP reply.</summary>
+    internal static readonly TimeSpan NativeSendDrainLimit = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Waits, bounded by <see cref="NativeSendDrainLimit"/>, until every order request already issued on a Tradovate
+    /// session or a Binance broker was answered, refused or failed: a confirmed Close or Cancel queued behind an earlier
+    /// order's reply is sent before quit closes brokers and connections. Logged when the bound is reached.
+    /// </summary>
+    internal async Task DrainNativeSendsAsync()
+    {
+        var idle = new List<Task>();
+        foreach (var session in _tradovateSessions.Values.Concat(_retiredTradovateSessions)) idle.Add(session.SendsIdle);
+        foreach (var broker in _realBrokers.Values.Concat(_replacedBrokers).OfType<BinanceBroker>().Distinct()) idle.Add(broker.SendsIdle);
+        var all = Task.WhenAll(idle);
+        // The caller's context is kept: shutdown continues on it and reads UI-owned broker maps afterwards.
+        if (await Task.WhenAny(all, Task.Delay(NativeSendDrainLimit)) == all) return;
+        this.LogWarn("Order requests were still waiting to be sent or answered when Trading Hub quit; check orders and positions at the broker.");
+    }
+
     private async Task CompleteShutdownAsync(TaskCompletionSource completion)
     {
         void Close(Action action)
@@ -984,6 +1004,9 @@ public sealed partial class AppServices
             // Gestures already handed to an order lane finish (durably and through transport) before strategies stop
             // and providers close; later gestures are refused visibly.
             await CloseOwnedAsync(OrderLanes.DrainAsync, "Error draining order actions");
+            // Requests those gestures (and earlier ones) issued, such as a Close waiting for an earlier order's reply in
+            // its send turn, are sent and answered before brokers and connections close (bounded).
+            await CloseOwnedAsync(DrainNativeSendsAsync, "Error draining native order requests");
             var workDrain = CloseOwnedAsync(Work.StopAsync, "Error closing ordinary work");
             var recordingDrain = CloseOwnedAsync(Hub.StopRecordingAsync, "Error closing recorded history");
             Close(() => StopLiveForQuit(QuitMode.CancelStops));
