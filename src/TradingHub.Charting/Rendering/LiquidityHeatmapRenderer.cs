@@ -240,35 +240,10 @@ public sealed class LiquidityHeatmapRenderer
         }
         var frame = _frame!;
         _projection.Project(frame, main.Rect, X, price => main.Y(price * tick), grouping);
-        decimal peak = 0;
-        foreach (var span in _projection.Spans) peak = Math.Max(peak, span.RestingSize);
-        double scale = Math.Log(1 + (double)peak);
         byte alpha = (byte)Math.Clamp(model.Settings.HeatmapOpacity * 255 / 100, 0, 255);
         canvas.Save();
         canvas.ClipRect(main.Rect);
-        foreach (var gap in frame.Gaps)
-        {
-            float left = Math.Max(main.Rect.Left, X(gap.From)), right = Math.Min(main.Rect.Right, X(gap.To));
-            if (right < left) continue;
-            _paint.Color = new SKColor(245, 170, 80, 14);
-            canvas.DrawRect(left, main.Rect.Top, Math.Max(1, right - left), main.Rect.Height, _paint);
-            _paint.Color = new SKColor(245, 170, 80, 100);
-            canvas.DrawLine(left, main.Rect.Top, left, main.Rect.Bottom, _paint);
-        }
-        if (scale > 0)
-            foreach (var pixel in _projection.Spans)
-            {
-                double intensity = Math.Log(1 + (double)pixel.RestingSize) / scale;
-                byte opacity = (byte)(alpha * (0.2 + intensity * 0.8));
-                _paint.Color = pixel.Side == BookSide.Bid ? new SKColor(40, (byte)(110 + intensity * 130), 170, opacity)
-                    : new SKColor((byte)(110 + intensity * 140), 100, 210, opacity);
-                canvas.DrawRect(pixel.Rect, _paint);
-                if ((pixel.Coverage & (DepthCoverage.PartialBook | DepthCoverage.Truncated)) != 0)
-                {
-                    _paint.Color = new SKColor(255, 205, 90, 130);
-                    canvas.DrawLine(pixel.Rect.Left, pixel.Rect.Bottom, pixel.Rect.Right, pixel.Rect.Bottom, _paint);
-                }
-            }
+        Paint(canvas, _paint, frame, _projection.Spans, main.Rect, X, alpha);
         _text.Color = model.Theme.TextDim;
         string caption = _projection.IsTruncated && !frame.IsTruncated ? _caption + " · display limit reached" : _caption;
         canvas.DrawUiText(caption, main.Rect.Left + 5, main.Rect.Bottom - 5, RenderContext.GetFont(model.Theme.FontFamily, 10, false, false), _text);
@@ -282,5 +257,40 @@ public sealed class LiquidityHeatmapRenderer
             double fraction = duration > 0 ? Math.Clamp((time - interval.From).TotalSeconds / duration, 0, 1) : 0;
             return layout.LeftX(bar) + (float)(fraction * layout.BarWidth);
         }
+    }
+
+    /// <summary>
+    /// Paints projected resting-size spans (log intensity per side, partial/truncated coverage underlined) and shades
+    /// missing/stale intervals. Shared by the chart overlay and the Workbench full-panel heat map.
+    /// </summary>
+    public static void Paint(SKCanvas canvas, SKPaint paint, DepthHeatmapFrame frame, IReadOnlyList<DepthHeatmapSpan> spans, SKRect rect,
+        Func<DateTime, float> x, byte alpha)
+    {
+        decimal peak = 0;
+        foreach (var span in spans) peak = Math.Max(peak, span.RestingSize);
+        double scale = Math.Log(1 + (double)peak);
+        foreach (var gap in frame.Gaps)
+        {
+            float left = Math.Max(rect.Left, x(gap.From)), right = Math.Min(rect.Right, x(gap.To));
+            if (right < left) continue;
+            paint.Color = new SKColor(245, 170, 80, 14);
+            canvas.DrawRect(left, rect.Top, Math.Max(1, right - left), rect.Height, paint);
+            paint.Color = new SKColor(245, 170, 80, 100);
+            canvas.DrawLine(left, rect.Top, left, rect.Bottom, paint);
+        }
+        if (scale > 0)
+            foreach (var pixel in spans)
+            {
+                double intensity = Math.Log(1 + (double)pixel.RestingSize) / scale;
+                byte opacity = (byte)(alpha * (0.2 + intensity * 0.8));
+                paint.Color = pixel.Side == BookSide.Bid ? new SKColor(40, (byte)(110 + intensity * 130), 170, opacity)
+                    : new SKColor((byte)(110 + intensity * 140), 100, 210, opacity);
+                canvas.DrawRect(pixel.Rect, paint);
+                if ((pixel.Coverage & (DepthCoverage.PartialBook | DepthCoverage.Truncated)) != 0)
+                {
+                    paint.Color = new SKColor(255, 205, 90, 130);
+                    canvas.DrawLine(pixel.Rect.Left, pixel.Rect.Bottom, pixel.Rect.Right, pixel.Rect.Bottom, paint);
+                }
+            }
     }
 }

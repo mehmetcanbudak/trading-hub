@@ -152,7 +152,7 @@ internal sealed partial class SettingsView : UserControl, IPage
             Children =
             {
                 Ui.V(4, Ui.H1("Settings"), Ui.Muted("General Trading Hub preferences")), general, trading, liveStart,
-                sleep, hotkeys, data, BuildHistorySettings(), BuildCandleMaintenance(), BuildProxySettings(), BuildThirdPartyDataSettings(),
+                sleep, hotkeys, data, BuildHistorySettings(), BuildCandleMaintenance(), BuildProxySettings(), BuildThirdPartyDataSettings(), BuildLocalApiSettings(),
                 Section("Storage locations", MaterialIconKind.FolderOpenOutline, new Controls.StorageLocationPanel(_svc.StoragePreferences, Localization.Lang.Restart)),
                 about,
             },

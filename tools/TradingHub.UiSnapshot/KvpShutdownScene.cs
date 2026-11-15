@@ -34,6 +34,17 @@ internal static class KvpShutdownScene
         return _longbridge.CreateServices();
     }
 
+    private static bool LocalApiRefused(int port)
+    {
+        try
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            client.Connect(System.Net.IPAddress.Loopback, port);
+            return false;
+        }
+        catch (System.Net.Sockets.SocketException) { return true; }
+    }
+
     public static int Run(MainWindow owner, Action<double> pump, string outDir, bool platformRequest = false)
     {
         outDir = Path.GetFullPath(outDir);
@@ -220,6 +231,15 @@ internal static class KvpShutdownScene
                 replacements++;
                 ordering.Add("replacement");
             }
+            // the opt-in local market-data API is on when the real terminal shutdown starts
+            var apiProbe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            apiProbe.Start();
+            int apiPort = ((System.Net.IPEndPoint)apiProbe.LocalEndpoint).Port;
+            apiProbe.Stop();
+            services.Settings.LocalApiEnabled = true;
+            services.Settings.LocalApiPort = apiPort;
+            services.ApplyLocalApi();
+            Check(services.LocalApi is { IsRunning: true }, "the opt-in local market-data API listens before quit");
             desktop.Exiting = () =>
             {
                 CheckPrivateAdmissionClosed("desktop exit");
@@ -304,6 +324,8 @@ internal static class KvpShutdownScene
             longbridge.BrowserRelease.TrySetResult();
             ObserveCancellation(longbridge.Authorization, "owned Longbridge authorization callback and loopback listener drain before exit");
             Await(sharedShutdown, "real composed AppServices shutdown drains all resources");
+            Check(services.LocalApi == null && services.LocalApiStatus == "Off" && LocalApiRefused(apiPort),
+                "the real terminal shutdown drained and closed the local market-data API (its port refuses connections)");
             if (quitTask != null) Await(quitTask, "restart-style quit observes terminal completion");
             Until(() => desktop.Shutdowns == 1, "desktop shutdown occurs exactly once after asynchronous ownership drains");
             ObserveCancellation(privateRead, "real default private-store pending read is canceled/drained before completed terminal return");

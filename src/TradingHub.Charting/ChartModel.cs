@@ -141,7 +141,9 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
     // Indicators post from background tasks (DoActionInGuiThread) while Update drains on the UI thread.
     private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _invokes = new();
     private int? _autoStep;
-    private readonly NeighbourSeriesPrebuilder _neighbours = new(CandleSeriesCache.Shared);
+    // Null for private models: they never restore from, store into or prebuild for the shared candle cache.
+    private readonly CandleSeriesCache? _seriesCache;
+    private readonly NeighbourSeriesPrebuilder? _neighbours;
     private CumulativeTrade? _openCumulative;
     private long _lastBestBid = long.MinValue, _lastBestAsk = long.MaxValue;
     private bool _lastBestAvailable;
@@ -160,8 +162,17 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
     private long _depthRequest, _depthObservedVersion = -1;
     private volatile bool _disposed;
 
-    public ChartModel(InstrumentData data, ChartPeriod period, ChartSettings? settings = null)
+    /// <param name="sharedSeriesCache">
+    /// False for throwaway models (such as summaries computed off screen): they aggregate privately and never admit to,
+    /// evict from or schedule neighbour prebuilds for the shared candle cache the open charts use.
+    /// </param>
+    public ChartModel(InstrumentData data, ChartPeriod period, ChartSettings? settings = null, bool sharedSeriesCache = true)
     {
+        if (sharedSeriesCache)
+        {
+            _seriesCache = CandleSeriesCache.Shared;
+            _neighbours = new NeighbourSeriesPrebuilder(_seriesCache);
+        }
         Data = data;
         _depthSelection = data.DepthHistory.CreateSelection();
         Period = period;
@@ -325,8 +336,8 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
 
     private const int AutomaticStepRows = 150;
 
-    /// <summary>Background aggregation of the neighbouring timeframes (cancelled on every rebuild and on dispose).</summary>
-    public NeighbourSeriesPrebuilder NeighbourBuilds => _neighbours;
+    /// <summary>Background aggregation of the neighbouring timeframes (cancelled on every rebuild and on dispose); null for private models.</summary>
+    public NeighbourSeriesPrebuilder? NeighbourBuilds => _neighbours;
 
     /// <summary>Reconstruye las velas desde las operaciones y recalcula los indicadores.</summary>
     public void Rebuild()
@@ -335,11 +346,11 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
         int step = BaseStepFor(Settings.PriceStep);
         var session = (Data.Feed as TradingHub.Feeds.ISessionSettingsFeed)?.GetSessionSettings(Instrument);
         Series = new CandleSeries(Instrument, Period, step, session);
-        if (!CandleSeriesCache.Shared.TryRestore(Series, Data.Trades, CandleCacheScope))
+        if (_seriesCache?.TryRestore(Series, Data.Trades, CandleCacheScope) != true)
             Series.BeginRebuild(Data.Trades);
         Series.Append(Data.Trades, CandleSeries.InitialBatchSize);
         Series.AdvanceAvailability(AvailabilityClock);
-        if (!Series.HasPendingTrades(Data.Trades)) CandleSeriesCache.Shared.Store(Series, Data.Trades, CandleCacheScope);
+        if (!Series.HasPendingTrades(Data.Trades)) _seriesCache?.Store(Series, Data.Trades, CandleCacheScope);
         Data.OpenInterest.Apply(Series, Data.Feed.Now);
         _wrappers.Clear();
         for (int i = 0; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
@@ -350,7 +361,7 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
             EnsureDepthHistory(GetDepthInterval(0).From, GetDepthInterval(Series.Count - 1).To);
         ProcessPending();
         Invalidate();
-        _neighbours.Request(Data.Trades, NeighbourSeriesPrebuilder.NeighboursOf(Period), Settings.PriceStep, AutomaticStepRows, session,
+        _neighbours?.Request(Data.Trades, NeighbourSeriesPrebuilder.NeighboursOf(Period), Settings.PriceStep, AutomaticStepRows, session,
             CandleCacheScope, AvailabilityClock);
     }
 
@@ -538,7 +549,7 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
             if (rebuilt) slot.NeedsRecalc = true;
             else if (!slot.NeedsRecalc) Safe(slot, () => slot.Indicator.HostCalculate(first));
         }
-        if (!Series.HasPendingTrades(Data.Trades)) CandleSeriesCache.Shared.Store(Series, Data.Trades, CandleCacheScope);
+        if (!Series.HasPendingTrades(Data.Trades)) _seriesCache?.Store(Series, Data.Trades, CandleCacheScope);
         if (!Series.HasPendingTrades(Data.Trades) && Series.Count > 0 && Indicators.Any(s => s.WantsDepthHistory))
             EnsureDepthHistory(GetDepthInterval(0).From, GetDepthInterval(Series.Count - 1).To);
         Invalidate();
@@ -1085,7 +1096,7 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
     {
         if (_disposed) return;
         _disposed = true;
-        _neighbours.Dispose();
+        _neighbours?.Dispose();
         _depthLoadCancellation?.Cancel();
         _depthLoadTask?.GetAwaiter().GetResult();
         _depthLoadCancellation?.Dispose();

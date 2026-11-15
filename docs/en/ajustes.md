@@ -99,6 +99,10 @@ Policy is captured when each app-owned HTTP/WebSocket consumer is constructed: p
 
 Native Interactive Brokers TCP and external assistant/browser processes have their own networking; they are not advertised as app-proxy-covered.
 
+## Local market-data API
+
+**Off by default.** When on, Trading Hub serves read-only market data (candles, trades, order book and recorded depth of instruments already open) on `127.0.0.1` only, for tools you run yourself on this computer. Choose the port (1024–65535, default 48231) and, only for browser-based tools served from your own local web server, the exact **Allowed browser origins** (`scheme://host[:port]`); every other web page is refused, and invalid entries are listed and ignored. The status line shows the address it listens on or why it could not start (for example a port already in use). It never exposes credentials, accounts, orders or positions and cannot change anything; quitting closes it. Routes, limits and examples: [Workbench → Local market-data API](./workbench.md#local-market-data-api).
+
 ## Local and external alerts
 
 Open the title-bar bell or **Go → Alerts / delivery status** for consolidated price, indicator, strategy, risk and execution events. Local presentation remains independent of external delivery/disk success. Live compiled strategies can call `Strategy.Alert`; historical recalculation is not an external-notification replay. Practice events remain local.

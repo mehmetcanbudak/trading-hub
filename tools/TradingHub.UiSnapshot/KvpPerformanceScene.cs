@@ -140,7 +140,7 @@ internal static class KvpPerformanceScene
                 long constructed = Stopwatch.GetTimestamp();
                 using var neighbourModel = new ChartModel(neighbourData, ChartPeriod.M15, new ChartSettings { TimeZoneId = "UTC" });
                 double ownerRebuild = Stopwatch.GetElapsedTime(constructed).TotalMilliseconds;
-                var builds = neighbourModel.NeighbourBuilds;
+                var builds = neighbourModel.NeighbourBuilds!; // a shared chart model always has one
                 bool stillBuildingAfterConstruction = !builds.Completion.IsCompleted;
                 double worstFrameGap = 0; int frames = 0;
                 DateTime deadline = DateTime.UtcNow.AddSeconds(120);

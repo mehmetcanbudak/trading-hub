@@ -144,7 +144,7 @@ public sealed class NeighbourSeriesPrebuilderTests
         using var data = new InstrumentData(instrument, new SimulatedFeed());
         for (int i = 0; i < 5_000; i++) data.Trades.Add(new Trade(i + 1, Start.AddSeconds(i * 13), 100 + i % 40 * 0.25m, 1, TradeSide.Buy));
         var model = new ChartModel(data, ChartPeriod.M15, new ChartSettings { TimeZoneId = "UTC" });
-        var builds = model.NeighbourBuilds;
+        var builds = model.NeighbourBuilds!;
         builds.MinimumTrades = 0;
         model.SetPeriod(ChartPeriod.M5);
         var running = builds.Completion;
@@ -165,16 +165,17 @@ public sealed class NeighbourSeriesPrebuilderTests
         using var data = new InstrumentData(instrument, new SimulatedFeed());
         for (int i = 0; i < 5_000; i++) data.Trades.Add(new Trade(i + 1, Start.AddSeconds(i * 13), 100 + i % 40 * 0.25m, 1, TradeSide.Buy));
         using var model = new ChartModel(data, ChartPeriod.M15, new ChartSettings { TimeZoneId = "UTC" });
-        model.NeighbourBuilds.MinimumTrades = 0;
+        var builds = model.NeighbourBuilds!;
+        builds.MinimumTrades = 0;
         using var gate = new ManualResetEventSlim();
         // Occupy the worker's predecessor so a request cannot finish before Rebuild returns.
         var blocker = Task.Run(gate.Wait);
         var field = typeof(NeighbourSeriesPrebuilder).GetField("_running", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        field.SetValue(model.NeighbourBuilds, blocker);
+        field.SetValue(builds, blocker);
         model.Rebuild();
-        Assert.False(model.NeighbourBuilds.Completion.IsCompleted);
+        Assert.False(builds.Completion.IsCompleted);
         Assert.True(model.Series.Count > 0);
         gate.Set();
-        await model.NeighbourBuilds.Completion;
+        await builds.Completion;
     }
 }
