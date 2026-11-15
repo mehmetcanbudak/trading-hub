@@ -111,7 +111,8 @@ public class PivotPointLadders : ClosedBarStudy
     private PivotFloorThird _third = PivotFloorThird.Classic;
     private PivotLadderPeriod _period = PivotLadderPeriod.Auto;
     private int _back = 10, _tiers = 5;
-    private bool _crosses = true, _labels = true;
+    private bool _crosses = true, _labels = true, _prices = true, _labelsRight = true;
+    private int _width = 1;
     // display-only tier toggles (index 0 = P, 1–5 = R1/S1 … R5/S5); the ladder is always computed and alertable for every tier
     private readonly bool[] _shownTiers = { true, true, true, true, true, true };
     private bool _active, _partial, _hasLevels;
@@ -135,8 +136,16 @@ public class PivotPointLadders : ClosedBarStudy
     /// <summary>Display only: tiers above this are hidden on the chart; every tier is still computed and alertable.</summary>
     [Display(Name = "Highest level shown (R/S 1–5)", GroupName = "Levels", Order = 20, Description = DisplayOnly), Range(1, 5)]
     public int MaxTier { get => _tiers; set { _tiers = Math.Clamp(value, 1, 5); RedrawChart(); } }
-    [Display(Name = "Level names", GroupName = "Levels", Order = 21)]
-    public bool ShowLabels { get => _labels; set { _labels = value; RecalculateValues(); } }
+    [Display(Name = "Level names", GroupName = "Labels", Order = 21, Description = DisplayOnly)]
+    public bool ShowLabels { get => _labels; set { _labels = value; RedrawChart(); } }
+    [Display(Name = "Prices", GroupName = "Labels", Order = 23, Description = DisplayOnly)]
+    public bool ShowPrices { get => _prices; set { _prices = value; RedrawChart(); } }
+    /// <summary>Display only. Default right (the existing look); the reference default was left.</summary>
+    [Display(Name = "Labels on the right", GroupName = "Labels", Order = 24, Description = DisplayOnly)]
+    public bool LabelsRight { get => _labelsRight; set { _labelsRight = value; RedrawChart(); } }
+    /// <summary>Display only: stroke width of R/S levels; the pivot is drawn one pixel wider.</summary>
+    [Display(Name = "Width", GroupName = "Labels", Order = 25, Description = DisplayOnly), Range(1, 10)]
+    public int Width { get => _width; set { _width = Math.Clamp(value, 1, 10); RedrawChart(); } }
     /// <summary>Display only: the crossing marks are always recorded and the signal is always written.</summary>
     [Display(Name = "Mark pivot and R2/S2 crossings", GroupName = "Levels", Order = 22, Description = DisplayOnly)]
     public bool ShowCrosses { get => _crosses; set { _crosses = value; RedrawChart(); } }
@@ -174,6 +183,17 @@ public class PivotPointLadders : ClosedBarStudy
     }
 
     public override bool IsShown(StudyMark mark) => ShowCrosses;
+
+    /// <summary>"R1 1234.5": the name and/or the price, as chosen.</summary>
+    public override string? LineLabel(StudyLine line)
+    {
+        if (line.Label is not { Length: > 0 } name || !ShowLabels && !ShowPrices) return null;
+        return ((ShowLabels ? name : "") + (ShowLabels && ShowPrices ? " " : "") + (ShowPrices ? Price(line.Price) : "")).Trim();
+    }
+
+    public override bool LabelAtRight(StudyLine line) => LabelsRight;
+
+    public override int LineWidth(StudyLine line) => line.Label == "P" ? Width + 1 : Width;
 
     /// <summary>
     /// The pivot ladder of one completed period (<paramref name="open"/>, <paramref name="high"/>, <paramref name="low"/>,
@@ -269,7 +289,7 @@ public class PivotPointLadders : ClosedBarStudy
             if (name == "P") _pivot = value; else if (name == "R2") _r2 = value; else if (name == "S2") _s2 = value;
             // every tier is drawn and alertable; MaxTier and the tier toggles only hide lines (IsShown)
             var color = name == "P" ? PivotColor : name[0] == 'R' ? ResistanceColor : SupportColor;
-            _current.Add(Scene.Level(bar, bar, value, color, ShowLabels ? name : null, $"Pivot {name}", name == "P" ? 2 : 1));
+            _current.Add(Scene.Level(bar, bar, value, color, name, $"Pivot {name}", name == "P" ? 2 : 1));
         }
         _hasLevels = true;
         _ladders.Enqueue(bar);

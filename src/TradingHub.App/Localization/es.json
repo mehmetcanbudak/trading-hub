@@ -3763,6 +3763,7 @@
   "Label merged profiles": "Rotular los perfiles unidos",
   "Labels": "Etiquetas",
   "Labels (wick / retest)": "Etiquetas (mecha / re-prueba)",
+  "Labels on the right": "Etiquetas a la derecha",
   "Laboratory": "Laboratorio",
   "Laboratory mode: Claude can download data, run backtests, optimization, walk-forward and Monte Carlo, assess the strategy and save a report in Reports.": "Modo laboratorio: Claude puede bajar datos, correr backtests, optimizaciones, walk-forward y Monte Carlo por su cuenta, decidir si la estrategia es ganadora o perdedora y dejar un reporte en la pestaña Reportes.",
   "Laboratory mode: the selected assistant can download data, run backtests, optimization, walk-forward and Monte Carlo, assess strategies and save reports. Financial changes remain proposals.": "Modo laboratorio: el asistente seleccionado puede descargar datos, ejecutar backtests, optimización, walk-forward y Monte Carlo, evaluar estrategias y guardar reportes. Los cambios financieros siguen siendo propuestas.",

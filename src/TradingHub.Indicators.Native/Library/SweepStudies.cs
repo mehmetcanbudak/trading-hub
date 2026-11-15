@@ -737,8 +737,8 @@ public class EqualHighsLowsFvg : ClosedBarStudy
     public int MaxApart { get => _maxApart; set { _maxApart = Math.Clamp(value, 2, 500); RecalculateValues(); } }
     [Display(Name = "Maximum zone age (bars)", GroupName = "Calculation", Order = 15), Range(1, 1000)]
     public int MaxAge { get => _maxAge; set { _maxAge = Math.Clamp(value, 1, 1000); RecalculateValues(); } }
-    [Display(Name = "Volume in the zone", GroupName = "Drawing", Order = 20)]
-    public bool ShowVolume { get => _showVolume; set { _showVolume = value; RecalculateValues(); } }
+    [Display(Name = "Volume in the zone", GroupName = "Drawing", Order = 20, Description = SweepMath.DisplayOnly)]
+    public bool ShowVolume { get => _showVolume; set { _showVolume = value; RedrawChart(); } }
     // display-only filters: breakout marks and gaps are always recorded (gaps stay alertable until filled or projected out)
     [Display(Name = "Breakout marks", GroupName = "Breakout", Order = 30, Description = SweepMath.DisplayOnly)]
     public bool ShowBreakouts { get => _showBreakouts; set { _showBreakouts = value; RedrawChart(); } }
@@ -758,6 +758,16 @@ public class EqualHighsLowsFvg : ClosedBarStudy
     // breakout marks are this study's only marks; breakout gaps are the boxes alerted as "Breakout gap"
     public override bool IsShown(StudyMark mark) => ShowBreakouts;
     public override bool IsShown(StudyBox box) => box.Alert != "Breakout gap" || ShowFvgs;
+
+    /// <summary>"EQH 1.2K": the zone volume is a caption only, appended when <see cref="ShowVolume"/> is on.</summary>
+    public override string? BoxText(StudyBox box)
+    {
+        string? text = base.BoxText(box);
+        return text != null && ShowVolume && _zoneVolume.TryGetValue(box, out var volume) ? text + " " + SweepMath.Volume(volume.Value) : text;
+    }
+
+    // presentation-only: the volume between the two swings of each equal-high/low zone (never read by detection)
+    private readonly ConditionalWeakTable<StudyBox, StrongBox<decimal>> _zoneVolume = new();
 
     protected override void ResetState()
     {
@@ -831,8 +841,9 @@ public class EqualHighsLowsFvg : ClosedBarStudy
             decimal top = Math.Max(swing.Price, q.Price), bottom = Math.Min(swing.Price, q.Price);
             if (top == bottom) top += atr * 0.05m;
             var color = swing.High ? EqualHighsColor : EqualLowsColor;
-            string text = (swing.High ? "EQH" : "EQL") + (ShowVolume ? " " + SweepMath.Volume(volume) : "");
-            _zones.Add((Scene.Box(q.Bar, bar, top, bottom, color, text, swing.High ? "Equal highs" : "Equal lows"), swing.High));
+            var zone = Scene.Box(q.Bar, bar, top, bottom, color, swing.High ? "EQH" : "EQL", swing.High ? "Equal highs" : "Equal lows");
+            _zoneVolume.AddOrUpdate(zone, new StrongBox<decimal>(volume));
+            _zones.Add((zone, swing.High));
             // only the newest MaxZones live zones stay active
             int live = _zones.Count;
             for (int z = 0; z < _zones.Count && live > MaxZones; z++) { _zones[z].Box.End(bar); live--; }

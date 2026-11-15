@@ -306,4 +306,30 @@ public class LibraryLevelStudiesTests
         Assert.All(study.Scene.Marks, m => Assert.Equal(option != nameof(LineBreak.ShowMarkers), study.IsShown(m)));
         Assert.All(study.Scene.Tags, t => Assert.Equal(option != nameof(LineBreak.ShowReversalLabels), study.IsShown(t)));
     }
+
+    [Fact]
+    public void Pivot_label_formatting_is_display_only()
+    {
+        var formatted = AssertDisplayOnly(() => Ladders(), () =>
+        {
+            var study = Ladders(); study.ShowPrices = false; study.LabelsRight = false; study.Width = 3; return study;
+        }, DstSessions(), ChartPeriod.H1, ThursdayAfternoon, NewYork18);
+        Assert.Equal(11, formatted.GetAlertLevels().Count());
+        var ladder = (PivotPointLadders)formatted;
+        var r1 = ladder.Scene.Lines.Last(l => l.Label == "R1"); var p = ladder.Scene.Lines.Last(l => l.Label == "P");
+        Assert.Equal("R1", ladder.LineLabel(r1));
+        Assert.False(ladder.LabelAtRight(r1));
+        Assert.Equal((3, 4), (ladder.LineWidth(r1), ladder.LineWidth(p)));
+        // defaults keep the existing look: name and price at the right end, widths 1 and 2
+        var plain = Ladders();
+        Assert.Equal((true, true, true, 1), (plain.ShowLabels, plain.ShowPrices, plain.LabelsRight, plain.Width));
+        Assert.Equal((1, 2), (plain.LineWidth(r1), plain.LineWidth(p)));
+        ladder.ShowPrices = true;
+        string full = ladder.LineLabel(r1)!;
+        Assert.StartsWith("R1 ", full);
+        ladder.ShowLabels = false;
+        Assert.Equal(full["R1 ".Length..], ladder.LineLabel(r1));
+        ladder.ShowPrices = false;
+        Assert.Null(ladder.LineLabel(r1));
+    }
 }

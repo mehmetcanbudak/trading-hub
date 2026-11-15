@@ -406,4 +406,17 @@ public class LibrarySweepStudiesTests
         Assert.Equal(6, tint.Key); Assert.False(hidden.IsTintShown(tint.Key, tint.Value));
         Assert.Contains(hidden.GetAlertLevels(), l => l.Name == "Broken support zone: top edge");
     }
+
+    [Fact]
+    public void Equal_zone_volume_caption_is_display_only()
+    {
+        var shown = AssertDisplayOnly(() => Create("equal"), () => Create("equal"), Walk(700, 11), ChartPeriod.M15, Monday);
+        var hidden = AssertDisplayOnly(() => Create("equal"), () => new EqualHighsLowsFvg { Left = 4, Right = 2, ThresholdPct = 0.1m, MaximumObjects = 5000, ShowVolume = false },
+            Walk(700, 11), ChartPeriod.M15, Monday);
+        var zone = Assert.IsType<EqualHighsLowsFvg>(hidden).Scene.Boxes.First(b => b.Alert is "Equal highs" or "Equal lows");
+        Assert.True(zone.Text is "EQH" or "EQL");
+        Assert.Equal(zone.Text, hidden.BoxText(zone));
+        var withVolume = shown.BoxText(shown.Scene.Boxes.First(b => b.Alert is "Equal highs" or "Equal lows"));
+        Assert.StartsWith(zone.Text + " ", withVolume);
+    }
 }
