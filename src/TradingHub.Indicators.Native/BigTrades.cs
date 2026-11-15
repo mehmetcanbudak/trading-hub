@@ -29,6 +29,18 @@ public class BigTrades : Indicator
         [Display(Name = "Order first price")] First,
     }
 
+    public enum SizeUnit
+    {
+        [Display(Name = "Base units (contracts / coins)")] Base,
+        [Display(Name = "Notional (price × size × contract multiplier)")] Notional,
+    }
+
+    public enum Placement
+    {
+        [Display(Name = "At the order price")] AtPrice,
+        [Display(Name = "At the bar's center")] BarCenter,
+    }
+
     private sealed class Bubble
     {
         public int Bar;
@@ -106,6 +118,30 @@ public class BigTrades : Indicator
         get => _anchor;
         set { _anchor = value; RecalculateValues(); }
     }
+
+    private SizeUnit _unit = SizeUnit.Base;
+
+    [Display(Name = "Fixed threshold unit", GroupName = "Filter", Order = 21,
+        Description = "Notional is price × size × the instrument's contract multiplier (point value), in the quote currency; 1 for spot and linear crypto.")]
+    public SizeUnit Unit
+    {
+        get => _unit;
+        set { _unit = value; RecalculateValues(); }
+    }
+
+    [Display(Name = "At most per bar (0 = all)", GroupName = "Filter", Order = 60, Description = "Only the largest orders of each bar are drawn.")]
+    [Range(0, 100)]
+    public int MaxPerBar { get; set; }
+
+    [Display(Name = "Whale from (notional; 0 = off)", GroupName = "Filter", Order = 70, Description = "Orders of at least this notional get a ring and always show their size.")]
+    [Range(0, 10_000_000_000)]
+    public decimal WhaleNotional { get; set; }
+
+    [Display(Name = "Draw at", GroupName = "Visualization", Order = 95)]
+    public Placement Position { get; set; } = Placement.AtPrice;
+
+    [Display(Name = "Size shown in", GroupName = "Visualization", Order = 141)]
+    public SizeUnit ShownAs { get; set; } = SizeUnit.Base;
 
     [Display(Name = "Buy color", GroupName = "Visualization", Order = 100)]
     public Color BuyColor { get; set; } = Color.FromArgb(150, 50, 140, 230);
@@ -192,11 +228,18 @@ public class BigTrades : Indicator
         _liveTrade = trade; _liveBubble = null;
     }
 
+    /// <summary>Whether an order passes the threshold; a fixed threshold may be notional (price × size × multiplier).</summary>
+    private bool Passes(CumulativeTrade trade) => trade.Volume > 0 &&
+        (_mode == ThresholdMode.Fixed && _unit == SizeUnit.Notional ? trade.Volume * AveragePrice(trade) * PointValue >= _minVolume : trade.Volume >= CurrentThreshold);
+
+    /// <summary>The instrument's contract multiplier, so futures notional is price × size × multiplier.</summary>
+    private decimal PointValue => InstrumentInfo is { PointValue: > 0 } info ? info.PointValue : 1;
+
     private void UpdateOpenTrade(CumulativeTrade trade, int bar)
     {
         bool eligible = IsEligible(trade);
         RefreshAdaptive(eligible);
-        if (!eligible || trade.Volume < CurrentThreshold || trade.Volume <= 0)
+        if (!eligible || !Passes(trade))
         {
             if (_liveBubble != null) _bubbles.Remove(_liveBubble);
             _liveBubble = null; return;
@@ -316,25 +359,41 @@ public class BigTrades : Indicator
         FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, Status, Color.LightSkyBlue);
         if (_bubbles.Count == 0) return;
         int first = FirstVisibleBarNumber, last = LastVisibleBarNumber;
-        decimal thr = Math.Max(CurrentThreshold, 0.0000001m);
+        bool notionalThreshold = _mode == ThresholdMode.Fixed && _unit == SizeUnit.Notional;
+        decimal thr = Math.Max(notionalThreshold ? _minVolume : CurrentThreshold, 0.0000001m);
         var font = FootprintStudyData.BoldFont;
 
         // las chicas primero para que las grandes queden arriba
-        foreach (var b in _bubbles.Where(b => b.Bar >= first && b.Bar <= last).OrderBy(b => b.Volume))
+        foreach (var b in VisibleBubbles(first, last).OrderBy(b => b.Volume))
         {
             int x = ChartInfo.GetXByBar(b.Bar, false);
-            int y = ChartInfo.GetYByPrice(b.Price, false);
-            double ratio = Math.Sqrt((double)(b.Volume / thr));
+            int y = Position == Placement.BarCenter && b.Bar < CurrentBar
+                ? ChartInfo.GetYByPrice((GetCandle(b.Bar).High + GetCandle(b.Bar).Low) / 2, false)
+                : ChartInfo.GetYByPrice(b.Price, false);
+            decimal notional = b.Volume * b.Price * PointValue;
+            bool whale = WhaleNotional > 0 && notional >= WhaleNotional;
+            double ratio = Math.Sqrt((double)((notionalThreshold ? notional : b.Volume) / thr));
             int size = (int)Math.Clamp(MinSize * ratio, MinSize, Math.Max(MinSize, MaxSize));
             var rect = new Rectangle(x - size / 2, y - size / 2, size, size);
             var col = b.Buy ? BuyColor : SellColor;
             context.FillEllipse(col, rect);
             if (ShowBorder) { _borderPen.Color = Color.FromArgb(220, col.R, col.G, col.B); context.DrawEllipse(_borderPen, rect); }
-            if (ShowVolume && size >= 22)
+            if (whale) context.DrawEllipse(_whalePen, new Rectangle(rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6));
+            if (ShowVolume && (size >= 22 || whale))
             {
-                string txt = VolumeFormat.Compact(b.Volume, ChartInfo.VolumeDecimals > 0 && b.Volume < 100 ? 1 : 0);
+                string txt = ShownAs == SizeUnit.Notional ? VolumeFormat.Compact(notional, 1) : VolumeFormat.Compact(b.Volume, ChartInfo.VolumeDecimals > 0 && b.Volume < 100 ? 1 : 0);
                 context.DrawString(txt, font, Color.White, rect, new RenderStringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoClip });
             }
         }
+    }
+
+    private readonly RenderPen _whalePen = new(Color.FromArgb(235, 255, 255, 255), 2);
+
+    /// <summary>Bubbles between two bars; with <see cref="MaxPerBar"/>, only the largest orders of each bar.</summary>
+    internal IEnumerable<(int Bar, decimal Price, decimal Volume, bool Buy)> VisibleBubbles(int first, int last)
+    {
+        var visible = _bubbles.Where(b => b.Bar >= first && b.Bar <= last);
+        if (MaxPerBar > 0) visible = visible.GroupBy(b => b.Bar).SelectMany(g => g.OrderByDescending(b => b.Volume).Take(MaxPerBar));
+        return visible.Select(b => (b.Bar, b.Price, b.Volume, b.Buy));
     }
 }

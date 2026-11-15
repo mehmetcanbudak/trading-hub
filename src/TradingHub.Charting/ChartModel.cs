@@ -138,7 +138,8 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
 {
     private readonly List<IndicatorCandle> _wrappers = new();
     private readonly List<(Indicator Ind, TimeSpan Interval, Action Action, DateTime Next)> _timers = new();
-    private readonly Queue<Action> _invokes = new();
+    // Indicators post from background tasks (DoActionInGuiThread) while Update drains on the UI thread.
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _invokes = new();
     private int? _autoStep;
     private readonly NeighbourSeriesPrebuilder _neighbours = new(CandleSeriesCache.Shared);
     private CumulativeTrade? _openCumulative;
@@ -359,6 +360,7 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
         _instrumentInfo.Exchange = Instrument.Exchange;
         _instrumentInfo.TickSize = Series.RowSize;
         _instrumentInfo.TickCost = Instrument.PointValue * Series.RowSize;
+        _instrumentInfo.PointValue = Instrument.PointValue;
         _instrumentInfo.LotSize = Instrument.VolumeStep;
         _instrumentInfo.Description = Instrument.Description;
         _instrumentInfo.TimeZoneOffset = Settings.TimeZone.GetUtcOffset(DateTime.UtcNow);
@@ -496,11 +498,10 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
         if (Series.AdvanceAvailability(AvailabilityClock))
             foreach (var slot in Indicators) slot.NeedsRecalc = true;
         RefreshFixedProfiles();
-        while (_invokes.Count > 0)
+        while (_invokes.TryDequeue(out var a))
         {
-            var a = _invokes.Dequeue();
             try { a(); }
-            catch (Exception ex) { this.LogError("Deferred action error", ex); }
+            catch (Exception ex) { this.LogError($"Deferred action error: {ex}", ex); }
         }
 
         ProcessPending();

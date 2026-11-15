@@ -31,6 +31,7 @@ var scenes = new Dictionary<string, SnapshotScene>(StringComparer.Ordinal)
     ["kvp-studies"] = new(static context => new(KvpStudiesScene.Run(context.Window, context.Pump, context.Output))),
     ["library-structure"] = new(static context => new(LibraryStructureScene.Run(context.Window, context.Pump, context.Output))),
     ["profiles-vwap"] = new(static context => new(ProfilesVwapScene.Run(context.Window, context.Pump, context.Output))),
+    ["library-flow"] = new(static context => new(LibraryFlowScene.Run(context.Window, context.Pump, context.Output))),
     ["kvp-authoring"] = new(static context => new(KvpAuthoringScene.Run(context.Window, context.Pump, context.Output))),
     ["authoring-scripts"] = new(static context => new(AuthoringScriptsScene.Run(context.Window, context.Pump, context.Output))),
     ["kvp-providers"] = new(static context => new(KvpProvidersScene.Run(context.Window, context.Pump, context.Output))),
