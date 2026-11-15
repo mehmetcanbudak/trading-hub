@@ -13950,5 +13950,45 @@
   "«{0}» is not declared; declare it with output or var first": {
     "es": "«{0}» no está declarado; decláralo antes con output o var",
     "zh-CN": "「{0}」未声明，请先用 output 或 var 声明"
+  },
+  "Name shown in the library and on charts (empty restores «{0}»)": {
+    "es": "Nombre que se muestra en la biblioteca y en los gráficos (vacío restaura «{0}»)",
+    "zh-CN": "在指标库和图表中显示的名称（留空则恢复「{0}」）"
+  },
+  "Remove from library": {
+    "es": "Quitar de la biblioteca",
+    "zh-CN": "从指标库移除"
+  },
+  "Remove from library…": {
+    "es": "Quitar de la biblioteca…",
+    "zh-CN": "从指标库移除…"
+  },
+  "Rename indicator": {
+    "es": "Renombrar indicador",
+    "zh-CN": "重命名指标"
+  },
+  "Rename…": {
+    "es": "Renombrar…",
+    "zh-CN": "重命名…"
+  },
+  "Restore all": {
+    "es": "Restaurar todos",
+    "zh-CN": "全部恢复"
+  },
+  "Restore the default name («{0}»)": {
+    "es": "Restaurar el nombre predeterminado («{0}»)",
+    "zh-CN": "恢复默认名称（「{0}」）"
+  },
+  "Restore «{0}»": {
+    "es": "Restaurar «{0}»",
+    "zh-CN": "恢复「{0}」"
+  },
+  "Show hidden indicators ({0})": {
+    "es": "Mostrar indicadores ocultos ({0})",
+    "zh-CN": "显示已隐藏的指标（{0}）"
+  },
+  "«{0}» stops appearing in the library. Charts, saved charts and templates that use it keep loading it, and Show hidden indicators brings it back.": {
+    "es": "«{0}» deja de aparecer en la biblioteca. Los gráficos, gráficos guardados y plantillas que lo usan lo siguen cargando, y Mostrar indicadores ocultos lo trae de vuelta.",
+    "zh-CN": "「{0}」将不再显示在指标库中。使用它的图表、已保存的图表和模板仍会加载它，可通过「显示已隐藏的指标」恢复。"
   }
 }

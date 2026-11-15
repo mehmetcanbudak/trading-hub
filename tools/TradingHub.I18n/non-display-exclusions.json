@@ -12,7 +12,7 @@
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Edited": {
-    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:255",
+    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:314",
     "reason": "Suffix of the default C# class name for an editable indicator copy. Generated identifiers stay English in every UI language."
   },
   "Fee": {
@@ -64,7 +64,7 @@
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
   },
   "{0}Edited": {
-    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:255",
+    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:314",
     "reason": "Default C# class name of an editable indicator copy (original type name + English suffix), not a display label."
   }
 }

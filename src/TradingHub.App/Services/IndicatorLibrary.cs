@@ -7,6 +7,12 @@ public sealed class IndicatorLibraryLayout
 {
     /// <summary>Groups in the chosen order. Groups not listed follow at their default position.</summary>
     public List<IndicatorLibraryGroupState> Groups { get; set; } = new();
+
+    /// <summary>Display aliases: indicator full type name → name shown in the library, chart legends, settings and alerts.</summary>
+    public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>Indicator full type names removed from the library list. They still load and render on saved charts.</summary>
+    public List<string> Hidden { get; set; } = new();
 }
 
 public sealed class IndicatorLibraryGroupState
@@ -105,8 +111,10 @@ public static class IndicatorLibrary
 
     public static List<IndicatorLibraryGroup> Build(IReadOnlyList<IndicatorInfo> items, IndicatorLibraryLayout layout)
     {
+        var hidden = layout.Hidden.ToHashSet(StringComparer.Ordinal);
         var byType = new Dictionary<string, IndicatorInfo>(StringComparer.Ordinal);
-        foreach (var info in items) byType.TryAdd(info.Type.FullName!, info);
+        foreach (var info in items)
+            if (!hidden.Contains(info.Type.FullName!)) byType.TryAdd(info.Type.FullName!, info);
 
         // where the user placed each indicator (first placement wins)
         var placed = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -124,7 +132,7 @@ public static class IndicatorLibrary
         }
 
         // everything else in its default group, after hand-ordered items, by name
-        foreach (var info in byType.Values.Where(i => !placed.ContainsKey(i.Type.FullName!)).OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase))
+        foreach (var info in byType.Values.Where(i => !placed.ContainsKey(i.Type.FullName!)).OrderBy(i => DisplayNameOf(i, layout), StringComparer.CurrentCultureIgnoreCase))
             ListOf(DefaultGroupOf(info)).Add(info);
 
         // group order: the user's, then unlisted groups at their default rank (before the first later default group)
@@ -254,10 +262,52 @@ public static class IndicatorLibrary
     {
         Materialize(layout, Build(items, layout));
         var g = Group(layout, id);
-        var names = items.GroupBy(i => i.Type.FullName!).ToDictionary(x => x.Key, x => x.First().Name, StringComparer.Ordinal);
+        var names = items.GroupBy(i => i.Type.FullName!).ToDictionary(x => x.Key, x => DisplayNameOf(x.First(), layout), StringComparer.Ordinal);
         g.Items = g.Items.OrderBy(t => names.TryGetValue(t, out var n) ? n : t, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
-    /// <summary>Back to the default arrangement (groups, order and names).</summary>
+    /// <summary>Back to the default arrangement (groups, order and group names). Aliases and hidden indicators have their own restore actions.</summary>
     public static void Reset(IndicatorLibraryLayout layout) => layout.Groups.Clear();
+
+    // ------------------------------------------------------------------ display aliases and hidden indicators
+
+    /// <summary>The library's name for an indicator: its alias, else the catalog (factory) name.</summary>
+    public static string DisplayNameOf(IndicatorInfo info, IndicatorLibraryLayout layout) =>
+        layout.Aliases.TryGetValue(info.Type.FullName!, out var alias) && !string.IsNullOrWhiteSpace(alias) ? alias : info.Name;
+
+    /// <summary>
+    /// Installs the layout's aliases as the SDK display-name resolver (an immutable snapshot, safe from any thread).
+    /// Call at start-up and after every rename.
+    /// </summary>
+    public static void Apply(IndicatorLibraryLayout layout)
+    {
+        var snapshot = new Dictionary<string, string>(layout.Aliases.Where(p => !string.IsNullOrWhiteSpace(p.Value)), StringComparer.Ordinal);
+        Indicator.DisplayAlias = snapshot.Count == 0 ? null : type => type.FullName is { } name && snapshot.TryGetValue(name, out var alias) ? alias : null;
+    }
+
+    /// <summary>Sets (or with null/blank removes) the display alias of a type. Type and saved identities are unchanged.</summary>
+    public static void Rename(IndicatorLibraryLayout layout, string type, string? alias)
+    {
+        if (string.IsNullOrWhiteSpace(alias)) layout.Aliases.Remove(type);
+        else layout.Aliases[type] = alias.Trim();
+        Apply(layout);
+    }
+
+    /// <summary>Removes an indicator from the library list only; charts that use it keep loading it.</summary>
+    public static void Hide(IndicatorLibraryLayout layout, string type)
+    {
+        if (!layout.Hidden.Contains(type)) layout.Hidden.Add(type);
+    }
+
+    public static void Unhide(IndicatorLibraryLayout layout, string type) => layout.Hidden.Remove(type);
+
+    public static void UnhideAll(IndicatorLibraryLayout layout) => layout.Hidden.Clear();
+
+    /// <summary>Hidden indicators that are currently loaded, by display name.</summary>
+    public static List<IndicatorInfo> HiddenItems(IReadOnlyList<IndicatorInfo> items, IndicatorLibraryLayout layout)
+    {
+        var hidden = layout.Hidden.ToHashSet(StringComparer.Ordinal);
+        return items.Where(i => hidden.Contains(i.Type.FullName!)).DistinctBy(i => i.Type.FullName)
+            .OrderBy(i => DisplayNameOf(i, layout), StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
 }
