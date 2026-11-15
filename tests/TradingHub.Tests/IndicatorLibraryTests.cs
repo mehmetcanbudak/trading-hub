@@ -141,4 +141,87 @@ public sealed class IndicatorLibraryTests
         Assert.NotNull(settings.IndicatorLibrary);
         Assert.Empty(settings.IndicatorLibrary.Groups);
     }
+
+    [System.ComponentModel.DisplayName("Alias probe")]
+    public sealed class AliasProbe : Indicator
+    {
+        public decimal Period { get; set; } = 3;
+        protected override void OnCalculate(int bar, decimal value) { }
+    }
+
+    [Fact]
+    public void A_rename_is_a_display_alias_that_survives_restart_and_never_changes_saved_identity()
+    {
+        string type = typeof(AliasProbe).FullName!;
+        var settings = new AppSettings();
+        var onChart = new AliasProbe { Period = 7 };
+        try
+        {
+            IndicatorLibrary.Rename(settings.IndicatorLibrary, type, "  My probe ");
+            Assert.Equal("My probe", onChart.Name); // relabels an instance already on a chart
+            Assert.Equal("Alias probe", Indicator.DefaultName(typeof(AliasProbe)));
+            Assert.Equal("Moving average", new MovingAverage().Name); // other types keep their names
+            var info = new IndicatorInfo(typeof(AliasProbe), "Alias probe", IndicatorCategories.Oscillators, "Trading Hub", "");
+            Assert.Equal("My probe", IndicatorLibrary.DisplayNameOf(info, settings.IndicatorLibrary));
+
+            // saved workspaces store the type and settings only: no alias text, and they reload into the same type
+            var props = Workspace.SaveIndicator(onChart, out var series);
+            Assert.DoesNotContain("My probe", props.ToString());
+            var reloaded = new AliasProbe();
+            Workspace.LoadIndicator(reloaded, props, series);
+            Assert.Equal(7m, reloaded.Period);
+            Assert.Equal(type, reloaded.GetType().FullName);
+
+            // restart: settings.json round trip, then the start-up Apply
+            Indicator.DisplayAlias = null;
+            Assert.Equal("Alias probe", new AliasProbe().Name);
+            var restored = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings))!;
+            IndicatorLibrary.Apply(restored.IndicatorLibrary);
+            Assert.Equal("My probe", new AliasProbe().Name);
+
+            IndicatorLibrary.Rename(restored.IndicatorLibrary, type, " ");
+            Assert.Empty(restored.IndicatorLibrary.Aliases);
+            Assert.Equal("Alias probe", onChart.Name);
+        }
+        finally
+        {
+            Indicator.DisplayAlias = null;
+        }
+    }
+
+    [Fact]
+    public void Hidden_indicators_leave_the_library_but_still_load_and_come_back_in_place()
+    {
+        var catalog = new IndicatorCatalog();
+        catalog.Scan(typeof(BigTrades).Assembly, "Trading Hub");
+        var items = catalog.Items;
+        var layout = new IndicatorLibraryLayout();
+        string rsi = Type<Rsi>();
+        string favorites = IndicatorLibrary.CreateGroup(layout, items, "Favorites", null);
+        IndicatorLibrary.Move(layout, items, rsi, favorites, null);
+
+        IndicatorLibrary.Hide(layout, rsi);
+        IndicatorLibrary.Hide(layout, rsi);
+        var groups = IndicatorLibrary.Build(items, layout);
+        Assert.DoesNotContain(groups.SelectMany(g => g.Items), i => i.Type == typeof(Rsi));
+        Assert.Equal(items.Count - 1, groups.Sum(g => g.Items.Count));
+        Assert.Equal(typeof(Rsi), Assert.Single(IndicatorLibrary.HiddenItems(items, layout)).Type);
+        IndicatorLibrary.Shift(layout, items, Type<Macd>(), 1); // other edits keep the hidden placement
+
+        // a saved chart that uses the hidden study still creates and loads it
+        var created = Assert.IsType<Rsi>(catalog.Create(rsi));
+        Workspace.LoadIndicator(created, Workspace.SaveIndicator(new Rsi(), out var series), series);
+
+        IndicatorLibrary.Unhide(layout, rsi);
+        Assert.Empty(IndicatorLibrary.HiddenItems(items, layout));
+        Assert.Contains(IndicatorLibrary.Build(items, layout).Single(g => g.Id == favorites).Items, i => i.Type == typeof(Rsi));
+        IndicatorLibrary.Hide(layout, rsi);
+        IndicatorLibrary.Hide(layout, Type<Macd>());
+        IndicatorLibrary.UnhideAll(layout);
+        Assert.Empty(layout.Hidden);
+
+        var back = JsonSerializer.Deserialize<IndicatorLibraryLayout>("""{"Groups":[],"Hidden":["X"],"Aliases":{"X":"Y"}}""")!;
+        Assert.Equal(new[] { "X" }, back.Hidden);
+        Assert.Equal("Y", back.Aliases["X"]);
+    }
 }

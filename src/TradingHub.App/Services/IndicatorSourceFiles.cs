@@ -40,15 +40,23 @@ public sealed class IndicatorSourceFiles(string folder)
 
     public string Read(string path) => File.ReadAllText(Owned(path));
 
+    /// <summary>
+    /// Publishes the complete file in one rename (never overwriting), so the compiler's monitor cannot capture an empty or
+    /// half-written source between creation and write.
+    /// </summary>
     public string Create(string fileName, string text)
     {
         string name = FileName(fileName);
         Directory.CreateDirectory(Folder);
         EnsureNoCollision(Folder, name);
         string path = Path.Combine(Folder, name);
-        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
-        writer.Write(text);
+        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, text, new UTF8Encoding(false));
+            File.Move(temporary, path, overwrite: false); // a concurrent collision fails safely
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
         return path;
     }
 

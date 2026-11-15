@@ -8,6 +8,7 @@ using Material.Icons;
 using TradingHub.App.Controls;
 using TradingHub.App.Localization;
 using TradingHub.App.Services;
+using TradingHub.Charting;
 
 namespace TradingHub.App.Windows;
 
@@ -47,9 +48,10 @@ public sealed partial class IndicatorsWindow
         if (select != null) _available.SelectedItem = _available.Items.OfType<ListBoxItem>().FirstOrDefault(x => Equals(x.Tag, select));
     }
 
-    private static bool Matches(IndicatorInfo i, string q) =>
+    private bool Matches(IndicatorInfo i, string q) =>
         q.Length == 0 || i.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || i.Category.Contains(q, StringComparison.CurrentCultureIgnoreCase) ||
-        Lang.T(i.Name).Contains(q, StringComparison.CurrentCultureIgnoreCase) || Lang.T(i.Category).Contains(q, StringComparison.CurrentCultureIgnoreCase);
+        Lang.T(i.Name).Contains(q, StringComparison.CurrentCultureIgnoreCase) || Lang.T(i.Category).Contains(q, StringComparison.CurrentCultureIgnoreCase) ||
+        IndicatorLibrary.DisplayNameOf(i, Layout).Contains(q, StringComparison.CurrentCultureIgnoreCase);
 
     private void FillAvailable()
     {
@@ -68,6 +70,8 @@ public sealed partial class IndicatorsWindow
         }
 
         _count.Text = $"{count}";
+        // the list itself keeps a restore path, even if every indicator (and so every group menu) is hidden
+        _available.ContextMenu = HiddenMenu() is { } hidden ? new ContextMenu { ItemsSource = new List<Control> { hidden } } : null;
     }
 
     private ListBoxItem LibraryItem(IndicatorInfo i, IndicatorLibraryGroup group, bool draggable)
@@ -96,9 +100,11 @@ public sealed partial class IndicatorsWindow
             row.Children.Add(star);
         }
 
-        row.Children.Add(new TextBlock { Text = i.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+        bool aliased = Layout.Aliases.ContainsKey(i.Type.FullName!);
+        row.Children.Add(new TextBlock { Text = IndicatorLibrary.DisplayNameOf(i, Layout), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
         var item = new ListBoxItem { Content = row, Tag = i, Padding = new Thickness(18, 4, 8, 4) };
-        if (!string.IsNullOrWhiteSpace(i.Description)) ToolTip.SetTip(item, i.Description);
+        string tip = aliased ? (Lang.T(i.Name) + "\n" + i.Description).Trim() : i.Description;
+        if (!string.IsNullOrWhiteSpace(tip)) ToolTip.SetTip(item, tip);
         item.ContextMenu = new ContextMenu { ItemsSource = ItemMenu(i, group, item) };
         if (draggable) Draggable(item, i);
         return item;
@@ -173,6 +179,12 @@ public sealed partial class IndicatorsWindow
             }));
         }
 
+        if (HiddenMenu() is { } hiddenMenu)
+        {
+            items.Add(new Separator());
+            items.Add(hiddenMenu);
+        }
+
         items.Add(new Separator());
         items.Add(Item("Restore the default library arrangement…", MaterialIconKind.Restore, async () =>
         {
@@ -206,6 +218,26 @@ public sealed partial class IndicatorsWindow
             items.Add(Item("The original was updated: restore it (your edits move to a backup)…", MaterialIconKind.Restore, () => _ = RestoreOriginalAsync(copy)));
             items.Add(Item("Keep my edits and stop reminding me", MaterialIconKind.ContentSaveCheckOutline, () => _ = KeepEditsAsync(copy)));
         }
+
+        items.Add(new Separator());
+        items.Add(Item("Rename…", MaterialIconKind.RenameOutline, async () =>
+        {
+            var name = await PromptDialog.ShowAsync(this, "Rename indicator",
+                $"Name shown in the library and on charts (empty restores «{Lang.T(i.Name)}»)", IndicatorLibrary.DisplayNameOf(i, Layout), "Rename");
+            if (name == null) return;
+            RenameIndicator(i, name);
+        }));
+        if (Layout.Aliases.ContainsKey(type))
+            items.Add(Item($"Restore the default name («{Lang.T(i.Name)}»)", MaterialIconKind.Restore, () => RenameIndicator(i, null)));
+        items.Add(Item("Remove from library…", MaterialIconKind.EyeOffOutline, async () =>
+        {
+            if (!await ConfirmDialog.ShowAsync(this, "Remove from library",
+                    $"«{IndicatorLibrary.DisplayNameOf(i, Layout)}» stops appearing in the library. Charts, saved charts and templates that use it keep loading it, and Show hidden indicators brings it back.",
+                    "Remove from library", danger: true)) return;
+            IndicatorLibrary.Hide(Layout, type);
+            LibraryChanged();
+        }));
+        if (HiddenMenu() is { } hiddenMenu) items.Add(hiddenMenu);
 
         items.Add(new Separator());
         var move = new MenuItem { Header = "Move to group", Icon = Ui.Icon(MaterialIconKind.FolderMoveOutline, 16) };
@@ -242,6 +274,33 @@ public sealed partial class IndicatorsWindow
     {
         IndicatorLibrary.Shift(Layout, _svc.Catalog.Items, i.Type.FullName!, delta);
         LibraryChanged(i);
+    }
+
+    /// <summary>A display alias only: the type, saved charts, templates and series keep their identities.</summary>
+    private void RenameIndicator(IndicatorInfo i, string? alias)
+    {
+        IndicatorLibrary.Rename(Layout, i.Type.FullName!, alias);
+        LibraryChanged(i);
+        FillOnChart();
+        if (_onChart.SelectedItem is ListBoxItem { Tag: IndicatorSlot s }) _title.Text = s.Indicator.Name;
+        _model.Invalidate();
+    }
+
+    /// <summary>«Show hidden indicators (N)»: restore one or all; null when nothing loaded is hidden.</summary>
+    private MenuItem? HiddenMenu()
+    {
+        var hidden = IndicatorLibrary.HiddenItems(_svc.Catalog.Items, Layout);
+        if (hidden.Count == 0) return null;
+        var entries = new List<Control>();
+        foreach (var h in hidden)
+        {
+            string type = h.Type.FullName!;
+            entries.Add(Item($"Restore «{IndicatorLibrary.DisplayNameOf(h, Layout)}»", MaterialIconKind.Eye, () => { IndicatorLibrary.Unhide(Layout, type); LibraryChanged(h); }));
+        }
+
+        entries.Add(new Separator());
+        entries.Add(Item("Restore all", MaterialIconKind.EyeOutline, () => { IndicatorLibrary.UnhideAll(Layout); LibraryChanged(); }));
+        return new MenuItem { Header = $"Show hidden indicators ({hidden.Count})", Icon = Ui.Icon(MaterialIconKind.EyeOutline, 16), ItemsSource = entries };
     }
 
     private void ShowLibraryError(string text)

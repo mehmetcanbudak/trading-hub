@@ -126,6 +126,37 @@ internal static class AuthoringScriptsScene
             "the arrangement is persisted additively in settings");
         Save(library, "authoring_library_groups.png");
 
+        // ---- display alias and remove-from-library, with the study on a live chart
+        string average = typeof(MovingAverage).FullName!;
+        Choose(Menu(Row(average)), "Add to chart");
+        var slot = model.Indicators.Single(s => s.Indicator is MovingAverage);
+        Choose(Menu(Row(average)), "Rename…");
+        Prompt(library, "Scene average", "Rename");
+        string RowText(string type) => ((DockPanel)Row(type).Content!).Children.OfType<TextBlock>().Last().Text ?? "";
+        Check(RowText(average) == "Scene average" && slot.Indicator.Name == "Scene average" && slot.Indicator.GetType() == typeof(MovingAverage),
+            "a rename relabels the library row and the indicator already on the chart without changing its type");
+        Check(AppSettings.Load().IndicatorLibrary.Aliases.GetValueOrDefault(average) == "Scene average" &&
+              !Workspace.SaveIndicator(slot.Indicator, out _).ToString().Contains("Scene average", StringComparison.Ordinal),
+            "the alias is persisted in settings, never in the saved indicator");
+        Save(library, "authoring_library_alias.png");
+        Choose(Menu(Row(average)), "Remove from library…");
+        Until(() => library.OwnedWindows.OfType<ConfirmDialog>().Any(), "remove-from-library asks first");
+        Click(Action(library.OwnedWindows.OfType<ConfirmDialog>().Single(), "Remove from library"));
+        pump(0.1);
+        model.Update();
+        Check(Rows().All(r => !(r.Tag is IndicatorInfo { } hiddenInfo && hiddenInfo.Type == typeof(MovingAverage))) && slot.Error == null && model.Indicators.Contains(slot),
+            "a removed study leaves the library but stays on the chart");
+        Check(svc.Catalog.Create(average) is MovingAverage, "saved charts can still create the removed study");
+        var showHidden = Menu(Header(IndicatorCategories.Vwap)).Single(m => Equals(m.Header, Lang.T("Show hidden indicators (1)")));
+        ((IEnumerable<Control>)showHidden.ItemsSource!).OfType<MenuItem>().Single(m => Equals(m.Header, Lang.T("Restore «Scene average»")))
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        pump(0.1);
+        Check(Rows().Any(r => r.Tag is IndicatorInfo { } shown && shown.Type == typeof(MovingAverage)) && svc.Settings.IndicatorLibrary.Hidden.Count == 0,
+            "Show hidden indicators restores the study to the library");
+        Choose(Menu(Row(average)), Lang.T("Restore the default name («Moving average»)"));
+        Check(slot.Indicator.Name == Lang.T("Moving average") || slot.Indicator.Name == "Moving average", "restoring the default name relabels the chart");
+        model.RemoveIndicator(slot);
+
         // ---- editable copy of a built-in, then an "updated original" with user edits
         Choose(Menu(Row(typeof(MovingAverage).FullName!)), "Edit a copy…");
         Until(() => svc.SourceCopies.Any(s => s.OriginalType == typeof(MovingAverage).FullName) && library.OwnedWindows.OfType<CodeEditorWindow>().Any(),

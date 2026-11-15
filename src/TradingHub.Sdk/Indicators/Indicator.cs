@@ -124,15 +124,29 @@ namespace TradingHub.Indicators
         [JsonIgnore]
         public string Name
         {
-            get => TradingHub.Common.EnglishText.Of(_name ??= DefaultName(GetType()));
+            // not cached: a library rename (display alias) also relabels indicators already on charts
+            get => _name != null ? TradingHub.Common.EnglishText.Of(_name) : DisplayName(GetType());
             set => _name = value;
         }
 
-        public static string DefaultName(Type t)
+        /// <summary>The factory display name (DisplayName attribute, else the type name). Never affected by aliases.</summary>
+        public static string DefaultName(Type t) => DefaultNames.GetValue(t, static type =>
         {
-            var dn = t.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName;
-            return TradingHub.Common.EnglishText.Of(string.IsNullOrWhiteSpace(dn) ? t.Name : dn);
-        }
+            var dn = type.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName;
+            return TradingHub.Common.EnglishText.Of(string.IsNullOrWhiteSpace(dn) ? type.Name : dn);
+        });
+
+        // weak: compiled user indicators live in collectible load contexts that must stay unloadable after a recompile
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Type, string> DefaultNames = new();
+
+        /// <summary>
+        /// Host-installed display alias per indicator type (the library's Rename). Display only: type names, saved chart
+        /// identities, series ids and settings keys never change. Null or empty means the factory name.
+        /// </summary>
+        public static Func<Type, string?>? DisplayAlias { get; set; }
+
+        /// <summary>The name shown for a type: its alias when one is set, otherwise <see cref="DefaultName"/>.</summary>
+        public static string DisplayName(Type t) => DisplayAlias?.Invoke(t) is { Length: > 0 } alias ? alias : DefaultName(t);
 
         [Browsable(false)]
         [JsonIgnore]

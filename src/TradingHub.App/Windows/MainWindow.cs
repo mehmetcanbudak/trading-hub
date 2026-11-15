@@ -94,6 +94,7 @@ public sealed class MainWindow : Window
             : $"Error compiling custom indicators: {result.Diagnostics.FirstOrDefault(d => d.Severity == "error")}");
         scripts.Compiled += OnScriptsCompiled;
         if (scripts.LastResult == null) scripts.CompileAll();
+        IndicatorLibrary.Apply(_svc.Settings.IndicatorLibrary); // library renames are display aliases on every chart
         _ = _svc.ReviewSourceCopiesAtStartupAsync(SetStatus);
 
         Log.Entry += e =>
