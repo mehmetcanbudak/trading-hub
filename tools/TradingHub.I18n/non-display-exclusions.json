@@ -102,5 +102,29 @@
   "{0}Edited": {
     "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:327",
     "reason": "Default C# class name of an editable indicator copy (original type name + English suffix), not a display label."
+  },
+  "Software": {
+    "locations": "TradingHub.App/Controls/SkiaView.cs:92",
+    "reason": "Rendering backend identifier written into the opt-in TRADINGHUB_FRAME_LOG diagnostic CSV (matches Avalonia's backend name), not a display label."
+  },
+  "cpu,{0},,,,,,,{1},{2}": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:153",
+    "reason": "CSV record format of the opt-in frame-timing diagnostic file; column grammar must stay stable for the analysis scripts. Not shown in the UI."
+  },
+  "note,{0},\"{1}\"": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:109",
+    "reason": "CSV record format of the opt-in frame-timing diagnostic file; column grammar must stay stable for the analysis scripts. Not shown in the UI."
+  },
+  "os={0};cores={1};continuous={2}": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:85",
+    "reason": "Machine-readable environment header of the opt-in frame-timing diagnostic CSV. Not shown in the UI."
+  },
+  "{0}:{1}x{2}@{3};window={4}x{5}": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:121",
+    "reason": "Machine-readable screen/window note in the opt-in frame-timing diagnostic CSV. Not shown in the UI."
+  },
+  "{0}='{1}' ignored: use metal, opengl or software. The default rendering order is kept.": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:32",
+    "reason": "Startup diagnostic log line for an invalid TRADINGHUB_RENDERING developer override; written to the app log, never shown in the UI. Names environment values that are not translatable."
   }
 }
