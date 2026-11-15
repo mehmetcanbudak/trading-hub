@@ -22474,5 +22474,129 @@
   "a page limit": {
     "es": "un límite de páginas",
     "zh-CN": "分页上限"
+  },
+  "Display only: hides drawings; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: oculta dibujos; nunca cambia la detección, las series para estrategias ni las alertas.",
+    "zh-CN": "仅显示：只隐藏绘图；绝不改变检测、策略序列或警报。"
+  },
+  "R1 / S1": {
+    "es": "R1 / S1",
+    "zh-CN": "R1 / S1"
+  },
+  "R3 / S3": {
+    "es": "R3 / S3",
+    "zh-CN": "R3 / S3"
+  },
+  "R4 / S4": {
+    "es": "R4 / S4",
+    "zh-CN": "R4 / S4"
+  },
+  "R5 / S5": {
+    "es": "R5 / S5",
+    "zh-CN": "R5 / S5"
+  },
+  "Session box and range levels": {
+    "es": "Caja de la sesión y niveles del rango",
+    "zh-CN": "时段方框与区间水平"
+  },
+  "Hypothetical signals (trendline, inverse FVG, stop, target)": {
+    "es": "Señales hipotéticas (línea de tendencia, FVG invertido, stop, objetivo)",
+    "zh-CN": "假设信号（趋势线、反向 FVG、止损、目标）"
+  },
+  "FVGs drawn": {
+    "es": "FVG dibujados",
+    "zh-CN": "绘制的 FVG 数量"
+  },
+  "Keep filled FVGs": {
+    "es": "Dejar los FVG rellenados",
+    "zh-CN": "保留已回补的 FVG"
+  },
+  "Only the latest test and retest": {
+    "es": "Solo la última prueba y re-prueba",
+    "zh-CN": "仅显示最近一次测试与回测"
+  },
+  "Hide BOS before the first CHoCH": {
+    "es": "Ocultar los BOS anteriores al primer CHoCH",
+    "zh-CN": "隐藏首个 CHoCH 之前的 BOS"
+  },
+  "Border opacity (%)": {
+    "es": "Opacidad del borde (%)",
+    "zh-CN": "边框不透明度 (%)"
+  },
+  "Display only: changes how session outlines are drawn; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: cambia cómo se dibujan los bordes de las sesiones; nunca cambia la detección, las series de la estrategia ni las alertas.",
+    "zh-CN": "仅显示：改变交易时段边框的绘制方式；绝不改变检测、策略序列或警报。"
+  },
+  "Display only: hides drawings of sessions dated this many days or more before the latest session; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: oculta los dibujos de las sesiones fechadas esa cantidad de días o más antes de la última sesión; nunca cambia la detección, las series de la estrategia ni las alertas.",
+    "zh-CN": "仅显示：隐藏日期早于最新交易时段该天数或更多的交易时段绘图；绝不改变检测、策略序列或警报。"
+  },
+  "Sessions drawn": {
+    "es": "Sesiones que se dibujan",
+    "zh-CN": "绘制的交易时段数"
+  },
+  "Display only: hides the range boxes and levels of older Asian sessions; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: oculta las cajas del rango y los niveles de las sesiones de Asia más antiguas; nunca cambia la detección, las series de la estrategia ni las alertas.",
+    "zh-CN": "仅显示：隐藏较早亚洲时段的区间框和价位；绝不改变检测、策略序列或警报。"
+  },
+  "Filled bullish gaps": {
+    "es": "Huecos alcistas rellenados",
+    "zh-CN": "已回补的看涨缺口"
+  },
+  "Display only: hides the drawings of ended sessions' filled bullish gaps; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: oculta los dibujos de los huecos alcistas rellenados de sesiones terminadas; nunca cambia la detección, las series de la estrategia ni las alertas.",
+    "zh-CN": "仅显示：隐藏已结束交易时段中已回补看涨缺口的绘图；绝不改变检测、策略序列或警报。"
+  },
+  "Filled bearish gaps": {
+    "es": "Huecos bajistas rellenados",
+    "zh-CN": "已回补的看跌缺口"
+  },
+  "Display only: hides the drawings of ended sessions' filled bearish gaps; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: oculta los dibujos de los huecos bajistas rellenados de sesiones terminadas; nunca cambia la detección, las series de la estrategia ni las alertas.",
+    "zh-CN": "仅显示：隐藏已结束交易时段中已回补看跌缺口的绘图；绝不改变检测、策略序列或警报。"
+  },
+  "Unfilled gaps": {
+    "es": "Huecos sin rellenar",
+    "zh-CN": "未回补的缺口"
+  },
+  "Display only: hides the drawings of ended sessions' unfilled gaps; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: oculta los dibujos de los huecos sin rellenar de sesiones terminadas; nunca cambia la detección, las series de la estrategia ni las alertas.",
+    "zh-CN": "仅显示：隐藏已结束交易时段中未回补缺口的绘图；绝不改变检测、策略序列或警报。"
+  },
+  "Paint the reversion bars": {
+    "es": "Pintar las velas de la reversión",
+    "zh-CN": "为回归K线着色"
+  },
+  "Reversion bar colors": {
+    "es": "Colores de las velas de reversión",
+    "zh-CN": "回归K线颜色"
+  },
+  "Display only: colors the re-entry bars; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: colorea las velas de reentrada; nunca cambia la detección, las series para estrategias ni las alertas.",
+    "zh-CN": "仅显示：为重新进入的K线着色；绝不改变检测、策略序列或警报。"
+  },
+  "Display only: hides the cross marks; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: oculta las marcas de cruce; nunca cambia la detección, las series para estrategias ni las alertas.",
+    "zh-CN": "仅显示：隐藏穿越标记；绝不改变检测、策略序列或警报。"
+  },
+  "Hours drawn": {
+    "es": "Horas que se dibujan",
+    "zh-CN": "绘制的小时数"
+  },
+  "Display only: draws only the latest finished hours; never changes detection, strategy series or alerts.": {
+    "es": "Solo visual: dibuja solo las últimas horas terminadas; nunca cambia la detección, las series para estrategias ni las alertas.",
+    "zh-CN": "仅显示：只绘制最近完成的小时；绝不改变检测、策略序列或警报。"
+  },
+  "Display only: hides the arrival and window VWAP lines; never changes the simulation, strategy series or alerts.": {
+    "es": "Solo visual: oculta las líneas del precio de llegada y del VWAP de la ventana; nunca cambia la simulación, las series para estrategias ni las alertas.",
+    "zh-CN": "仅显示：隐藏到达价和窗口VWAP线；绝不改变模拟、策略序列或警报。"
+  },
+  "Display only: hides the average fill price lines; never changes the simulation, strategy series or alerts.": {
+    "es": "Solo visual: oculta las líneas de los precios promedio de ejecución; nunca cambia la simulación, las series para estrategias ni las alertas.",
+    "zh-CN": "仅显示：隐藏平均成交价线；绝不改变模拟、策略序列或警报。"
+  },
+  "Display only: hides the shading of the scheduled bars; never changes the simulation, strategy series or alerts.": {
+    "es": "Solo visual: oculta el sombreado de las velas del programa; nunca cambia la simulación, las series para estrategias ni las alertas.",
+    "zh-CN": "仅显示：隐藏计划K线的阴影；绝不改变模拟、策略序列或警报。"
   }
 }
