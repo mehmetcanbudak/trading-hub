@@ -8371,6 +8371,8 @@
   "Tradovate data connection": "Tradovate 行情",
   "Tradovate did not cancel order: ": "Tradovate 未取消订单： ",
   "Tradovate did not cancel order: {0}": "Tradovate 未撤销订单：{0}",
+  "Tradovate did not liquidate the position: ": "Tradovate 未平掉该持仓： ",
+  "Tradovate did not liquidate the position: {0}": "Tradovate 未平掉该持仓：{0}",
   "Tradovate did not modify order: ": "Tradovate 未修改订单： ",
   "Tradovate did not modify order: {0}": "Tradovate 未修改订单：{0}",
   "Tradovate did not return an account snapshot.": "Tradovate 未返回账户快照。",

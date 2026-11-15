@@ -552,7 +552,7 @@ public sealed class BinanceAccountClient : IDisposable
 /// remain unavailable (0); strategy cost accounting continues to come from its own fills.
 /// </para>
 /// </remarks>
-public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, IDisposable
+public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, ICoordinatedPositionClose, IDisposable
 {
     /// <summary>Starts the <see cref="Order.ExchangeOrderId"/> of a conditional order: an algo id is not an order id.</summary>
     private const string AlgoPrefix = "algo:";
@@ -2148,7 +2148,92 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     }
 
 
-    public Order Submit(PreparedOrderIntent intent)
+    public Order Submit(PreparedOrderIntent intent) => Submit(intent, null);
+
+    /// <summary>
+    /// Close position. Working orders are canceled (cancel-all), and this broker's market orders still in flight are part
+    /// of what is closed: the reduce-only market order takes its send turn here and is sized there, after the earlier
+    /// requests were answered, from the venue's position read once those orders ended. Unconfirmed within
+    /// <see cref="NativeSendTurns.ReducingWait"/>, it is sized from the best known position and reports
+    /// <see cref="NativeSendTurns.UnsettledMessage"/>.
+    /// </summary>
+    public void Flatten()
+    {
+        Tracked[] earlier;
+        decimal before = Position.Volume, expected;
+        lock (_gate)
+        {
+            earlier = _byOrder.Values.Where(t => t.Own && t.Order.Type == OrderTypes.Market && t.Order.State == OrderStates.Active).ToArray();
+            expected = before + earlier.Sum(t => (t.Order.Direction == OrderDirections.Buy ? 1 : -1) * t.Order.Unfilled);
+        }
+        CancelAll();
+        if (expected == 0) return;
+        var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
+        decimal quantity = Math.Abs(expected);
+        var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, direction, OrderTypes.Market,
+            quantity, 0, ReduceOnly: true, Comment: "Close", Protective: true, MaximumOwnedQuantity: Math.Max(Math.Abs(before), quantity)));
+        Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + NativeSendTurns.ReducingWait));
+    }
+
+    /// <summary>A close sized in its send turn: the side it reduces, the market orders in flight when it was issued, and
+    /// how long it waits for a position that includes them.</summary>
+    private sealed record CloseSizing(OrderDirections Direction, Tracked[] Earlier, DateTime Until);
+
+    /// <summary>
+    /// The quantity a close sends: once every market order in flight when it was issued is known to have ended at Binance,
+    /// the venue's position on its side, read then; past the deadline, the best known position, unconfirmed.
+    /// </summary>
+    private async Task<(decimal Size, bool Confirmed)> CloseSizeAsync(CloseSizing sizing)
+    {
+        static decimal Side(CloseSizing sizing, decimal volume) =>
+            sizing.Direction == OrderDirections.Sell ? Math.Max(0, volume) : Math.Max(0, -volume);
+        while (true)
+        {
+            bool settled = true;
+            foreach (var t in sizing.Earlier)
+            {
+                long id;
+                lock (_gate)
+                {
+                    if (t.Order.State is OrderStates.Done or OrderStates.Failed) continue;
+                    if (!t.Accepted || t.SubmissionUnknown) { settled = false; continue; }
+                    id = t.Id;
+                }
+                try
+                {
+                    var native = await _client.GetOrderAsync(Instrument.Symbol, id, _cts.Token).ConfigureAwait(false);
+                    lock (_gate)
+                        if (native != null && t.Id == id && _byOrder.ContainsKey(t.Order)) Apply(t, native);
+                    if (native?.Status is not ("FILLED" or "CANCELED" or "EXPIRED" or "EXPIRED_IN_MATCH" or "REJECTED")) settled = false;
+                }
+                catch (Exception) when (!_cts.IsCancellationRequested) { settled = false; }
+            }
+            if (settled)
+            {
+                try
+                {
+                    decimal volume = await ReadPositionVolumeAsync().ConfigureAwait(false);
+                    lock (_gate) Position.Volume = volume; // admission checks the position this close is sized from
+                    return (Side(sizing, volume), true);
+                }
+                catch (Exception) when (!_cts.IsCancellationRequested) { }
+            }
+            if (DateTime.UtcNow >= sizing.Until) return (Side(sizing, Position.Volume), false);
+            await Task.Delay(50, _cts.Token).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The venue's current position in this instrument (futures position; spot base-asset balance).</summary>
+    private async Task<decimal> ReadPositionVolumeAsync()
+    {
+        if (_settings.Futures)
+            return (await _client.GetPositionsAsync(_cts.Token).ConfigureAwait(false)).FirstOrDefault(p => p.Symbol == Instrument.Symbol)?.Quantity ?? 0;
+        _spotBaseAsset ??= await _client.GetSpotBaseAssetAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false);
+        var balances = await _client.GetBalancesAsync(_cts.Token).ConfigureAwait(false);
+        return balances.FirstOrDefault(balance => balance.Asset == _spotBaseAsset)?.Wallet ?? 0;
+    }
+
+    private Order Submit(PreparedOrderIntent intent, CloseSizing? sizing)
     {
         lock (_gate)
             if (_byClient.TryGetValue(intent.ClientOrderId, out var existing)) return existing.Order;
@@ -2178,7 +2263,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             SetClientIdentity(t, intent);
             // The send turn is taken where the order is issued, so this broker's requests reach Binance in issue order.
             var turn = _sendTurns.Take();
-            t.Last = Task.Run(() => InTurnAsync(turn, () => SubmitAsync(t, turn, type, qty, px, reduceOnly)));
+            t.Last = Task.Run(() => InTurnAsync(turn, () => SubmitAsync(t, turn, type, qty, px, reduceOnly, sizing)));
         }
 
         Publish();
@@ -2193,7 +2278,8 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         finally { turn.Release(); }
     }
 
-    private async Task SubmitAsync(Tracked t, NativeSendTurns.Turn turn, OrderTypes type, decimal qty, decimal price, bool reduceOnly)
+    private async Task SubmitAsync(Tracked t, NativeSendTurns.Turn turn, OrderTypes type, decimal qty, decimal price, bool reduceOnly,
+        CloseSizing? sizing)
     {
         var order = t.Order;
         BinanceOpenOrder? placed = null;
@@ -2206,6 +2292,18 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         {
             inOrder = await turn.WaitAsync(reduceOnly || t.Intent!.Request.Protective, _cts.Token).ConfigureAwait(false);
             await WaitForNativeReplayAsync().ConfigureAwait(false);
+            if (sizing != null)
+            {
+                var (size, confirmed) = await CloseSizeAsync(sizing).ConfigureAwait(false);
+                inOrder &= confirmed;
+                qty = BinanceAccountClient.NormalizeWireNumber(size);
+                if (qty <= 0) throw new InvalidOperationException(confirmed ? "No open position." : NativeSendTurns.UnsettledMessage);
+                lock (_gate)
+                {
+                    order.QuantityToFill = qty;
+                    order.Unfilled = qty;
+                }
+            }
             Task<BinanceOpenOrder>? placement = null;
             Task<BinanceAlgoOrder>? algoPlacement = null;
             lock (_gate)

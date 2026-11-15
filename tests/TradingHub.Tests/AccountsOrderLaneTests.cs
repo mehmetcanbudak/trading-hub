@@ -131,6 +131,7 @@ public sealed partial class AccountsRithmicCloseRegressionTests
     public async Task Accounts_tradovate_cancel_and_close_run_after_a_chart_market_buy_queued_behind_a_slow_durable_write()
     {
         using var tradovate = new FakeTradovate();
+        tradovate.SeedPosition(1);
         var normalHttp = tradovate.Server.OnHttp!;
         var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var arrivals = new List<string>(); // order requests in arrival order
@@ -142,7 +143,7 @@ public sealed partial class AccountsRithmicCloseRegressionTests
                 // The buy's request reached the venue; its reply is still outstanding.
                 if (request.Route == "/v1/order/placeorder") await buyReply.Task;
             }
-            return request.Route == "/v1/order/liquidateposition" ? (200, "{}") : normalHttp(request);
+            return normalHttp(request);
         };
         string[] Arrivals() { lock (arrivals) return arrivals.ToArray(); }
         using var feed = new TradovateFeed(() => tradovate.Settings());
@@ -207,6 +208,8 @@ public sealed partial class AccountsRithmicCloseRegressionTests
         Assert.Empty(lanes.Pending);
         await Until(() => Arrivals().Length == 3);
         Assert.Equal(new[] { "/v1/order/placeorder", "/v1/order/cancelorder", "/v1/order/liquidateposition" }, Arrivals());
+        // liquidateposition is sized by the venue when it processes it, after the earlier buy: 1 + 1 closed, flat.
+        await Until(() => tradovate.NetPosition == 0 && session.PositionFor(101, 555)?.Net == 0);
     }
 
     private static T Private<T>(object target, string name) =>

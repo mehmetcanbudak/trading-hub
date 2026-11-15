@@ -8371,6 +8371,8 @@
   "Tradovate data connection": "datos de Tradovate",
   "Tradovate did not cancel order: ": "Tradovate no canceló la orden: ",
   "Tradovate did not cancel order: {0}": "Tradovate no canceló la orden: {0}",
+  "Tradovate did not liquidate the position: ": "Tradovate no liquidó la posición: ",
+  "Tradovate did not liquidate the position: {0}": "Tradovate no liquidó la posición: {0}",
   "Tradovate did not modify order: ": "Tradovate no modificó la orden: ",
   "Tradovate did not modify order: {0}": "Tradovate no modificó la orden: {0}",
   "Tradovate did not return an account snapshot.": "Tradovate no devolvió un estado de cuenta.",

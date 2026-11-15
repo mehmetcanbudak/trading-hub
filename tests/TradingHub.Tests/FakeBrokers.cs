@@ -288,6 +288,21 @@ internal sealed class FakeTradovate : IDisposable
     public JsonArray ReplayFills { get; } = new();
     public int OcoRequests;
     public JsonArray ReplayPositions { get; } = new();
+    private readonly List<Task> _lifecycles = new();
+
+    /// <summary>Position reports from order lifecycles carry the venue timestamp, as Tradovate's position entities do.</summary>
+    public bool TimestampPositions { get; set; }
+
+    /// <summary>The fake venue's net position for account 101 / contract 555.</summary>
+    public int NetPosition => Volatile.Read(ref _position);
+
+    /// <summary>Starts with a net position the venue holds and replays.</summary>
+    public void SeedPosition(int net)
+    {
+        _position = net;
+        ReplayPositions.Add(JsonNode.Parse(string.Create(CultureInfo.InvariantCulture,
+            $"{{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":{net},\"netPrice\":5000.25,\"bought\":{Math.Max(net, 0)},\"boughtValue\":{Math.Max(net, 0) * 5000.25m},\"sold\":{Math.Max(-net, 0)},\"soldValue\":{Math.Max(-net, 0) * 5000.25m},\"timestamp\":\"{DateTime.UtcNow.AddMinutes(-1):O}\"}}")));
+    }
     // OCO legs this fixture placed: leg ID → sibling ID, action, quantity and price (stop or limit).
     private readonly Dictionary<long, (long Sibling, string Action, int Quantity, decimal Price, string ClientId, long OcoId, string Type)> _ocoLegs = new();
 
@@ -332,8 +347,27 @@ internal sealed class FakeTradovate : IDisposable
                 var o = JsonNode.Parse(req.Body)!.AsObject();
                 long id = Interlocked.Increment(ref _nextOrder);
                 lock (Orders) Orders.Add(o);
-                _ = Task.Run(() => OrderLifecycle(id, o));
+                var lifecycle = Task.Run(() => OrderLifecycle(id, o));
+                lock (_lifecycles) _lifecycles.Add(lifecycle);
                 return (200, $"{{\"failureReason\":\"Success\",\"failureText\":\"\",\"orderId\":{id}}}");
+            }
+
+            // POST /order/liquidateposition: the venue processes it after the orders it received earlier and closes the
+            // position it then holds at market.
+            if (req.Route == "/v1/order/liquidateposition")
+            {
+                Task[] earlier;
+                lock (_lifecycles) earlier = _lifecycles.ToArray();
+                long id = Interlocked.Increment(ref _nextOrder);
+                var liquidation = Task.Run(async () =>
+                {
+                    await Task.WhenAll(earlier);
+                    int net = Volatile.Read(ref _position);
+                    if (net == 0) return;
+                    await OrderLifecycle(id, new JsonObject { ["action"] = net > 0 ? "Sell" : "Buy", ["orderType"] = "Market", ["orderQty"] = Math.Abs(net) });
+                });
+                lock (_lifecycles) _lifecycles.Add(liquidation);
+                return (200, $"{{\"orderId\":{id}}}");
             }
 
             // POST /order/placeoco: the primary (stop) and its "other" leg become one OCO; the reply names the primary.
@@ -527,10 +561,11 @@ internal sealed class FakeTradovate : IDisposable
         await Push("order", "Created", $"{{\"id\":{id},\"accountId\":101,\"contractId\":555,\"clOrdId\":{o["clOrdId"]?.ToJsonString() ?? "null"},\"action\":\"{action}\",\"ordStatus\":\"Working\",\"timestamp\":\"{now}\"}}");
         if (type != "Market") return;
         await Task.Delay(30);
-        _position += action == "Buy" ? qty : -qty;
+        int net = Interlocked.Add(ref _position, action == "Buy" ? qty : -qty);
         long fill = Interlocked.Increment(ref _nextFill);
         await Push("fill", "Created", $"{{\"id\":{fill},\"orderId\":{id},\"contractId\":555,\"timestamp\":\"{now}\",\"action\":\"{action}\",\"qty\":{qty},\"price\":5000.25,\"active\":true}}");
-        await Push("position", "Updated", string.Create(CultureInfo.InvariantCulture, $"{{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":{_position},\"netPrice\":5000.25,\"bought\":{(action == "Buy" ? qty : 0)},\"boughtValue\":{(action == "Buy" ? qty * 5000.25 : 0)},\"sold\":0,\"soldValue\":0}}"));
+        string stamp = TimestampPositions ? $",\"timestamp\":\"{DateTime.UtcNow:O}\"" : "";
+        await Push("position", "Updated", string.Create(CultureInfo.InvariantCulture, $"{{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":{net},\"netPrice\":5000.25,\"bought\":{(action == "Buy" ? qty : 0)},\"boughtValue\":{(action == "Buy" ? qty * 5000.25 : 0)},\"sold\":0,\"soldValue\":0{stamp}}}"));
         await Push("order", "Updated", $"{{\"id\":{id},\"accountId\":101,\"contractId\":555,\"action\":\"{action}\",\"ordStatus\":\"Filled\",\"timestamp\":\"{now}\"}}");
     }
 

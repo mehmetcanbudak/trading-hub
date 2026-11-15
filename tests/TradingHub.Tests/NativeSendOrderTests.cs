@@ -22,8 +22,8 @@ public sealed class NativeSendOrderTests : IDisposable
     [Fact]
     public async Task Tradovate_close_position_is_not_sent_before_an_earlier_buy_is_answered()
     {
-        using var fake = new FakeTradovate();
-        fake.ReplayPositions.Add(JsonNode.Parse("{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":1,\"netPrice\":5000.25,\"bought\":1,\"boughtValue\":5000.25,\"sold\":0,\"soldValue\":0}"));
+        using var fake = new FakeTradovate { TimestampPositions = true };
+        fake.SeedPosition(1);
         var normalHttp = fake.Server.OnHttp!;
         var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int holdNextBuy = 0;
@@ -101,6 +101,110 @@ public sealed class NativeSendOrderTests : IDisposable
         var placed = fake.Placed.Skip(1).ToArray();
         Assert.Equal(new[] { ("BUY", false), ("SELL", true) }, placed.Select(order => (order.Side, order.ReduceOnly)));
         await Until(() => buy.ExchangeOrderId.Length > 0, () => broker.LastError);
+    }
+
+    /// <summary>Close position issued right after a market buy (which fills in the venue as it is answered): the close
+    /// is sized after that buy's outcome, so it closes the buy too and the account ends flat.</summary>
+    [Theory]
+    [InlineData(1, 2)]
+    [InlineData(0, 1)]
+    public async Task Tradovate_close_position_after_a_queued_market_buy_closes_it_too(int start, int expectedSell)
+    {
+        using var fake = new FakeTradovate { TimestampPositions = true };
+        if (start != 0) fake.SeedPosition(start);
+        using var data = new InstrumentData(new Instrument
+        {
+            Symbol = "ES", FeedId = TradovateFeed.FeedId, Exchange = "CME", TickSize = 0.25m, VolumeStep = 1m, PointValue = 50m, QuoteAsset = "USD",
+        }, new SimulatedFeed()) { RecordLive = false };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady, () => session.StatusText);
+        using var broker = _orders.Tradovate(data, session, Assert.Single(session.Accounts), "Tradovate close sizing");
+        await Until(() => broker.PositionReady && broker.OrdersReady && broker.Position.Volume == start, () => broker.LastError);
+
+        var buy = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 1);
+        OrderActions.Flatten(broker);
+
+        JsonObject[] Sells() { lock (fake.Orders) return fake.Orders.Where(order => order["action"]?.GetValue<string>() == "Sell").ToArray(); }
+        await Until(() => Sells().Length == 1 && fake.NetPosition == 0 && broker.Position.Volume == 0 && buy.Filled == 1,
+            () => $"{broker.LastError}; venue net {fake.NetPosition}, local {broker.Position.Volume}, sells {string.Join(", ", Sells().Select(s => s["orderQty"]))}");
+        Assert.Equal(expectedSell, Sells()[0]["orderQty"]!.GetValue<int>());
+        Assert.NotEqual(NativeSendTurns.UnsettledMessage, broker.LastError); // sized from a confirmed position
+    }
+
+    /// <summary>Position reports without a venue timestamp never prove they include the buy: past its wait the close is
+    /// sent from the best known position, once, and says the earlier outcome was unsettled.</summary>
+    [Fact]
+    public async Task Tradovate_close_position_sent_unconfirmed_reports_the_unsettled_earlier_order()
+    {
+        using var fake = new FakeTradovate { TimestampPositions = false };
+        fake.SeedPosition(1);
+        using var data = new InstrumentData(new Instrument
+        {
+            Symbol = "ES", FeedId = TradovateFeed.FeedId, Exchange = "CME", TickSize = 0.25m, VolumeStep = 1m, PointValue = 50m, QuoteAsset = "USD",
+        }, new SimulatedFeed()) { RecordLive = false };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady, () => session.StatusText);
+        using var broker = _orders.Tradovate(data, session, Assert.Single(session.Accounts), "Tradovate unconfirmed close");
+        broker.CloseConfirmationWait = TimeSpan.FromMilliseconds(300);
+        await Until(() => broker.PositionReady && broker.OrdersReady && broker.Position.Volume == 1, () => broker.LastError);
+
+        OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 1);
+        OrderActions.Flatten(broker);
+
+        JsonObject[] Sells() { lock (fake.Orders) return fake.Orders.Where(order => order["action"]?.GetValue<string>() == "Sell").ToArray(); }
+        await Until(() => Sells().Length == 1 && broker.LastError?.Contains(NativeSendTurns.UnsettledMessage, StringComparison.Ordinal) == true,
+            () => $"{broker.LastError}; sells {Sells().Length}");
+        Assert.InRange(Sells()[0]["orderQty"]!.GetValue<int>(), 1, 2); // the best known position when it was sent
+    }
+
+    [Fact]
+    public async Task Tradovate_refused_liquidation_is_reported_not_treated_as_sent()
+    {
+        using var fake = new FakeTradovate();
+        var normalHttp = fake.Server.OnHttp!;
+        fake.Server.OnHttp = request => request.Route == "/v1/order/liquidateposition"
+            ? (200, "{\"failureReason\":\"TradingLocked\",\"failureText\":\"Trading is locked for this account.\"}")
+            : normalHttp(request);
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady, () => session.StatusText);
+
+        var refused = await Assert.ThrowsAsync<TradovateException>(() => session.LiquidateAsync(101, 555, CancellationToken.None).WaitAsync(Deadline));
+        Assert.Equal("Tradovate did not liquidate the position: Trading is locked for this account.", refused.Message);
+    }
+
+    [Theory]
+    [InlineData("0.01", "0.02")]
+    [InlineData("0", "0.01")]
+    public async Task Binance_close_position_after_a_queued_market_buy_closes_it_too(string startText, string expectedText)
+    {
+        decimal start = decimal.Parse(startText, System.Globalization.CultureInfo.InvariantCulture);
+        decimal expectedSell = decimal.Parse(expectedText, System.Globalization.CultureInfo.InvariantCulture);
+        using var fake = new FakeBinance(futures: true);
+        var instrument = new Instrument { Symbol = "BTCUSDT", FeedId = "binance-futures", TickSize = 0.1m, VolumeStep = 0.001m };
+        using var broker = _orders.Binance(new InstrumentData(instrument, new SimulatedFeed()), fake.Settings, "Binance close sizing");
+        await Until(() => broker.PositionReady && broker.OrdersReady, () => broker.LastError);
+        if (start != 0)
+        {
+            var opening = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, start);
+            await Until(() => broker.Position.Volume == start && opening.ExchangeOrderId.Length > 0, () => broker.LastError);
+        }
+
+        var buy = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
+        OrderActions.Flatten(broker);
+
+        FakeBinanceOrder[] Sells() => fake.Placed.Where(order => order.Side == "SELL").ToArray();
+        await Until(() => Sells().Length == 1 && broker.Position.Volume == 0 && buy.ExchangeOrderId.Length > 0,
+            () => $"{broker.LastError}; local {broker.Position.Volume}, sells {string.Join(", ", Sells().Select(s => s.Qty))}");
+        var sell = Sells()[0];
+        Assert.Equal(expectedSell, sell.Qty);
+        Assert.True(sell.ReduceOnly);
+        Assert.NotEqual(NativeSendTurns.UnsettledMessage, broker.LastError); // sized from a confirmed position
     }
 
     private static async Task Until(Func<bool> condition, Func<string?> diagnostics)

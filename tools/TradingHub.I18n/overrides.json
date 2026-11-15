@@ -22746,5 +22746,13 @@
   "An earlier order's outcome was still unsettled after 10 seconds; this reducing request was sent anyway. Check orders and position.": {
     "es": "El resultado de una orden anterior seguía sin resolverse después de 10 segundos; esta solicitud de reducción se envió de todos modos. Revisá las órdenes y la posición.",
     "zh-CN": "先前订单的结果在 10 秒后仍未确定；此减仓请求仍已发送。请检查订单和持仓。"
+  },
+  "Tradovate did not liquidate the position: ": {
+    "es": "Tradovate no liquidó la posición: ",
+    "zh-CN": "Tradovate 未平掉该持仓： "
+  },
+  "Tradovate did not liquidate the position: {0}": {
+    "es": "Tradovate no liquidó la posición: {0}",
+    "zh-CN": "Tradovate 未平掉该持仓：{0}"
   }
 }
