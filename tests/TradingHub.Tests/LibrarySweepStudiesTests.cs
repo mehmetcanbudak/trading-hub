@@ -226,4 +226,184 @@ public class LibrarySweepStudiesTests
             Assert.NotEmpty(study.Scene.Dash);
         }
     }
+
+    // ------------------------------------------------------------------ display-only filters
+
+    public static TheoryData<string> Filters => new()
+    {
+        "sweeps.zones", "sweeps.levels", "sweeps.labels", "sweeps.background",
+        "session.box", "session.sweeps", "session.signals",
+        "priorday.fvgs", "priorday.max", "priorday.keep", "priorday.mid",
+        "equal.breakouts", "equal.fvgs",
+        "gapfill.gaps", "gapfill.levels", "gapfill.labels",
+        "breakout.onlylast", "breakout.minbars", "breakout.zones", "breakout.glyphs", "breakout.background",
+    };
+
+    /// <summary>The study of <see cref="Create"/> with one display filter changed from its default.</summary>
+    private static ClosedBarStudy Filtered(string filter)
+    {
+        var study = Create(filter[..filter.IndexOf('.')]);
+        switch (study, filter)
+        {
+            case (LiquiditySweeps s, "sweeps.zones"): s.ShowZones = false; break;
+            case (LiquiditySweeps s, "sweeps.levels"): s.ShowLevels = false; break;
+            case (LiquiditySweeps s, "sweeps.labels"): s.ShowLabels = false; break;
+            case (LiquiditySweeps s, "sweeps.background"): s.ShowBackground = false; break;
+            case (SessionSweepInverseFvg s, "session.box"): s.ShowSessionBox = false; break;
+            case (SessionSweepInverseFvg s, "session.sweeps"): s.ShowSweeps = false; break;
+            case (SessionSweepInverseFvg s, "session.signals"): s.ShowSignals = false; break;
+            case (PriorDayFvg s, "priorday.fvgs"): s.ShowFvgs = false; break;
+            case (PriorDayFvg s, "priorday.max"): s.MaxFvgs = 1; break;
+            case (PriorDayFvg s, "priorday.keep"): s.KeepFilled = true; break;
+            case (PriorDayFvg s, "priorday.mid"): s.ShowMid = false; break;
+            case (EqualHighsLowsFvg s, "equal.breakouts"): s.ShowBreakouts = false; break;
+            case (EqualHighsLowsFvg s, "equal.fvgs"): s.ShowFvgs = false; break;
+            case (GapFillBreakouts s, "gapfill.gaps"): s.ShowGaps = false; break;
+            case (GapFillBreakouts s, "gapfill.levels"): s.ShowLevels = false; break;
+            case (GapFillBreakouts s, "gapfill.labels"): s.ShowLabels = false; break;
+            case (BreakoutTestsRetests s, "breakout.onlylast"): s.OnlyLast = true; break;
+            case (BreakoutTestsRetests s, "breakout.minbars"): s.MinBars = 5; break;
+            case (BreakoutTestsRetests s, "breakout.zones"): s.ShowZones = false; break;
+            case (BreakoutTestsRetests s, "breakout.glyphs"): s.ShowGlyphs = false; break;
+            case (BreakoutTestsRetests s, "breakout.background"): s.ShowBreakoutBackground = false; break;
+            default: throw new ArgumentOutOfRangeException(nameof(filter), filter, null);
+        }
+        return study;
+    }
+
+    [Theory]
+    [MemberData(nameof(Filters))]
+    public void Sweep_display_filters_never_change_series_scene_or_alerts(string filter) =>
+        AssertDisplayOnly(() => Create(filter[..filter.IndexOf('.')]), () => Filtered(filter), Walk(700, 11), ChartPeriod.M15, Monday);
+
+    [Fact]
+    public void Liquidity_sweep_filters_hide_areas_levels_labels_and_tints()
+    {
+        var bars = SwingHigh.Concat(new Ohlc[] { new(12, 22, 11, 18), new(18, 19, 15, 16), new(16, 24, 16, 23), new(23, 24, 22, 23) }).ToList();
+        var study = AssertDisplayOnly(() => new LiquiditySweeps { SwingLength = 2 },
+            () => new LiquiditySweeps { SwingLength = 2, ShowZones = false, ShowLevels = false, ShowLabels = false, ShowBackground = false }, bars);
+        var tint = Assert.Single(study.Scene.Tints);
+        Assert.Equal(5, tint.Key);
+        Assert.False(study.IsShown(Assert.Single(study.Scene.Boxes)));
+        Assert.All(study.Scene.Lines, l => Assert.False(study.IsShown(l)));
+        Assert.Contains(study.GetAlertLevels(), l => l.Name == "Liquidity high"); // still alertable
+        Assert.False(study.IsShown(Assert.Single(study.Scene.Tags)));
+        Assert.False(study.IsTintShown(tint.Key, tint.Value));
+        Assert.Equal(-1m, Series(study, "LiquiditySweeps.Signal")[5]); // still detected
+        var plain = new LiquiditySweeps();
+        Assert.True(plain.ShowZones && plain.ShowLevels && plain.ShowLabels && plain.ShowBackground);
+    }
+
+    [Fact]
+    public void Session_sweep_filters_hide_the_range_the_sweep_and_the_signal_separately()
+    {
+        // one more closed bar after the fixture: bar 21 closes below the support line from the session low (bar 12)
+        // through bar 20's low, a hypothetical short with the bullish 103-110 gap (bars 16-18) as its inverse FVG
+        var bars = SessionSweepBars().Append(new Ohlc(105, 106, 104, 105)).ToList();
+        var start = new DateTime(2026, 1, 5, 0, 0, 0, DateTimeKind.Utc);
+        SessionSweepInverseFvg Plain() => new() { Session = WorldSession.London, SweepBars = 3 };
+        foreach (var (box, sweeps, signals) in new[] { (false, true, true), (true, false, true), (true, true, false) })
+        {
+            var study = (SessionSweepInverseFvg)AssertDisplayOnly(Plain, () => new SessionSweepInverseFvg
+                { Session = WorldSession.London, SweepBars = 3, ShowSessionBox = box, ShowSweeps = sweeps, ShowSignals = signals }, bars, ChartPeriod.H1, start);
+            Assert.Equal(box, study.IsShown(Assert.Single(study.SessionRanges)));
+            Assert.All(study.Scene.Lines.Where(l => l.Alert is "Session high" or "Session low"), l => Assert.Equal(box, study.IsShown(l)));
+            Assert.Equal(sweeps, study.IsShown(Assert.Single(study.Scene.Marks, m => m.Kind == StudyMarkKind.Circle)));
+            Assert.Equal(sweeps, study.IsShown(Assert.Single(study.Scene.Tags, t => t.Text == "Valid sweep")));
+            Assert.Equal(signals, study.IsShown(Assert.Single(study.Scene.Marks, m => m.Bar == 21 && m.Text == "Hypothetical short")));
+            Assert.Equal(signals, study.IsShown(Assert.Single(study.Scene.Boxes, b => b.Text == "Inverse FVG")));
+            Assert.Equal(signals, study.IsShown(Assert.Single(study.Scene.Lines, l => l.Alert == "Hypothetical stop")));
+            Assert.Equal(signals, study.IsShown(Assert.Single(study.Scene.Lines, l => l.Alert == null && l.Price != l.EndPrice)));
+            Assert.Equal(-1m, Series(study, "SessionSweepInverseFvg.Signal")[21]);
+        }
+    }
+
+    [Fact]
+    public void Prior_day_fvg_filters_draw_the_newest_live_gaps_and_keep_filled_ones_on_request()
+    {
+        // default: filled gaps hidden, the newest ten live ones drawn with their midpoint lines
+        var plain = AssertDisplayOnly(() => new PriorDayFvg { MaximumObjects = 5000 }, () => new PriorDayFvg { MaximumObjects = 5000 }, Walk(700, 11), ChartPeriod.M15, Monday);
+        Assert.Contains(plain.Scene.Boxes, b => !b.Live);
+        Assert.Equal(plain.Scene.Boxes.Where(b => b.Live).TakeLast(10), plain.Scene.Boxes.Where(plain.IsShown));
+        var mids = plain.Scene.Lines.Where(l => l.Alert == null).ToList();
+        Assert.Equal(plain.Scene.Boxes.Count, mids.Count);
+        Assert.All(mids, l => Assert.Equal(plain.Scene.Boxes.Where(plain.IsShown).Any(b => b.From == l.From), plain.IsShown(l)));
+
+        var newest = AssertDisplayOnly(() => new PriorDayFvg { MaximumObjects = 5000 }, () => new PriorDayFvg { MaximumObjects = 5000, MaxFvgs = 1 }, Walk(700, 11), ChartPeriod.M15, Monday);
+        Assert.Equal(newest.Scene.Boxes.Where(b => b.Live).TakeLast(1), newest.Scene.Boxes.Where(newest.IsShown));
+
+        var kept = AssertDisplayOnly(() => new PriorDayFvg { MaximumObjects = 5000 }, () => new PriorDayFvg { MaximumObjects = 5000, KeepFilled = true, MaxFvgs = 3 }, Walk(700, 11), ChartPeriod.M15, Monday);
+        Assert.Equal(kept.Scene.Boxes.TakeLast(3), kept.Scene.Boxes.Where(kept.IsShown));
+
+        // the fixture's single live gap (bars 14-16) and its midpoint line; the prior-day levels are never filtered
+        var hidden = AssertDisplayOnly(() => new PriorDayFvg(), () => new PriorDayFvg { ShowMid = false }, PriorDayBars(), ChartPeriod.H4, Monday);
+        var gap = Assert.Single(hidden.Scene.Boxes, b => b.From == 15);
+        Assert.True(hidden.IsShown(gap));
+        Assert.False(hidden.IsShown(Assert.Single(hidden.Scene.Lines, l => l.Alert == null && l.From == 15)));
+        Assert.All(hidden.Scene.Lines.Where(l => l.Alert != null), l => Assert.True(hidden.IsShown(l)));
+        var none = AssertDisplayOnly(() => new PriorDayFvg(), () => new PriorDayFvg { ShowFvgs = false }, PriorDayBars(), ChartPeriod.H4, Monday);
+        Assert.False(none.IsShown(Assert.Single(none.Scene.Boxes, b => b.From == 15)));
+        Assert.Contains(none.GetAlertLevels(), l => l.Name == "Fair value gap: top edge"); // still alertable
+    }
+
+    [Fact]
+    public void Equal_highs_filters_hide_the_breakout_mark_and_gap_but_not_the_zone()
+    {
+        var study = AssertDisplayOnly(() => new EqualHighsLowsFvg { Left = 2, Right = 2 },
+            () => new EqualHighsLowsFvg { Left = 2, Right = 2, ShowBreakouts = false, ShowFvgs = false }, EqualHighs);
+        Assert.False(study.IsShown(Assert.Single(study.Scene.Marks, m => m.Text == "Breakout")));
+        Assert.False(study.IsShown(Assert.Single(study.Scene.Boxes, b => b.Alert == "Breakout gap")));
+        Assert.True(study.IsShown(Assert.Single(study.Scene.Boxes, b => b.Alert == "Equal highs")));
+        Assert.Equal(1m, Series(study, "EqualHighsLowsFvg.Signal")[10]);
+    }
+
+    [Fact]
+    public void Gap_fill_filters_hide_gaps_levels_and_labels()
+    {
+        var bars = new Ohlc[] { new(10, 12, 9, 11), new(11, 20, 11, 19), new(19, 22, 16, 21), new(21, 22, 14, 15), new(16, 19, 15, 18), new(18, 18, 13, 14), new(14, 15, 11, 12), new(12, 13, 11, 12) };
+        var study = AssertDisplayOnly(() => new GapFillBreakouts { AtrMult = 0.5m, PivotLength = 1 },
+            () => new GapFillBreakouts { AtrMult = 0.5m, PivotLength = 1, ShowGaps = false, ShowLevels = false, ShowLabels = false }, bars);
+        Assert.Equal(3, study.Scene.Boxes.Count);
+        Assert.All(study.Scene.Boxes, b => Assert.False(study.IsShown(b)));
+        Assert.False(study.IsShown(Assert.Single(study.Scene.Lines)));
+        Assert.False(study.IsShown(Assert.Single(study.Scene.Tags)));
+        Assert.Equal(-1m, Series(study, "GapFillBreakouts.Signal")[5]);
+    }
+
+    // as the breakout fixture above with a second test (bar 5) before the break (bar 6) and the retest (bar 7)
+    private static readonly Ohlc[] TwoTests =
+    {
+        new(20, 21, 18, 19), new(19, 20, 16, 17), new(17, 18, 10, 12), new(12, 15, 11, 14), new(13, 17, 12, 16),
+        new(12, 17, 11.5m, 16.5m), new(15, 16, 8, 9), new(11, 12, 7, 9), new(9, 10, 8, 9),
+    };
+
+    private static BreakoutTestsRetests Bullish() => new() { Sides = BreakoutZoneSides.Bullish, Left = 2, Right = 1, Width = 1 };
+
+    [Fact]
+    public void Breakout_only_last_draws_the_latest_test_and_retest_of_the_zone()
+    {
+        var study = AssertDisplayOnly(Bullish, () => { var s = Bullish(); s.OnlyLast = true; return s; }, TwoTests);
+        Assert.Equal(new decimal[] { 0, 0, 0, 0, 1, 1, 0, 0 }, Enumerable.Range(0, 8).Select(i => Series(study, "BreakoutTestsRetests.Test")[i]));
+        Assert.False(study.IsShown(Assert.Single(study.Scene.Marks, m => m.Text == "Test" && m.Bar == 4)));
+        Assert.True(study.IsShown(Assert.Single(study.Scene.Marks, m => m.Text == "Test" && m.Bar == 5)));
+        Assert.True(study.IsShown(Assert.Single(study.Scene.Marks, m => m.Text == "Retest" && m.Bar == 7)));
+        Assert.All(study.Scene.Marks.Where(m => m.Text == null), m => Assert.True(study.IsShown(m))); // swing, breakout
+        Assert.False(new BreakoutTestsRetests().OnlyLast);
+    }
+
+    [Fact]
+    public void Breakout_min_bars_spaces_the_drawn_marks_and_the_other_filters_hide_zones_marks_and_tints()
+    {
+        var spaced = AssertDisplayOnly(Bullish, () => { var s = Bullish(); s.MinBars = 5; return s; }, TwoTests);
+        Assert.Equal(new[] { true, false, false }, new[] { (4, "Test"), (5, "Test"), (7, "Retest") }
+            .Select(x => spaced.IsShown(Assert.Single(spaced.Scene.Marks, m => m.Bar == x.Item1 && m.Text == x.Item2))));
+
+        var hidden = AssertDisplayOnly(Bullish, () => { var s = Bullish(); s.ShowZones = false; s.ShowGlyphs = false; s.ShowBreakoutBackground = false; return s; }, TwoTests);
+        Assert.Equal(2, hidden.Scene.Boxes.Count); // support, then broken support
+        Assert.All(hidden.Scene.Boxes, b => Assert.False(hidden.IsShown(b)));
+        Assert.All(hidden.Scene.Marks, m => Assert.Equal(m.Text == null, hidden.IsShown(m)));
+        var tint = Assert.Single(hidden.Scene.Tints);
+        Assert.Equal(6, tint.Key); Assert.False(hidden.IsTintShown(tint.Key, tint.Value));
+        Assert.Contains(hidden.GetAlertLevels(), l => l.Name == "Broken support zone: top edge");
+    }
 }

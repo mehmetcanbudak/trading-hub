@@ -92,9 +92,9 @@ public class CompositeVolumeProfileTests
         Assert.Equal(10, study.PocProjections.Count); Assert.All(study.PocProjections, p => Assert.Equal(69, p.TouchBar));
     }
     [Theory]
-    [InlineData(CompositeVolumeProfile.ProfilePeriod.Month, "2026-12-01T22:59:00Z", "2026-12-01T23:00:00Z")]
-    [InlineData(CompositeVolumeProfile.ProfilePeriod.Month, "2027-01-01T22:59:00Z", "2027-01-01T23:00:00Z")]
-    [InlineData(CompositeVolumeProfile.ProfilePeriod.Week, "2026-11-02T22:59:00Z", "2026-11-02T23:00:00Z")]
+    [InlineData(CompositeVolumeProfile.ProfilePeriod.Month, "2026-11-30T22:59:00Z", "2026-11-30T23:00:00Z")]
+    [InlineData(CompositeVolumeProfile.ProfilePeriod.Month, "2026-12-31T22:59:00Z", "2026-12-31T23:00:00Z")]
+    [InlineData(CompositeVolumeProfile.ProfilePeriod.Week, "2026-11-01T22:59:00Z", "2026-11-01T23:00:00Z")]
     [InlineData(CompositeVolumeProfile.ProfilePeriod.Session, "2026-11-01T22:59:00Z", "2026-11-01T23:00:00Z")]
     public void Boundaries_use_host_New_York_session_start_not_UTC_calendar(CompositeVolumeProfile.ProfilePeriod period, string before, string after)
     {

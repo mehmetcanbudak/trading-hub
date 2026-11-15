@@ -172,7 +172,7 @@ public class ValueAreaReversion : ClosedBarStudy
 {
     private struct Exit { public int Side, Bar; }
 
-    private bool _usePrior = true, _useDeveloping, _estimate, _open, _whole;
+    private bool _usePrior = true, _useDeveloping, _estimate, _open, _whole, _colorBars = true;
     private int _maxBars = 10, _minBars = 5, _ticks = 1, _sessionStart, _bulls, _bears;
     private decimal _va = 70;
     private DateOnly _date;
@@ -180,6 +180,9 @@ public class ValueAreaReversion : ClosedBarStudy
     private readonly StudyRowProfile _session = new();
     private readonly Exit[] _exit = new Exit[2];
     private readonly List<StudyLine> _priorLines = new();
+    // presentation-only: the signal at each processed bar, so the bar painting can be switched without recalculating
+    private readonly List<sbyte> _latch = new();
+    private readonly PaintbarsDataSeries _paint = new("ValueAreaReversion.Paint", "Reversion bar colors") { IsHidden = true };
     private readonly OptionalValueDataSeries _priorSignal = new("ValueAreaReversion.Prior", "Reversion vs previous value area (+1 up, -1 down)") { VisualType = VisualMode.Hide, ShowZeroValue = true };
     private readonly OptionalValueDataSeries _developingSignal = new("ValueAreaReversion.Developing", "Reversion vs developing value area (+1 up, -1 down)") { VisualType = VisualMode.Hide, ShowZeroValue = true };
     private readonly OptionalValueDataSeries _priorHigh = new("ValueAreaReversion.PriorHigh", "Previous session VAH") { VisualType = VisualMode.Hide, ShowZeroValue = true };
@@ -192,7 +195,7 @@ public class ValueAreaReversion : ClosedBarStudy
     {
         DataSeries[0] = _priorSignal;
         DataSeries.Add(_developingSignal); DataSeries.Add(_priorHigh); DataSeries.Add(_priorLow); DataSeries.Add(_priorPoc);
-        DataSeries.Add(_developingHigh); DataSeries.Add(_developingLow);
+        DataSeries.Add(_developingHigh); DataSeries.Add(_developingLow); DataSeries.Add(_paint);
     }
 
     [Display(Name = "Signals against the previous session", GroupName = "Signals", Order = 10)]
@@ -209,6 +212,8 @@ public class ValueAreaReversion : ClosedBarStudy
     public int TicksPerRow { get => _ticks; set { _ticks = Math.Clamp(value, 1, 10000); RecalculateValues(); } }
     [Display(Name = "Allow estimated OHLC fallback", GroupName = "Profile", Order = 22)]
     public bool AllowEstimated { get => _estimate; set { _estimate = value; RecalculateValues(); } }
+    [Display(Name = "Paint the reversion bars", GroupName = "Visualization", Order = 30, Description = "Display only: colors the re-entry bars; never changes detection, strategy series or alerts.")]
+    public bool ColorBars { get => _colorBars; set { _colorBars = value; Repaint(); RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 40)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 41)] public Color BearColor { get; set; } = StudyPalette.Bear;
     [Display(Name = "POC", GroupName = "Colors", Order = 42)] public Color PocColor { get; set; } = StudyPalette.Amber;
@@ -220,6 +225,7 @@ public class ValueAreaReversion : ClosedBarStudy
     {
         _session.Clear(grid: true); _prior = null; _open = _whole = false; _sessionStart = 0; _bulls = _bears = 0;
         _exit[0] = _exit[1] = default;
+        if (_latch.Count > Bars.Count) _latch.RemoveRange(Bars.Count, _latch.Count - Bars.Count);
         // a coverage gap ends the previous-session lines at the gap bar (on a full recalculation the scene is already empty)
         int last = Bars.Count - 1;
         foreach (var line in _priorLines) { line.To = Math.Max(line.From, last); line.EndAvailable = Math.Max(line.Available, last); }
@@ -252,6 +258,7 @@ public class ValueAreaReversion : ClosedBarStudy
         _session.AddBar(candle, _estimate);
         _priorSignal.Set(bar, priorSignal, _usePrior && _prior != null);
         _developingSignal.Set(bar, developingSignal, _useDeveloping && developing != null);
+        Paint(bar, developingSignal != 0 ? developingSignal : priorSignal);
         Dashboard();
     }
 
@@ -299,6 +306,16 @@ public class ValueAreaReversion : ClosedBarStudy
         else { _bulls++; Scene.Mark(bar, bar, b.Low, prior ? StudyMarkKind.TriangleUp : StudyMarkKind.Circle, BullColor, prior ? "VAL" : null, false); }
         return signal;
     }
+
+    private void Paint(int bar, int signal)
+    {
+        while (_latch.Count <= bar) _latch.Add(0);
+        _latch[bar] = (sbyte)signal; _paint[bar] = PaintColor(signal);
+    }
+
+    private void Repaint() { for (int i = 0; i < _latch.Count; i++) _paint[i] = PaintColor(_latch[i]); }
+
+    private Color? PaintColor(int signal) => _colorBars && signal != 0 ? (signal > 0 ? BullColor : BearColor) : null;
 
     private void Dashboard()
     {
@@ -351,8 +368,8 @@ public class ProfileLevelAlerts : ClosedBarStudy
     public int TicksPerRow { get => _ticks; set { _ticks = Math.Clamp(value, 1, 10000); RecalculateValues(); } }
     [Display(Name = "Allow estimated OHLC fallback", GroupName = "Calculation", Order = 14)]
     public bool AllowEstimated { get => _estimate; set { _estimate = value; RecalculateValues(); } }
-    [Display(Name = "Mark the crosses", GroupName = "Visualization", Order = 20)]
-    public bool ShowCrosses { get => _crosses; set { _crosses = value; RecalculateValues(); } }
+    [Display(Name = "Mark the crosses", GroupName = "Visualization", Order = 20, Description = "Display only: hides the cross marks; never changes detection, strategy series or alerts.")]
+    public bool ShowCrosses { get => _crosses; set { _crosses = value; RedrawChart(); } }
 
     [Browsable(false)] public StudyCoverage Coverage => _profile.Coverage;
     [Browsable(false)] public override string Status => FootprintStudyData.Label(Coverage);
@@ -391,10 +408,12 @@ public class ProfileLevelAlerts : ClosedBarStudy
     private int Cross(int bar, decimal previous, decimal close, decimal level)
     {
         int direction = previous <= level && close > level ? 1 : previous >= level && close < level ? -1 : 0;
-        if (direction != 0 && _crosses)
+        if (direction != 0)
             Scene.Mark(bar, bar, level, direction > 0 ? StudyMarkKind.TriangleUp : StudyMarkKind.TriangleDown, direction > 0 ? StudyPalette.Bull : StudyPalette.Bear, null, direction < 0);
         return direction;
     }
+
+    public override bool IsShown(StudyMark mark) => _crosses;
 
     /// <summary>The levels in force, one stable id per level and period (the developing level moves; its id does not).</summary>
     public override IEnumerable<IndicatorLevel> GetAlertLevels()
@@ -684,7 +703,7 @@ public class VolumeHeatHours : ClosedBarStudy
 
     private sealed class Hour { public DateTime Start; public int From, To; public decimal High, Low, Volume; }
 
-    private int _baseline = 24; private decimal _hot = 2;
+    private int _baseline = 24, _hoursKept = 60; private decimal _hot = 2;
     private Hour? _hour; private TimeZoneInfo? _zone;
     private readonly Queue<decimal> _history = new(); private decimal _historySum;
     private readonly List<HourResult> _results = new();
@@ -696,12 +715,19 @@ public class VolumeHeatHours : ClosedBarStudy
     public int BaselineHours { get => _baseline; set { _baseline = Math.Clamp(value, 1, 500); RecalculateValues(); } }
     [Display(Name = "Hot from (× average)", GroupName = "Calculation", Order = 11), Range(1.1, 20)]
     public decimal HotMultiple { get => _hot; set { _hot = Math.Clamp(value, 1.1m, 20); RecalculateValues(); } }
+    [Display(Name = "Hours drawn", GroupName = "Visualization", Order = 15, Description = "Display only: draws only the latest finished hours; never changes detection, strategy series or alerts."), Range(5, 1000)]
+    public int HoursKept { get => _hoursKept; set { _hoursKept = Math.Clamp(value, 5, 1000); RedrawChart(); } }
     [Display(Name = "Color", GroupName = "Colors", Order = 20)] public Color HeatColor { get; set; } = StudyPalette.Amber;
 
     /// <summary>Finished hours with a baseline, oldest first (bounded).</summary>
     [Browsable(false)] public IReadOnlyList<HourResult> Hours => _results;
 
     protected override void ResetState() { _hour = null; _zone = null; _history.Clear(); _historySum = 0; _results.Clear(); }
+
+    /// <summary>Source bar of the oldest hour still drawn (display only).</summary>
+    private int FirstShownBar => _results.Count > _hoursKept ? _results[^_hoursKept].From : int.MinValue;
+    public override bool IsShown(StudyBox box) => box.From >= FirstShownBar;
+    public override bool IsShown(StudyTag tag) => tag.Bar >= FirstShownBar;
 
     protected override void OnBarClosed(int bar)
     {
@@ -813,9 +839,12 @@ public class ExecutionBenchmarks : ClosedBarStudy
     public decimal PovRate { get => _pov; set { _pov = Math.Clamp(value, 1, 100); RecalculateValues(); } }
     [Display(Name = "Earlier windows for the volume profile", GroupName = "Parent order", Order = 17), Range(1, 100)]
     public int LookbackWindows { get => _lookback; set { _lookback = Math.Clamp(value, 1, 100); RecalculateValues(); } }
-    [Display(Name = "Benchmark lines", GroupName = "Visualization", Order = 20)] public bool ShowBenchmarks { get => _benchmarks; set { _benchmarks = value; RecalculateValues(); } }
-    [Display(Name = "Average fill prices", GroupName = "Visualization", Order = 21)] public bool ShowFills { get => _fills; set { _fills = value; RecalculateValues(); } }
-    [Display(Name = "Shade the scheduled bars", GroupName = "Visualization", Order = 22)] public bool ShadeScheduled { get => _shade; set { _shade = value; RecalculateValues(); } }
+    [Display(Name = "Benchmark lines", GroupName = "Visualization", Order = 20, Description = "Display only: hides the arrival and window VWAP lines; never changes the simulation, strategy series or alerts.")]
+    public bool ShowBenchmarks { get => _benchmarks; set { _benchmarks = value; RedrawChart(); } }
+    [Display(Name = "Average fill prices", GroupName = "Visualization", Order = 21, Description = "Display only: hides the average fill price lines; never changes the simulation, strategy series or alerts.")]
+    public bool ShowFills { get => _fills; set { _fills = value; RedrawChart(); } }
+    [Display(Name = "Shade the scheduled bars", GroupName = "Visualization", Order = 22, Description = "Display only: hides the shading of the scheduled bars; never changes the simulation, strategy series or alerts.")]
+    public bool ShadeScheduled { get => _shade; set { _shade = value; RedrawChart(); } }
 
     /// <summary>Finished windows with a schedule, oldest first (bounded).</summary>
     [Browsable(false)] public IReadOnlyList<WindowResult> Results => _results;
@@ -889,7 +918,7 @@ public class ExecutionBenchmarks : ClosedBarStudy
         Fill(w, 0, w.Parent / w.Length, typical);
         Fill(w, 1, w.ShapeSum > 0 ? w.Parent * w.Shape[k] / w.ShapeSum : 0, typical);
         Fill(w, 2, b.Volume * _pov / 100, typical);
-        if (_shade) Scene.Tints[bar] = StudyPalette.A(StudyPalette.Neutral, 16);
+        Scene.Tints[bar] = StudyPalette.A(StudyPalette.Neutral, 16);
     }
 
     private static void Fill(Live w, int algo, decimal want, decimal price)
@@ -926,9 +955,14 @@ public class ExecutionBenchmarks : ClosedBarStudy
             var line = Scene.Level(w.From, available, price, color, style: style);
             line.To = w.To; line.EndAvailable = available;
         }
-        if (_benchmarks) { Line(w.Arrival, StudyPalette.Muted, LineDashStyle.Dot); Line(vwap, StudyPalette.Amber, LineDashStyle.Dash); }
-        if (_fills) for (int a = 0; a < 3; a++) if (fills[a] is { } f) Line(f.AveragePrice, AlgoColors[a], LineDashStyle.Solid);
+        // benchmark lines are dotted/dashed and fill lines solid; IsShown filters them by that style
+        Line(w.Arrival, StudyPalette.Muted, LineDashStyle.Dot); Line(vwap, StudyPalette.Amber, LineDashStyle.Dash);
+        for (int a = 0; a < 3; a++) if (fills[a] is { } f) Line(f.AveragePrice, AlgoColors[a], LineDashStyle.Solid);
     }
+
+    public override bool IsShown(StudyLine line) => line.Style == LineDashStyle.Solid ? _fills : _benchmarks;
+
+    public override bool IsTintShown(int bar, Color color) => _shade;
 
     private void Dashboard()
     {

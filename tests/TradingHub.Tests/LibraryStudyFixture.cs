@@ -100,6 +100,39 @@ internal static class LibraryStudyFixture
         }
     }
 
+    /// <summary>
+    /// Display-only filters: with the filters on (<paramref name="filtered"/>) and off (<paramref name="plain"/>) every series
+    /// value, every scene shape (bars, availability, prices, text, ends) and every alert level are identical; returns the
+    /// filtered study so the caller can assert what <see cref="ClosedBarStudy.IsShown(StudyBox)"/> hides.
+    /// </summary>
+    internal static ClosedBarStudy AssertDisplayOnly(Func<ClosedBarStudy> plain, Func<ClosedBarStudy> filtered, IReadOnlyList<Ohlc> bars, ChartPeriod? period = null, DateTime? start = null, SessionSettings? session = null)
+    {
+        var at = start ?? new DateTime(2026, 3, 2, 0, 0, 0, DateTimeKind.Utc); var p = period ?? ChartPeriod.M5;
+        using var a = Model(at, p, session, bars); using var b = Model(at, p, session, bars);
+        var x = Add(a, plain()); var y = Add(b, filtered());
+        Render(b);
+        Assert.Equal(x.DataSeries.Count, y.DataSeries.Count);
+        for (int s = 0; s < x.DataSeries.Count; s++)
+        {
+            if (x.DataSeries[s] is not ValueDataSeries u || y.DataSeries[s] is not ValueDataSeries v) continue;
+            for (int bar = 0; bar < a.Series.Count; bar++)
+            {
+                bool ua = u is not IValueDataSeriesAvailability uo || uo.IsAvailable(bar), va = v is not IValueDataSeriesAvailability vo || vo.IsAvailable(bar);
+                Assert.True(ua == va && (!ua || u[bar] == v[bar]), $"{x.GetType().Name} series {u.Id} differs at bar {bar} with display filters on");
+            }
+        }
+        static string Box(StudyBox s) => $"{s.From}/{s.Available}/{s.To}/{s.EndAvailable}/{s.Top}/{s.Bottom}/{s.Text}/{s.Alert}";
+        static string Line(StudyLine s) => $"{s.From}/{s.Available}/{s.To}/{s.EndAvailable}/{s.Price}/{s.EndPrice}/{s.Label}/{s.Alert}";
+        Assert.Equal(x.Scene.Boxes.Select(Box), y.Scene.Boxes.Select(Box));
+        Assert.Equal(x.Scene.Lines.Select(Line), y.Scene.Lines.Select(Line));
+        Assert.Equal(x.Scene.Marks, y.Scene.Marks);
+        Assert.Equal(x.Scene.Tags, y.Scene.Tags);
+        Assert.Equal(x.Scene.Tints.OrderBy(t => t.Key), y.Scene.Tints.OrderBy(t => t.Key));
+        Assert.Equal(x.Scene.Paths.Select(q => (q.Available, string.Join(";", q.Points))), y.Scene.Paths.Select(q => (q.Available, string.Join(";", q.Points))));
+        Assert.Equal(x.GetAlertLevels(), y.GetAlertLevels());
+        return y;
+    }
+
     internal sealed class SessionFeed(SessionSettings session) : IMarketDataFeed, ISessionSettingsFeed
     {
         private readonly SimulatedFeed _inner = new();

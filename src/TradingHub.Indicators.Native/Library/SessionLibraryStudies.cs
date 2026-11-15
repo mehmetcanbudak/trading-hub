@@ -115,8 +115,11 @@ public class MarketSessions : ClosedBarStudy
     };
     private readonly OptionalValueDataSeries _signal;
     private SessionBarStep _step;
-    private int _fillOpacity = 12, _vwapWidth = 2;
+    private int _fillOpacity = 12, _vwapWidth = 2, _borderOpacity = 100, _daysKept = 10;
     private bool _names = true, _midline, _levels = true, _overlaps, _bands, _estimate;
+    // presentation only: the session date of each drawn shape and the latest session date, for "Days kept"
+    private readonly Dictionary<object, DateOnly> _dates = new(ReferenceEqualityComparer.Instance);
+    private DateOnly _latest;
 
     public MarketSessions() : this("MarketSessions.Completed", "Sessions completed at this close (bit mask of slots 1-4)") { }
 
@@ -157,6 +160,10 @@ public class MarketSessions : ClosedBarStudy
     [Display(Name = "Overlap", GroupName = "Drawing", Order = 55)] public Color OverlapColor { get; set; } = StudyPalette.Muted;
     [Display(Name = "Show the forming session", GroupName = "Drawing", Order = 56)] public bool ShowLive { get; set; } = true;
     [Display(Name = "Extend the forming session to its scheduled end", GroupName = "Drawing", Order = 57)] public bool ExtendLive { get; set; } = true;
+    [Display(Name = "Border opacity (%)", GroupName = "Drawing", Order = 58, Description = "Display only: changes how session outlines are drawn; never changes detection, strategy series or alerts."), Range(0, 100)]
+    public int BorderOpacity { get => _borderOpacity; set { _borderOpacity = Math.Clamp(value, 0, 100); RedrawChart(); } }
+    [Display(Name = "Days kept", GroupName = "Drawing", Order = 59, Description = "Display only: hides drawings of sessions dated this many days or more before the latest session; never changes detection, strategy series or alerts."), Range(1, 60)]
+    public int DaysKept { get => _daysKept; set { _daysKept = Math.Clamp(value, 1, 60); RedrawChart(); } }
     [Display(Name = "±1σ VWAP bands", GroupName = "VWAP", Order = 60)]
     public bool VwapBands { get => _bands; set { _bands = value; RecalculateValues(); } }
     [Display(Name = "VWAP width", GroupName = "VWAP", Order = 61), Range(1, 6)]
@@ -171,7 +178,7 @@ public class MarketSessions : ClosedBarStudy
 
     protected override void ResetState()
     {
-        _step = default;
+        _step = default; _dates.Clear(); _latest = default;
         foreach (var s in _slots)
         {
             s.Run = null; s.Moments = default; s.Coverage = StudyCoverage.Missing; s.Mid = s.Up = s.Down = null;
@@ -203,6 +210,7 @@ public class MarketSessions : ClosedBarStudy
             bool member = s.Run.Add(b, bar, _step.Value, out bool started, out var before, out var here);
             if (before is { } ended) { Complete(s, ended); completed |= 1 << k; }
             if (!member) continue;
+            if (s.Run.Date > _latest) _latest = s.Run.Date;
             inside++;
             if (started) StartVwap(s, bar);
             AddVwap(s, bar);
@@ -214,19 +222,21 @@ public class MarketSessions : ClosedBarStudy
         Dashboard();
     }
 
+    private T Dated<T>(T shape, DateOnly date) where T : class { _dates[shape] = date; return shape; }
+
     private void Complete(Slot s, CompletedWindowSession c)
     {
         string name = WindowSessionRun.Name(s.Session);
         // ended boxes render at half the fill alpha, so the configured opacity is doubled here
-        var box = Scene.Box(c.From, c.Available, c.High, c.Low, s.Color, ShowNames ? name : null, fillAlpha: Math.Min(255, FillOpacity * 255 / 50));
+        var box = Dated(Scene.Box(c.From, c.Available, c.High, c.Low, s.Color, ShowNames ? name : null, fillAlpha: Math.Min(255, FillOpacity * 255 / 50)), c.Date);
         box.To = c.Last; box.EndAvailable = c.Available;
         decimal mid = (c.High + c.Low) / 2;
-        if (Midline) Scene.Segment(c.From, c.Last, c.Available, mid, mid, StudyPalette.A(s.Color, 180), 1, LineDashStyle.Dash);
+        if (Midline) Dated(Scene.Segment(c.From, c.Last, c.Available, mid, mid, StudyPalette.A(s.Color, 180), 1, LineDashStyle.Dash), c.Date);
         s.High?.End(c.Available); s.Low?.End(c.Available); s.High = s.Low = null;
         if (LiveLevels)
         {
-            s.High = Scene.Level(c.From, c.Available, c.High, s.Color, name + " high", name + " high", 1, LineDashStyle.Dash);
-            s.Low = Scene.Level(c.From, c.Available, c.Low, s.Color, name + " low", name + " low", 1, LineDashStyle.Dash);
+            s.High = Dated(Scene.Level(c.From, c.Available, c.High, s.Color, name + " high", name + " high", 1, LineDashStyle.Dash), c.Date);
+            s.Low = Dated(Scene.Level(c.From, c.Available, c.Low, s.Color, name + " low", name + " low", 1, LineDashStyle.Dash), c.Date);
         }
         s.Previous = c; s.Mid = s.Up = s.Down = null;
     }
@@ -236,11 +246,11 @@ public class MarketSessions : ClosedBarStudy
         s.Mid = s.Up = s.Down = null;
         if (!s.Vwap) return;
         s.Moments = default; s.Coverage = StudyCoverage.Missing; s.Mid = new();
-        Scene.Paths.Add(new StudyPath(bar, s.Mid, s.Color, VwapWidth));
+        Scene.Paths.Add(Dated(new StudyPath(bar, s.Mid, s.Color, VwapWidth), s.Run!.Date));
         if (!VwapBands) return;
         s.Up = new(); s.Down = new();
-        Scene.Paths.Add(new StudyPath(bar, s.Up, StudyPalette.A(s.Color, 140), 1, LineDashStyle.Dash));
-        Scene.Paths.Add(new StudyPath(bar, s.Down, StudyPalette.A(s.Color, 140), 1, LineDashStyle.Dash));
+        Scene.Paths.Add(Dated(new StudyPath(bar, s.Up, StudyPalette.A(s.Color, 140), 1, LineDashStyle.Dash), s.Run.Date));
+        Scene.Paths.Add(Dated(new StudyPath(bar, s.Down, StudyPalette.A(s.Color, 140), 1, LineDashStyle.Dash), s.Run.Date));
     }
 
     private void AddVwap(Slot s, int bar)
@@ -280,7 +290,7 @@ public class MarketSessions : ClosedBarStudy
             int y0 = ChartInfo.GetYByPrice(run.High, false), y1 = ChartInfo.GetYByPrice(run.Low, false);
             var rect = new Rectangle(x0, Math.Min(y0, y1), Math.Max(2, x1 - x0), Math.Max(1, Math.Abs(y1 - y0)));
             ctx.FillRectangle(StudyPalette.A(s.Color, FillOpacity * 255 / 100), rect);
-            ctx.DrawRectangle(Pen(StudyPalette.A(s.Color, 200), 1, LineDashStyle.Dash), rect);
+            ctx.DrawRectangle(Pen(StudyPalette.A(s.Color, 200 * BorderOpacity / 100), 1, LineDashStyle.Dash), rect);
             if (Midline)
             {
                 int ym = ChartInfo.GetYByPrice((run.High + run.Low) / 2, false);
@@ -289,6 +299,17 @@ public class MarketSessions : ClosedBarStudy
             if (ShowNames) ctx.DrawString(UiText.Tr(WindowSessionRun.Name(s.Session)), font, s.Color, rect.Left + 3, rect.Top + 2);
         }
     }
+
+    /// <summary>Display only: a session drawn more than <see cref="DaysKept"/> days before the latest session is hidden; live (alertable) levels always show.</summary>
+    private bool Kept(StudyShape shape) => shape.Live || Kept((object)shape);
+    private bool Kept(object shape) => !_dates.TryGetValue(shape, out var date) || _latest.DayNumber - date.DayNumber < DaysKept;
+
+    public override bool IsShown(StudyBox box) => Kept(box);
+    public override bool IsShown(StudyLine line) => Kept(line);
+    public override bool IsShown(StudyPath path) => Kept(path);
+
+    /// <summary>Display only: <see cref="BorderOpacity"/> scales the outline of every session box.</summary>
+    protected override int BoxBorderAlpha(StudyBox box) => base.BoxBorderAlpha(box) * BorderOpacity / 100;
 }
 
 [DisplayName("Session map (Asia, London, New York)")]
@@ -302,7 +323,7 @@ public class SessionMap : MarketSessions
         S2Session = WorldSession.London; S2Color = StudyPalette.Neutral;
         S3Session = WorldSession.NewYork; S3Color = StudyPalette.Bull;
         S4Show = false;
-        HighlightOverlaps = true; ExtendLive = false;
+        HighlightOverlaps = true; ExtendLive = false; DaysKept = 5;
     }
 }
 
@@ -325,6 +346,9 @@ public class AsianSessionSweeps : ClosedBarStudy
     private decimal _rh, _rl, _sweepExt, _ih, _il, _entry, _stop, _target;
     private int _sweepDir, _sweepBar, _ihBar, _ilBar, _trend, _pos, _entryBar, _setups, _wins, _losses;
     private StudyLine? _hiLine, _loLine, _stopLine, _targetLine;
+    // presentation only: the ordinal of the Asian session each range box/level belongs to, for "Sessions drawn"
+    private readonly Dictionary<StudyShape, int> _sessionOf = new(ReferenceEqualityComparer.Instance);
+    private int _sessions, _maxSessions = 20;
 
     public AsianSessionSweeps()
     {
@@ -354,11 +378,18 @@ public class AsianSessionSweeps : ClosedBarStudy
     [Display(Name = "Session box", GroupName = "Drawing", Order = 30)] public bool ShowSessionBox { get; set; } = true;
     [Display(Name = "Trade boxes", GroupName = "Drawing", Order = 31)] public bool ShowTradeBoxes { get; set; } = true;
     [Display(Name = "Session background", GroupName = "Drawing", Order = 32)] public bool ShowBackground { get; set; } = true;
+    [Display(Name = "Sessions drawn", GroupName = "Drawing", Order = 33, Description = "Display only: hides the range boxes and levels of older Asian sessions; never changes detection, strategy series or alerts."), Range(1, 100)]
+    public int MaxSessions { get => _maxSessions; set { _maxSessions = Math.Clamp(value, 1, 100); RedrawChart(); } }
     [Display(Name = "Session", GroupName = "Colors", Order = 40)] public Color SessionColor { get; set; } = StudyPalette.Amber;
     [Display(Name = "Bullish", GroupName = "Colors", Order = 41)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 42)] public Color BearColor { get; set; } = StudyPalette.Bear;
 
     protected override void ResetState()
+    {
+        ResetRunning(); _sessionOf.Clear(); _sessions = 0;
+    }
+
+    private void ResetRunning()
     {
         _run = new(LocalSessionWindow.Of(WorldSession.Asia)); _step = default; _ema = new(TrendLength);
         _rangeReady = _hiSwept = _loSwept = false; _ihCrossed = _ilCrossed = true;
@@ -370,7 +401,7 @@ public class AsianSessionSweeps : ClosedBarStudy
     protected override void OnCoverageGap(int bar)
     {
         _hiLine?.End(bar); _loLine?.End(bar); _stopLine?.End(bar); _targetLine?.End(bar);
-        ResetState();
+        ResetRunning();
     }
 
     protected override void OnBarClosed(int bar)
@@ -486,15 +517,23 @@ public class AsianSessionSweeps : ClosedBarStudy
     private void RangeDone(CompletedWindowSession c)
     {
         _rh = c.High; _rl = c.Low; _rangeReady = true;
+        int session = _sessions++;
         if (ShowSessionBox)
         {
             var box = Scene.Box(c.From, c.Available, c.High, c.Low, SessionColor, "Asia", fillAlpha: 44);
-            box.To = c.Last; box.EndAvailable = c.Available;
+            box.To = c.Last; box.EndAvailable = c.Available; _sessionOf[box] = session;
         }
         _hiLine?.End(c.Available); _loLine?.End(c.Available);
         _hiLine = Scene.Level(c.From, c.Available, c.High, SessionColor, "Asia high", "Asia high", 1, LineDashStyle.Dash);
         _loLine = Scene.Level(c.From, c.Available, c.Low, SessionColor, "Asia low", "Asia low", 1, LineDashStyle.Dash);
+        _sessionOf[_hiLine] = _sessionOf[_loLine] = session;
     }
+
+    /// <summary>Display only: the last <see cref="MaxSessions"/> Asian ranges are drawn; live (alertable) levels always show.</summary>
+    private bool Drawn(StudyShape shape) => shape.Live || !_sessionOf.TryGetValue(shape, out int session) || _sessions - session <= MaxSessions;
+
+    public override bool IsShown(StudyBox box) => Drawn(box);
+    public override bool IsShown(StudyLine line) => Drawn(line);
 
     private void EndTrade(int bar)
     {
@@ -744,6 +783,11 @@ public class SessionGapFill : ClosedBarStudy
     private decimal _open, _priorClose, _excursion;
     private StudyBox? _box;
     private StudyLine? _level;
+    private bool _showFilledBull = true, _showFilledBear = true, _showUnfilled = true;
+    // presentation only: which gap each box/level/excursion line belongs to, for the filled/unfilled display filters
+    private sealed class GapView(bool bull) { public readonly bool Bull = bull; public bool Filled, Done; }
+    private readonly Dictionary<StudyShape, GapView> _views = new(ReferenceEqualityComparer.Instance);
+    private GapView? _view;
 
     public SessionGapFill()
     {
@@ -754,21 +798,33 @@ public class SessionGapFill : ClosedBarStudy
     public SessionGapKind Filter { get => _filter; set { _filter = value; RecalculateValues(); } }
     [Display(Name = "Prior session close level", GroupName = "Drawing", Order = 20)] public bool ShowLevel { get; set; } = true;
     [Display(Name = "Maximum adverse excursion", GroupName = "Drawing", Order = 21)] public bool ShowDeviation { get; set; } = true;
+    [Display(Name = "Filled bullish gaps", GroupName = "Drawing", Order = 22, Description = "Display only: hides the drawings of ended sessions' filled bullish gaps; never changes detection, strategy series or alerts.")]
+    public bool ShowFilledBull { get => _showFilledBull; set { _showFilledBull = value; RedrawChart(); } }
+    [Display(Name = "Filled bearish gaps", GroupName = "Drawing", Order = 23, Description = "Display only: hides the drawings of ended sessions' filled bearish gaps; never changes detection, strategy series or alerts.")]
+    public bool ShowFilledBear { get => _showFilledBear; set { _showFilledBear = value; RedrawChart(); } }
+    [Display(Name = "Unfilled gaps", GroupName = "Drawing", Order = 24, Description = "Display only: hides the drawings of ended sessions' unfilled gaps; never changes detection, strategy series or alerts.")]
+    public bool ShowUnfilled { get => _showUnfilled; set { _showUnfilled = value; RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 30)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 31)] public Color BearColor { get; set; } = StudyPalette.Bear;
 
     protected override void ResetState()
     {
+        ResetRunning(); _views.Clear();
+    }
+
+    private void ResetRunning()
+    {
         _valid = _bull = false; _start = _fill = -1;
         _bullCount = _bearCount = _bullFilled = _bearFilled = _bullReversed = _bearReversed = _fills = 0; _fillBars = 0;
-        _open = _priorClose = _excursion = 0; _box = null; _level = null;
+        _open = _priorClose = _excursion = 0; _box = null; _level = null; _view = null;
     }
 
     protected override void OnCoverageGap(int bar)
     {
         if (_box is { Live: true }) _box.End(bar);
         _level?.End(bar);
-        ResetState();
+        if (_view != null) _view.Done = true;
+        ResetRunning();
     }
 
     protected override void OnBarClosed(int bar)
@@ -790,6 +846,8 @@ public class SessionGapFill : ClosedBarStudy
                     var color = bull ? BullColor : BearColor;
                     _box = Scene.Box(bar, bar, _open, _priorClose, color, "Gap", "Session gap", fillAlpha: 60);
                     if (ShowLevel) _level = Scene.Level(bar, bar, _priorClose, color, "Prior session close", "Prior session close", 1, LineDashStyle.Dot);
+                    _view = _views[_box] = new GapView(bull);
+                    if (_level != null) _views[_level] = _view;
                 }
             }
         }
@@ -798,7 +856,7 @@ public class SessionGapFill : ClosedBarStudy
             _excursion = _bull ? Math.Max(_excursion, b.High) : Math.Min(_excursion, b.Low);
             if (_fill < 0 && (_bull ? b.Low <= _priorClose : b.High >= _priorClose))
             {
-                _fill = bar; filled = _bull ? 1 : -1; _box?.End(bar);
+                _fill = bar; filled = _bull ? 1 : -1; _box?.End(bar); if (_view != null) _view.Filled = true;
                 Scene.Mark(bar, bar, _priorClose, _bull ? StudyMarkKind.TriangleDown : StudyMarkKind.TriangleUp, _bull ? BullColor : BearColor, "Filled", !_bull);
             }
         }
@@ -820,9 +878,17 @@ public class SessionGapFill : ClosedBarStudy
             _box.FillAlpha = done ? 30 : 60;
         }
         if (_level != null) { _level.To = end; _level.EndAvailable = available; }
-        if (ShowDeviation) Scene.Segment(_start, end, available, _excursion, _excursion, StudyPalette.Muted, 1, LineDashStyle.Dash);
-        _box = null; _level = null;
+        if (ShowDeviation && _view != null) _views[Scene.Segment(_start, end, available, _excursion, _excursion, StudyPalette.Muted, 1, LineDashStyle.Dash)] = _view;
+        if (_view != null) _view.Done = true;
+        _box = null; _level = null; _view = null;
     }
+
+    /// <summary>Display only: an ended session's gap is drawn per the filled/unfilled filters; the current session's gap always shows.</summary>
+    private bool Drawn(StudyShape shape) => !_views.TryGetValue(shape, out var v) || !v.Done
+        || (v.Filled ? (v.Bull ? ShowFilledBull : ShowFilledBear) : ShowUnfilled);
+
+    public override bool IsShown(StudyBox box) => Drawn(box);
+    public override bool IsShown(StudyLine line) => Drawn(line);
 
     private void Dashboard()
     {

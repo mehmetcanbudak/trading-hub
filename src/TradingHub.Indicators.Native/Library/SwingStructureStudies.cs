@@ -3,6 +3,7 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Drawing;
+using System.Runtime.CompilerServices;
 using TradingHub.Rendering;
 using TradingHub.Rendering.Context;
 using TradingHub.Rendering.Tools;
@@ -153,10 +154,25 @@ public sealed class SwingStructureEngine
 
 internal static class SwingStudyText
 {
+    internal const string DisplayOnly = "Display only: hides drawings; never changes detection, strategy series or alerts.";
     internal static string Trend(int trend) => trend > 0 ? "Bullish" : trend < 0 ? "Bearish" : "—";
     internal static Color TrendColor(int trend, Color bull, Color bear) => trend > 0 ? bull : trend < 0 ? bear : default;
     internal static string Kind(StructureBreak br) => br.Choch ? "CHoCH" : "BOS";
     internal static string Count(int a, int b) => $"{a} / {b}";
+}
+
+/// <summary>
+/// Presentation-only classification of drawn shapes for the display filters (<see cref="ClosedBarStudy.IsShown(StudyBox)"/>).
+/// Held weakly by shape identity, so shapes dropped by retention or a recalculation free their entry; never read by
+/// detection, confirmation, strategy series or alerts.
+/// </summary>
+internal sealed class DrawnKinds<TKind> where TKind : struct
+{
+    private readonly ConditionalWeakTable<object, StrongBox<TKind>> _kinds = new();
+
+    internal T Add<T>(T shape, TKind kind) where T : class { _kinds.AddOrUpdate(shape, new StrongBox<TKind>(kind)); return shape; }
+
+    internal TKind? Of(object shape) => _kinds.TryGetValue(shape, out var kind) ? kind.Value : null;
 }
 
 // ====================================================================================================== shifts and sweeps
@@ -166,11 +182,16 @@ internal static class SwingStudyText
 [Description("Internal structure from swings confirmed a swing length of closed bars later: BOS when a close breaks the last swing in the trend direction, CHoCH when it breaks against the trend. A sweep is a wick through the last unbroken swing with a close back inside. The protected level is the opposite swing the trend must hold (alertable); a close beyond it removes it. Heuristic; every event is known at its closing bar.")]
 public class StructureShiftSweeps : ClosedBarStudy
 {
+    private enum Drawn { Bos, Choch, Sweep, Protected }
+
     private int _length = 5;
-    private bool _wick, _bos = true, _choch = true, _sweeps = true, _protected = true;
+    private bool _wick, _bos = true, _choch = true, _sweeps = true, _protected = true, _hideEarlyBos;
     private SwingStructureEngine _engine = new(5);
     private StudyLine? _protectedLine, _highLine, _lowLine;
     private int _bosCount, _chochCount, _sweepCount;
+    // presentation only: the closing bar of the first CHoCH since the start (kept across coverage gaps), for the BOS filter
+    private int _firstChoch = -1;
+    private readonly DrawnKinds<Drawn> _drawn = new();
     private readonly List<StructureBreak> _breaks = new();
     private readonly OptionalValueDataSeries _trend = new("StructureShift.Trend", "Internal structure trend (+1 / -1)") { VisualType = VisualMode.Hide, ShowZeroValue = true };
     private readonly OptionalValueDataSeries _signal = new("StructureShift.Signal", "Break at this close (+1/-1 BOS, +2/-2 CHoCH)") { VisualType = VisualMode.Hide, ShowZeroValue = true };
@@ -183,24 +204,40 @@ public class StructureShiftSweeps : ClosedBarStudy
     public int Length { get => _length; set { _length = Math.Clamp(value, 1, 100); RecalculateValues(); } }
     [Display(Name = "Ignore breaks with a rejecting wick", GroupName = "Calculation", Order = 11)]
     public bool WickFilter { get => _wick; set { _wick = value; RecalculateValues(); } }
-    [Display(Name = "BOS", GroupName = "Drawing", Order = 20)]
-    public bool ShowBos { get => _bos; set { _bos = value; RecalculateValues(); } }
-    [Display(Name = "CHoCH", GroupName = "Drawing", Order = 21)]
-    public bool ShowChoch { get => _choch; set { _choch = value; RecalculateValues(); } }
-    [Display(Name = "Sweeps", GroupName = "Drawing", Order = 22)]
-    public bool ShowSweeps { get => _sweeps; set { _sweeps = value; RecalculateValues(); } }
-    [Display(Name = "Protected level", GroupName = "Drawing", Order = 23)]
-    public bool ShowProtected { get => _protected; set { _protected = value; RecalculateValues(); } }
+    [Display(Name = "BOS", GroupName = "Drawing", Order = 20, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowBos { get => _bos; set { _bos = value; RedrawChart(); } }
+    [Display(Name = "CHoCH", GroupName = "Drawing", Order = 21, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowChoch { get => _choch; set { _choch = value; RedrawChart(); } }
+    [Display(Name = "Sweeps", GroupName = "Drawing", Order = 22, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowSweeps { get => _sweeps; set { _sweeps = value; RedrawChart(); } }
+    [Display(Name = "Protected level", GroupName = "Drawing", Order = 23, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowProtected { get => _protected; set { _protected = value; RedrawChart(); } }
+    [Display(Name = "Hide BOS before the first CHoCH", GroupName = "Drawing", Order = 24, Description = SwingStudyText.DisplayOnly)]
+    public bool HideBosBeforeFirstChoch { get => _hideEarlyBos; set { _hideEarlyBos = value; RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 30)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 31)] public Color BearColor { get; set; } = StudyPalette.Bear;
 
     /// <summary>Breaks known so far (newest last, at most 1000).</summary>
     [Browsable(false)] public IReadOnlyList<StructureBreak> Breaks => _breaks;
 
+    public override bool IsShown(StudyLine line) => Shown(_drawn.Of(line), line.Available);
+    public override bool IsShown(StudyTag tag) => Shown(_drawn.Of(tag), tag.Available);
+    public override bool IsShown(StudyMark mark) => Shown(_drawn.Of(mark), mark.Available);
+
+    private bool Shown(Drawn? kind, int available) => kind switch
+    {
+        Drawn.Bos => ShowBos && !(HideBosBeforeFirstChoch && (_firstChoch < 0 || available < _firstChoch)),
+        Drawn.Choch => ShowChoch,
+        Drawn.Sweep => ShowSweeps,
+        Drawn.Protected => ShowProtected,
+        _ => true,
+    };
+
     protected override void ResetState()
     {
         _engine = new SwingStructureEngine(Length) { RejectionFilter = WickFilter };
         _protectedLine = _highLine = _lowLine = null; _breaks.Clear(); _bosCount = _chochCount = _sweepCount = 0;
+        if (Bars.Count == 0) _firstChoch = -1;
     }
 
     protected override void OnCoverageGap(int bar)
@@ -223,23 +260,23 @@ public class StructureShiftSweeps : ClosedBarStudy
         {
             _breaks.Add(br); if (_breaks.Count > 1000) _breaks.RemoveAt(0);
             if (br.Choch) _chochCount++; else _bosCount++;
+            if (br.Choch && _firstChoch < 0) _firstChoch = bar;
             signal = br.Direction * (br.Choch ? 2 : 1);
             if (br.Direction > 0) { _highLine?.End(bar); _highLine = null; } else { _lowLine?.End(bar); _lowLine = null; }
-            if (!(br.Choch ? ShowChoch : ShowBos)) continue;
-            var c = br.Direction > 0 ? BullColor : BearColor;
-            Scene.Segment(br.SwingBar, bar, bar, br.Level, br.Level, c, 1, br.Choch ? LineDashStyle.Dash : LineDashStyle.Solid);
-            Scene.Tag((br.SwingBar + bar) / 2, bar, br.Level, SwingStudyText.Kind(br), c, br.Direction > 0);
-            Scene.Mark(bar, bar, br.Direction > 0 ? b.Low : b.High, br.Direction > 0 ? StudyMarkKind.TriangleUp : StudyMarkKind.TriangleDown, c, null, br.Direction < 0);
+            var c = br.Direction > 0 ? BullColor : BearColor; var kind = br.Choch ? Drawn.Choch : Drawn.Bos;
+            _drawn.Add(Scene.Segment(br.SwingBar, bar, bar, br.Level, br.Level, c, 1, br.Choch ? LineDashStyle.Dash : LineDashStyle.Solid), kind);
+            Scene.Tags.Add(_drawn.Add(new StudyTag((br.SwingBar + bar) / 2, bar, br.Level, SwingStudyText.Kind(br), c, br.Direction > 0), kind));
+            Scene.Marks.Add(_drawn.Add(new StudyMark(bar, bar, br.Direction > 0 ? b.Low : b.High, br.Direction > 0 ? StudyMarkKind.TriangleUp : StudyMarkKind.TriangleDown, c, null, br.Direction < 0), kind));
         }
         foreach (var sw in _engine.NewSweeps)
         {
             _sweepCount++; sweep = sw.Swing.High ? -1 : 1;
-            if (ShowSweeps) Scene.Mark(bar, bar, sw.Swing.High ? b.High : b.Low, StudyMarkKind.Circle, sw.Swing.High ? BearColor : BullColor, "Sweep", sw.Swing.High);
+            Scene.Marks.Add(_drawn.Add(new StudyMark(bar, bar, sw.Swing.High ? b.High : b.Low, StudyMarkKind.Circle, sw.Swing.High ? BearColor : BullColor, "Sweep", sw.Swing.High), Drawn.Sweep));
         }
         decimal? level = _engine.Protected(0); int from = _engine.ProtectedBar(0);
         if (_protectedLine != null && (level != _protectedLine.Price || from != _protectedLine.From)) { _protectedLine.End(bar); _protectedLine = null; }
-        if (level is { } p && _protectedLine == null && ShowProtected)
-            _protectedLine = Scene.Level(from, bar, p, _engine.Trend(0) > 0 ? BullColor : BearColor, "Protected", "Protected swing", 1, LineDashStyle.Dash);
+        if (level is { } p && _protectedLine == null)
+            _protectedLine = _drawn.Add(Scene.Level(from, bar, p, _engine.Trend(0) > 0 ? BullColor : BearColor, "Protected", "Protected swing", 1, LineDashStyle.Dash), Drawn.Protected);
         int trend = _engine.Trend(0);
         _trend.Set(bar, trend); _signal.Set(bar, signal); _sweep.Set(bar, sweep);
         if (level is { } lv) _level.Set(bar, lv); else _level.SetUnavailable(bar);
@@ -258,6 +295,8 @@ public class StructureShiftSweeps : ClosedBarStudy
 [Description("Short-term swings (confirmed a swing strength of closed bars later), intermediate swings (a short-term swing more extreme than its two same-side neighbours) and long-term swings (the same over intermediate swings), with each tier's BOS / CHoCH on closes. A break is validated by an ATR band around the broken level: the first later close outside the band confirms it (in the break direction) or invalidates it (on the other side). Structure boxes span the bars inside the band; heuristic, every shape is known at its closing bar.")]
 public class AnchoredMarketStructure : ClosedBarStudy
 {
+    private enum Part { Swing, Break, Label, Box, Verdict }
+
     private static readonly string[] TierTrendRows = { "Short-term trend", "Intermediate trend", "Long-term trend" };
     private static readonly string[] TierBreakRows = { "Short-term last break", "Intermediate last break", "Long-term last break" };
     private int _strength = 1, _atrLength = 17;
@@ -268,6 +307,9 @@ public class AnchoredMarketStructure : ClosedBarStudy
     private RunningAtr _atr = new(17);
     private StudyLine? _longHigh, _longLow;
     private readonly List<StructureBreak> _breaks = new();
+    // presentation only: tier and part of each drawing, and the tiers (bit mask) that tinted a bar, for the display filters
+    private readonly DrawnKinds<(int Tier, Part Part)> _drawn = new();
+    private readonly Dictionary<int, int> _tintTiers = new();
     private readonly OptionalValueDataSeries _short = new("AnchoredStructure.ShortTrend", "Short-term trend (+1 / -1)") { VisualType = VisualMode.Hide, ShowZeroValue = true };
     private readonly OptionalValueDataSeries _mid = new("AnchoredStructure.IntermediateTrend", "Intermediate trend (+1 / -1)") { VisualType = VisualMode.Hide, ShowZeroValue = true };
     private readonly OptionalValueDataSeries _long = new("AnchoredStructure.LongTrend", "Long-term trend (+1 / -1)") { VisualType = VisualMode.Hide, ShowZeroValue = true };
@@ -286,36 +328,59 @@ public class AnchoredMarketStructure : ClosedBarStudy
     public int ValidationAtrLength { get => _atrLength; set { _atrLength = Math.Clamp(value, 1, 200); RecalculateValues(); } }
     [Display(Name = "Validation band (ATR)", GroupName = "Calculation", Order = 12), Range(0.1, 10)]
     public decimal ValidationBand { get => _band; set { _band = Math.Clamp(value, 0.1m, 10); RecalculateValues(); } }
-    [Display(Name = "Short-term swings", GroupName = "Short term", Order = 20)]
-    public bool ShortSwings { get => _swingsOn[0]; set { _swingsOn[0] = value; RecalculateValues(); } }
-    [Display(Name = "Short-term structure", GroupName = "Short term", Order = 21)]
-    public bool ShortStructure { get => _structureOn[0]; set { _structureOn[0] = value; RecalculateValues(); } }
-    [Display(Name = "Intermediate swings", GroupName = "Intermediate term", Order = 30)]
-    public bool IntermediateSwings { get => _swingsOn[1]; set { _swingsOn[1] = value; RecalculateValues(); } }
-    [Display(Name = "Intermediate structure", GroupName = "Intermediate term", Order = 31)]
-    public bool IntermediateStructure { get => _structureOn[1]; set { _structureOn[1] = value; RecalculateValues(); } }
-    [Display(Name = "Long-term swings", GroupName = "Long term", Order = 40)]
-    public bool LongSwings { get => _swingsOn[2]; set { _swingsOn[2] = value; RecalculateValues(); } }
-    [Display(Name = "Long-term structure", GroupName = "Long term", Order = 41)]
-    public bool LongStructure { get => _structureOn[2]; set { _structureOn[2] = value; RecalculateValues(); } }
-    [Display(Name = "Validate breaks", GroupName = "Drawing", Order = 50)]
-    public bool ValidateBreaks { get => _validate; set { _validate = value; RecalculateValues(); } }
-    [Display(Name = "Labels", GroupName = "Drawing", Order = 51)]
-    public bool ShowBreakLabels { get => _labels; set { _labels = value; RecalculateValues(); } }
-    [Display(Name = "Structure boxes", GroupName = "Drawing", Order = 52)]
-    public bool StructureBoxes { get => _boxes; set { _boxes = value; RecalculateValues(); } }
-    [Display(Name = "Tint the break bar", GroupName = "Drawing", Order = 53)]
-    public bool BreakTint { get => _background; set { _background = value; RecalculateValues(); } }
+    [Display(Name = "Short-term swings", GroupName = "Short term", Order = 20, Description = SwingStudyText.DisplayOnly)]
+    public bool ShortSwings { get => _swingsOn[0]; set { _swingsOn[0] = value; RedrawChart(); } }
+    [Display(Name = "Short-term structure", GroupName = "Short term", Order = 21, Description = SwingStudyText.DisplayOnly)]
+    public bool ShortStructure { get => _structureOn[0]; set { _structureOn[0] = value; RedrawChart(); } }
+    [Display(Name = "Intermediate swings", GroupName = "Intermediate term", Order = 30, Description = SwingStudyText.DisplayOnly)]
+    public bool IntermediateSwings { get => _swingsOn[1]; set { _swingsOn[1] = value; RedrawChart(); } }
+    [Display(Name = "Intermediate structure", GroupName = "Intermediate term", Order = 31, Description = SwingStudyText.DisplayOnly)]
+    public bool IntermediateStructure { get => _structureOn[1]; set { _structureOn[1] = value; RedrawChart(); } }
+    [Display(Name = "Long-term swings", GroupName = "Long term", Order = 40, Description = SwingStudyText.DisplayOnly)]
+    public bool LongSwings { get => _swingsOn[2]; set { _swingsOn[2] = value; RedrawChart(); } }
+    [Display(Name = "Long-term structure", GroupName = "Long term", Order = 41, Description = SwingStudyText.DisplayOnly)]
+    public bool LongStructure { get => _structureOn[2]; set { _structureOn[2] = value; RedrawChart(); } }
+    [Display(Name = "Validate breaks", GroupName = "Drawing", Order = 50, Description = SwingStudyText.DisplayOnly)]
+    public bool ValidateBreaks { get => _validate; set { _validate = value; RedrawChart(); } }
+    [Display(Name = "Labels", GroupName = "Drawing", Order = 51, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowBreakLabels { get => _labels; set { _labels = value; RedrawChart(); } }
+    [Display(Name = "Structure boxes", GroupName = "Drawing", Order = 52, Description = SwingStudyText.DisplayOnly)]
+    public bool StructureBoxes { get => _boxes; set { _boxes = value; RedrawChart(); } }
+    [Display(Name = "Tint the break bar", GroupName = "Drawing", Order = 53, Description = SwingStudyText.DisplayOnly)]
+    public bool BreakTint { get => _background; set { _background = value; RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 60)] public Color BullColor { get; set; } = Color.FromArgb(255, 0, 176, 79);
     [Display(Name = "Bearish", GroupName = "Colors", Order = 61)] public Color BearColor { get; set; } = Color.FromArgb(255, 156, 27, 65);
 
     /// <summary>Breaks of every tier known so far (newest last, at most 1000).</summary>
     [Browsable(false)] public IReadOnlyList<StructureBreak> Breaks => _breaks;
 
+    public override bool IsShown(StudyBox box) => Shown(_drawn.Of(box));
+    public override bool IsShown(StudyLine line) => Shown(_drawn.Of(line));
+    public override bool IsShown(StudyMark mark) => Shown(_drawn.Of(mark));
+    public override bool IsShown(StudyTag tag) => Shown(_drawn.Of(tag));
+
+    public override bool IsTintShown(int bar, Color color)
+    {
+        if (!BreakTint || !_tintTiers.TryGetValue(bar, out int tiers)) return BreakTint;
+        for (int t = 1; t < 3; t++) if ((tiers & 1 << t) != 0 && _structureOn[t]) return true;
+        return false;
+    }
+
+    private bool Shown((int Tier, Part Part)? drawn) => drawn switch
+    {
+        null => true,
+        (var t, Part.Swing) => _swingsOn[t],
+        (var t, Part.Break) => _structureOn[t],
+        (var t, Part.Label) => _structureOn[t] && ShowBreakLabels,
+        (var t, Part.Box) => _structureOn[t] && ValidateBreaks && StructureBoxes,
+        (var t, _) => _structureOn[t] && ValidateBreaks,
+    };
+
     protected override void ResetState()
     {
         _engine = new SwingStructureEngine(SwingStrength, 3); _atr = new(ValidationAtrLength);
         _longHigh = _longLow = null; _breaks.Clear();
+        if (Bars.Count == 0) _tintTiers.Clear();
     }
 
     protected override void OnCoverageGap(int bar)
@@ -348,10 +413,9 @@ public class AnchoredMarketStructure : ClosedBarStudy
                     sw.High ? "Long-term swing high" : "Long-term swing low", 1, LineDashStyle.Dot);
                 if (sw.High) { _longHigh?.End(bar); _longHigh = line; } else { _longLow?.End(bar); _longLow = line; }
             }
-            if (!_swingsOn[t]) continue;
             var kind = t switch { 0 => StudyMarkKind.Circle, 1 => sw.High ? StudyMarkKind.TriangleDown : StudyMarkKind.TriangleUp, _ => StudyMarkKind.Diamond };
             string? text = t switch { 1 => sw.High ? "ITH" : "ITL", 2 => sw.High ? "LTH" : "LTL", _ => null };
-            Scene.Mark(sw.Bar, bar, sw.Price, kind, StudyPalette.A(sw.High ? BearColor : BullColor, t == 0 ? 110 : 220), text, sw.High);
+            Scene.Marks.Add(_drawn.Add(new StudyMark(sw.Bar, bar, sw.Price, kind, StudyPalette.A(sw.High ? BearColor : BullColor, t == 0 ? 110 : 220), text, sw.High), (t, Part.Swing)));
         }
         int brk = 0, valid = 0, invalid = 0;
         foreach (var br in _engine.NewBreaks)
@@ -359,23 +423,23 @@ public class AnchoredMarketStructure : ClosedBarStudy
             _breaks.Add(br); if (_breaks.Count > 1000) _breaks.RemoveAt(0);
             int t = br.Tier; if (Math.Abs(brk) <= t) brk = br.Direction * (t + 1);
             if (t == 2) { if (br.Direction > 0) { _longHigh?.End(bar); _longHigh = null; } else { _longLow?.End(bar); _longLow = null; } }
-            if (!_structureOn[t]) continue;
             var c = br.Direction > 0 ? BullColor : BearColor;
             var style = t switch { 0 => LineDashStyle.Dot, 1 => LineDashStyle.Dash, _ => LineDashStyle.Solid };
-            Scene.Segment(br.SwingBar, bar, bar, br.Level, br.Level, c, t == 2 ? 2 : 1, style);
-            if (ShowBreakLabels) Scene.Tag((br.SwingBar + bar) / 2, bar, br.Level, Label(t, br.Choch), c, br.Direction > 0);
-            if (BreakTint && t >= 1) Scene.Tints[bar] = StudyPalette.A(c, 20);
+            _drawn.Add(Scene.Segment(br.SwingBar, bar, bar, br.Level, br.Level, c, t == 2 ? 2 : 1, style), (t, Part.Break));
+            Scene.Tags.Add(_drawn.Add(new StudyTag((br.SwingBar + bar) / 2, bar, br.Level, Label(t, br.Choch), c, br.Direction > 0), (t, Part.Label)));
+            if (t >= 1) { Scene.Tints[bar] = StudyPalette.A(c, 20); _tintTiers[bar] = _tintTiers.GetValueOrDefault(bar) | 1 << t; }
         }
         foreach (var br in _engine.NewResolved)
         {
             int t = br.Tier, code = br.Direction * (t + 1);
             if (br.Valid) { if (Math.Abs(valid) <= t) valid = code; } else if (Math.Abs(invalid) <= t) invalid = code;
-            if (!ValidateBreaks || !_structureOn[t]) continue;
             var c = br.Direction > 0 ? BullColor : BearColor;
-            if (StructureBoxes) Scene.Box(br.Bar, bar, br.ZoneTop, br.ZoneBottom, c, null, null, 22).End(bar);
-            Scene.Mark(bar, bar, br.Direction > 0 ? b.Low : b.High, br.Valid ? StudyMarkKind.Square : StudyMarkKind.Cross, br.Valid ? c : StudyPalette.Muted,
-                br.Valid ? "✓" : "✕", br.Direction < 0);
+            _drawn.Add(Scene.Box(br.Bar, bar, br.ZoneTop, br.ZoneBottom, c, null, null, 22), (t, Part.Box)).End(bar);
+            Scene.Marks.Add(_drawn.Add(new StudyMark(bar, bar, br.Direction > 0 ? b.Low : b.High, br.Valid ? StudyMarkKind.Square : StudyMarkKind.Cross, br.Valid ? c : StudyPalette.Muted,
+                br.Valid ? "✓" : "✕", br.Direction < 0), (t, Part.Verdict)));
         }
+        if (_tintTiers.Count > Scene.Tints.Count + 256)
+            foreach (int stale in _tintTiers.Keys.Where(k => !Scene.Tints.ContainsKey(k)).ToList()) _tintTiers.Remove(stale);
         _short.Set(bar, _engine.Trend(0)); _mid.Set(bar, _engine.Trend(1)); _long.Set(bar, _engine.Trend(2));
         _break.Set(bar, brk); _validated.Set(bar, valid); _invalidated.Set(bar, invalid);
 
@@ -534,7 +598,7 @@ public class StructureScatterPanel : ClosedBarStudy
     }
 
     private int _length = 10, _sample = 150;
-    private bool _heatmap = true, _structure = true;
+    private bool _structure = true;
     private HeatMode _mode = HeatMode.Retracement;
     private SwingStructureEngine _engine = new(10);
     private readonly List<StudySwing> _alt = new();
@@ -554,13 +618,13 @@ public class StructureScatterPanel : ClosedBarStudy
     public int PivotLength { get => _length; set { _length = Math.Clamp(value, 1, 100); RecalculateValues(); } }
     [Display(Name = "Retained legs (percentile sample)", GroupName = "Calculation", Order = 11), Range(10, 1000)]
     public int SampleSize { get => _sample; set { _sample = Math.Clamp(value, 10, 1000); RecalculateValues(); } }
-    [Display(Name = "Paint bars by percentile", GroupName = "Drawing", Order = 20)]
-    public bool Heatmap { get => _heatmap; set { _heatmap = value; RecalculateValues(); } }
+    [Display(Name = "Paint bars by percentile", GroupName = "Drawing", Order = 20, Description = SwingStudyText.DisplayOnly)]
+    public bool Heatmap { get => _paint.Visible; set { _paint.Visible = value; RedrawChart(); } }
     [Display(Name = "Percentile of", GroupName = "Drawing", Order = 21)]
     public HeatMode Mode { get => _mode; set { _mode = value; RecalculateValues(); } }
     [Display(Name = "Scatter panel", GroupName = "Drawing", Order = 22)] public bool ShowScatter { get; set; } = true;
-    [Display(Name = "Structure breaks", GroupName = "Drawing", Order = 23)]
-    public bool ShowStructure { get => _structure; set { _structure = value; RecalculateValues(); } }
+    [Display(Name = "Structure breaks", GroupName = "Drawing", Order = 23, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowStructure { get => _structure; set { _structure = value; RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 30)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 31)] public Color BearColor { get; set; } = StudyPalette.Bear;
 
@@ -570,6 +634,10 @@ public class StructureScatterPanel : ClosedBarStudy
     [Browsable(false)] public int LegCount => _count;
     [Browsable(false)] public decimal? AverageImpulse => _count == 0 ? null : _sumImpulse / _count;
     [Browsable(false)] public decimal? AverageRetracement => _count == 0 ? null : _sumRetrace / _count;
+
+    // the only lines and tags of this study are the structure breaks
+    public override bool IsShown(StudyLine line) => ShowStructure;
+    public override bool IsShown(StudyTag tag) => ShowStructure;
 
     protected override void ResetState()
     {
@@ -610,7 +678,6 @@ public class StructureScatterPanel : ClosedBarStudy
         {
             if (br.Direction > 0) _breaksUp++; else _breaksDown++;
             signal = br.Direction * (br.Choch ? 2 : 1);
-            if (!ShowStructure) continue;
             var c = br.Direction > 0 ? BullColor : BearColor;
             Scene.Segment(br.SwingBar, bar, bar, br.Level, br.Level, c, 1, br.Choch ? LineDashStyle.Dash : LineDashStyle.Solid);
             Scene.Tag((br.SwingBar + bar) / 2, bar, br.Level, SwingStudyText.Kind(br), c, br.Direction > 0);
@@ -627,7 +694,7 @@ public class StructureScatterPanel : ClosedBarStudy
                 decimal pi = (decimal)_legs.Count(l => l.ImpulsePercent <= impulse) / _legs.Count, pr = (decimal)_legs.Count(l => l.Retracement <= retrace) / _legs.Count;
                 decimal heat = Mode switch { HeatMode.Impulse => pi, HeatMode.Retracement => pr, _ => (pi + pr) / 2 };
                 _percentile.Set(bar, heat * 100);
-                if (Heatmap && heat > 0) _paint[bar] = StudyPalette.A(trend >= 0 ? BullColor : BearColor, (int)(80 + 175 * heat));
+                if (heat > 0) _paint[bar] = StudyPalette.A(trend >= 0 ? BullColor : BearColor, (int)(80 + 175 * heat));
             }
             else _percentile.SetUnavailable(bar);
         }
@@ -702,7 +769,7 @@ public class StructureTrendPanel : ClosedBarStudy
     };
 
     private int _length = 5, _fvgLimit = 5;
-    private bool _structure = true, _paintOn = true, _liquidity = true, _fvg = true;
+    private bool _structure = true, _liquidity = true, _fvg = true;
     private StudyTimeFrame _structureFrame = StudyTimeFrame.Chart, _liquidityFrame = StudyTimeFrame.Chart;
     private Dictionary<StudyTimeFrame, Frame>? _frames;
     private List<Frame>? _all;
@@ -716,20 +783,20 @@ public class StructureTrendPanel : ClosedBarStudy
 
     public StructureTrendPanel() { DataSeries[0] = _trend; DataSeries.Add(_signal); DataSeries.Add(_sweep); DataSeries.Add(_alignment); DataSeries.Add(_paint); }
 
-    [Display(Name = "Structure", GroupName = "Structure", Order = 10)]
-    public bool ShowStructure { get => _structure; set { _structure = value; RecalculateValues(); } }
+    [Display(Name = "Structure", GroupName = "Structure", Order = 10, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowStructure { get => _structure; set { _structure = value; RedrawChart(); } }
     [Display(Name = "Structure period", GroupName = "Structure", Order = 11)]
     public StudyTimeFrame StructureFrame { get => _structureFrame; set { _structureFrame = value; RecalculateValues(); } }
     [Display(Name = "Swing length", GroupName = "Structure", Order = 12), Range(1, 50)]
     public int SwingLength { get => _length; set { _length = Math.Clamp(value, 1, 50); RecalculateValues(); } }
-    [Display(Name = "Paint bars by trend", GroupName = "Structure", Order = 13)]
-    public bool ColorCandles { get => _paintOn; set { _paintOn = value; RecalculateValues(); } }
-    [Display(Name = "Liquidity sweeps", GroupName = "Liquidity", Order = 20)]
-    public bool ShowLiquidity { get => _liquidity; set { _liquidity = value; RecalculateValues(); } }
+    [Display(Name = "Paint bars by trend", GroupName = "Structure", Order = 13, Description = SwingStudyText.DisplayOnly)]
+    public bool ColorCandles { get => _paint.Visible; set { _paint.Visible = value; RedrawChart(); } }
+    [Display(Name = "Liquidity sweeps", GroupName = "Liquidity", Order = 20, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowLiquidity { get => _liquidity; set { _liquidity = value; RedrawChart(); } }
     [Display(Name = "Liquidity period", GroupName = "Liquidity", Order = 21)]
     public StudyTimeFrame LiquidityFrame { get => _liquidityFrame; set { _liquidityFrame = value; RecalculateValues(); } }
-    [Display(Name = "Fair value gaps", GroupName = "FVG", Order = 30)]
-    public bool ShowFvg { get => _fvg; set { _fvg = value; RecalculateValues(); } }
+    [Display(Name = "Fair value gaps", GroupName = "FVG", Order = 30, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowFvg { get => _fvg; set { _fvg = value; RedrawChart(); } }
     [Display(Name = "Maximum active FVG", GroupName = "FVG", Order = 31), Range(1, 30)]
     public int FvgLimit { get => _fvgLimit; set { _fvgLimit = Math.Clamp(value, 1, 30); RecalculateValues(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 40)] public Color BullColor { get; set; } = StudyPalette.Bull;
@@ -737,6 +804,12 @@ public class StructureTrendPanel : ClosedBarStudy
 
     /// <summary>Structure trend of a period from its completed bars (0 when unavailable or not yet broken).</summary>
     public int FrameTrend(StudyTimeFrame period) => _frames != null && _frames.TryGetValue(Usable(period) ? period : StudyTimeFrame.Chart, out var f) ? f.Engine.Trend(0) : 0;
+
+    // boxes are the fair value gaps, tags the breaks and marks the sweeps; dotted lines are swept pools, the others breaks
+    public override bool IsShown(StudyBox box) => ShowFvg;
+    public override bool IsShown(StudyLine line) => line.Style == LineDashStyle.Dot ? ShowLiquidity : ShowStructure;
+    public override bool IsShown(StudyTag tag) => ShowStructure;
+    public override bool IsShown(StudyMark mark) => ShowLiquidity;
 
     protected override void ResetState() { _frames = null; _all = null; _pools.Clear(); _gaps.Clear(); }
 
@@ -791,12 +864,11 @@ public class StructureTrendPanel : ClosedBarStudy
                 foreach (var br in f.Engine.NewBreaks)
                 {
                     signal = br.Direction * (br.Choch ? 2 : 1);
-                    if (!ShowStructure) continue;
                     var c = br.Direction > 0 ? BullColor : BearColor; int from = ChartBar(f, br.SwingBar);
                     Scene.Segment(from, bar, bar, br.Level, br.Level, c, 1, br.Choch ? LineDashStyle.Dash : LineDashStyle.Solid);
                     Scene.Tag((from + bar) / 2, bar, br.Level, SwingStudyText.Kind(br), c, br.Direction > 0);
                 }
-            if (f == liquidity && ShowLiquidity)
+            if (f == liquidity)
                 foreach (var (_, sw) in f.Engine.NewSwings)
                 {
                     _pools.Add(new Liquidity(ChartBar(f, sw.Bar), bar, sw.Price, sw.High));
@@ -816,9 +888,9 @@ public class StructureTrendPanel : ClosedBarStudy
             }
             else if (p.High ? b.Close > p.Price : b.Close < p.Price) _pools.RemoveAt(i);
         }
-        if (ShowFvg) Gaps(bar);
+        Gaps(bar);
         int trend = structure.Engine.Trend(0);
-        _paint[bar] = ColorCandles && trend != 0 ? StudyPalette.A(trend > 0 ? BullColor : BearColor, 230) : null;
+        _paint[bar] = trend != 0 ? StudyPalette.A(trend > 0 ? BullColor : BearColor, 230) : null;
         _trend.Set(bar, trend); _signal.Set(bar, signal); _sweep.Set(bar, sweep);
 
         Scene.Dash.Clear(); Scene.DashTitle = "Trend alignment";
@@ -866,6 +938,7 @@ public sealed record WaveTargets(int From, int Available, decimal Equality, deci
 [Description("Builds a zigzag from confirmed swings and checks five-wave impulses against the rules (wave 2 stays beyond the start, wave 3 is not the shortest, wave 4 does not overlap wave 1, waves 3 and 5 make new extremes). The extended wave (1, 3 or 5) is marked, wave-5 targets (equality with wave 1 and 0.618 of waves 1-3) are projected while wave 4 forms, and a 38.2-61.8 % retracement zone follows an extension. Heuristic; a pattern exists only from the confirmation of its last pivot.")]
 public class WaveExtensions : ClosedBarStudy
 {
+    private const string WatchText = "Watch: possible extended wave 5";
     private int _length = 10, _sub = 4;
     private decimal _ratio = 1.618m, _tolerance = 10;
     private bool _requireSub = true, _targetsOn = true, _watch = true, _zone = true, _labels = true, _pathOn = true;
@@ -894,16 +967,16 @@ public class WaveExtensions : ClosedBarStudy
     public bool RequireSubwaves { get => _requireSub; set { _requireSub = value; RecalculateValues(); } }
     [Display(Name = "Equality tolerance (%)", GroupName = "Calculation", Order = 14), Range(1, 50)]
     public decimal EqualityTolerance { get => _tolerance; set { _tolerance = Math.Clamp(value, 1, 50); RecalculateValues(); } }
-    [Display(Name = "Wave-5 targets", GroupName = "Drawing", Order = 20)]
-    public bool ShowTargets { get => _targetsOn; set { _targetsOn = value; RecalculateValues(); } }
-    [Display(Name = "Extended wave-5 watch", GroupName = "Drawing", Order = 21)]
-    public bool ShowWatch { get => _watch; set { _watch = value; RecalculateValues(); } }
-    [Display(Name = "Retracement zone", GroupName = "Drawing", Order = 22)]
-    public bool ShowZone { get => _zone; set { _zone = value; RecalculateValues(); } }
-    [Display(Name = "Wave labels", GroupName = "Drawing", Order = 23)]
-    public bool ShowLabels { get => _labels; set { _labels = value; RecalculateValues(); } }
-    [Display(Name = "Wave path", GroupName = "Drawing", Order = 24)]
-    public bool ShowPath { get => _pathOn; set { _pathOn = value; RecalculateValues(); } }
+    [Display(Name = "Wave-5 targets", GroupName = "Drawing", Order = 20, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowTargets { get => _targetsOn; set { _targetsOn = value; RedrawChart(); } }
+    [Display(Name = "Extended wave-5 watch", GroupName = "Drawing", Order = 21, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowWatch { get => _watch; set { _watch = value; RedrawChart(); } }
+    [Display(Name = "Retracement zone", GroupName = "Drawing", Order = 22, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowZone { get => _zone; set { _zone = value; RedrawChart(); } }
+    [Display(Name = "Wave labels", GroupName = "Drawing", Order = 23, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowLabels { get => _labels; set { _labels = value; RedrawChart(); } }
+    [Display(Name = "Wave path", GroupName = "Drawing", Order = 24, Description = SwingStudyText.DisplayOnly)]
+    public bool ShowPath { get => _pathOn; set { _pathOn = value; RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 30)] public Color BullColor { get; set; } = Color.FromArgb(255, 0, 176, 79);
     [Display(Name = "Bearish", GroupName = "Colors", Order = 31)] public Color BearColor { get; set; } = Color.FromArgb(255, 156, 27, 65);
     [Display(Name = "Neutral", GroupName = "Colors", Order = 32)] public Color NeutralColor { get; set; } = StudyPalette.Neutral;
@@ -912,6 +985,14 @@ public class WaveExtensions : ClosedBarStudy
     [Browsable(false)] public IReadOnlyList<WaveImpulse> Impulses => _impulses;
     /// <summary>Wave-5 targets while wave 4 is the last confirmed pivot; null otherwise.</summary>
     [Browsable(false)] public WaveTargets? Targets => _targets;
+
+    // alert-named lines are the wave-5 targets (the unnamed one is the extended-wave segment); boxes and marks are the
+    // retracement zones and their "Zone reached" marks; tags are the wave labels and the watch; paths are the wave paths
+    public override bool IsShown(StudyLine line) => line.Alert == null || ShowTargets;
+    public override bool IsShown(StudyTag tag) => tag.Text == WatchText ? ShowTargets && ShowWatch : ShowLabels;
+    public override bool IsShown(StudyBox box) => ShowZone;
+    public override bool IsShown(StudyMark mark) => ShowZone;
+    public override bool IsShown(StudyPath path) => ShowPath;
 
     protected override void ResetState()
     {
@@ -950,7 +1031,7 @@ public class WaveExtensions : ClosedBarStudy
             Project(bar);
             if (Impulse(bar) is { } found) { impulse = found.Bullish ? 1 : -1; extended = found.ExtendedWave; }
         }
-        if (changed && ShowPath && _zz.Count >= 2)
+        if (changed && _zz.Count >= 2)
         {
             if (_path != null) Scene.Paths.Remove(_path);
             _path = new StudyPath(bar, _zz.Select(x => (x.Bar, x.Price)).ToList(), StudyPalette.A(StudyPalette.Muted, 120));
@@ -975,11 +1056,10 @@ public class WaveExtensions : ClosedBarStudy
         decimal dir = up ? 1 : -1, larger = Math.Max(l1, l3);
         bool watch = larger > 0 && Math.Abs(l1 - l3) / larger * 100 <= EqualityTolerance;
         _targets = new WaveTargets(w[4].Bar, bar, w[4].Price + dir * l1, w[4].Price + dir * 0.618m * Math.Abs(w[3].Price - w[0].Price), up, watch);
-        if (!ShowTargets) return;
         var c = up ? BullColor : BearColor;
         _eqLine = Scene.Level(w[4].Bar, bar, _targets.Equality, c, "Wave 5 = wave 1", "Wave 5 target (equality)", 1, LineDashStyle.Dash);
         _fibLine = Scene.Level(w[4].Bar, bar, _targets.Fibonacci, c, "Wave 5 = 0.618 × waves 1-3", "Wave 5 target (0.618)", 1, LineDashStyle.Dot);
-        if (ShowWatch && watch) Scene.Tag(w[4].Bar, bar, w[4].Price, "Watch: possible extended wave 5", StudyPalette.A(NeutralColor, 210), !up);
+        if (watch) Scene.Tag(w[4].Bar, bar, w[4].Price, WatchText, StudyPalette.A(NeutralColor, 210), !up);
     }
 
     /// <summary>With six pivots: a complete impulse when every rule holds; the extended wave is the longest by the ratio.</summary>
@@ -1003,19 +1083,15 @@ public class WaveExtensions : ClosedBarStudy
         if (up) _bull++; else _bear++;
         if (wave == 1) _e1++; else if (wave == 3) _e3++; else if (wave == 5) _e5++;
         var c = up ? BullColor : BearColor;
-        if (ShowPath) Scene.Paths.Add(new StudyPath(bar, w.Select(x => (x.Bar, x.Price)).ToList(), StudyPalette.A(c, 200), 2));
-        if (ShowLabels)
-            for (int k = 1; k <= 5; k++)
-                Scene.Tag(w[k].Bar, bar, w[k].Price, k == wave ? $"Ext. {k}" : k.ToString(System.Globalization.CultureInfo.InvariantCulture), StudyPalette.A(k == wave ? NeutralColor : c, k == wave ? 220 : 150), w[k].High);
+        Scene.Paths.Add(new StudyPath(bar, w.Select(x => (x.Bar, x.Price)).ToList(), StudyPalette.A(c, 200), 2));
+        for (int k = 1; k <= 5; k++)
+            Scene.Tag(w[k].Bar, bar, w[k].Price, k == wave ? $"Ext. {k}" : k.ToString(System.Globalization.CultureInfo.InvariantCulture), StudyPalette.A(k == wave ? NeutralColor : c, k == wave ? 220 : 150), w[k].High);
         if (wave > 0)
         {
             Scene.Segment(w[wave - 1].Bar, w[wave].Bar, bar, w[wave - 1].Price, w[wave].Price, NeutralColor, 3);
-            if (ShowZone)
-            {
-                decimal a = w[wave - 1].Price, z = w[wave].Price;
-                _zones.Add(Scene.Box(w[5].Bar, bar, z - (z - a) * 0.382m, z - (z - a) * 0.618m, NeutralColor, "Retracement zone", "Extension retracement zone", 28));
-                while (_zones.Count > 6) { _zones[0].End(bar); _zones.RemoveAt(0); }
-            }
+            decimal a = w[wave - 1].Price, z = w[wave].Price;
+            _zones.Add(Scene.Box(w[5].Bar, bar, z - (z - a) * 0.382m, z - (z - a) * 0.618m, NeutralColor, "Retracement zone", "Extension retracement zone", 28));
+            while (_zones.Count > 6) { _zones[0].End(bar); _zones.RemoveAt(0); }
         }
         return found;
     }
