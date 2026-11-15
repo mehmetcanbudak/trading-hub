@@ -1361,6 +1361,7 @@ public sealed partial class TradingView : UserControl
     private void CheckAlerts(ChartTab t)
     {
         var m = t.Model!;
+        CheckChartAlerts(t);
         decimal last = m.Data.LastPrice;
         if (last == 0) return;
         foreach (var d in m.Drawings.Where(d => d.IsAlert && d.Points.Count > 0).ToList())

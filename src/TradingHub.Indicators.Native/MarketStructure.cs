@@ -19,7 +19,7 @@ public readonly record struct StructureZone(StructureZoneKind Kind, int SourceBa
 [DisplayName("Causal SMC / ICT structure heuristics")]
 [Category(IndicatorCategories.Levels)]
 [Description("Optional closed-pivot swings, BOS/CHoCH, opposite-candle order blocks, breakers, three-candle FVG, equal-high/low liquidity, sweeps and CISD. These are configurable OHLC heuristics, not observed institutional orders. Retrospective drawing never changes earlier strategy values.")]
-public class MarketStructure : Indicator
+public partial class MarketStructure : Indicator
 {
     public enum GapMitigation { WickTouch, FullWickFill, CloseThrough }
     private readonly record struct Pivot(int Bar, decimal Price, bool Exists, bool Broken);

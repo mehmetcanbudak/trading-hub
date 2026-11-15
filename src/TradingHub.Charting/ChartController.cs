@@ -707,6 +707,15 @@ public sealed partial class ChartController
     private void FinishDrawing()
     {
         _drag = DragMode.None;
+        // parallel channel: the parallel edge starts 6 % of the visible height above the base line (its handle adjusts it)
+        if (_active is { Kind: DrawingKind.ParallelChannel, Points.Count: 2 } channel && L is { } lc)
+        {
+            double off = Math.Abs(lc.Main.Top - lc.Main.Bottom) * 0.06;
+            double tick = (double)_model.Instrument.TickSize;
+            if (tick > 0) off = Math.Max(tick, Math.Round(off / tick) * tick);
+            channel.InitChannel(off);
+        }
+
         if (!StickyTool && (KeepTool == null || KeepTool != ActiveTool)) ActiveTool = null;
         ToolFinished?.Invoke();
         DrawingsChanged?.Invoke();

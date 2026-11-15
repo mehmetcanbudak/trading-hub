@@ -55,9 +55,9 @@ public sealed class DrawingSettingsWindow : Window
         body.Children.Add(Ui.H2(ChartDrawing.KindName(drawing.Kind)));
 
         if (!drawing.IsPosition && drawing.Kind != DrawingKind.Ruler) body.Children.Add(StyleSection());
-        if (drawing.Kind is DrawingKind.Rectangle or DrawingKind.Ellipse) body.Children.Add(FillSection());
+        if (drawing.Kind is DrawingKind.Rectangle or DrawingKind.Ellipse or DrawingKind.ParallelChannel) body.Children.Add(FillSection());
         if (drawing.Kind is not (DrawingKind.Ruler or DrawingKind.FibRetracement) && !drawing.IsPosition && !drawing.IsFreehand) body.Children.Add(TextSection());
-        if (drawing.Kind is DrawingKind.TrendLine or DrawingKind.Rectangle or DrawingKind.HorizontalRay or DrawingKind.FibRetracement) body.Children.Add(ExtendSection());
+        if (drawing.Kind is DrawingKind.TrendLine or DrawingKind.Rectangle or DrawingKind.HorizontalRay or DrawingKind.FibRetracement or DrawingKind.ParallelChannel) body.Children.Add(ExtendSection());
         if (drawing.Kind == DrawingKind.FibRetracement) body.Children.Add(LevelsSection());
         if (drawing.IsPosition) body.Children.Add(PositionSection());
         else if (drawing.Kind == DrawingKind.AnchoredVwap) body.Children.Add(AnchoredVwapSection());

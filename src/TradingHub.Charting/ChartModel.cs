@@ -12,7 +12,7 @@ using IndicatorCandle = TradingHub.Indicators.IndicatorCandle;
 namespace TradingHub.Charting;
 
 /// <summary>Un indicador agregado al gráfico.</summary>
-public sealed class IndicatorSlot
+public sealed partial class IndicatorSlot
 {
     internal IndicatorSlot(Indicator indicator)
     {
@@ -462,6 +462,7 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
 
     public void RemoveIndicator(IndicatorSlot slot)
     {
+        RemoveAlertsOf(slot);
         Indicators.Remove(slot);
         if (slot.Panel != null)
         {
