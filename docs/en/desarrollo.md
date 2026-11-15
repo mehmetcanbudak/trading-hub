@@ -185,6 +185,38 @@ Diagnostics: TRADINGHUB_SNAP_INDICATORS="Name|Other" adds selected studies; TRAD
 | TRADINGHUB_TRADOVATE_REST / _TRADOVATE_WS / _TRADOVATE_MD | Tradovate test endpoints. |
 | TRADINGHUB_CTRADER_URL / TRADINGHUB_DATABENTO_URL | cTrader/Databento test endpoints. |
 | TRADINGHUB_BYBIT_REST / _BYBIT_MARKET_REST / _BYBIT_MARKET_WS | Isolated Bybit account/public-data endpoints; never point acceptance at a real account. |
+| TRADINGHUB_RENDERING | Diagnostic macOS rendering backend: `metal`, `opengl` or `software` (a pinned GPU backend keeps Software as last resort). Unset keeps the default; other values are ignored with a warning. See [Rendering backend diagnostics](#rendering-backend-diagnostics). |
+| TRADINGHUB_FRAME_LOG / _FRAME_LOG_REDRAW | Opt-in frame-timing CSV path; `TRADINGHUB_FRAME_LOG_REDRAW=continuous` re-invalidates charts every frame for sustained-throughput measurement. |
+
+## Rendering backend diagnostics
+
+On macOS, Avalonia.Native 11.3 renders through its default order, OpenGL then Software; charts are Skia pictures replayed into that backend's canvas. `TRADINGHUB_RENDERING=metal|opengl|software` pins a backend for measurement only (macOS; ignored elsewhere). A pinned GPU backend keeps Software as last resort, so check the logged backend. Without the variable, startup is unchanged.
+
+`TRADINGHUB_FRAME_LOG=<file.csv>` enables a frame probe; without it no probe is created. Each Skia view logs `record` rows (UI-thread picture recording) and `draw` rows (render-thread replay, with the actual `Metal`, `OpenGL` or `Software` backend). It also logs one process CPU/RSS sample per second and notes for the request, screen and window activation. `TRADINGHUB_FRAME_LOG_REDRAW=continuous` re-invalidates every chart after each frame, so frame intervals measure sustained throughput instead of tick arrival. `draw` time is CPU-side command encoding/replay, not GPU completion; compare delivered intervals and process CPU across backends.
+
+```bash
+open -n --env TRADINGHUB_DATA_DIR="$fixture/data" … --env TRADINGHUB_RENDERING=metal \
+  --env TRADINGHUB_FRAME_LOG="$fixture/frames.csv" --env TRADINGHUB_FRAME_LOG_REDRAW=continuous "$TH_STAGE/Trading Hub.app"
+```
+
+**Measured result (2026-11-15, M4 Max, macOS 27.0.1, 120 Hz built-in Retina, 1512 × 949 pt window).** Packaged Release app via LaunchServices, isolated simulator profile, SIM-BTC 1-minute footprint, liquidity heatmap, value area and nine studies: Big Trades, Delta, VWAP, moving average, Bollinger, session profile, naked POCs, volume and CVD. The DOM and tape were visible. Four modes ran three times each in rotating order. Each run measured 15–45 s after launch, excluding warm-up, and medians of per-run values are shown. Dropped frames are missed 120 Hz vsyncs. Screen and activation notes confirmed every run stayed on the built-in display.
+
+| Scenario | Mode (backend used) | Frames/s | Interval median / p95 ms | Dropped | Replay median / p95 ms | UI record median ms | Process CPU | Max RSS MB |
+|---|---|---|---|---|---|---|---|---|
+| One chart, continuous redraw | default (OpenGL) | 120.0 | 8.33 / 9.09 | 0.03% | 2.91 / 4.00 | 0.94 | 88% | 652 |
+| | opengl (OpenGL) | 119.6 | 8.33 / 9.22 | 0.28% | 2.45 / 4.12 | 1.10 | 82% | 741 |
+| | metal (Metal) | 118.5 | 8.33 / 9.54 | 1.41% | 2.07 / 3.15 | 2.57 | 86% | 551 |
+| | software (Software) | 80.3 | 11.23 / 18.32 | 27.2% | 1.90 / 3.60 | 1.35 | 122% | 454 |
+| Four charts, continuous redraw | default (OpenGL) | 116.6 | 8.33 / 10.43 | 2.86% | 0.56 / 0.72 | 0.51 | 132% | 969 |
+| | opengl (OpenGL) | 113.9 | 8.33 / 12.24 | 4.34% | 0.26 / 0.36 | 0.49 | 122% | 855 |
+| | metal (Metal) | 114.2 | 8.33 / 12.04 | 4.86% | 0.16 / 0.31 | 0.56 | 89% | 952 |
+| | software (Software) | 71.6 | 13.74 / 17.29 | 45.9% | 0.77 / 0.98 | 0.41 | 141% | 1098 |
+| One chart, simulator ticks only | default (OpenGL) | 20.7 | n/a (tick-driven) | n/a | 3.53 / 7.08 | 2.70 | 31% | 569 |
+| | opengl (OpenGL) | 24.2 | n/a | n/a | 3.51 / 9.33 | 1.44 | 33% | 605 |
+| | metal (Metal) | 21.2 | n/a | n/a | 1.91 / 3.72 | 3.29 | 34% | 532 |
+| | software (Software) | 20.7 | n/a | n/a | 1.81 / 5.21 | 1.18 | 42% | 748 |
+
+Metal cut process CPU by about 30% only under saturated four-chart redraw: 85–92% across runs versus 120–135% for OpenGL. Frame rate was the same, and dropped frames did not improve: 4.4–4.9% versus 2.6–6.3%. With one chart, Metal dropped more vsyncs: 0.3–1.9% versus 0–0.8%. In normal tick-driven use it saved no CPU: 34–36% versus 28–40%. Its UI-thread recording was mostly slower in one-chart and tick-driven runs. Software was clearly worse. Every screenshot rendered correctly; one OpenGL four-chart capture showed only the Stage Manager thumbnail after another app took focus. The fixed tool rail was pixel-identical for OpenGL and Metal. Software differed only in faint antialiasing, at most 0.14% of tool-rail pixels with channel delta ≤ 32. No run logged a crash or rendering error. **Decision: keep the platform default (OpenGL, then Software).** Metal was not better for delivered frames or ordinary use, so it remains a diagnostic override. Only an inactive window covered by other windows or Stage Manager is throttled to about 5 Hz. Measurements stop at that point, because it reflects macOS rather than the backend. No Apple GPU compute (ILGPU/CUDA/Metal kernels) is used.
 
 ## Add a provider
 
