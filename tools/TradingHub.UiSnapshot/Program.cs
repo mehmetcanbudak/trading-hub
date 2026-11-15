@@ -50,6 +50,7 @@ var scenes = new Dictionary<string, SnapshotScene>(StringComparer.Ordinal)
     ["english"] = new(static context => new(EnglishScene.Run(context.Window, context.Pump, context.Output))),
     ["safety"] = new(static context => new(SafetyScene.Run(context.Window, context.Pump, context.Output) + SafetyScene.RunQuit(context.Window, context.Pump, context.Output))),
     ["conexiones"] = new(static context => new(ConnectionsScene.Run(context.Window, context.Pump, context.Output))),
+    ["venues"] = new(static context => new(VenuesScene.Run(context.Window, context.Pump, context.Output))),
     ["panel"] = new(static context => new(PanelScene.Run(context.Window, context.Pump, context.Output))),
     ["dom-book"] = new(static context => new(DomBookScene.Run(context.Window, context.Pump, context.Output))),
     ["footprint"] = new(static context => new(FootprintScene.Run(context.Window, context.Pump, context.Output))),

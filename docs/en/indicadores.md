@@ -16,6 +16,8 @@ Strategy indicator factories such as Sma/Ema/Rsi are a separate, simpler [API](.
 | Volume | Volume / Order flow | Color by delta or candle direction. |
 | Delta | Volume / Order flow | Histogram or candles showing intrabar delta high/low. |
 | Cumulative delta (CVD) | Volume / Order flow | Candles with optional session reset. |
+| CVD by market | Volume / Order flow | One cumulative delta line per market, exchange or spot/perpetual group of an aggregate, the sign-colored aggregate CVD and an unattributed line. |
+| Derivatives: funding, open interest, liquidations | Volume / Order flow | Binance and Bybit perpetual funding, open interest (level or change) and observed liquidations, per exchange and combined. |
 | Big Trades | Volume / Order flow | Combine fills of large aggressive orders across levels; fixed/adaptive percentile thresholds, price placement, colors and sizes. |
 | Session volume profile | Volume / Order flow | Session/week/visible history, volume/delta/bid-ask, value-area percentage, POC, VAH/VAL. |
 | Volume profile | Volume / Order flow | One entry for session/week/month/quarter/year/all-history profiles: ticks per row or price grouping, volume/delta/bid-ask view, untested POCs and head-to-tail merging (right-click or automatic). |
@@ -217,6 +219,8 @@ These selected studies complement, rather than replace, the existing moving aver
 - **Refill Zones (heuristic)** uses Minimum bucket volume, Floor-price bucket size, Absorption only and Project until mitigation. It is an absorption/refill heuristic, **not proof of book replenishment or icebergs**. Optional estimated OHLC uses threshold × 0.4 and at most 200 buckets.
 - **Composite Volume Profile** uses host Session/Week/Month boundaries, nearest-price grouping (ties away from zero), Value area (%) and optional chronological composition when the next POC is inside the current value area. Month is session-based, not simply a UTC date label. Equal-volume POCs choose the lower price; equal adjacent value-area volume expands upward first. POC projection uses a 60-profile lookback with up to 10 tested POCs; untested projections follow their configured limit (zero means all within the finite lookback).
 - **Open interest** shows server-observed OI and adjacent-known-cutoff signed change. See [Data fidelity](./datos.md#open-interest-observation-fidelity) for retention, freshness and missing-value rules.
+- **CVD by market** splits an aggregate crypto instrument's delta by the market that printed it (see [Data fidelity](./datos.md#per-market-delta-and-crypto-derivatives)). On a single-market chart it shows only the aggregate line.
+- **Derivatives** derives the perpetual symbol from the chart's base asset (BTC-USDT-SWAP, BTC-USD and BTC become BTCUSDT) unless **Perpetual symbol** is set. Choose funding, open interest, open-interest change or liquidations; unknown periods are gaps, not zero.
 
 For all three flow/profile studies, **Allow estimated OHLC** is off by default. Any observed footprint rows win over aggregate fallback, but mixed observed/estimated contributions remain marked incomplete; observed rows include Between volume and do not certify exchange-authoritative aggressor side (IB sides are inferred). Composite OHLC fallback is bounded to 200 samples. Coverage annotations distinguish observed, estimated, incomplete and missing bars; absence of a plot is not automatically a zero signal. Estimates and retrospective anchors must not be represented as observed trades in strategy evaluation.
 

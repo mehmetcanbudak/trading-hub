@@ -100,6 +100,7 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 | account-journal-revision | Same execution correction with two effective fills: Account analysis, summary, Trades, Statistics and chart marks/links must change from net 500 to 400. Requires a fresh explicit application-store override. |
 | live-excursions | Actual excursion service recalculates MAE/MFE from owned raw history after correcting the same entry execution; no broker data or model calls. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
+| venues | Public crypto market and aggregate connection setup against a loopback fake (OKX listing test, spot/perpetual filter, composite-book option), and a fixture aggregate chart with CVD by market and the derivatives pane. |
 | panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
 | dom-book | DOM book-reading features (auto tick, notional, size/total/changes/recent columns, marks, stats, mirror), the DOM trading lock and the tape notional filter; restores defaults. |
 | footprint | Footprint text colors and editor. |

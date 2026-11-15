@@ -30,7 +30,9 @@ See [Installation](./instalacion.md#where-your-data-lives) for exact paths. AI-r
 
 | Feature | When | Destination |
 |---|---|---|
-| Market data | Opening/using an instrument on an enabled connection. | Configured Binance, Bybit, Longbridge, aggregate constituents, Rithmic, Tradovate, Interactive Brokers, OANDA, Alpaca or cTrader provider. |
+| Market data | Opening/using an instrument on an enabled connection. | Configured Binance, Bybit, Longbridge, aggregate constituents, public crypto markets, Rithmic, Tradovate, Interactive Brokers, OANDA, Alpaca or cTrader provider. |
+| Public crypto markets | Listing, candles and live data of an enabled public crypto connection or aggregate constituent. No account, key or user identifier is sent. | OKX `www.okx.com`, `ws.okx.com`; Bitget `api.bitget.com`, `ws.bitget.com`; Hyperliquid `api.hyperliquid.xyz`; Deribit `www.deribit.com`; MEXC `contract.mexc.com`; Coinbase `api.exchange.coinbase.com`, `ws-feed.exchange.coinbase.com`; Bybit spot `api.bybit.com`, `stream.bybit.com`. |
+| Derivatives pane | Only while a chart shows the **Derivatives** indicator. Liquidation streams stay connected while it shows liquidations; observed liquidations and connection windows are stored under the market-data folder in `Derivatives/Liquidations`. | Binance `fapi.binance.com` (funding, open interest) and `fstream.binance.com` (forceOrder); Bybit `api.bybit.com` (funding, open interest) and `stream.bybit.com` (allLiquidation). |
 | History | User download or laboratory download_data request. | Public archives or configured provider APIs. |
 | Long-history/context bars | Loading older charts or context without stored ticks. | Relevant market provider; crypto can use public Binance/Bybit bars without account login. |
 | Orders | Manual or strategy submission to a broker account. | That broker; simulated orders are internal. |

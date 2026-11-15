@@ -374,11 +374,12 @@ public enum ConnectionKind
     [Display(Name = "Alpaca")] Alpaca,
     [Display(Name = "Databento")] Databento,
     [Display(Name = "Longbridge (data only)")] Longbridge,
-    [Display(Name = "Aggregate Binance + Bybit (data only)")] AggregateCrypto,
+    [Display(Name = "Aggregate crypto (data only)")] AggregateCrypto,
+    [Display(Name = "Public crypto market (data only)")] PublicCrypto,
 }
 
 /// <summary>Una conexión configurada (los secretos van al llavero, no a este archivo).</summary>
-public sealed class ConnectionProfile
+public sealed partial class ConnectionProfile
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
     /// <summary>Opaque local trading namespace and cooperating configuration generation, not a native account ID.</summary>
@@ -455,6 +456,7 @@ public sealed class ConnectionProfile
         ConnectionKind.Bybit => BybitEnvironment == BybitEnvironment.Testnet ? BybitFeed.TestnetId : BybitFeed.LinearId,
         ConnectionKind.Longbridge => "longbridge-" + Id,
         ConnectionKind.AggregateCrypto => AggregateFeed.FeedId,
+        ConnectionKind.PublicCrypto => PublicVenueId,
         ConnectionKind.Rithmic or ConnectionKind.AmpFutures => RithmicFeed.FeedId,
         ConnectionKind.Tradovate => TradingHub.Feeds.Tradovate.TradovateFeed.FeedId,
         // cada broker de cTrader tiene sus propios precios: el primero usa «ctrader» y los demás su propio id
@@ -488,7 +490,7 @@ public sealed class ConnectionProfile
 }
 
 /// <summary>Administra las conexiones: las guarda, crea sus feeds y las prueba.</summary>
-public sealed class ConnectionManager
+public sealed partial class ConnectionManager
 {
     private readonly string _filePath;
     private readonly ISecretStore _secretStore;
@@ -759,11 +761,8 @@ public sealed class ConnectionManager
             ConnectionKind.BinanceFutures => BinanceFeedOf(futures: true),
             ConnectionKind.BinanceSpot => BinanceFeedOf(futures: false),
             ConnectionKind.Bybit => BybitFeedOf(p),
-            ConnectionKind.AggregateCrypto => new AggregateFeed(new IMarketDataFeed[]
-            {
-                BinanceFeedOf(futures: true),
-                new BybitFeed(_networkFactory().CreateHttpClient(TimeSpan.FromSeconds(20)), configureSocket: _networkFactory().Configure, ownsHttpClient: true),
-            }, ownsSources: true),
+            ConnectionKind.AggregateCrypto => AggregateFeedOf(p),
+            ConnectionKind.PublicCrypto => PublicVenueFeedOf(p.PublicVenueId),
             ConnectionKind.Rithmic or ConnectionKind.AmpFutures => new RithmicFeed(RithmicSettingsOf(p), network: _networkFactory()),
             ConnectionKind.Tradovate => TradovateFeedOf(p),
             ConnectionKind.CTrader => CTraderFeedOf(p),
@@ -1063,8 +1062,15 @@ public sealed class ConnectionManager
                 }
                 case ConnectionKind.AggregateCrypto:
                 {
+                    var aggregate = (AggregateFeed)GetFeed(p.Id);
+                    var instruments = await aggregate.GetInstrumentsAsync(ct);
+                    string book = aggregate.IsBookConsolidated ? "DOM is a composite of venue books, not executable" : $"DOM is {aggregate.Sources[0].DisplayName} only";
+                    return (true, $"{instruments.Count} composite instruments from {aggregate.Sources.Count} markets. Non-executable prices; {book}. Constituent failures remain visible in coverage.");
+                }
+                case ConnectionKind.PublicCrypto:
+                {
                     var instruments = await GetFeed(p.Id).GetInstrumentsAsync(ct);
-                    return (true, $"{instruments.Count} composite instruments. Non-executable prices; DOM is Binance Futures only. Constituent failures remain visible in coverage.");
+                    return (true, $"{instruments.Count} instruments available. Public data only; no account or orders.");
                 }
                 case ConnectionKind.Rithmic:
                 case ConnectionKind.AmpFutures:

@@ -395,6 +395,7 @@ public sealed partial class AppServices
         InitializeOperations();
         InitializeReplayAlerts();
         InitializeKvpProviders();
+        InitializeDerivatives(networkFactory);
         // las que corrían al cerrar Trading Hub (enseguida el guardado periódico las marca detenidas): para reanudarlas al abrir
         RunningAtLastClose = TradingHub.Strategies.LiveStore.LoadRunners().Where(i => i.Running && !LiveEntry.IsManaged(i.Source)).ToList();
         Hub.RecordLive = Settings.RecordLiveData;
@@ -1005,6 +1006,7 @@ public sealed partial class AppServices
             Close(Hub.Dispose);
             await recordingDrain;
             Close(Connections.DisposeAll);
+            Close(DisposeDerivatives);
         }
         finally
         {

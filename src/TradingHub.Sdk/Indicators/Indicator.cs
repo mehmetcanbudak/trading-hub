@@ -52,7 +52,18 @@ namespace TradingHub.Indicators
         /// <summary>Recorded received depth in this bar's causal time interval, including explicit gaps.</summary>
         DepthHistoryQuery GetDepthHistory(int bar) => new(DateTime.MinValue, DateTime.MinValue,
             Array.Empty<DepthSample>(), null, DepthCoverage.Missing, "Recorded depth is unavailable.");
+
+        /// <summary>
+        /// Replaces <paramref name="destination"/> with the trades applied to a bar, in order, with their provenance
+        /// (source venue, quality). Volume is the part applied to this bar when a volume/tick bar boundary splits one
+        /// event. Empty when the bar was built from provider candles or the host has no tape. The caller owns and
+        /// reuses the buffer, so no per-bar allocation is needed.
+        /// </summary>
+        void CopyBarTrades(int bar, List<BarTrade> destination) => destination.Clear();
     }
+
+    /// <summary>One trade applied to a bar (see <see cref="IIndicatorHost.CopyBarTrades"/>).</summary>
+    public readonly record struct BarTrade(DateTime Time, decimal Price, decimal Volume, TradeSide Side, TradeProvenance Provenance);
 
     /// <summary>Argumento de RedrawChart.</summary>
     public class RedrawArg
@@ -237,6 +248,13 @@ namespace TradingHub.Indicators
             new(DateTime.MinValue, DateTime.MinValue, Array.Empty<DepthSample>(), null, DepthCoverage.Missing, "Recorded depth is unavailable.");
 
         protected IReadOnlyList<DepthSample> GetDepthSamples(int bar) => GetDepthHistory(bar).Samples;
+
+        /// <summary>Trades applied to a bar with their provenance (see <see cref="IIndicatorHost.CopyBarTrades"/>).</summary>
+        protected void GetBarTrades(int bar, List<BarTrade> destination)
+        {
+            if (Host is { } host) host.CopyBarTrades(bar, destination);
+            else destination.Clear();
+        }
 
         [Browsable(false)]
         [JsonIgnore]
