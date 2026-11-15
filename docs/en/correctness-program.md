@@ -22,11 +22,11 @@ Personal data, credentials, the upstream checkpoint, the historical English audi
 | CI and maintained documentation | Current display completeness, compiled scene discovery and standalone selector enforcement are exercised. | Portable test inputs carry the real provenance and guide files. English documentation is canonical. |
 | Marked portfolio coverage | Missing coverage and cuts through measured windows are refused. | Common available intervals and exact weighted money remain authoritative. |
 | Marked report consumers | Equity and drawdown remain visible without pretending boundary marks are independent trades. | Complete, partial and unavailable research coverage stays explicit through saved and exported reports. |
-| Exchange-side protection (`fp/native-protection`) | Opt-in per Tradovate connection, off by default: a whole-position stop and target go out as one `placeOCO` so the venue cancels the sibling without the app. Refused or dissolved links fall back to app-managed legs with a visible reason; restarted chart protection is re-owned and adopted, never duplicated. | One `INativeProtection` contract; each leg keeps its own client ID, durable intent and acknowledgment rules. Fake-venue conformance only; Binance, Bybit and Rithmic stay app-managed ([decisions](./native-protection-demo-checklist.md#venue-decisions)). |
+| Exchange-side protection (fork parity) | Opt-in per Tradovate connection, off by default: a whole-position stop and target go out as one `placeOCO` so the venue cancels the sibling without the app. Refused or dissolved links fall back to app-managed legs with a visible reason; restarted chart protection is re-owned and adopted, never duplicated. | One `INativeProtection` contract; each leg keeps its own client ID, durable intent and acknowledgment rules. Fake-venue conformance only; Binance, Bybit and Rithmic stay app-managed ([decisions](./native-protection-demo-checklist.md#venue-decisions)). |
 
 The [development guide](./desarrollo.md#native-execution-ownership), [backtesting guide](./backtesting.md), [strategy guide](./estrategias.md#files-and-compilation) and [data guide](./datos.md#interactive-brokers-bars-and-offline-history) describe the resulting contracts.
 
-## Storage durability (`fp/durability`)
+## Storage durability
 
 Before this change, journaling was process-crash consistent: execution journals, order ownership and ledger intents were flushed, but runner, portfolio, settings and workspace state was rewritten in place, and Bybit order, alert and replay state was renamed without synchronizing its directory. Every safety-critical state writer now uses one helper, `TradingHub.Common.DurableFile`:
 
@@ -53,7 +53,7 @@ Before this change, journaling was process-crash consistent: execution journals,
 
 A single drive flush dominates, at about 4 ms. A directory sync on APFS costs less than run-to-run noise. Order-path latency did not rise, so no fsync batching was introduced. Settings, workspace, drawings and runner/portfolio saves now cost one drive flush each, where they previously had none. Workspace and drawings skip rewriting content that this process has already committed.
 
-## Order lanes and UI-thread holds (`fp/flakes`)
+## Order lanes and UI-thread holds
 
 Every manual order gesture (chart and DOM drags, stop/target drops, chart-menu bracket actions, Chart Trader, DOM and hotkey buttons, Bybit Cancel/Close in Accounts) called its account on the Avalonia UI thread. The account call waits for the durable ownership journal (`DurableFile`, one drive flush per record), so a slow disk froze the window for the whole write.
 
