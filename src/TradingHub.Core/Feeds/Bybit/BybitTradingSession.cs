@@ -291,6 +291,8 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
     public decimal AverageFillFor(Order order) { lock (_gate) return Find(order)?.AverageFill ?? 0; }
     public bool IsReplacementPending(Order order) { lock (_gate) return Find(order) is { } t && (t.Amendment != null || t.QueuedAmendment != null); }
     public bool IsSubmissionUnknown(Order order) { lock (_gate) return Find(order)?.SubmissionUnconfirmed ?? false; }
+    /// <summary>True while a placement request for this order is still in flight; its outcome is not yet settled into the tracked state.</summary>
+    internal bool IsSending(Order order) { lock (_gate) return Find(order)?.Sending ?? false; }
     public string? StableOrderIdentityOf(Order order)
     {
         lock (_gate)
