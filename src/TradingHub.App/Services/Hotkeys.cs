@@ -43,6 +43,15 @@ public static class Hotkeys
         new("autoscale", "Chart", "Auto scale"),
         new("go-last", "Chart", "Go to latest price"),
         new("tool-hline", "Chart", "Draw horizontal line", "Alt+H"),
+        // TradingView-style tool shortcuts; Alt+T stays with the Chart Trader toggle users already rely on
+        new("tool-trend", "Chart", "Draw trend line", "Alt+Shift+T"),
+        new("tool-hray", "Chart", "Draw horizontal ray", "Alt+J"),
+        new("tool-vline", "Chart", "Draw vertical line", "Alt+V"),
+        new("tool-cross", "Chart", "Draw cross line", "Alt+C"),
+        new("tool-fib", "Chart", "Draw Fibonacci retracement", "Alt+F"),
+        new("tool-rect", "Chart", "Draw rectangle", "Alt+Shift+R"),
+        new("tool-brush", "Chart", "Draw with the brush", "Alt+B"),
+        new("tool-text", "Chart", "Write a text", "Alt+N"),
         new("tool-cursor", "Chart", "Cursor (release tool)"),
         new("reset-view", "Chart", "Reset chart view", "Alt+R"),
         new("rectangle-zoom", "Chart", "Rectangle zoom tool"),
@@ -59,6 +68,20 @@ public static class Hotkeys
         new("toggle-dom", "Chart windows", "Show or hide DOM"),
         new("toggle-trader", "Chart windows", "Show or hide chart's Chart Trader", "Alt+T"),
         new("toggle-panel", "Chart windows", "Show or hide right panel"),
+    };
+
+    /// <summary>The shortcut id of each drawing tool that has one.</summary>
+    public static readonly IReadOnlyDictionary<TradingHub.Charting.Drawings.DrawingKind, string> DrawingTools = new Dictionary<TradingHub.Charting.Drawings.DrawingKind, string>
+    {
+        [TradingHub.Charting.Drawings.DrawingKind.HorizontalLine] = "tool-hline",
+        [TradingHub.Charting.Drawings.DrawingKind.TrendLine] = "tool-trend",
+        [TradingHub.Charting.Drawings.DrawingKind.HorizontalRay] = "tool-hray",
+        [TradingHub.Charting.Drawings.DrawingKind.VerticalLine] = "tool-vline",
+        [TradingHub.Charting.Drawings.DrawingKind.CrossLine] = "tool-cross",
+        [TradingHub.Charting.Drawings.DrawingKind.FibRetracement] = "tool-fib",
+        [TradingHub.Charting.Drawings.DrawingKind.Rectangle] = "tool-rect",
+        [TradingHub.Charting.Drawings.DrawingKind.Brush] = "tool-brush",
+        [TradingHub.Charting.Drawings.DrawingKind.Text] = "tool-text",
     };
 
     public static string? GestureOf(AppSettings s, string id) =>

@@ -988,11 +988,16 @@ public sealed partial class TradingView
                 model.Viewport.ScrollBars = 0;
                 model.Invalidate();
                 break;
-            case "tool-hline":
             case "tool-cursor":
+            case var tool when Hotkeys.DrawingTools.Values.Contains(tool):
             {
-                DrawingKind? kind = id == "tool-hline" ? DrawingKind.HorizontalLine : null;
-                if (chart.View.Controller is { } c) c.ActiveTool = kind;
+                DrawingKind? kind = id == "tool-cursor" ? null : Hotkeys.DrawingTools.First(t => t.Value == id).Key;
+                if (chart.View.Controller is { } c)
+                {
+                    c.ActiveTool = kind;
+                    if (c.KeepTool != kind) c.KeepTool = null;
+                }
+
                 chart.Tools?.Check(kind);
                 chart.View.Focus();
                 break;
@@ -1090,7 +1095,7 @@ public sealed partial class TradingView
             foreach (var (name, c) in new[] { ("Blue", 0xFF3D8BFDu), ("Amber", 0xFFF2B53Au), ("Green", 0xFF26C281u), ("Red", 0xFFF0525Au), ("White", 0xFFFFFFFFu), ("Purple", 0xFFB478FFu) })
                 colors.Items.Add(Item(name, null, () => { sel.ColorArgb = c; DrawingsTouched(tab); }));
             items.Add(colors);
-            if (sel.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay)
+            if (sel.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.CrossLine)
                 items.Add(Item(sel.IsAlert ? "Remove alert" : "Alert when price touches", MaterialIconKind.BellOutline, () =>
                 {
                     if (sel.IsAlert)
@@ -1176,7 +1181,7 @@ public sealed partial class TradingView
             items.Add(Item("Move this chart to a new tab", MaterialIconKind.TabPlus, () => _ = MoveToNewPageAsync(tab)));
         }
         else if (tab.Window is { } window) items.Add(Item("Return to main window", MaterialIconKind.DockWindow, () => DockBack(window)));
-        new ContextMenu { ItemsSource = items }.Open(tab.View);
+        OpenChartMenu(new ContextMenu { ItemsSource = items }, tab.View);
     }
 
     private static MenuItem Item(string header, MaterialIconKind? icon, Action onClick)

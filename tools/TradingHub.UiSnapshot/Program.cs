@@ -21,6 +21,7 @@ var scenes = new Dictionary<string, SnapshotScene>(StringComparer.Ordinal)
     ["nonkvp-ib"] = new(static context => new(NonKvpIbDataScene.Run(context.Window, context.Pump, context.Output))),
     ["nonkvp-assistant"] = new(static context => new(NonKvpAssistantScene.Run(context.Window, context.Pump, context.Output)), SupportsWindows: false),
     ["nonkvp-tradingview"] = new(static context => new(NonKvpTradingViewScene.Run(context.Window, context.Pump, context.Output))),
+    ["chart-toolbar"] = new(static context => new(ChartToolbarScene.Run(context.Window, context.Pump, context.Output))),
     ["kvp-operations"] = new(static context => new(KvpOperationsScene.Run(context.Window, context.Pump, context.Output))),
     ["kvp-proxy"] = new(static context => new(KvpProxyScene.Run(context.Window, context.Pump, context.Output))),
     ["kvp-performance"] = new(static context => new(KvpPerformanceScene.Run(context.Window, context.Pump, context.Output))),
