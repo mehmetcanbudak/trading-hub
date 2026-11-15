@@ -1837,7 +1837,7 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
         _placing++;
         try
         {
-            using var link = native?.LinkProtection();
+            using var link = native?.LinkProtection(_owner);
             var exit = pos > 0 ? OrderSide.Sell : OrderSide.Buy;
             if (stop && prices.Stop > 0)
             {

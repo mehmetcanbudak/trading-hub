@@ -285,6 +285,105 @@ public class NativeProtectionTests
         Assert.Equal(2, venue.Submitted.Count);
     }
 
+    // ===================================================================== separately published venue events
+
+    [Fact]
+    public void A_stop_cancelled_before_the_target_fill_is_reported_is_replaced_once_the_position_confirms_it()
+    {
+        var venue = new OcoVenue();
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+
+        venue.ReportCancel(stop); // the venue cancelled the stop because the target filled 1; that fill is not reported yet
+        Assert.Equal(2, venue.Submitted.Count);
+        Assert.Contains("Protection gap", brackets.ProtectionNote);
+
+        venue.ReportExecution(target, 1); // fill reported, position report still 4
+        Assert.Equal(2, venue.Submitted.Count);
+
+        venue.ReportPosition(3);
+        var restored = brackets.StopLoss!;
+        Assert.NotSame(stop, restored);
+        Assert.Equal(3m, restored.Unfilled);
+        Assert.Equal(90m, restored.TriggerPrice);
+        Assert.Equal(3, venue.Submitted.Count);
+        Assert.DoesNotContain("Protection gap", brackets.ProtectionNote ?? "");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Cancel_all_or_close_position_after_an_earlier_partial_target_fill_never_re_sends_a_stop(bool closePosition)
+    {
+        var venue = new OcoVenue();
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+        venue.Fill(target, 1); // the venue keeps the stop; it is resized to 3
+        Assert.Equal(3m, stop.Unfilled);
+        int submitted = venue.Submitted.Count;
+
+        if (closePosition) OrderActions.Flatten(venue); // Cancel all, then a market close for 3
+        else venue.CancelAll();
+        submitted = venue.Submitted.Count;
+        venue.ReportCancel(stop); // acknowledged while the position still reads 3
+        venue.ReportCancel(target);
+        Assert.Equal(submitted, venue.Submitted.Count);
+        Assert.Null(brackets.StopLoss);
+        if (closePosition)
+        {
+            venue.Fill(venue.Working.Single(o => o.Type == OrderTypes.Market), 3);
+            Assert.Equal(0m, venue.Position.Volume);
+        }
+        Assert.Equal(submitted, venue.Submitted.Count);
+        Assert.DoesNotContain(venue.Working, o => o.Type == OrderTypes.Stop);
+    }
+
+    [Fact]
+    public void Removing_the_target_while_it_fills_completely_never_re_sends_a_stop()
+    {
+        var venue = new OcoVenue { DeferCancels = true };
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+
+        brackets.CancelBracket(target); // requested; the venue fills it before the cancellation arrives
+        venue.ReportCancel(stop); // OCO cancellation of the stop, reported before the target's fill
+        Assert.Equal(2, venue.Submitted.Count);
+        venue.ReportExecution(target, 4);
+        Assert.Equal(2, venue.Submitted.Count);
+        venue.ReportPosition(0);
+
+        Assert.Equal(2, venue.Submitted.Count);
+        Assert.Empty(venue.Working);
+        Assert.Null(brackets.StopLoss);
+    }
+
+    [Fact]
+    public void An_unexplained_cancellation_ends_in_a_visible_protection_gap_after_the_wait_bound()
+    {
+        var venue = new OcoVenue();
+        var now = new DateTime(2026, 11, 15, 12, 0, 0, DateTimeKind.Utc);
+        using var brackets = Brackets(venue);
+        brackets.Clock = () => now;
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+
+        venue.ReportCancel(stop); // nobody here asked; the target has not filled
+        Assert.Contains("Protection gap", brackets.ProtectionNote);
+        now = now.AddMinutes(5);
+        venue.Publish();
+
+        Assert.Equal(2, venue.Submitted.Count);
+        Assert.Null(brackets.StopLoss);
+        Assert.Contains("Protection gap", brackets.ProtectionNote);
+        Assert.Contains("no stop", brackets.ProtectionNote);
+    }
+
     /// <summary>Fake venue with a linked stop/target contract and native amendments.</summary>
     private sealed class OcoVenue : ITradingAccount, ITrackedOrderReplacement, INativeProtection
     {
@@ -322,7 +421,7 @@ public class NativeProtectionTests
             : NativeProtectionFeatures.None;
         public string? NativeProtectionFault { get; private set; }
 
-        public IDisposable LinkProtection()
+        public IDisposable LinkProtection(OrderOwner owner)
         {
             Assert.Null(_scope);
             var scope = _scope = new List<Order>();
@@ -455,6 +554,8 @@ public class NativeProtectionTests
         {
             if (order.ExchangeOrderId.Length == 0 || order.State != OrderStates.Active) return;
             CancelRequests.Add(order);
+            CancelRequestedOrders.Add(order);
+            if (DeferCancels) { Publish(); return; }
             var sibling = CancelCancelsSibling ? Sibling(order) : null;
             VenueCancel(order);
             if (sibling != null) VenueCancel(sibling);
@@ -462,7 +563,45 @@ public class NativeProtectionTests
         }
 
         public void CancelAt(decimal price) => throw new NotSupportedException();
-        public void CancelAll() => throw new NotSupportedException();
+
+        /// <summary>Cancel all requests every working order; acknowledgments arrive later, one event each.</summary>
+        public void CancelAll()
+        {
+            foreach (var order in Working.ToArray())
+            {
+                CancelRequests.Add(order);
+                CancelRequestedOrders.Add(order);
+            }
+            Publish();
+        }
+
+        // ---- venue events published one at a time, as a real venue's separate order/fill/position reports arrive
+        public bool DeferCancels { get; set; }
+        public HashSet<Order> CancelRequestedOrders { get; } = new();
+        public bool CancelRequested(Order order) => CancelRequestedOrders.Contains(order);
+
+        public void ReportCancel(Order order)
+        {
+            VenueCancel(order);
+            Publish();
+        }
+
+        public void ReportExecution(Order order, decimal quantity)
+        {
+            order.Unfilled -= quantity;
+            bool full = order.Unfilled == 0;
+            order.Status = full ? OrderStatus.Filled : OrderStatus.PartlyFilled;
+            order.State = full ? OrderStates.Done : OrderStates.Active;
+            if (full) Working.Remove(order);
+            LastPrice = BracketManager.PriceOf(order);
+            Publish();
+        }
+
+        public void ReportPosition(decimal volume)
+        {
+            Position.Volume = volume;
+            Publish();
+        }
 
         private sealed class Scope(Action close) : IDisposable
         {

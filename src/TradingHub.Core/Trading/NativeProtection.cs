@@ -28,13 +28,17 @@ public interface INativeProtection
     /// <summary>Why exchange-side protection is not in use although the connection asked for it (venue refusal or an
     /// unrepresentable pair); null when nothing fell back.</summary>
     string? NativeProtectionFault { get; }
-
-    /// <summary>Collects the protective stop and target submitted on this thread until disposal, then sends them as one
-    /// linked group when both are valid exits of equal quantity, or individually otherwise.</summary>
-    IDisposable LinkProtection();
+    /// <summary>Collects the protective stop and target that <paramref name="owner"/> submits on this thread until disposal,
+    /// then sends them as one linked group when both are valid exits of equal quantity, or individually otherwise. Another
+    /// owner's orders are never collected, and a scope opened while one is already open collects nothing.</summary>
+    IDisposable LinkProtection(OrderOwner owner);
 
     /// <summary>The venue's identity of the linked group an order belongs to, or null when the venue reports none.</summary>
     string? ProtectionGroupOf(Order order);
+
+    /// <summary>True once this application asked the venue to cancel the order, through any path (a bracket change,
+    /// Cancel all or Close position). A venue cancellation of such an order is never a dissolved link.</summary>
+    bool CancelRequested(Order order);
 }
 
 /// <summary>Display state of a position's protection.</summary>

@@ -664,6 +664,8 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
     private LinkScope? _link;
     private string? _nativeFault;
     private readonly HashSet<long> _recoveryChecked = new();
+    // Every order this app asked Tradovate to cancel (kept after the cancellation is acknowledged).
+    private readonly HashSet<Order> _cancelRequested = new();
     private List<Order> _active = new();
     private readonly object _executionProducer = new();
     private readonly SemaphoreSlim _executionWake = new(0, 1);
@@ -1381,12 +1383,13 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         }
     }
 
-    public IDisposable LinkProtection()
+    public IDisposable LinkProtection(OrderOwner owner)
     {
-        var scope = new LinkScope(this, Environment.CurrentManagedThreadId);
+        var scope = new LinkScope(this, Environment.CurrentManagedThreadId, owner);
         lock (_gate)
         {
-            if (_link != null) throw new InvalidOperationException("A Tradovate protection link is already open.");
+            // A scope opened inside another (a consumer reacting synchronously to an account change) collects nothing.
+            if (_link != null) return NoLink.Instance;
             _link = scope;
         }
         return scope;
@@ -1398,6 +1401,11 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         if (id == 0) return null;
         long oco = _session.OrderState(id)?.OcoId ?? 0;
         return oco > 0 ? "tradovate-oco:" + oco.ToString(CultureInfo.InvariantCulture) : null;
+    }
+
+    public bool CancelRequested(Order order)
+    {
+        lock (_gate) return _cancelRequested.Contains(order);
     }
 
     // Called under the broker gate. After a restart, a still-working OCO leg of manual (chart) protection is re-owned only
@@ -1425,19 +1433,28 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         }
     }
 
-    private sealed class LinkScope(TradovateBroker broker, int thread) : IDisposable
+    private sealed class LinkScope(TradovateBroker broker, int thread, OrderOwner owner) : IDisposable
     {
         public readonly int Thread = thread;
+        public readonly OrderOwner Owner = owner;
         public readonly List<PendingLeg> Legs = new();
         public void Dispose() => broker.CloseLink(this);
+    }
+
+    private sealed class NoLink : IDisposable
+    {
+        public static readonly NoLink Instance = new();
+        public void Dispose() { }
     }
 
     private bool TryDeferLinkedLeg(PendingLeg leg)
     {
         lock (_gate)
         {
+            // Only the scope owner's own exits are collected: another owner's order is never paired with them.
             if (_link is not { } scope || scope.Thread != Environment.CurrentManagedThreadId || scope.Legs.Count >= 2 ||
-                leg.Type is not (OrderTypes.Stop or OrderTypes.Limit) || !(leg.Intent.Request.ReduceOnly || leg.Intent.Request.Protective))
+                leg.Intent.Owner != scope.Owner || leg.Type is not (OrderTypes.Stop or OrderTypes.Limit) ||
+                !(leg.Intent.Request.ReduceOnly || leg.Intent.Request.Protective))
                 return false;
             scope.Legs.Add(leg);
             return true;
@@ -1548,6 +1565,7 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         {
             if (order.State != OrderStates.Active) return;
             _cancelPending.Add(order);
+            _cancelRequested.Add(order);
             RejectQueuedReprice(order, "Cancellation superseded the queued price update.");
             if (!_replacements.ContainsKey(order)) _session.ResolveReplacement(order);
         }

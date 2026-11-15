@@ -596,7 +596,7 @@ public class LiveRunnerTests : IDisposable
         public NativeProtectionFeatures NativeProtection => Enabled && NativeProtectionFault == null
             ? NativeProtectionFeatures.LinkedStopAndTarget | NativeProtectionFeatures.NativeAmendment : NativeProtectionFeatures.None;
         public string? NativeProtectionFault { get; private set; }
-        public IDisposable LinkProtection()
+        public IDisposable LinkProtection(OrderOwner owner)
         {
             Scopes++;
             var scope = _scope = new List<Order>();
@@ -634,7 +634,13 @@ public class LiveRunnerTests : IDisposable
         }
         public Order Replace(Order order, PreparedOrderIntent intent) => _inner.Replace(order, intent);
         public bool IsReplacementPending(Order order) => _inner.IsReplacementPending(order);
-        public void Cancel(Order order) => _inner.Cancel(order);
+        private readonly HashSet<Order> _cancelRequested = new();
+        public void Cancel(Order order)
+        {
+            _cancelRequested.Add(order);
+            _inner.Cancel(order);
+        }
+        public bool CancelRequested(Order order) => _cancelRequested.Contains(order);
         public void CancelAt(decimal price) => _inner.CancelAt(price);
         public void CancelAll() => _inner.CancelAll();
         private sealed class Scope(Action close) : IDisposable

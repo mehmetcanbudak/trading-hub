@@ -102,10 +102,15 @@ A Tradovate connection can opt in to **Exchange-side protection (Tradovate OCO)*
 - Moving a leg is a native amendment of that leg. Position increases and partial exits resize the legs natively while Trading Hub runs.
 - Partial targets, a stop without a target, or a target that does not cover the whole position stay app-managed. Chart Trader says why.
 - If Tradovate refuses the OCO, both legs are sent again as separate app-managed orders and the reason stays visible. Linking stays off for that session until the option is switched off and on again.
-- If Tradovate cancels one leg because the other filled partly, or because Trading Hub removed the other, the remaining position gets an app-managed replacement. A cancellation that nobody in Trading Hub requested, such as **Cancel all**, is respected as it is for app-managed orders.
+- If Tradovate cancels a leg that Trading Hub never asked to cancel, Trading Hub waits for the cause, because cancellation, fill and position reports arrive separately and in any order. Chart Trader shows a **Protection gap** while it waits.
+  - The leg is replaced with an app-managed order only when the other leg has executed since the cancelled leg was last sized, or Trading Hub had removed the other leg and that removal has ended. The replacement is sent only once the reported position matches the booked fills, and it is sized from that position.
+  - The wait ends without sending anything when the other leg filled completely or the position is flat.
+  - Legs that Trading Hub asked to cancel through any path (**Cancel all**, **Close position** or a bracket change), and cancellations of both legs that nobody here requested, are respected as they are for app-managed orders.
+  - When no cause is confirmed within 30 seconds, Chart Trader keeps showing the **Protection gap** and that no stop (or target) is working. Nothing is sent automatically, so place a new stop yourself.
+- A strategy's linked pair and the chart's are separate: one owner's order is never paired with another's.
 - After a restart, chart protection that is still working at Tradovate is re-owned from the saved client IDs and adopted. It is never placed a second time. A strategy re-adopts its own kept stop and target as before.
 
-Tradovate documents neither reduce-only orders nor how OCO legs follow partial fills. While Trading Hub is closed, a leg that is larger than the remaining position is not resized. These behaviours are verified against a fake venue only; follow the [demo checklist](./native-protection-demo-checklist.md) before relying on them with real money.
+Tradovate documents neither reduce-only orders nor how OCO legs follow partial fills or a cancellation of one leg. While Trading Hub is closed, a leg that is larger than the remaining position is not resized, and a cancelled leg is not replaced. While it runs, a replacement waits for the position report, so a short gap with a visible status is possible. These behaviours are verified against a fake venue that publishes cancellation, fill and position reports separately; follow the [demo checklist](./native-protection-demo-checklist.md) before relying on them with real money.
 
 Binance, Bybit and Rithmic connections stay app-managed. Their documented linked contracts do not fit these ownership and resizing rules; the [checklist](./native-protection-demo-checklist.md#venues-that-stay-app-managed) records why.
 

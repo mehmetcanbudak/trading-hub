@@ -192,6 +192,48 @@ public sealed class TradovateNativeProtectionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_nested_link_scope_is_a_no_op_and_never_throws()
+    {
+        using var fake = new FakeTradovate();
+        var (feed, session, account) = await Connect(fake);
+        using var _f = feed;
+        using var _s = session;
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, account, "DEMO101", Context(), () => true);
+        var owner = broker.OrderContext.ManualOwner;
+
+        using var outer = broker.LinkProtection(owner);
+        using var inner = broker.LinkProtection(owner);
+        Assert.NotSame(outer, inner);
+    }
+
+    [Fact]
+    public async Task A_strategy_leg_submitted_inside_a_chart_scope_is_never_paired_with_a_chart_leg()
+    {
+        using var fake = new FakeTradovate();
+        var (feed, session, account) = await Connect(fake);
+        using var _f = feed;
+        using var _s = session;
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, account, "DEMO101", Context(), () => true);
+        OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 2);
+        await Until(() => broker.Position.Volume == 2);
+
+        Order chartStop, strategyTarget;
+        using (broker.LinkProtection(broker.OrderContext.ManualOwner))
+        {
+            chartStop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 2, 4995.25m, "SL", reduceOnly: true);
+            // A runner reacting on the same thread to this submission's account change.
+            strategyTarget = OrderActions.Place(broker, new OrderOwner("strategy-fixture", Kind: OrderOwnerKind.Strategy),
+                OrderTypes.Limit, OrderDirections.Sell, 2, 5010.25m, "TP", reduceOnly: true, protective: true);
+        }
+        await Until(() => chartStop.ExchangeOrderId.Length > 0 && strategyTarget.ExchangeOrderId.Length > 0);
+
+        Assert.Equal(0, fake.OcoRequests);
+        Assert.Equal(3, Count(fake, "placeorder"));
+        Assert.Null(broker.ProtectionGroupOf(chartStop));
+        Assert.Null(broker.ProtectionGroupOf(strategyTarget));
+    }
+
+    [Fact]
     public async Task A_restarted_app_re_owns_and_adopts_the_working_oco_without_sending_again()
     {
         using var fake = new FakeTradovate();

@@ -15822,5 +15822,25 @@
   "Tradovate rejected OCO: {0}": {
     "es": "Tradovate rechazó el OCO: {0}",
     "zh-CN": "Tradovate 拒绝了 OCO：{0}"
+  },
+  "Protection gap:": {
+    "es": "Hueco de protección:",
+    "zh-CN": "保护缺口："
+  },
+  "Protection gap: the venue cancelled the linked stop without a confirmed cause; no stop is working for this position.": {
+    "es": "Hueco de protección: el exchange canceló el stop vinculado sin una causa confirmada; esta posición no tiene ningún stop activo.",
+    "zh-CN": "保护缺口：交易场所在没有确认原因的情况下取消了关联止损；此持仓当前没有有效的止损。"
+  },
+  "Protection gap: the venue cancelled the linked stop; waiting for its fills and position to confirm the remaining position.": {
+    "es": "Hueco de protección: el exchange canceló el stop vinculado; se esperan sus ejecuciones y la posición para confirmar la posición restante.",
+    "zh-CN": "保护缺口：交易场所取消了关联止损；正在等待成交和持仓报告以确认剩余持仓。"
+  },
+  "Protection gap: the venue cancelled the linked target without a confirmed cause; no target is working for this position.": {
+    "es": "Hueco de protección: el exchange canceló el objetivo vinculado sin una causa confirmada; esta posición no tiene ningún objetivo activo.",
+    "zh-CN": "保护缺口：交易场所在没有确认原因的情况下取消了关联目标；此持仓当前没有有效的目标。"
+  },
+  "Protection gap: the venue cancelled the linked target; waiting for its fills and position to confirm the remaining position.": {
+    "es": "Hueco de protección: el exchange canceló el objetivo vinculado; se esperan sus ejecuciones y la posición para confirmar la posición restante.",
+    "zh-CN": "保护缺口：交易场所取消了关联目标；正在等待成交和持仓报告以确认剩余持仓。"
   }
 }

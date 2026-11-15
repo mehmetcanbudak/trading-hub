@@ -138,7 +138,7 @@ internal sealed class FixtureLinkedAccount(SimBroker inner) : ITradingAccount, I
     public NativeProtectionFeatures NativeProtection => Enabled
         ? NativeProtectionFeatures.LinkedStopAndTarget | NativeProtectionFeatures.NativeAmendment : NativeProtectionFeatures.None;
     public string? NativeProtectionFault => null;
-    public IDisposable LinkProtection()
+    public IDisposable LinkProtection(OrderOwner owner)
     {
         var scope = _scope = new List<Order>();
         return new LinkClose(() =>
@@ -158,7 +158,13 @@ internal sealed class FixtureLinkedAccount(SimBroker inner) : ITradingAccount, I
     }
     public Order Replace(Order order, PreparedOrderIntent intent) => inner.Replace(order, intent);
     public bool IsReplacementPending(Order order) => inner.IsReplacementPending(order);
-    public void Cancel(Order order) => inner.Cancel(order);
+    private readonly HashSet<Order> _cancelRequested = new();
+    public void Cancel(Order order)
+    {
+        _cancelRequested.Add(order);
+        inner.Cancel(order);
+    }
+    public bool CancelRequested(Order order) => _cancelRequested.Contains(order);
     public void CancelAt(decimal price) => inner.CancelAt(price);
     public void CancelAll() => inner.CancelAll();
 
