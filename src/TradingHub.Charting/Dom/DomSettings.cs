@@ -17,6 +17,10 @@ public enum DomColumn
     [Display(Name = "Session delta")] Delta,
     [Display(Name = "Traded at bid")] TradedBid,
     [Display(Name = "Traded at ask")] TradedAsk,
+    [Display(Name = "Size (bids below / asks above)")] Size,
+    [Display(Name = "Cumulative total from best price")] Total,
+    [Display(Name = "Book changes (recorded window)")] Changes,
+    [Display(Name = "Recently traded (window)")] Recent,
 }
 
 /// <summary>Una columna del DOM: si se ve y cuánto ancho relativo ocupa.</summary>
@@ -28,7 +32,7 @@ public sealed class DomColumnSetting
 }
 
 /// <summary>Todo lo configurable del DOM.</summary>
-public sealed class DomSettings
+public sealed partial class DomSettings
 {
     [Browsable(false)]
     public List<DomColumnSetting> Columns { get; set; } = DefaultColumns();
@@ -94,6 +98,11 @@ public sealed class DomSettings
         new() { Column = DomColumn.Delta, Width = 0.9, Visible = false },
         new() { Column = DomColumn.TradedBid, Width = 0.9, Visible = false },
         new() { Column = DomColumn.TradedAsk, Width = 0.9, Visible = false },
+        // Optional read-the-book columns stay hidden so the default ladder keeps its existing look.
+        new() { Column = DomColumn.Size, Width = 1.1, Visible = false },
+        new() { Column = DomColumn.Total, Width = 0.9, Visible = false },
+        new() { Column = DomColumn.Changes, Width = 0.9, Visible = false },
+        new() { Column = DomColumn.Recent, Width = 0.9, Visible = false },
     };
 
     /// <summary>Completa columnas que falten (configuraciones guardadas con versiones anteriores).</summary>

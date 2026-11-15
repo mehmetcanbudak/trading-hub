@@ -161,13 +161,37 @@ The bookmark icon or context menu lets you:
 
 ## DOM and tape
 
-DOM follows the active chart in the right panel. Default columns show buy orders, bid size, price, ask size, sell orders and session volume. Its header groups prices by ×1–×1000 ticks, toggles execution buttons, centers the ladder, opens settings or detaches it.
+DOM follows the active chart in the right panel. Default columns show buy orders, bid size, price, ask size, sell orders and session volume. Its header groups prices by ×1–×1000 ticks or **Auto**, switches DOM trading (the lock; see [DOM trading switch](./operar.md#dom-trading-switch)), toggles execution buttons, centers the ladder, opens settings or detaches it.
 
 **DOM settings** controls columns (including session delta and volume traded at bid/ask), ordering, widths, row height, font, automatic centering, double-click trading, order-book highlight thresholds, bars and colors.
 
-The **trade tape** combines fills from one aggressive order with the same millisecond and side. Wheel scrolling pauses following; click the header to return to the latest trades. See [DOM trading](./operar.md#trade-with-dom).
+Optional **book reading** settings are all off by default, so the ladder keeps its usual look until you enable them:
+
+| Setting / column | What it shows |
+|---|---|
+| Automatic row grouping (auto tick) | Ticks per row chosen so the visible rows span ± the chosen percentage of the price, never wider than the received book's shorter side. |
+| Size unit | Quantity, or notional = quantity × price × point value in the instrument's quote currency (also used by the tape). |
+| **Size** column | Bids below and asks above the price in one column, with optional distance marks. |
+| **Total** column | Cumulative resting size from each side's best price to that row. |
+| **Changes** column | Net recorded book change per row in the window: added minus removed size, from the opt-in [depth recording](./datos.md#recorded-depth-and-heatmap-fidelity). Without recording it says **Depth recording is off**; gaps and stale intervals are skipped and reported, never bridged. |
+| **Recent** column | Observed traded volume per row in the same window (seller/buyer split). |
+| Distance marks | Comma-separated percentages marked on both sides of the mid price. |
+| Stats bar | Spread (also in basis points), current step and each side's resting size within 0.5 / 2 / 10 % of the mid; `≥` means the band is deeper than the received book. |
+| Hover mirror | Size from the price to the hovered row against the same distance on the other side, with the ratio. |
+| Highlight the largest sizes automatically | When the fixed highlight size is 0, outlines sizes ≥ 85 % of the largest visible level and ≥ 3 × the median. |
+
+The **trade tape** combines fills from one aggressive order with the same millisecond and side. Its filter shows only prints of at least 10K–1M notional. Wheel scrolling pauses following; click the header to return to the latest trades. See [DOM trading](./operar.md#trade-with-dom).
 
 **Recorded liquidity heatmap** is a separate resting-book overlay. Displaying it does not enable depth recording. Source/venue, gaps, stale/partial books and I/O errors remain visible; the aggregate crypto DOM/heatmap is explicitly first-venue, not consolidated. See [Recorded depth and heatmap fidelity](./datos.md#recorded-depth-and-heatmap-fidelity).
+
+### Book-change studies
+
+Two studies read the same recorded depth (they never enable recording or keep their own copy):
+
+- **Order book changes (added / pulled)** draws a ladder at the right of the price panel for a window (visible bars, 1 h, 4 h, 1 day, session or custom hours): per price, size **added**, size removed and matched to observed footprint volume at that price (**filled**), and the unexplained removed rest (**pulled**). Values are differences between consecutive received snapshots, so orders added and removed between two snapshots are invisible. Only snapshots from one uninterrupted recording, provider and venue no further apart than the stale timeout are compared; the legend counts comparisons, skipped transitions and the longest compared interval. Bars without an observed tick-resolution footprint cannot separate fills, and their removals are labelled as pulled.
+- **Large book orders (pull / chase heuristics)** follows resting levels of at least a fixed or automatic size (a multiple of the median level). A level removed without matching trades within the quick-pull time is marked **S** (spoofing heuristic); one that reappears nearby in the direction the best price moved is marked **C** (chasing heuristic). Levels whose fate falls into a gap, stale interval or outside the received book stay unjudged (dotted), and without trade data a removal is only "removed". These marks describe one price level's snapshot behaviour, never intent or a specific order.
+
+**Orderbook Delta** can also sum a mid-relative **0 – 0.5 / 1 / 2.5 / 5 / 10 / 25 %** band instead of a tick distance; when the provider book is shallower than the band, its status says only recorded levels were summed.
 
 ## Volume profile
 

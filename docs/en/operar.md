@@ -68,6 +68,10 @@ DOM uses the active chart's quantity. **Double-click to trade** disables single-
 
 The optional execution strip has quantity shortcuts, Buy/Sell MKT, Buy/Sell Bid/Ask, Cancel, Reverse and Close, all operating on the active chart.
 
+### DOM trading switch
+
+The lock in the DOM header is a separate, saved switch for trading from the DOM; chart trading, Chart Trader and hotkeys are unaffected. It is **on** by default, so the gestures above and the execution strip work exactly as before, behind the same real-account confirmation, real-order permission and risk limits. Turned **off**, the DOM is read-only: clicks, cancel clicks, order drags and the execution strip's order buttons send nothing and open no confirmation, the status bar explains why, and the ladder shows **DOM trading off**. Scrolling, recentering (double-click also recenters while off) and quantity entry still work.
+
 ## Trade from the chart
 
 - Right-click below last price for buy-limit/sell-stop; above for sell-limit/buy-stop, using Chart Trader quantity. The menu also cancels all orders.

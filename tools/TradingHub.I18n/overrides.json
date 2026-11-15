@@ -13594,5 +13594,461 @@
   "Kept ownership context {0}: {1}": {
     "es": "Se conservó el contexto de propiedad {0}: {1}",
     "zh-CN": "已保留所有权上下文 {0}：{1}"
+  },
+  " · band is deeper than the recorded levels; only recorded levels are summed": {
+    "es": " · la banda es más profunda que los niveles grabados; solo se suman los niveles grabados",
+    "zh-CN": " · 区间深于已记录的档位；只汇总已记录的档位"
+  },
+  " · unobserved {0} · removed without trade data {1} · heuristics, not intent": {
+    "es": " · no observadas {0} · retiradas sin datos de operaciones {1} · heurísticas, no intención",
+    "zh-CN": " · 未观察到 {0} · 无成交数据的移除 {1} · 启发式判断，并非意图"
+  },
+  " · {0} bars without tick footprint: removals shown as pulled": {
+    "es": " · {0} velas sin footprint por tick: lo retirado se muestra como cancelado",
+    "zh-CN": " · {0} 根 K 线没有逐 tick 足迹：移除量显示为撤单"
+  },
+  "0 – 0.5 % of mid": {
+    "es": "0 – 0,5 % del precio medio",
+    "zh-CN": "中间价的 0 – 0.5 %"
+  },
+  "0 – 1 % of mid": {
+    "es": "0 – 1 % del precio medio",
+    "zh-CN": "中间价的 0 – 1 %"
+  },
+  "0 – 10 % of mid": {
+    "es": "0 – 10 % del precio medio",
+    "zh-CN": "中间价的 0 – 10 %"
+  },
+  "0 – 2.5 % of mid": {
+    "es": "0 – 2,5 % del precio medio",
+    "zh-CN": "中间价的 0 – 2.5 %"
+  },
+  "0 – 25 % of mid": {
+    "es": "0 – 25 % del precio medio",
+    "zh-CN": "中间价的 0 – 25 %"
+  },
+  "0 – 5 % of mid": {
+    "es": "0 – 5 % del precio medio",
+    "zh-CN": "中间价的 0 – 5 %"
+  },
+  "0–{0}% of mid": {
+    "es": "0–{0} % del precio medio",
+    "zh-CN": "中间价的 0–{0}%"
+  },
+  "4 hours": {
+    "es": "4 horas",
+    "zh-CN": "4 小时"
+  },
+  "Added and removed (two columns)": {
+    "es": "Agregado y retirado (dos columnas)",
+    "zh-CN": "新增与移除（两列）"
+  },
+  "Added color": {
+    "es": "Color de lo agregado",
+    "zh-CN": "新增颜色"
+  },
+  "All trades": {
+    "es": "Todas las operaciones",
+    "zh-CN": "全部成交"
+  },
+  "Approximate rows (automatic grouping)": {
+    "es": "Filas aproximadas (agrupación automática)",
+    "zh-CN": "大约行数（自动合并）"
+  },
+  "Ask color": {
+    "es": "Color del ask",
+    "zh-CN": "卖盘颜色"
+  },
+  "Ask side background": {
+    "es": "Fondo del lado ask",
+    "zh-CN": "卖盘一侧背景"
+  },
+  "Auto tick: range on each side of the price (%)": {
+    "es": "Tick automático: rango a cada lado del precio (%)",
+    "zh-CN": "自动 tick：价格两侧的范围（%）"
+  },
+  "Automatic": {
+    "es": "Automático",
+    "zh-CN": "自动"
+  },
+  "Automatic row grouping (auto tick)": {
+    "es": "Agrupación automática de filas (tick automático)",
+    "zh-CN": "自动合并行（自动 tick）"
+  },
+  "Automatic: multiple of the median level size": {
+    "es": "Automático: múltiplo del tamaño mediano de los niveles",
+    "zh-CN": "自动：档位挂单量中位数的倍数"
+  },
+  "Bid color": {
+    "es": "Color del bid",
+    "zh-CN": "买盘颜色"
+  },
+  "Bid side background": {
+    "es": "Fondo del lado bid",
+    "zh-CN": "买盘一侧背景"
+  },
+  "Book changes (recorded window)": {
+    "es": "Cambios del libro (ventana grabada)",
+    "zh-CN": "订单簿变化（已记录的时间窗）"
+  },
+  "Book changes and recent trades window (seconds)": {
+    "es": "Ventana de cambios del libro y operaciones recientes (segundos)",
+    "zh-CN": "订单簿变化和近期成交的时间窗（秒）"
+  },
+  "Book changes compare recorded received snapshots in this window (depth recording must be on); recent trades sum observed prints.": {
+    "es": "Los cambios del libro comparan las instantáneas recibidas y grabadas en esta ventana (la grabación de profundidad debe estar activada); las operaciones recientes suman las ejecuciones observadas.",
+    "zh-CN": "订单簿变化比较此时间窗内已记录的收到快照（必须开启深度记录）；近期成交汇总观察到的成交。"
+  },
+  "Book changes · {0}": {
+    "es": "Cambios del libro · {0}",
+    "zh-CN": "订单簿变化 · {0}"
+  },
+  "Book range": {
+    "es": "Rango del libro",
+    "zh-CN": "订单簿范围"
+  },
+  "Book reading": {
+    "es": "Lectura del libro",
+    "zh-CN": "读盘"
+  },
+  "Changes": {
+    "es": "Cambios",
+    "zh-CN": "变化"
+  },
+  "Chasing color": {
+    "es": "Color de persecución",
+    "zh-CN": "追价颜色"
+  },
+  "Chasing: maximum distance (ticks)": {
+    "es": "Persecución: distancia máxima (ticks)",
+    "zh-CN": "追价：最大距离（tick）"
+  },
+  "Chooses the ticks per row so the visible rows span the range below, never wider than the received book.": {
+    "es": "Elige los ticks por fila para que las filas visibles abarquen el rango de abajo, nunca más que el libro recibido.",
+    "zh-CN": "自动选择每行的 tick 数，让可见行覆盖下面的范围，但绝不超过收到的订单簿。"
+  },
+  "Comma-separated percentages marked on both sides of the mid price (empty = none).": {
+    "es": "Porcentajes separados por comas, marcados a ambos lados del precio medio (vacío = ninguno).",
+    "zh-CN": "用逗号分隔的百分比，在中间价两侧标出（留空 = 不标）。"
+  },
+  "Compare with the other side on hover (mirror)": {
+    "es": "Comparar con el otro lado al pasar el puntero (espejo)",
+    "zh-CN": "悬停时与另一侧对比（镜像）"
+  },
+  "Consecutive snapshots further apart are not compared; the book between them was not observed.": {
+    "es": "Las instantáneas consecutivas más separadas no se comparan: el libro entre ellas no se observó.",
+    "zh-CN": "间隔更长的相邻快照不做比较：两者之间的订单簿没有被观察到。"
+  },
+  "Cumulative total from best price": {
+    "es": "Total acumulado desde el mejor precio",
+    "zh-CN": "从最优价起的累计"
+  },
+  "Current session": {
+    "es": "Sesión actual",
+    "zh-CN": "当前交易时段"
+  },
+  "Custom hours": {
+    "es": "Horas personalizadas",
+    "zh-CN": "自定义小时数"
+  },
+  "DOM settings control columns, sizing, colors, optional double-click trading and book reading (auto tick, notional, changes, stats, mirror).": {
+    "es": "La configuración del DOM controla columnas, tamaños, colores, la operación opcional con doble clic y la lectura del libro (tick automático, nocional, cambios, estadísticas, espejo).",
+    "zh-CN": "DOM 设置控制列、尺寸、颜色、可选的双击交易以及读盘功能（自动 tick、名义金额、变化、统计、镜像）。"
+  },
+  "DOM trading is off: the DOM is read-only. Use the lock in the DOM header to enable it.": {
+    "es": "Operar desde el DOM está desactivado: el DOM es de solo lectura. Usá el candado del encabezado del DOM para activarlo.",
+    "zh-CN": "DOM 交易已关闭：DOM 为只读。使用 DOM 标题栏的锁来开启。"
+  },
+  "DOM trading off": {
+    "es": "Operar desde el DOM: desactivado",
+    "zh-CN": "DOM 交易：已关闭"
+  },
+  "DOM trading off: the DOM is read-only": {
+    "es": "Operar desde el DOM desactivado: el DOM es de solo lectura",
+    "zh-CN": "DOM 交易已关闭：DOM 为只读"
+  },
+  "DOM trading off: the DOM is read-only. Click to enable DOM trading.": {
+    "es": "Operar desde el DOM desactivado: el DOM es de solo lectura. Hacé clic para activarlo.",
+    "zh-CN": "DOM 交易已关闭：DOM 为只读。点击以开启 DOM 交易。"
+  },
+  "DOM trading on": {
+    "es": "Operar desde el DOM activado",
+    "zh-CN": "DOM 交易已开启"
+  },
+  "DOM trading on. Click to make the DOM read-only (chart trading is unaffected).": {
+    "es": "Operar desde el DOM activado. Hacé clic para dejar el DOM en solo lectura (operar en el gráfico no cambia).",
+    "zh-CN": "DOM 交易已开启。点击使 DOM 变为只读（不影响图表交易）。"
+  },
+  "Depth recording is off": {
+    "es": "La grabación de profundidad está desactivada",
+    "zh-CN": "深度记录已关闭"
+  },
+  "Distance marks from the price (%)": {
+    "es": "Marcas de distancia al precio (%)",
+    "zh-CN": "距价格的标记（%）"
+  },
+  "Filled color": {
+    "es": "Color de lo ejecutado",
+    "zh-CN": "成交颜色"
+  },
+  "Group DOM price levels (automatic: rows span the range set in DOM settings)": {
+    "es": "Agrupar precios del DOM (automático: las filas abarcan el rango fijado en la configuración del DOM)",
+    "zh-CN": "合并 DOM 价位（自动：行覆盖 DOM 设置中设定的范围）"
+  },
+  "Group rows by ticks (0 = automatic)": {
+    "es": "Agrupar filas por ticks (0 = automático)",
+    "zh-CN": "按 tick 合并行（0 = 自动）"
+  },
+  "Highlight the largest visible sizes automatically": {
+    "es": "Resaltar automáticamente los tamaños visibles más grandes",
+    "zh-CN": "自动高亮可见范围内最大的挂单量"
+  },
+  "Hours (custom window)": {
+    "es": "Horas (ventana personalizada)",
+    "zh-CN": "小时数（自定义时间窗）"
+  },
+  "Ladder of recorded L2 changes per price: size added, size removed without matching trades (pulled) and removed size matched to observed footprint volume (filled). Snapshot differences, not individual orders; gaps and stale intervals are skipped and counted. Needs explicit depth recording.": {
+    "es": "Escalera de cambios L2 grabados por precio: tamaño agregado, tamaño retirado sin operaciones que lo expliquen (cancelado) y tamaño retirado que coincide con el volumen observado del footprint (ejecutado). Diferencias entre instantáneas, no órdenes individuales; los huecos y los intervalos obsoletos se omiten y se cuentan. Requiere activar explícitamente la grabación de profundidad.",
+    "zh-CN": "按价格显示已记录的 L2 变化阶梯：新增量、没有对应成交的移除量（撤单），以及与观察到的足迹成交量相符的移除量（成交）。这是快照之间的差异，不是单个订单；缺口和过期区间会被跳过并计数。需要明确开启深度记录。"
+  },
+  "Ladder width (px)": {
+    "es": "Ancho de la escalera (px)",
+    "zh-CN": "阶梯宽度（像素）"
+  },
+  "Large book orders (pull / chase heuristics)": {
+    "es": "Órdenes grandes del libro (heurísticas de retiro / persecución)",
+    "zh-CN": "订单簿大单（撤单 / 追价启发式）"
+  },
+  "Large levels ≥ {0} · {1} tracked · S quick pulls {2} · C moved {3}": {
+    "es": "Niveles grandes ≥ {0} · {1} seguidos · S retiros rápidos {2} · C movidos {3}",
+    "zh-CN": "大档位 ≥ {0} · 跟踪 {1} 个 · S 快速撤单 {2} · C 移动 {3}"
+  },
+  "Large levels ≥ {0} · {1} tracked · S quick pulls {2} · C moved {3} · unobserved {4} · removed without trade data {5} · heuristics, not intent": {
+    "es": "Niveles grandes ≥ {0} · {1} seguidos · S retiros rápidos {2} · C movidos {3} · no observadas {4} · retiradas sin datos de operaciones {5} · heurísticas, no intención",
+    "zh-CN": "大档位 ≥ {0} · 跟踪 {1} 个 · S 快速撤单 {2} · C 移动 {3} · 未观察到 {4} · 无成交数据的移除 {5} · 启发式判断，并非意图"
+  },
+  "Large recorded resting levels: when they appeared and how long they rested. Marks quick pulls without matching trades (S, spoofing heuristic) and levels moving with the price (C, chasing heuristic); fates crossing gaps, stale intervals or leaving the visible book stay unjudged. Needs explicit depth recording.": {
+    "es": "Niveles grandes en reposo grabados: cuándo aparecieron y cuánto duraron. Marca los retiros rápidos sin operaciones que los expliquen (S, heurística de spoofing) y los niveles que se mueven con el precio (C, heurística de persecución); los destinos que cruzan huecos, intervalos obsoletos o salen del libro visible no se juzgan. Requiere activar explícitamente la grabación de profundidad.",
+    "zh-CN": "已记录的大额挂单档位：何时出现、挂了多久。标出没有对应成交的快速撤单（S，虚假挂单启发式）以及随价格移动的档位（C，追价启发式）；跨越缺口、过期区间或离开可见订单簿的结局不作判断。需要明确开启深度记录。"
+  },
+  "Line width": {
+    "es": "Grosor de línea",
+    "zh-CN": "线宽"
+  },
+  "Minimum size (0 = automatic)": {
+    "es": "Tamaño mínimo (0 = automático)",
+    "zh-CN": "最小挂单量（0 = 自动）"
+  },
+  "Net (added minus removed)": {
+    "es": "Neto (agregado menos retirado)",
+    "zh-CN": "净额（新增减移除）"
+  },
+  "No comparable consecutive snapshots (gaps, stale intervals or source changes).": {
+    "es": "No hay instantáneas consecutivas comparables (huecos, intervalos obsoletos o cambios de fuente).",
+    "zh-CN": "没有可比较的相邻快照（缺口、过期区间或数据源变化）。"
+  },
+  "No comparable consecutive snapshots in the window (gaps, stale intervals or source changes).": {
+    "es": "No hay instantáneas consecutivas comparables en la ventana (huecos, intervalos obsoletos o cambios de fuente).",
+    "zh-CN": "时间窗内没有可比较的相邻快照（缺口、过期区间或数据源变化）。"
+  },
+  "No comparable snapshots": {
+    "es": "No hay instantáneas comparables",
+    "zh-CN": "没有可比较的快照"
+  },
+  "No recorded depth in the visible bars. Recording must be explicitly enabled; display does not enable it.": {
+    "es": "No hay profundidad grabada en las velas visibles. La grabación debe activarse explícitamente; mostrarla no la activa.",
+    "zh-CN": "可见 K 线中没有已记录的深度。必须明确开启记录；显示并不会开启记录。"
+  },
+  "No recorded depth in the window": {
+    "es": "No hay profundidad grabada en la ventana",
+    "zh-CN": "时间窗内没有已记录的深度"
+  },
+  "No recorded depth in the window. Recording must be explicitly enabled; display does not enable it.": {
+    "es": "No hay profundidad grabada en la ventana. La grabación debe activarse explícitamente; mostrarla no la activa.",
+    "zh-CN": "时间窗内没有已记录的深度。必须明确开启记录；显示并不会开启记录。"
+  },
+  "No recorded depth snapshots in this interval.": {
+    "es": "No hay instantáneas de profundidad grabadas en este intervalo.",
+    "zh-CN": "此区间内没有已记录的深度快照。"
+  },
+  "No trade data: removed size includes fills.": {
+    "es": "Sin datos de operaciones: lo retirado incluye ejecuciones.",
+    "zh-CN": "没有成交数据：移除量包含成交。"
+  },
+  "No two-sided book": {
+    "es": "No hay libro de dos lados",
+    "zh-CN": "没有双边订单簿"
+  },
+  "No usable book to size the automatic threshold.": {
+    "es": "No hay un libro utilizable para calcular el umbral automático.",
+    "zh-CN": "没有可用的订单簿来计算自动阈值。"
+  },
+  "Notional": {
+    "es": "Nocional",
+    "zh-CN": "名义金额"
+  },
+  "Notional (quantity × price × point value)": {
+    "es": "Nocional (cantidad × precio × valor del punto)",
+    "zh-CN": "名义金额（数量 × 价格 × 点值）"
+  },
+  "Notional multiplies size by price and the instrument point value, in the instrument's quote currency.": {
+    "es": "El nocional multiplica el tamaño por el precio y el valor del punto del instrumento, en la moneda de cotización del instrumento.",
+    "zh-CN": "名义金额 = 数量 × 价格 × 合约点值，以该品种的计价货币表示。"
+  },
+  "Order book changes (added / pulled)": {
+    "es": "Cambios del libro de órdenes (agregado / cancelado)",
+    "zh-CN": "订单簿变化（新增 / 撤单）"
+  },
+  "Partial: gaps or stale intervals skipped": {
+    "es": "Parcial: se omitieron huecos o intervalos obsoletos",
+    "zh-CN": "部分：已跳过缺口或过期区间"
+  },
+  "Percentage bands are measured from the mid price; when the provider book is shallower than the band, only the recorded levels are summed and the status says so.": {
+    "es": "Las bandas porcentuales se miden desde el precio medio; si el libro del proveedor es menos profundo que la banda, solo se suman los niveles grabados y el estado lo indica.",
+    "zh-CN": "百分比区间从中间价起算；当提供商的订单簿浅于该区间时，只汇总已记录的档位，并在状态中注明。"
+  },
+  "Pulled color": {
+    "es": "Color de lo cancelado",
+    "zh-CN": "撤单颜色"
+  },
+  "Quantity (contracts / coins)": {
+    "es": "Cantidad (contratos / monedas)",
+    "zh-CN": "数量（合约 / 币）"
+  },
+  "Quick pull color": {
+    "es": "Color de retiro rápido",
+    "zh-CN": "快速撤单颜色"
+  },
+  "Quick pull: removed within (seconds)": {
+    "es": "Retiro rápido: retirada antes de (segundos)",
+    "zh-CN": "快速撤单：在多少秒内移除"
+  },
+  "Recent": {
+    "es": "Reciente",
+    "zh-CN": "近期"
+  },
+  "Recently traded (window)": {
+    "es": "Operado recientemente (ventana)",
+    "zh-CN": "近期成交（时间窗）"
+  },
+  "Recorded L2 snapshot differences · {0} comparisons · {1} skipped (gaps/stale/source changes) · longest interval {2} s · filled/pulled split is a heuristic": {
+    "es": "Diferencias entre instantáneas L2 grabadas · {0} comparaciones · {1} omitidas (huecos/obsoletas/cambios de fuente) · intervalo más largo {2} s · la separación ejecutado/cancelado es una heurística",
+    "zh-CN": "已记录 L2 快照差异 · {0} 次比较 · 跳过 {1} 次（缺口/过期/数据源变化）· 最长间隔 {2} 秒 · 成交/撤单的划分是启发式判断"
+  },
+  "Recorded L2 snapshot differences · {0} comparisons · {1} skipped (gaps/stale/source changes) · longest interval {2} s · filled/pulled split is a heuristic{3}{4}": {
+    "es": "Diferencias entre instantáneas L2 grabadas · {0} comparaciones · {1} omitidas (huecos/obsoletas/cambios de fuente) · intervalo más largo {2} s · la separación ejecutado/cancelado es una heurística{3}{4}",
+    "zh-CN": "已记录 L2 快照差异 · {0} 次比较 · 跳过 {1} 次（缺口/过期/数据源变化）· 最长间隔 {2} 秒 · 成交/撤单的划分是启发式判断{3}{4}"
+  },
+  "Recording off": {
+    "es": "Grabación desactivada",
+    "zh-CN": "记录已关闭"
+  },
+  "Resting L2 · {0} · {1} · {2} snapshots · {3} covered seconds": {
+    "es": "L2 de órdenes pendientes · {0} · {1} · {2} instantáneas · {3} segundos cubiertos",
+    "zh-CN": "L2 挂单 · {0} · {1} · {2} 个快照 · 覆盖 {3} 秒"
+  },
+  "Show filled (removed by trades)": {
+    "es": "Mostrar lo ejecutado (retirado por operaciones)",
+    "zh-CN": "显示成交（被成交移除的量）"
+  },
+  "Show only trades of at least this notional (quantity × price × point value)": {
+    "es": "Mostrar solo operaciones de al menos este nocional (cantidad × precio × valor del punto)",
+    "zh-CN": "只显示名义金额不低于此值的成交（数量 × 价格 × 点值）"
+  },
+  "Show traded levels": {
+    "es": "Mostrar niveles operados",
+    "zh-CN": "显示已成交的档位"
+  },
+  "Show unobserved fates": {
+    "es": "Mostrar destinos no observados",
+    "zh-CN": "显示未观察到的结局"
+  },
+  "Size (bids below / asks above)": {
+    "es": "Cantidad (bids abajo / asks arriba)",
+    "zh-CN": "挂单量（下方买盘 / 上方卖盘）"
+  },
+  "Size unit": {
+    "es": "Unidad de tamaño",
+    "zh-CN": "数量单位"
+  },
+  "Some bars lack an observed tick footprint; their removed size is shown as pulled.": {
+    "es": "Algunas velas no tienen footprint observado por tick; su tamaño retirado se muestra como cancelado.",
+    "zh-CN": "部分 K 线没有观察到的逐 tick 足迹；其移除量显示为撤单。"
+  },
+  "Some transitions were skipped (gaps, stale intervals or source changes); changes across them are unknown.": {
+    "es": "Se omitieron algunas transiciones (huecos, intervalos obsoletos o cambios de fuente); los cambios a través de ellas son desconocidos.",
+    "zh-CN": "部分相邻快照被跳过（缺口、过期区间或数据源变化）；跨越它们的变化未知。"
+  },
+  "Spread {0} ({1} bp) · ×{2} tick": {
+    "es": "Spread {0} ({1} pb) · ×{2} tick",
+    "zh-CN": "价差 {0}（{1} 基点）· ×{2} tick"
+  },
+  "Stats bar (spread, liquidity within 0.5 / 2 / 10 %)": {
+    "es": "Barra de estadísticas (spread, liquidez dentro del 0,5 / 2 / 10 %)",
+    "zh-CN": "统计栏（价差、0.5 / 2 / 10 % 内的挂单量）"
+  },
+  "The lock in the header switches DOM trading off: the DOM becomes read-only (chart trading is unaffected).": {
+    "es": "El candado del encabezado desactiva operar desde el DOM: el DOM queda en solo lectura (operar en el gráfico no cambia).",
+    "zh-CN": "标题栏中的锁可关闭 DOM 交易：DOM 变为只读（不影响图表交易）。"
+  },
+  "Ticks from each side's best price": {
+    "es": "Ticks desde el mejor precio de cada lado",
+    "zh-CN": "距各侧最优价的 tick 数"
+  },
+  "Values on each row": {
+    "es": "Valores en cada fila",
+    "zh-CN": "每行显示数值"
+  },
+  "Visible bars": {
+    "es": "Velas visibles",
+    "zh-CN": "可见 K 线"
+  },
+  "When the fixed highlight size is 0: sizes ≥ 85 % of the largest visible level and ≥ 3 × the median are outlined.": {
+    "es": "Cuando el tamaño fijo de resaltado es 0: se recuadran los tamaños ≥ 85 % del nivel visible más grande y ≥ 3 × la mediana.",
+    "zh-CN": "当固定高亮阈值为 0 时：挂单量 ≥ 可见最大档位的 85 % 且 ≥ 中位数 3 倍的会被框出。"
+  },
+  "changes: {0} comparisons, {1} skipped": {
+    "es": "cambios: {0} comparaciones, {1} omitidas",
+    "zh-CN": "变化：{0} 次比较，跳过 {1} 次"
+  },
+  "current session": {
+    "es": "sesión actual",
+    "zh-CN": "当前交易时段"
+  },
+  "green added · red pulled · amber filled (heuristic)": {
+    "es": "verde agregado · rojo cancelado · ámbar ejecutado (heurístico)",
+    "zh-CN": "绿色新增 · 红色撤单 · 琥珀色成交（启发式）"
+  },
+  "green: more added · red: more removed": {
+    "es": "verde: más agregado · rojo: más retirado",
+    "zh-CN": "绿色：新增更多 · 红色：移除更多"
+  },
+  "visible bars": {
+    "es": "velas visibles",
+    "zh-CN": "可见 K 线"
+  },
+  "± book": {
+    "es": "± libro",
+    "zh-CN": "± 挂单"
+  },
+  "≥ 100K notional": {
+    "es": "≥ 100K de nocional",
+    "zh-CN": "名义金额 ≥ 100K"
+  },
+  "≥ 10K notional": {
+    "es": "≥ 10K de nocional",
+    "zh-CN": "名义金额 ≥ 10K"
+  },
+  "≥ 1M notional": {
+    "es": "≥ 1M de nocional",
+    "zh-CN": "名义金额 ≥ 1M"
+  },
+  "≥ 500K notional": {
+    "es": "≥ 500K de nocional",
+    "zh-CN": "名义金额 ≥ 500K"
+  },
+  "≥ 50K notional": {
+    "es": "≥ 50K de nocional",
+    "zh-CN": "名义金额 ≥ 50K"
   }
 }
