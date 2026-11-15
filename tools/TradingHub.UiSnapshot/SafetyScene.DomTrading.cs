@@ -111,7 +111,9 @@ internal static partial class SafetyScene
             window.MouseUp(to, MouseButton.Left);
             check(Confirmation(1) == null && working.Price == bidPrice, $"off: dragging the order moves nothing (price {inst.FormatPrice(working.Price)})");
         }
-        var buttons = tv.GetVisualDescendants().OfType<Button>().Where(b => b.Content is TextBlock t && (t.Text == "Buy MKT" || t.Text == Lang.T("Buy MKT"))).ToList();
+        // only the DOM section's execution strip (the Chart Trader has its own, unaffected Buy MKT buttons)
+        var domSection = dom.GetVisualAncestors().OfType<DockPanel>().First();
+        var buttons = domSection.GetVisualDescendants().OfType<Button>().Where(b => b.Content is TextBlock t && (t.Text == "Buy MKT" || t.Text == Lang.T("Buy MKT"))).ToList();
         check(buttons.Count > 0 && buttons.All(b => !b.IsEffectivelyEnabled), "off: the DOM order buttons are disabled");
         foreach (var button in buttons) button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); // even a forced click
         check(Confirmation(1) == null && real.Position.Volume == position, "off: a forced DOM order-button click sends nothing");
