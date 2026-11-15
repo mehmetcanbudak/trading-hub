@@ -234,6 +234,71 @@ public sealed class TradovateNativeProtectionTests : IDisposable
     }
 
     [Fact]
+    public async Task Cancel_requests_are_kept_while_the_oco_partner_works_and_forgotten_one_sync_after_both_end()
+    {
+        using var fake = new FakeTradovate();
+        var (feed, session, account) = await Connect(fake);
+        using var _f = feed;
+        using var _s = session;
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, account, "DEMO101", Context(), () => true);
+        OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 2);
+        await Until(() => broker.Position.Volume == 2);
+        Order stop, target;
+        using (broker.LinkProtection(broker.OrderContext.ManualOwner))
+        {
+            stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 2, 4995.25m, "SL", reduceOnly: true);
+            target = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Sell, 2, 5010.25m, "TP", reduceOnly: true);
+        }
+        await Until(() => broker.ProtectionGroupOf(stop) != null && broker.ProtectionGroupOf(target) != null);
+
+        broker.Cancel(stop);
+        await Until(() => stop.Canceled);
+        broker.Cancel(target); // its own sync runs while the stop has ended and the partner still works
+        await Until(() => target.Canceled);
+        Assert.True(broker.CancelRequested(stop));
+        Assert.True(broker.CancelRequested(target));
+
+        await fake.PublishPosition(new JsonObject { ["id"] = 1, ["accountId"] = 101, ["contractId"] = 555, ["netPos"] = 2, ["netPrice"] = 5000.25m,
+            ["bought"] = 2, ["boughtValue"] = 10000.5m, ["sold"] = 0, ["soldValue"] = 0 });
+        await Until(() => !broker.CancelRequested(stop) && !broker.CancelRequested(target));
+    }
+
+    [Fact]
+    public async Task The_cancel_request_cap_evicts_ended_orders_first_and_never_a_working_one()
+    {
+        using var fake = new FakeTradovate();
+        var normal = fake.Server.OnHttp!;
+        long held = 0;
+        fake.Server.OnHttp = request =>
+        {
+            // The second cancellation is accepted but never reported: that order stays working.
+            if (request.Route == "/v1/order/cancelorder" && JsonNode.Parse(request.Body)!["orderId"]!.GetValue<long>() == Interlocked.Read(ref held))
+                return (200, $"{{\"failureReason\":\"Success\",\"commandId\":{held}}}");
+            return normal(request);
+        };
+        var (feed, session, account) = await Connect(fake);
+        using var _f = feed;
+        using var _s = session;
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, account, "DEMO101", Context(), () => true)
+        {
+            CancelRequestMemory = 1,
+        };
+        var first = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1, 4990);
+        var second = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1, 4985);
+        await Until(() => first.ExchangeOrderId.Length > 0 && second.ExchangeOrderId.Length > 0 &&
+            broker.ActiveOrders.Contains(first) && broker.ActiveOrders.Contains(second));
+        Interlocked.Exchange(ref held, long.Parse(second.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture));
+
+        broker.Cancel(second);
+        broker.Cancel(first);
+        await Until(() => first.Canceled);
+
+        Assert.False(broker.CancelRequested(first)); // over the cap: the ended entry goes at once
+        Assert.True(broker.CancelRequested(second)); // a working order's request is never evicted
+        Assert.True(second.State == OrderStates.Active);
+    }
+
+    [Fact]
     public async Task A_restarted_app_re_owns_and_adopts_the_working_oco_without_sending_again()
     {
         using var fake = new FakeTradovate();

@@ -664,8 +664,15 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
     private LinkScope? _link;
     private string? _nativeFault;
     private readonly HashSet<long> _recoveryChecked = new();
-    // Every order this app asked Tradovate to cancel (kept after the cancellation is acknowledged).
-    private readonly HashSet<Order> _cancelRequested = new();
+    // Every order this app asked Tradovate to cancel, in request order. An entry outlives the acknowledgment by one sync
+    // (consumers read it on the change that reports the cancellation) and while its OCO partner still works; beyond the
+    // cap the oldest ended entries go first, and a working order's entry is never evicted.
+    private readonly Dictionary<Order, long> _cancelRequested = new();
+    private readonly List<Order> _cancelRequestPrunable = new();
+    private long _cancelRequestSequence;
+
+    /// <summary>Upper bound on remembered cancel requests of ended orders.</summary>
+    public int CancelRequestMemory { get; init; } = 1024;
     private List<Order> _active = new();
     private readonly object _executionProducer = new();
     private readonly SemaphoreSlim _executionWake = new(0, 1);
@@ -1170,6 +1177,9 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
             bool replayReady = _session.SnapshotReady;
             if (!replayReady) _cancelAwaitingAck.Clear();
             var states = _session.OrdersOf(_account.Id, c.Id);
+            // Entries found ended on the previous sync have been reported to consumers; forget them now.
+            foreach (var ended in _cancelRequestPrunable) _cancelRequested.Remove(ended);
+            _cancelRequestPrunable.Clear();
             foreach (var s in states)
             {
                 Order o;
@@ -1238,6 +1248,7 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
                     }
                 }
             _active = active;
+            PruneCancelRequests(states);
         }
         PublishOwnershipNotification();
         PublishQuantityNotifications();
@@ -1405,7 +1416,30 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
 
     public bool CancelRequested(Order order)
     {
-        lock (_gate) return _cancelRequested.Contains(order);
+        lock (_gate) return _cancelRequested.ContainsKey(order);
+    }
+
+    // Called under the broker gate at the end of a sync. An ended order whose OCO partner has also ended (or that has none)
+    // is forgotten on the next sync; the cap evicts the oldest ended entries first.
+    private void PruneCancelRequests(List<TradovateOrderState> states)
+    {
+        if (_cancelRequested.Count == 0) return;
+        var working = new HashSet<long>(states.Where(s => !s.Done && s.OcoId > 0).Select(s => s.OcoId));
+        var ended = new List<(Order Order, long Sequence)>();
+        foreach (var (order, sequence) in _cancelRequested)
+        {
+            if (order.State == OrderStates.Active) continue;
+            ended.Add((order, sequence));
+            long oco = _session.OrderState(IdOf(order))?.OcoId ?? 0;
+            if (oco == 0 || !working.Contains(oco)) _cancelRequestPrunable.Add(order);
+        }
+        int excess = _cancelRequested.Count - CancelRequestMemory;
+        foreach (var (order, _) in ended.OrderBy(e => e.Sequence))
+        {
+            if (excess-- <= 0) break;
+            _cancelRequestPrunable.Remove(order);
+            _cancelRequested.Remove(order);
+        }
     }
 
     // Called under the broker gate. After a restart, a still-working OCO leg of manual (chart) protection is re-owned only
@@ -1565,7 +1599,7 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         {
             if (order.State != OrderStates.Active) return;
             _cancelPending.Add(order);
-            _cancelRequested.Add(order);
+            _cancelRequested.TryAdd(order, ++_cancelRequestSequence);
             RejectQueuedReprice(order, "Cancellation superseded the queued price update.");
             if (!_replacements.ContainsKey(order)) _session.ResolveReplacement(order);
         }

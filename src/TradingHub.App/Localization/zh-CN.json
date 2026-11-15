@@ -474,7 +474,6 @@
   "A Binance execution producer cannot move to another account generation.": "Binance 成交生产方不能迁移到另一账户代次。",
   "A Bybit flatten is pending; new exposure is blocked until its tracked close reconciles.": "Bybit 全部平仓正在等待确认；在所跟踪的平仓核对完成前，禁止新增敞口。",
   "A Longbridge data-only connection is required.": "需要仅提供数据的 Longbridge 连接。",
-  "A Tradovate protection link is already open.": "已有一个打开的 Tradovate 保护关联。",
   "A Z → Fibonacci retracement (between the first and last strokes)": "Z 形 → 斐波那契回撤（位于第一笔和最后一笔之间）",
   "A bounded Rithmic close already reserves this native account and contract in another ownership context.": "另一个归属上下文中的有界 Rithmic 平仓已预留此原生账户和合约.",
   "A bounded Rithmic close reserves this native contract; new exposure is disabled.": "有界 Rithmic 平仓已预留此原生合约; 已禁用新增敞口.",

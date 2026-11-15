@@ -15727,10 +15727,6 @@
     "es": "Falló el cambio de nombre con escritura directa a '{0}' (error del sistema {1}).",
     "zh-CN": "直写重命名到“{0}”失败（系统错误 {1}）。"
   },
-  "A Tradovate protection link is already open.": {
-    "es": "Ya hay un vínculo de protección de Tradovate abierto.",
-    "zh-CN": "已有一个打开的 Tradovate 保护关联。"
-  },
   "App-managed protection": {
     "es": "Protección gestionada por la app",
     "zh-CN": "由应用管理的保护"

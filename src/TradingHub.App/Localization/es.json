@@ -474,7 +474,6 @@
   "A Binance execution producer cannot move to another account generation.": "Un productor de ejecuciones de Binance no puede pasar a otra generación de cuenta.",
   "A Bybit flatten is pending; new exposure is blocked until its tracked close reconciles.": "Hay un cierre total de Bybit pendiente; se bloquea la nueva exposición hasta conciliar su cierre registrado.",
   "A Longbridge data-only connection is required.": "Se necesita una conexión de Longbridge solo de datos.",
-  "A Tradovate protection link is already open.": "Ya hay un vínculo de protección de Tradovate abierto.",
   "A Z → Fibonacci retracement (between the first and last strokes)": "Una Z → retroceso de Fibonacci (entre el primer y el último trazo)",
   "A bounded Rithmic close already reserves this native account and contract in another ownership context.": "Un cierre acotado de Rithmic ya reserva esta cuenta nativa y este contrato en otro contexto de titularidad.",
   "A bounded Rithmic close reserves this native contract; new exposure is disabled.": "Un cierre acotado de Rithmic reserva este contrato nativo; la nueva exposición está deshabilitada.",
