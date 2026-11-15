@@ -30,6 +30,17 @@ public sealed class CandleSeriesCache
     /// <summary>Conservative retained-size estimate, including populated price rows and cache keys.</summary>
     public long RetainedBytes { get { lock (_sync) return _retainedBytes; } }
 
+    /// <summary>Drops every retained snapshot. Restores in progress keep their pinned snapshot.</summary>
+    public void Clear()
+    {
+        lock (_sync)
+        {
+            _entries.Clear();
+            _lru.Clear();
+            _retainedBytes = 0;
+        }
+    }
+
     public bool TryRestore(CandleSeries series, TradeStore store, string providerScope)
     {
         ArgumentNullException.ThrowIfNull(series);

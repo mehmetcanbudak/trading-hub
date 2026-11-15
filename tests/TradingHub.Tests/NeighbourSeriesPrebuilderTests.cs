@@ -98,6 +98,9 @@ public sealed class NeighbourSeriesPrebuilderTests
         Assert.False(cache.AdmitPrebuilt(speculative, store, view, "scope"));
         Assert.True(cache.Contains(used, store, "scope"));
         Assert.Equal(1, cache.EntryCount);
+        cache.Clear();
+        Assert.Equal((0, 0L), (cache.EntryCount, cache.RetainedBytes));
+        Assert.True(cache.AdmitPrebuilt(speculative, store, view, "scope"));
     }
 
     [Fact]

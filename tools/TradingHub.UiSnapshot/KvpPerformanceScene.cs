@@ -132,6 +132,11 @@ internal static class KvpPerformanceScene
                 for (int i = 0; i < neighbourTrades; i++)
                     neighbourData.Trades.Add(new Trade(i + 1, now.AddSeconds(i * 3 - neighbourTrades * 3L), -50 + (i * 53 % 1600) * 0.25m, 1 + i % 4,
                         i % 2 == 0 ? TradeSide.Buy : TradeSide.Sell));
+                // Speculative admission never evicts, so measure from an explicitly empty shared cache: earlier scene
+                // charts must not decide whether the neighbours fit.
+                CandleSeriesCache.Shared.Clear();
+                Check(CandleSeriesCache.Shared.EntryCount == 0 && CandleSeriesCache.Shared.RetainedBytes == 0,
+                    "the shared candle cache starts empty for the neighbour measurement");
                 long constructed = Stopwatch.GetTimestamp();
                 using var neighbourModel = new ChartModel(neighbourData, ChartPeriod.M15, new ChartSettings { TimeZoneId = "UTC" });
                 double ownerRebuild = Stopwatch.GetElapsedTime(constructed).TotalMilliseconds;
