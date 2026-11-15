@@ -12,7 +12,7 @@ namespace TradingHub.Feeds.External;
 /// <c>direction</c>); daily IV history: <c>get_volatility_index_data</c> (DVOL, a 30-day implied volatility index).
 /// Deribit contracts are one coin, so the multiplier is 1.
 /// </summary>
-public sealed class DeribitOptions : IOptionsProvider
+public sealed class DeribitOptions : IOptionsProvider, IOptionTradeWindows
 {
     /// <summary>Production REST root.</summary>
     public static readonly Uri DefaultRoot = new("https://www.deribit.com/api/v2/public/");
@@ -119,22 +119,42 @@ public sealed class DeribitOptions : IOptionsProvider
         return res;
     }
 
-    public async Task<IReadOnlyList<OptionTrade>> TradesAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
+    public int TradesPerWindow => MaxTradePages * 1000;
+
+    public async Task<IReadOnlyList<OptionTrade>> TradesAsync(string underlying, DateTime from, DateTime to, CancellationToken ct) =>
+        (await TradesWindowAsync(underlying, from, to, ct).ConfigureAwait(false)).Trades;
+
+    /// <summary>
+    /// Pages of 1,000 trades in time order. A page that says there is more ends inside its last millisecond, so its
+    /// trades at that millisecond are read again from the next page. After <see cref="MaxTradePages"/> pages the window
+    /// stops at that millisecond and reports it as <see cref="OptionTradeWindow.CoveredTo"/>; nothing later is implied.
+    /// </summary>
+    public async Task<OptionTradeWindow> TradesWindowAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
     {
         var res = new List<OptionTrade>();
         long start = new DateTimeOffset(DateTime.SpecifyKind(from, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
         long end = new DateTimeOffset(DateTime.SpecifyKind(to, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-        for (int page = 0; page < MaxTradePages && start < end; page++)
+        for (int page = 0; start < end; page++)
         {
             var r = await Get("get_last_trades_by_currency_and_time",
                 $"currency={underlying}&kind=option&start_timestamp={start}&end_timestamp={end}&count=1000&sorting=asc", ct).ConfigureAwait(false);
-            res.AddRange(ParseTrades(r, out bool more, out long last));
-            if (!more || last < start) break;
-            // Trades sharing the last millisecond may straddle pages; the hub de-duplicates them.
+            var trades = ParseTrades(r, out bool more, out long last);
+            if (!more)
+            {
+                res.AddRange(trades);
+                break;
+            }
+
+            // More than a page in one millisecond cannot be paged by time: coverage stops before it.
+            if (last <= start) return new OptionTradeWindow(res, DateTimeOffset.FromUnixTimeMilliseconds(start).UtcDateTime);
+
+            var boundary = DateTimeOffset.FromUnixTimeMilliseconds(last).UtcDateTime;
+            res.AddRange(trades.Where(t => t.Time < boundary));
+            if (page + 1 >= MaxTradePages) return new OptionTradeWindow(res, boundary);
             start = last;
         }
 
-        return res;
+        return new OptionTradeWindow(res, to);
     }
 
     public async Task<IReadOnlyList<OptionDaily>> DailyAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)

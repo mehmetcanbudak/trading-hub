@@ -457,6 +457,97 @@ public sealed class OptionsDataHubTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Fact]
+    public async Task Deribit_trade_window_that_hits_the_page_cap_reports_where_coverage_stops()
+    {
+        // Every page is full and says there is more: 1,000 trades one millisecond apart from the requested start.
+        using var s = new FakeHttpServer();
+        s.OnHttp = req =>
+        {
+            long start = long.Parse(req.Query("start_timestamp"));
+            var trades = Enumerable.Range(0, 1000).Select(i =>
+                $$"""{"trade_id":"t{{start + i}}","instrument_name":"BTC-27NOV26-72000-C","timestamp":{{start + i}},"price":0.01,"amount":1,"direction":"buy","iv":50,"index_price":70000}""");
+            return (200, """{"result":{"has_more":true,"trades":[""" + string.Join(",", trades) + "]}}");
+        };
+        using var http = new HttpClient();
+        var deribit = new DeribitOptions(http, new Uri(s.Http + "/api/v2/public/"));
+        var from = new DateTime(2026, 11, 5, 0, 0, 0, DateTimeKind.Utc);
+        var to = from.AddHours(1);
+        var window = await deribit.TradesWindowAsync("BTC", from, to, CancellationToken.None);
+        // 50 pages advance 999 ms each; trades at the last page's final millisecond may continue on an unread page.
+        var coveredTo = from.AddMilliseconds(50 * 999);
+        Assert.Equal(coveredTo, window.CoveredTo);
+        Assert.Equal(50 * 999, window.Trades.Count);
+        Assert.All(window.Trades, t => Assert.True(t.Time < coveredTo));
+        Assert.Equal(window.Trades.Count, window.Trades.Select(t => t.Time).Distinct().Count());
+        Assert.Equal(DeribitOptions.MaxTradePages, s.Requests.Count);
+        Assert.Equal(DeribitOptions.MaxTradePages * 1000, deribit.TradesPerWindow);
+    }
+
+    [Fact]
+    public async Task Capped_trade_windows_are_partial_gaps_until_a_later_refresh_fills_them()
+    {
+        var end = ProfileStart.AddDays(2);
+        var capped = new CappedTrades(end);
+        var hub = new OptionsData(null, () => end) { MaxTradeDays = 2, Provider = capped };
+        await hub.LoadTradesAsync("BTC", end.AddDays(-2), end, CancellationToken.None);
+        // Each request covers only its first hour: the rest of each window is a recorded gap, never an empty (zero) span.
+        Assert.True(hub.TradesCovered("BTC", end.AddDays(-1), end.AddDays(-1).AddMinutes(30)));
+        Assert.False(hub.TradesCovered("BTC", end.AddHours(-3), end.AddHours(-2)));
+        var note = hub.TradeCoverageNote("BTC", end.AddDays(-2), end);
+        Assert.NotNull(note);
+        Assert.StartsWith("Partial: trades capped at 1000 per request;", note);
+        Assert.Contains("UTC not loaded yet", note);
+        Assert.Null(hub.TradeCoverageNote("BTC", end.AddDays(-1), end.AddDays(-1).AddMinutes(30)));
+        // Studies name the unloaded span: the card footer of an overlay, and gaps (not zeros) in a pane.
+        using (var data = OptionsMacroStudyTests.Market(2))
+        {
+            var stats = new OptionsStats { Service = hub };
+            using var model = new TradingHub.Charting.ChartModel(data, TradingHub.Data.ChartPeriod.Parse("M30"), new TradingHub.Charting.ChartSettings { TimeZoneId = "UTC" });
+            Assert.Null(model.AddIndicator(stats, applyDefaultColors: false).Error);
+            var volume = new OptionsVolume { Service = hub };
+            Assert.Null(model.AddIndicator(volume, applyDefaultColors: false).Error);
+            model.Update();
+            Assert.Contains("Partial: trades capped at 1000 per request;", stats.Provenance);
+            var calls = (OptionalValueDataSeries)volume.DataSeries[0];
+            Assert.False(calls.IsAvailable(model.Series.Count - 2));
+        }
+
+        // Later refreshes keep paging from where each capped window stopped until the gaps close.
+        for (int i = 0; i < 60 && hub.TradeCoverageNote("BTC", end.AddDays(-2), end) != null; i++)
+            await hub.LoadTradesAsync("BTC", end.AddDays(-2), end, CancellationToken.None);
+        Assert.Null(hub.TradeCoverageNote("BTC", end.AddDays(-2), end));
+        Assert.True(hub.TradesCovered("BTC", end.AddDays(-2), end));
+        var all = hub.TradesBetween("BTC", end.AddDays(-2), end);
+        Assert.Equal(capped.All.Count(t => t.Time >= end.AddDays(-2)), all.Count);
+        Assert.Equal(all.Count, all.Select(t => t.Time).Distinct().Count());
+    }
+
+    /// <summary>A provider whose every trade request stops after one hour of its window, like a page cap.</summary>
+    private sealed class CappedTrades : IOptionsProvider, IOptionTradeWindows
+    {
+        public readonly List<OptionTrade> All = new();
+
+        public CappedTrades(DateTime end)
+        {
+            for (var t = end.AddDays(-3); t < end; t = t.AddMinutes(5))
+                All.Add(new OptionTrade(t, "BTC-C", end.AddDays(7), 100, OptionRight.Call, 1, 1, 1, 0.5, 100, 1));
+        }
+
+        public string Name => "Capped";
+        public int TradesPerWindow => 1000;
+        public bool Supports(string underlying) => true;
+        public Task<OptionsChain?> ChainAsync(string underlying, CancellationToken ct) => Task.FromResult<OptionsChain?>(null);
+        public Task<IReadOnlyList<OptionDaily>> DailyAsync(string underlying, DateTime from, DateTime to, CancellationToken ct) => Task.FromResult<IReadOnlyList<OptionDaily>>(Array.Empty<OptionDaily>());
+        public async Task<IReadOnlyList<OptionTrade>> TradesAsync(string underlying, DateTime from, DateTime to, CancellationToken ct) => (await TradesWindowAsync(underlying, from, to, ct)).Trades;
+
+        public Task<OptionTradeWindow> TradesWindowAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
+        {
+            var covered = from.AddHours(1) < to ? from.AddHours(1) : to;
+            return Task.FromResult(new OptionTradeWindow(All.Where(t => t.Time >= from && t.Time < covered).ToList(), covered));
+        }
+    }
+
     internal static readonly DateTime ProfileStart = ProfileMergeTests.Monday;
 
     private sealed class FailingOptions : IOptionsProvider

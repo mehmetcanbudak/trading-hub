@@ -24,8 +24,11 @@ public sealed class OptionsData : ExternalSeriesHub
 
     private sealed record ChainEntry(DateTime FetchedAt, OptionsChain? Chain, string? Error);
 
-    /// <summary>Contiguous loaded trades: every trade in [From, To) that the provider published is in Items.</summary>
-    private sealed record TradeStore(DateTime From, DateTime To, DateTime FetchedAt, List<OptionTrade> Items);
+    /// <summary>
+    /// Loaded trades: every trade in [From, To) that the provider published is in Items, except inside Gaps, spans where a
+    /// request stopped at the provider's page limit (unknown until a later request fills them).
+    /// </summary>
+    private sealed record TradeStore(DateTime From, DateTime To, DateTime FetchedAt, List<OptionTrade> Items, IReadOnlyList<(DateTime From, DateTime To)> Gaps);
 
     private sealed record DailyEntry(DateTime FetchedAt, List<OptionDaily> Days);
 
@@ -147,7 +150,8 @@ public sealed class OptionsData : ExternalSeriesHub
         _trades.TryGetValue(underlying, out var store);
         bool missingOld = store == null || store.From > want.AddMinutes(1);
         bool stale = store != null && to > store.To && now - store.FetchedAt > TimeSpan.FromMinutes(1);
-        if ((missingOld || stale) && now >= (_tradeRetry.TryGetValue(underlying, out var retry) ? retry : DateTime.MinValue))
+        bool gaps = store != null && store.Gaps.Count > 0 && now - store.FetchedAt > TimeSpan.FromSeconds(10);
+        if ((missingOld || stale || gaps) && now >= (_tradeRetry.TryGetValue(underlying, out var retry) ? retry : DateTime.MinValue))
             Schedule("trades:" + underlying, () => LoadTradesAsync(underlying, want, now, CancellationToken.None));
         if (store == null) return Array.Empty<OptionTrade>();
         int lo = LowerBound(store.Items, from), hi = LowerBound(store.Items, to);
@@ -156,11 +160,43 @@ public sealed class OptionsData : ExternalSeriesHub
 
     /// <summary>Whether every trade in [from, to) has been loaded (so an empty interval is a real zero, not a gap).</summary>
     public bool TradesCovered(string underlying, DateTime from, DateTime to) =>
-        _trades.TryGetValue(underlying, out var s) && s.From <= from && s.To >= to;
+        _trades.TryGetValue(underlying, out var s) && s.From <= from && s.To >= to && !s.Gaps.Any(g => g.From < to && g.To > from);
 
-    /// <summary>The loaded trade interval, or null.</summary>
+    /// <summary>The loaded trade interval, or null. Spans in <see cref="TradeGaps"/> inside it are still unknown.</summary>
     public (DateTime From, DateTime To)? TradeCoverage(string underlying) =>
         _trades.TryGetValue(underlying, out var s) ? (s.From, s.To) : null;
+
+    /// <summary>Spans inside the loaded interval where a request stopped at the provider's page limit (unknown, not empty).</summary>
+    public IReadOnlyList<(DateTime From, DateTime To)> TradeGaps(string underlying) =>
+        _trades.TryGetValue(underlying, out var s) ? s.Gaps : Array.Empty<(DateTime, DateTime)>();
+
+    /// <summary>A note naming the page-limited span within [from, to) that is not loaded yet, or null.</summary>
+    public string? TradeCoverageNote(string underlying, DateTime from, DateTime to)
+    {
+        var gaps = TradeGaps(underlying).Where(g => g.From < to && g.To > from).ToList();
+        if (gaps.Count == 0) return null;
+        DateTime a = gaps.Min(g => g.From) < from ? from : gaps.Min(g => g.From), b = gaps.Max(g => g.To) > to ? to : gaps.Max(g => g.To);
+        string cap = _provider is IOptionTradeWindows w ? w.TradesPerWindow.ToString(System.Globalization.CultureInfo.InvariantCulture) : "a page limit";
+        string span = a.Date == b.Date
+            ? $"{a.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)}–{b.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)}"
+            : $"{a.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)}–{b.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)}";
+        return $"Partial: trades capped at {cap} per request; {span} UTC not loaded yet";
+    }
+
+    /// <summary>Trades of [from, to) and how far they are complete (the provider's page limit can stop a window early).</summary>
+    private static async Task<OptionTradeWindow> FetchAsync(IOptionsProvider p, string underlying, DateTime from, DateTime to, CancellationToken ct)
+    {
+        if (p is IOptionTradeWindows windows)
+        {
+            var w = await windows.TradesWindowAsync(underlying, from, to, ct).ConfigureAwait(false);
+            return w.CoveredTo > to ? w with { CoveredTo = to } : w;
+        }
+
+        return new OptionTradeWindow(await p.TradesAsync(underlying, from, to, ct).ConfigureAwait(false), to);
+    }
+
+    private static List<(DateTime From, DateTime To)> AddGap(IEnumerable<(DateTime From, DateTime To)> gaps, DateTime from, DateTime to) =>
+        from < to ? gaps.Append((From: from, To: to)).OrderBy(g => g.From).ToList() : gaps.ToList();
 
     /// <summary>Loads trades until [from, to) is covered, one day per request window.</summary>
     public async Task LoadTradesAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
@@ -176,26 +212,37 @@ public sealed class OptionsData : ExternalSeriesHub
                 if (s == null)
                 {
                     var start = to.AddDays(-1) > from ? to.AddDays(-1) : from;
-                    var got = await p.TradesAsync(underlying, start, to, ct).ConfigureAwait(false);
+                    var got = await FetchAsync(p, underlying, start, to, ct).ConfigureAwait(false);
                     if (!ReferenceEquals(p, _provider)) return;
-                    _trades[underlying] = new TradeStore(start, to, Now, Merge(new List<OptionTrade>(), got, start, to));
+                    _trades[underlying] = new TradeStore(start, to, Now, Merge(new List<OptionTrade>(), got.Trades, start, got.CoveredTo),
+                        AddGap(Array.Empty<(DateTime, DateTime)>(), got.CoveredTo, to));
+                }
+                else if (s.Gaps.Count > 0)
+                {
+                    // Continue paging from where the newest capped window stopped.
+                    var gap = s.Gaps[^1];
+                    var got = await FetchAsync(p, underlying, gap.From, gap.To, ct).ConfigureAwait(false);
+                    if (!ReferenceEquals(p, _provider)) return;
+                    var gaps = AddGap(s.Gaps.Take(s.Gaps.Count - 1), got.CoveredTo, gap.To);
+                    _trades[underlying] = s with { FetchedAt = Now, Items = Merge(s.Items, got.Trades, gap.From, got.CoveredTo), Gaps = gaps };
                 }
                 else if (s.From > from.AddMinutes(1))
                 {
                     var start = s.From.AddDays(-1) > from ? s.From.AddDays(-1) : from;
-                    var got = await p.TradesAsync(underlying, start, s.From, ct).ConfigureAwait(false);
+                    var got = await FetchAsync(p, underlying, start, s.From, ct).ConfigureAwait(false);
                     if (!ReferenceEquals(p, _provider)) return;
-                    _trades[underlying] = s with { From = start, Items = Merge(s.Items, got, start, s.From) };
+                    _trades[underlying] = s with { From = start, Items = Merge(s.Items, got.Trades, start, got.CoveredTo), Gaps = AddGap(s.Gaps, got.CoveredTo, s.From) };
                 }
                 else if (s.To < to.AddMinutes(-1) || (s.To < to && Now - s.FetchedAt > TimeSpan.FromMinutes(1)))
                 {
                     var start = s.To.AddMinutes(-5);
-                    var got = await p.TradesAsync(underlying, start, to, ct).ConfigureAwait(false);
+                    var got = await FetchAsync(p, underlying, start, to, ct).ConfigureAwait(false);
                     if (!ReferenceEquals(p, _provider)) return;
-                    var items = Merge(s.Items, got, start, to);
+                    var items = Merge(s.Items, got.Trades, start, got.CoveredTo);
                     var keepFrom = Now.AddDays(-MaxTradeDays - 1);
                     if (items.Count > 0 && items[0].Time < keepFrom) items.RemoveRange(0, LowerBound(items, keepFrom));
-                    _trades[underlying] = new TradeStore(s.From < keepFrom ? keepFrom : s.From, to, Now, items);
+                    var gaps = AddGap(s.Gaps.Where(g => g.To > keepFrom), got.CoveredTo > s.To ? got.CoveredTo : s.To, to);
+                    _trades[underlying] = new TradeStore(s.From < keepFrom ? keepFrom : s.From, to, Now, items, gaps);
                 }
                 else break;
 

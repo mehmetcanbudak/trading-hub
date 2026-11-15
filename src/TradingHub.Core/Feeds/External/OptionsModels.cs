@@ -80,3 +80,19 @@ public interface IOptionsProvider
     /// <summary>Daily history; may be empty, in which case recorded daily snapshots fill it.</summary>
     Task<IReadOnlyList<OptionDaily>> DailyAsync(string underlying, DateTime from, DateTime to, CancellationToken ct);
 }
+
+/// <summary>
+/// Trades of one request window. Every trade in [from, <see cref="CoveredTo"/>) is included; when
+/// <see cref="CoveredTo"/> is earlier than the requested end, a page limit stopped the request there and the rest of the
+/// window is unknown, not empty.
+/// </summary>
+public sealed record OptionTradeWindow(IReadOnlyList<OptionTrade> Trades, DateTime CoveredTo);
+
+/// <summary>A provider whose trade requests can stop early at a page limit and say where coverage ends.</summary>
+public interface IOptionTradeWindows
+{
+    /// <summary>Most trades one request window returns before it stops.</summary>
+    int TradesPerWindow { get; }
+
+    Task<OptionTradeWindow> TradesWindowAsync(string underlying, DateTime from, DateTime to, CancellationToken ct);
+}

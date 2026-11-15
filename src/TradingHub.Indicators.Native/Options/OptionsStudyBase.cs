@@ -379,7 +379,11 @@ public abstract class OptionsOverlay : Indicator
         {
             _day = new int[CurrentBar];
             for (int i = 1; i < CurrentBar; i++) _day[i] = _day[i - 1] + (IsNewSession(i) ? 1 : 0);
+            _usedTrades = false;
             BuildOptions(scene, options ? data : null);
+            // Trade-based studies name any span a page limit left unloaded (gaps, never zero).
+            if (_usedTrades && options && data!.TradeCoverageNote(Underlying, TimeOf(0), EndOf(CurrentBar - 1)) is { } note)
+                scene.Footer = scene.Footer == null ? note : scene.Footer + " · " + note;
         }
 
         Scene = scene;
@@ -443,13 +447,22 @@ public abstract class OptionsOverlay : Indicator
         return ans;
     }
 
-    protected IReadOnlyList<OptionTrade> TradesOf(OptionsData data, int i) => data.TradesBetween(Underlying, TimeOf(i), EndOf(i));
+    private bool _usedTrades;
+
+    protected IReadOnlyList<OptionTrade> TradesOf(OptionsData data, int i) => TradesBetween(data, TimeOf(i), EndOf(i));
+
+    /// <summary>The chart underlying's loaded trades in [from, to).</summary>
+    protected IReadOnlyList<OptionTrade> TradesBetween(OptionsData data, DateTime from, DateTime to)
+    {
+        _usedTrades = true;
+        return data.TradesBetween(Underlying, from, to);
+    }
 
     /// <summary>Today's trades and whether all of today is loaded (an empty list is then a real absence).</summary>
     protected (IReadOnlyList<OptionTrade> Trades, bool Complete) TodayTrades(OptionsData data)
     {
         DateTime from = TimeOf(DayStart(LastBar)), to = EndOf(LastBar);
-        var trades = data.TradesBetween(Underlying, from, to);
+        var trades = TradesBetween(data, from, to);
         var now = DateTime.UtcNow;
         return (trades, data.TradesCovered(Underlying, from, to < now ? to : now.AddMinutes(-2)));
     }
@@ -638,11 +651,14 @@ public abstract class OptionsPane : Indicator
     protected DateTime BarEnd(int bar) => bar + 1 < CurrentBar ? GetCandle(bar + 1).Time
         : GetCandle(bar).Time + (ChartInfo?.GetTimeFrameTypeChartPeriod() is { } p && p > TimeSpan.Zero ? p : TimeSpan.FromMinutes(1));
 
+    private bool _usedTrades;
+
     /// <summary>The bar's trades, or null when the bar is outside the loaded coverage (a gap).</summary>
     protected IReadOnlyList<OptionTrade>? TradesOf(OptionsData data, int bar)
     {
         DateTime from = GetCandle(bar).Time, to = BarEnd(bar), now = DateTime.UtcNow;
         var trades = data.TradesBetween(Underlying, from, to);
+        _usedTrades = true;
         return data.TradesCovered(Underlying, from, to < now ? to : now.AddMinutes(-2)) ? trades : null;
     }
 
@@ -658,6 +674,8 @@ public abstract class OptionsPane : Indicator
         }
 
         Render(ctx, box);
+        if (_usedTrades && CurrentBar > 0 && Data?.TradeCoverageNote(Underlying, GetCandle(0).Time, BarEnd(CurrentBar - 1)) is { } note)
+            ctx.DrawString(UiText.Tr(note), StudyCard.Font, Opt.Flip, box.Region.Left + 6, box.Region.Top + 32);
     }
 
     protected virtual void Render(RenderContext ctx, IChartContainer box)

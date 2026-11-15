@@ -154,7 +154,7 @@ public class OptionsAtPrice : OptionsOverlay
         data.MaxTradeDays = Math.Max(data.MaxTradeDays, days);
         var now = EndOf(LastBar);
         var from = now.AddDays(-days);
-        var tr = data.TradesBetween(Underlying, from, now).Where(t => t.Spot > 0).ToList();
+        var tr = TradesBetween(data, from, now).Where(t => t.Spot > 0).ToList();
         _bull = _bear = Array.Empty<double>();
         if (tr.Count == 0)
         {
@@ -380,7 +380,7 @@ public class FlowTape : OptionsOverlay
     {
         var now = EndOf(LastBar);
         var from = now.AddHours(-12);
-        var tr = data.TradesBetween(Underlying, from, now);
+        var tr = TradesBetween(data, from, now);
         if (tr.Count == 0)
         {
             Status = data.TradesCovered(Underlying, from, DateTime.UtcNow.AddMinutes(-2) < now ? DateTime.UtcNow.AddMinutes(-2) : now)

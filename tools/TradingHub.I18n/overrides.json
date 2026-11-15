@@ -17670,5 +17670,13 @@
   "← push": {
     "es": "← empuje",
     "zh-CN": "← 推动"
+  },
+  "Partial: trades capped at {0} per request; {1} UTC not loaded yet": {
+    "es": "Parcial: operaciones limitadas a {0} por solicitud; {1} UTC aún sin cargar",
+    "zh-CN": "部分数据：每次请求最多 {0} 笔成交；{1} UTC 尚未加载"
+  },
+  "a page limit": {
+    "es": "un límite de páginas",
+    "zh-CN": "分页上限"
   }
 }
