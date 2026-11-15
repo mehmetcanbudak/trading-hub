@@ -34,7 +34,7 @@ dotnet test tests/TradingHub.Tests -c Release
 ./build-app.sh --install  # Replace the Applications bundle
 ```
 
-Packaging publishes self-contained osx-arm64, staging outside Desktop to avoid iCloud extended attributes interfering with signing. Git-ignored build.local.env can set BUNDLE_ID and SIGN_IDENTITY; TH_OUT and TH_STAGE override output/staging. See [Installation](./instalacion.md).
+Packaging publishes a self-contained build for the Mac's hardware architecture (`osx-arm64` or `osx-x64`; override with `TH_RID`), staging outside Desktop to avoid iCloud extended attributes interfering with signing. Git-ignored build.local.env can set BUNDLE_ID, SIGN_IDENTITY and TH_RID; a caller-supplied TH_RID wins. TH_OUT and TH_STAGE override output/staging. See [Installation](./instalacion.md).
 
 Windows packaging is implemented for both `win-x64` and `win-arm64`: `.\build-windows.ps1` on Windows with .NET SDK 10/NSIS, or `./build-windows.sh` on macOS with .NET SDK 10/NSIS. It produces per-user installers under `dist`; see [Windows](./portar-a-windows.md). Packaging and shared tests do not certify native installer, Credential Manager, CLI/shim, tray/DPI, power or brokerage behavior.
 

@@ -26,11 +26,11 @@ The initial community translation came from [TradeDock's English branch](https:/
 The installed application is self-contained: running it does not require a separate .NET installation.
 
 ```bash
-uname -m                 # Must report arm64
+uname -m                 # arm64 = Apple Silicon, x86_64 = Intel
 sw_vers -productVersion  # Must be 12 or later
 ```
 
-An `x86_64` result means an Intel Mac, which this build does not support.
+Apple Silicon is the primary, fully exercised target. `build-app.sh` builds for Intel automatically on an Intel Mac (`osx-x64`), or when `TH_RID=osx-x64` is set. The Intel package has been launched under Rosetta on Apple Silicon, but not yet on physical Intel hardware.
 
 ## Option 1: Ask Claude Code
 
@@ -66,7 +66,7 @@ The build script temporarily adds `~/.dotnet` to its own PATH; no shell configur
 
 ### What `build-app.sh` does
 
-- Publishes a self-contained Release build for `osx-arm64`.
+- Publishes a self-contained Release build for the Mac's architecture: `osx-arm64` on Apple Silicon, `osx-x64` on Intel. Set `TH_RID=osx-arm64` or `TH_RID=osx-x64` (in the environment or `build.local.env`) to choose explicitly; detection uses the hardware, so a Rosetta terminal on Apple Silicon still builds `osx-arm64`.
 - Assembles the bundle in a temporary directory, outside Desktop: iCloud-added extended attributes can break code signing.
 - Signs the app and places a copy in `dist/Trading Hub.app`.
 - With `--install`, removes the existing `/Applications/Trading Hub.app`, preserves the signed bundle's extended attributes while copying it, and performs strict/deep signature verification. Back up an existing bundle first if you need a rollback. Stripping extended attributes after signing can invalidate managed-assembly signatures; metadata removal is only safe before signing.
