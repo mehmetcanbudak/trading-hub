@@ -369,7 +369,7 @@ internal static class KvpProvidersScene
                 catch (InvalidOperationException) { Check(true, "actual aggregate account factory rejects execution even with a requested simulated account"); }
             }
             var page = SelectConnection(profile);
-            Check(Texts(page).Any(text => text.Contains("Missing constituents remain marked as partial", StringComparison.Ordinal)), "actual aggregate connection panel warns about partial constituents, non-executable prices and Binance-only DOM");
+            Check(Texts(page).Any(text => text.Contains("Prices are not executable. Missing or deviating constituents remain marked as partial", StringComparison.Ordinal)), "actual aggregate connection panel warns about partial constituents, non-executable prices and Binance-only DOM");
             var tested = Await(Connections.TestAsync(profile, default), "actual aggregate connection consumer tests only registered fake constituents");
             Check(tested.Ok && tested.Message.Contains("Non-executable", StringComparison.Ordinal), "actual aggregate test never offers executable composite prices", new { tested.Ok, tested.Message });
             Shot("kvp_providers_aggregate_partial");
