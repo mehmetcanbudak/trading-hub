@@ -128,4 +128,178 @@ public partial class BinanceBrokerTests
         Assert.True(Ready(broker));
         Assert.True(string.IsNullOrEmpty(order.OwnerId));
     }
+
+    private const string OrderNotReturned =
+        "Not modified: Binance did not return this order, so its earlier executions cannot be confirmed. It was left unowned and unchanged.";
+    private const string HistoryBeyondLimit =
+        "Not modified: Binance keeps USD-M futures executions for only three months, and this order is older. It was left unowned and unchanged.";
+
+    /// <summary>The drag was refused and changed nothing: the order is still the website's, unbound and working as it was.</summary>
+    private static void LeftUnownedAndUnchanged(FakeBinance fake, BinanceBroker broker, Order order, long website, decimal price)
+    {
+        Assert.True(string.IsNullOrEmpty(order.OwnerId));
+        Assert.Null(NativeClaim(broker.OrderContext, BtcUsdt, order.NativeIdentity!));
+        Assert.DoesNotContain(fake.Calls, call => call.StartsWith("DELETE ", StringComparison.Ordinal));
+        Assert.Empty(fake.Sent);
+        Assert.Equal(("PARTIALLY_FILLED", price), (fake.Order(website).Status, fake.Order(website).Price));
+    }
+
+    [Fact]
+    public async Task A_drag_before_the_next_poll_shows_a_website_fill_adopts_the_exchange_baseline_not_the_stale_local_one()
+    {
+        using var fake = new FakeBinance(futures: true);
+        long website = fake.AddExternal("BUY", "LIMIT", 3m, 59000m);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any() && Ready(broker));
+        var order = Assert.Single(broker.ActiveOrders);
+
+        // The website order executes after the last listing the broker saw, and the user drags it before the next poll.
+        fake.FreezeListings();
+        fake.Fill(website, 1m);
+        var websiteFill = Assert.Single(fake.FuturesTradeHistory);
+        await Polls(fake, 2);
+        Assert.Equal((0m, OrderStates.Active), (order.Filled, order.State));
+        Assert.True(string.IsNullOrEmpty(order.OwnerId));
+        OrderActions.Reprice(broker, order, 59100m);
+        fake.ThawListings();
+
+        await Observed(broker, fake, () => fake.Placed.Count == 1 && order.ExchangeOrderId != website.ToString(Inv) &&
+            order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order));
+        var adopted = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.LogicalOrderId));
+        Assert.Equal((true, true, 1m, broker.OrderContext.ManualOwner),
+            (adopted.Adopted, adopted.BaselineKnown, adopted.QuantityBaseline, adopted.Owner));
+        Assert.Equal(new[] { websiteFill.Id.ToString(Inv) }, adopted.PriorExecutions!.Select(prior => prior.Id));
+        Assert.Equal((2m, 59100m), (Assert.Single(fake.OpenOrders).Qty, Assert.Single(fake.OpenOrders).Price));
+        await Observed(broker, fake, () => Ready(broker));
+        await Polls(fake, 2);
+        Assert.DoesNotContain(broker.Executions.Capture(ExecutionCursor.Start).Changes,
+            report => report.Identity.Id == websiteFill.Id.ToString(Inv));
+        Assert.False(broker.OrderContext.HasStorageFault);
+    }
+
+    [Fact]
+    public async Task An_unfilled_website_order_is_adopted_from_the_exchange_read_with_an_empty_prefix()
+    {
+        using var fake = new FakeBinance(futures: true);
+        long website = fake.AddExternal("SELL", "LIMIT", 2m, 61000m);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any() && Ready(broker));
+        var order = Assert.Single(broker.ActiveOrders);
+
+        OrderActions.Reprice(broker, order, 60900m);
+        await Observed(broker, fake, () => fake.Placed.Count == 1 && order.ExchangeOrderId != website.ToString(Inv) &&
+            order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order));
+        Assert.Contains("GET /fapi/v1/order", fake.Calls);
+        var adopted = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.LogicalOrderId));
+        Assert.Equal((true, true, 0m), (adopted.Adopted, adopted.BaselineKnown, adopted.QuantityBaseline));
+        Assert.Empty(adopted.PriorExecutions!);
+        Assert.Equal((2m, 60900m), (Assert.Single(fake.OpenOrders).Qty, Assert.Single(fake.OpenOrders).Price));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_drag_after_an_unpolled_trigger_and_fill_of_a_website_stop_is_refused_unowned(bool listedWhileTriggered)
+    {
+        using var fake = new FakeBinance(futures: true) { ListTriggeredAlgoOrders = listedWhileTriggered };
+        long algoId = fake.AddExternalAlgo("BUY", "STOP", 3m, triggerPrice: 61000m, price: 61100m);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any() && Ready(broker));
+        var order = Assert.Single(broker.ActiveOrders);
+
+        // It triggers and its limit executes in part; the broker still lists it as the untriggered conditional order.
+        fake.FreezeListings();
+        long child = fake.Trigger(algoId, fill: 1m, staleListings: int.MaxValue);
+        await Polls(fake, 2);
+        Assert.Equal(("algo:" + algoId.ToString(Inv), 0m), (order.ExchangeOrderId, order.Filled));
+        OrderActions.Reprice(broker, order, 61200m);
+        await Observed(broker, fake, () => broker.LastError == "Not modified: the stop already triggered at Binance and its order is executing." &&
+            !broker.IsReplacementPending(order));
+        Assert.True(string.IsNullOrEmpty(order.OwnerId));
+        Assert.Null(NativeClaim(broker.OrderContext, BtcUsdt, order.NativeIdentity!));
+        Assert.DoesNotContain(fake.Calls, call => call.StartsWith("DELETE ", StringComparison.Ordinal));
+        Assert.Empty(fake.Sent);
+        Assert.Equal(("TRIGGERED", "PARTIALLY_FILLED"), (fake.AlgoOrder(algoId).Status, fake.Order(child).Status));
+    }
+
+    [Fact]
+    public async Task An_order_Binance_no_longer_returns_is_refused_as_not_returned_rather_than_finished()
+    {
+        // USD-M Query Order stops finding an order 90 days after it was placed, although it still works and is listed.
+        using var fake = new FakeBinance(futures: true);
+        var placed = DateTimeOffset.UtcNow.AddDays(-91);
+        long website = fake.AddExternal("BUY", "LIMIT", 3m, 59000m, placedAt: placed);
+        fake.Fill(website, 1m, placed.AddHours(1));
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any(o => o.Filled == 1m) && Ready(broker));
+        var order = Assert.Single(broker.ActiveOrders);
+
+        OrderActions.Reprice(broker, order, 59100m);
+        await Observed(broker, fake, () => broker.LastError == OrderNotReturned && !broker.IsReplacementPending(order));
+        LeftUnownedAndUnchanged(fake, broker, order, website, 59000m);
+    }
+
+    [Fact]
+    public async Task A_partly_filled_futures_order_older_than_the_default_seven_day_trade_window_adopts_its_full_baseline()
+    {
+        using var fake = new FakeBinance(futures: true);
+        var placed = DateTimeOffset.UtcNow.AddDays(-20);
+        long website = fake.AddExternal("BUY", "LIMIT", 3m, 59000m, placedAt: placed);
+        fake.Fill(website, 0.5m, placed.AddHours(1));
+        fake.Fill(website, 0.25m, placed.AddDays(12)); // eight days ago
+        fake.Fill(website, 0.25m, DateTimeOffset.UtcNow.AddDays(-1));
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any(o => o.Filled == 1m) && Ready(broker));
+        var order = Assert.Single(broker.ActiveOrders);
+
+        OrderActions.Reprice(broker, order, 59100m);
+        await Observed(broker, fake, () => fake.Placed.Count == 1 && order.ExchangeOrderId != website.ToString(Inv) &&
+            order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order));
+        var adopted = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.LogicalOrderId));
+        Assert.Equal((true, 1m), (adopted.BaselineKnown, adopted.QuantityBaseline));
+        Assert.Equal(fake.FuturesTradeHistory.Where(trade => trade.OrderId == website).Select(trade => trade.Id.ToString(Inv)),
+            adopted.PriorExecutions!.Select(prior => prior.Id).OrderBy(id => id, StringComparer.Ordinal));
+        Assert.Equal(2m, Assert.Single(fake.OpenOrders).Qty);
+        Assert.DoesNotContain(fake.Refused, refusal => refusal.Contains("userTrades", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_futures_order_placed_before_the_three_month_trade_history_is_refused_clearly()
+    {
+        using var fake = new FakeBinance(futures: true);
+        // Still found by Query Order (under 90 days), but older than the shortest three calendar months (89 days).
+        var placed = DateTimeOffset.UtcNow.AddDays(-89.5);
+        long website = fake.AddExternal("BUY", "LIMIT", 3m, 59000m, placedAt: placed);
+        fake.Fill(website, 1m, DateTimeOffset.UtcNow.AddDays(-2));
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any(o => o.Filled == 1m) && Ready(broker));
+        var order = Assert.Single(broker.ActiveOrders);
+
+        OrderActions.Reprice(broker, order, 59100m);
+        await Observed(broker, fake, () => broker.LastError == HistoryBeyondLimit && !broker.IsReplacementPending(order));
+        LeftUnownedAndUnchanged(fake, broker, order, website, 59000m);
+    }
+
+    [Fact]
+    public async Task A_spot_order_with_more_than_one_trade_page_of_fills_is_adopted_from_every_page()
+    {
+        using var fake = new FakeBinance(futures: false);
+        fake.SetSpotBalance("BTC", 0m, 0m);
+        long website = fake.AddExternal("BUY", "LIMIT", 3m, 59000m);
+        long start = DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeMilliseconds();
+        var fills = Enumerable.Range(0, 1001).Select(i =>
+            new FakeBinanceSpotTrade(95001 + i, website, "BTCUSDT", true, 0.001m, 59000m, start + i, 0m, "USDT")).ToArray();
+        fake.FillWithSpotTrades(website, 1.001m, fills);
+        using var broker = Broker(fake);
+        await Observed(broker, fake, () => broker.OrdersReady && broker.ActiveOrders.Any(o => o.Filled == 1.001m) && Ready(broker));
+        var order = Assert.Single(broker.ActiveOrders);
+
+        OrderActions.Reprice(broker, order, 59100m);
+        await Observed(broker, fake, () => fake.Placed.Count == 1 && order.ExchangeOrderId != website.ToString(Inv) &&
+            order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order));
+        var adopted = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.LogicalOrderId));
+        Assert.Equal((true, 1.001m), (adopted.BaselineKnown, adopted.QuantityBaseline));
+        Assert.Equal(fills.Select(fill => fill.Id.ToString(Inv)), adopted.PriorExecutions!.Select(prior => prior.Id).Order(StringComparer.Ordinal));
+        Assert.Equal(1.999m, Assert.Single(fake.OpenOrders).Qty);
+    }
 }

@@ -65,7 +65,8 @@ public sealed record BinancePosition(string Symbol, decimal Quantity, decimal En
 /// An order as Binance reports it: in the open-order list, when looked up, and in the answers to new and cancel requests
 /// (fields an answer leaves out are empty or 0).
 /// </summary>
-public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, string Type, decimal Price, decimal StopPrice, decimal Quantity, decimal Executed, string Status, bool ReduceOnly = false, string ClientOrderId = "");
+/// <param name="Time">When the order was placed (Binance's "time", epoch milliseconds); 0 if the answer leaves it out.</param>
+public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, string Type, decimal Price, decimal StopPrice, decimal Quantity, decimal Executed, string Status, bool ReduceOnly = false, string ClientOrderId = "", long Time = 0);
 
 /// <summary>
 /// A USD-M futures conditional (algo) order as Binance reports it: in the open algo-order list, when looked up, and in the
@@ -191,7 +192,7 @@ public sealed class BinanceAccountClient : IDisposable
     private static BinanceOpenOrder ParseOrder(JsonElement o, string symbol) => new(
         o.GetProperty("orderId").GetInt64(), S(o, "symbol") is { Length: > 0 } nativeSymbol ? nativeSymbol : symbol, S(o, "side"), S(o, "type"),
         D(o, "price"), D(o, "stopPrice"), D(o, "origQty"), D(o, "executedQty"), S(o, "status"),
-        o.TryGetProperty("reduceOnly", out var ro) && ro.ValueKind == JsonValueKind.True, S(o, "clientOrderId"));
+        o.TryGetProperty("reduceOnly", out var ro) && ro.ValueKind == JsonValueKind.True, S(o, "clientOrderId"), IdOrZero(o, "time"));
 
     private static BinanceAlgoOrder ParseAlgoOrder(JsonElement a, string symbol) => new(
         a.GetProperty("algoId").GetInt64(), S(a, "symbol") is { Length: > 0 } nativeSymbol ? nativeSymbol : symbol, S(a, "side"), S(a, "orderType"),
@@ -256,12 +257,62 @@ public sealed class BinanceAccountClient : IDisposable
     internal Task<IReadOnlyList<BinanceTrade>> GetTradesAsync(string symbol, long fromId, CancellationToken ct) =>
         ReadTradesAsync(symbol, $"symbol={Uri.EscapeDataString(symbol)}&fromId={fromId.ToString(CultureInfo.InvariantCulture)}&limit=1000", ct);
 
+    /// <summary>Binance's clock as last synchronized.</summary>
+    internal long ServerNowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + _timeOffsetMs;
+
     /// <summary>
-    /// One order's executions (symbol plus orderId, documented for Spot myTrades and USD-M userTrades). USD-M returns
-    /// only the last seven days without a time range, so callers must compare the sum with the order's executed quantity.
+    /// USD-M userTrades answers only the past three months; three calendar months are never shorter than 89 days.
     /// </summary>
-    internal Task<IReadOnlyList<BinanceTrade>> GetOrderTradesAsync(string symbol, long orderId, CancellationToken ct) =>
-        ReadTradesAsync(symbol, $"symbol={Uri.EscapeDataString(symbol)}&orderId={orderId.ToString(CultureInfo.InvariantCulture)}&limit=1000", ct);
+    internal static readonly long FuturesTradeHistoryMs = (long)TimeSpan.FromDays(89).TotalMilliseconds;
+    private static readonly long FuturesTradeWindowMs = (long)TimeSpan.FromDays(7).TotalMilliseconds;
+
+    /// <summary>Whether Binance still answers every execution of an order placed at <paramref name="placedAt"/>.</summary>
+    internal bool OrderTradesQueryable(long placedAt) => !_s.Futures || placedAt > ServerNowMs - FuturesTradeHistoryMs;
+
+    /// <summary>
+    /// Every execution of one order, placed at <paramref name="placedAt"/> (Binance's order time). USD-M userTrades with
+    /// orderId returns only the last 7 days unless a range is sent, takes ranges of at most 7 days and never fromId with
+    /// them (https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List),
+    /// so it is read in consecutive windows from the order's time to now, halving any full one. Spot myTrades takes
+    /// symbol, orderId and fromId together (https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md),
+    /// so it is paged by trade ID while a page is full. Callers compare the sum with the order's executed quantity.
+    /// </summary>
+    internal async Task<IReadOnlyList<BinanceTrade>> GetOrderTradesAsync(string symbol, long orderId, long placedAt, CancellationToken ct)
+    {
+        string order = $"symbol={Uri.EscapeDataString(symbol)}&orderId={orderId.ToString(CultureInfo.InvariantCulture)}";
+        var trades = new List<BinanceTrade>();
+        if (!_s.Futures)
+        {
+            for (long fromId = 0; ;)
+            {
+                var page = await ReadTradesAsync(symbol, $"{order}&fromId={fromId.ToString(CultureInfo.InvariantCulture)}&limit=1000", ct).ConfigureAwait(false);
+                if (page.Any(trade => trade.Id < fromId))
+                    throw new InvalidDataException("Binance returned trades before the requested trade ID.");
+                trades.AddRange(page);
+                if (page.Count < TradePageLimit) return trades;
+                fromId = page.Max(trade => trade.Id) + 1;
+            }
+        }
+        if (placedAt <= 0) throw new InvalidDataException("Binance did not report when the order was placed.");
+        async Task ReadWindowAsync(long from, long to)
+        {
+            var page = await ReadTradesAsync(symbol, string.Create(CultureInfo.InvariantCulture,
+                $"{order}&startTime={from}&endTime={to}&limit=1000"), ct).ConfigureAwait(false);
+            if (page.Count < TradePageLimit)
+            {
+                trades.AddRange(page);
+                return;
+            }
+            if (from == to) throw new InvalidDataException("Binance returned a full trade page for a single millisecond.");
+            long middle = from + (to - from) / 2;
+            await ReadWindowAsync(from, middle).ConfigureAwait(false);
+            await ReadWindowAsync(middle + 1, to).ConfigureAwait(false);
+        }
+        long now = ServerNowMs;
+        for (long from = placedAt; from <= now; from += FuturesTradeWindowMs)
+            await ReadWindowAsync(from, Math.Min(from + FuturesTradeWindowMs - 1, now)).ConfigureAwait(false);
+        return trades;
+    }
 
     private async Task<IReadOnlyList<BinanceTrade>> ReadTradesAsync(string symbol, string query, CancellationToken ct)
     {
@@ -2269,9 +2320,8 @@ public sealed partial class BinanceBroker : ITradingAccount, ITrackedOrderReplac
         if ((tracked.ConditionalParent != null && tracked.AlgoId == 0 && order.Type == OrderTypes.Stop) ||
             intent.Request.Type != order.Type)
         {
-            const string triggered = "Not modified: the stop already triggered at Binance and its order is executing.";
-            LastError = triggered;
-            RecordRejected(intent, triggered);
+            LastError = StopAlreadyTriggered;
+            RecordRejected(intent, StopAlreadyTriggered);
             return;
         }
         var predecessor = new Order

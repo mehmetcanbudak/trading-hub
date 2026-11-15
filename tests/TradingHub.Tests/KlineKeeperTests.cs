@@ -236,12 +236,14 @@ public sealed class KlineKeeperTests
         // cache blocker). The request must be served by a cycle that starts after it, never dropped as "already running".
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int cycle = 1, active = 0, maximumActive = 0;
-        var calls = new List<int>();
+        int active = 0, maximumActive = 0;
+        var calls = new List<long>();
+        KlineKeeper? observed = null;
         await using var keeper = new KlineKeeper(new KlineMaintenanceSettings { Enabled = true, Instruments = new() { Tracked("HELD") } },
             async (_, _, _, _, ct) =>
             {
-                lock (calls) calls.Add(cycle);
+                // The keeper's own cycle number, so a load is attributed to the cycle that actually made it.
+                lock (calls) calls.Add(observed!.Status.Cycle);
                 maximumActive = Math.Max(maximumActive, Interlocked.Increment(ref active));
                 try
                 {
@@ -251,6 +253,7 @@ public sealed class KlineKeeperTests
                 }
                 finally { Interlocked.Decrement(ref active); }
             }, utcNow: () => Now);
+        observed = keeper;
         var earlier = keeper.RunNowAsync();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var updateNow = keeper.RunNowAsync();
@@ -258,11 +261,57 @@ public sealed class KlineKeeperTests
         Assert.False(updateNow.IsCompleted);
         Assert.True(keeper.Status.CompletedRunRequest < requested);
 
-        cycle = 2;
         release.TrySetResult();
         await Task.WhenAll(earlier, updateNow).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Contains(2, calls);
+        long[] loads;
+        lock (calls) loads = calls.ToArray();
+        // Two whole cycles, each with its full bounded plan (4 resolutions plus 2 catch-up months), never overlapping.
+        Assert.Equal(new long[] { 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2 }, loads);
         Assert.Equal(1, maximumActive);
+        Assert.True(keeper.Status.CompletedRunRequest >= requested);
+        Assert.False(keeper.Status.IsRunning);
+    }
+
+    [Fact]
+    public async Task ChangingSettingsWaitsOnlyForTheCycleItCancelledNotAnUpdateNowQueuedBehindIt()
+    {
+        // Update now is queued behind a running background cycle when the user changes the lookback. The change cancels
+        // and drains the running cycle; it must not also wait for the whole fresh cycle that serves Update now.
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecond = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<long>();
+        KlineKeeper? observed = null;
+        await using var keeper = new KlineKeeper(new KlineMaintenanceSettings { Enabled = true, Instruments = new() { Tracked("HELD") } },
+            async (_, _, _, _, ct) =>
+            {
+                long cycle = observed!.Status.Cycle;
+                lock (calls) calls.Add(cycle);
+                if (cycle == 1)
+                {
+                    firstStarted.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                secondStarted.TrySetResult();
+                await releaseSecond.Task.WaitAsync(ct);
+                return 1;
+            }, utcNow: () => Now);
+        observed = keeper;
+        var background = keeper.RunNowAsync();
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var updateNow = keeper.RunNowAsync();
+        long requested = keeper.Status.RunRequest;
+
+        var configuring = keeper.ConfigureAsync(keeper.Settings with { LookbackYears = 2 });
+        await Task.WhenAll(background, configuring).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, keeper.Settings.LookbackYears);
+        Assert.False(updateNow.IsCompleted);
+
+        // Update now is still served afterwards by a whole fresh cycle.
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        releaseSecond.TrySetResult();
+        await updateNow.WaitAsync(TimeSpan.FromSeconds(5));
+        lock (calls) Assert.Equal(new long[] { 1, 2, 2, 2, 2, 2, 2 }, calls);
         Assert.True(keeper.Status.CompletedRunRequest >= requested);
         Assert.False(keeper.Status.IsRunning);
     }
