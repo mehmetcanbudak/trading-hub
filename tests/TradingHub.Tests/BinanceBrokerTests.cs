@@ -71,12 +71,13 @@ public partial class BinanceBrokerTests : IDisposable
     private static long IdOf(Order o) => long.Parse(o.ExchangeOrderId, Inv);
 
     /// <summary>
-    /// Waits until Binance accepted the order (it has an exchange id) or refused it; a refusal fails the test with what
-    /// Binance answered.
+    /// Waits until Binance accepted the order and the broker finished binding it, or refused it; a refusal fails the
+    /// test with what Binance answered. The exchange id is assigned first inside the broker's acceptance section and the
+    /// native identity last, after its ownership binding is durable: only then is the acceptance complete.
     /// </summary>
     private static async Task Accepted(FakeBinance fake, Order o)
     {
-        await Until(() => o.State != OrderStates.Active || o.ExchangeOrderId.Length > 0);
+        await Until(() => o.State != OrderStates.Active || o.ExchangeOrderId.Length > 0 && o.NativeIdentity != null);
         Assert.True(o.State == OrderStates.Active && o.ExchangeOrderId.Length > 0, $"not accepted: {o.State}/{o.Status}; refused by Binance: {string.Join(" | ", fake.Refused)}");
     }
 
@@ -363,7 +364,7 @@ public partial class BinanceBrokerTests : IDisposable
         var order = Exit(broker, conditional, 2m, 59000m);
         await Accepted(fake, order);
         fake.UnknownPosts = 1;
-        fake.HideOwnedOrders = true;
+        fake.HideOwnedOrdersFromUnknownPost = true;
         OrderActions.Reprice(broker, order, 59500m);
         await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
         OrderActions.Reprice(broker, order, 59700m);
@@ -450,7 +451,7 @@ public partial class BinanceBrokerTests : IDisposable
         var order = Exit(broker, conditional, 2m, 59000m);
         await Accepted(fake, order);
         fake.UnknownPosts = 1;
-        fake.HideOwnedOrders = true;
+        fake.HideOwnedOrdersFromUnknownPost = true;
         OrderActions.Reprice(broker, order, 59500m);
         await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
         OrderActions.Reprice(broker, order, 59700m);
@@ -476,7 +477,7 @@ public partial class BinanceBrokerTests : IDisposable
         var order = Exit(broker, conditional, 2m, 59000m);
         await Accepted(fake, order);
         fake.UnknownPosts = 1;
-        fake.HideOwnedOrders = true;
+        fake.HideOwnedOrdersFromUnknownPost = true;
         OrderActions.Reprice(broker, order, 59500m);
         await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
         OrderActions.Reprice(broker, order, 59700m);
@@ -2296,6 +2297,12 @@ internal sealed class FakeBinance : IDisposable
     public int UnknownPostCode { get; set; } = -1007;
     public bool HideOwnedOrders { get; set; }
 
+    /// <summary>
+    /// Start <see cref="HideOwnedOrders"/> exactly when the next unknown-outcome POST places its order: that order is
+    /// never visible, while the accepted order it replaces stays listed until its cancel instead of looking dropped.
+    /// </summary>
+    public bool HideOwnedOrdersFromUnknownPost { get; set; }
+
     /// <summary>The next open-order request waits this long before answering (a network stall).</summary>
     public int StallOpenOrdersOnceMs { get; set; }
 
@@ -2718,6 +2725,11 @@ internal sealed class FakeBinance : IDisposable
 
     private async ValueTask<(int Status, string Body)> Handle(FakeRequest r, CancellationToken ct)
     {
+        if (r.Method == "POST" && UnknownPosts > 0 && HideOwnedOrdersFromUnknownPost)
+        {
+            HideOwnedOrdersFromUnknownPost = false;
+            HideOwnedOrders = true;
+        }
         var answer = Answer(r);
         if (r.Method == "GET" && r.Route is "/api/v3/myTrades" or "/fapi/v1/userTrades" && BeforeTradeReply is { } beforeTradeReply)
             await beforeTradeReply(ct).ConfigureAwait(false);
