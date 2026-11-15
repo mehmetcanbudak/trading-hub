@@ -192,6 +192,8 @@ public sealed class DerivativesData : IDisposable
         public readonly List<ObservedWindow> Windows = new();
         public readonly CancellationTokenSource Cancellation;
         public int Users;
+        /// <summary>Start of each venue's currently connected window.</summary>
+        public readonly Dictionary<string, DateTime> Open = new();
         public long Generation;
         public string? Message;
 
@@ -246,9 +248,11 @@ public sealed class DerivativesData : IDisposable
             var (events, windows) = LoadRecorded(symbol, Math.Clamp((int)Math.Ceiling((_utcNow() - from).TotalDays), 1, 60));
             return new(events.Where(e => e.Time >= from && e.Time < to).ToArray(), windows.Where(w => w.To > from && w.From < to).ToArray(), null);
         }
+        var now = _utcNow();
         lock (stream.Events)
             return new(stream.Events.Where(e => e.Time >= from && e.Time < to).ToArray(),
-                stream.Windows.Where(w => w.To > from && w.From < to).ToArray(), stream.Message);
+                stream.Windows.Select(w => stream.Open.TryGetValue(w.VenueId, out var open) && open == w.From && now > w.To ? w with { To = now } : w)
+                    .Where(w => w.To > from && w.From < to).ToArray(), stream.Message);
     }
 
     private async Task RunAsync(string symbol, string venue, LiquidationStream stream, CancellationToken ct)
@@ -299,7 +303,11 @@ public sealed class DerivativesData : IDisposable
             }
             finally
             {
-                if (connectedAt is { } started) ExtendWindow(symbol, stream, venue, started, _utcNow());
+                if (connectedAt is { } started)
+                {
+                    lock (stream.Events) stream.Open.Remove(venue);
+                    ExtendWindow(symbol, stream, venue, started, _utcNow());
+                }
             }
             if (ct.IsCancellationRequested) return;
             try { await _delay(TimeSpan.FromSeconds(Math.Min(60, 3 << Math.Min(attempt, 4))), ct).ConfigureAwait(false); }
@@ -377,7 +385,11 @@ public sealed class DerivativesData : IDisposable
             liquidation.Price.ToString(CultureInfo.InvariantCulture), liquidation.Quantity.ToString(CultureInfo.InvariantCulture), liquidation.LongLiquidated ? "L" : "S"));
     }
 
-    private void OpenWindow(string symbol, LiquidationStream stream, string venue, DateTime from) => ExtendWindow(symbol, stream, venue, from, from);
+    private void OpenWindow(string symbol, LiquidationStream stream, string venue, DateTime from)
+    {
+        lock (stream.Events) stream.Open[venue] = from;
+        ExtendWindow(symbol, stream, venue, from, from);
+    }
 
     private void ExtendWindow(string symbol, LiquidationStream stream, string venue, DateTime from, DateTime to)
     {

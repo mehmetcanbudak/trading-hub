@@ -116,6 +116,8 @@ public sealed class DerivativesTests : IDisposable
                 await WaitUntilAsync(() => data.Liquidations("BTCUSDT", Start, clock.AddHours(1)).Events.Count == 2);
                 Assert.True(data.LiquidationGeneration("BTCUSDT") > generation);
                 clock = clock.AddMinutes(5);
+                // A still-connected stream covers up to now, not only to its last periodic window write.
+                Assert.All(data.Liquidations("BTCUSDT", Start, clock.AddHours(1)).Windows, w => Assert.Equal(clock, w.To));
             }
             // Releasing the last watcher closes both streams, which persist their final observed window end.
             await WaitUntilAsync(() => data.Liquidations("BTCUSDT", Start, clock.AddHours(1)).Windows is { Count: 2 } windows && windows.All(w => w.To == clock));
