@@ -226,6 +226,32 @@ These selected studies complement, rather than replace, the existing moving aver
 
 For all three flow/profile studies, **Allow estimated OHLC** is off by default. Any observed footprint rows win over aggregate fallback, but mixed observed/estimated contributions remain marked incomplete; observed rows include Between volume and do not certify exchange-authoritative aggressor side (IB sides are inferred). Composite OHLC fallback is bounded to 200 samples. Coverage annotations distinguish observed, estimated, incomplete and missing bars; absence of a plot is not automatically a zero signal. Estimates and retrospective anchors must not be represented as observed trades in strategy evaluation.
 
+## Options and macro studies
+
+The **Options** library group holds 42 studies that read the **Options data** connection (see [Connections](./conexiones.md#options-data)); **Day type** is in **Sessions** and the **Macro and other tools** group holds five more. Without an options connection each options study shows *Waiting for an options data connection* instead of values and makes no request. Every card names its source and snapshot time (UTC). Formulas use Black–Scholes with a zero rate, time in calendar days / 365 and IV as a fraction:
+
+| Measure | Definition |
+|---|---|
+| Dealer gamma (GEX) | Γ × open interest × contract multiplier × S² × 1 %, in USD of underlying dealers trade per 1 % move; calls positive and puts negative (the convention that customers buy puts and sell calls). S is the chain's spot reference at the snapshot time. |
+| Delta exposure (DEX) | Δ × open interest × multiplier × S (USD). |
+| Gamma flip | The spot where total GEX changes sign, scanning ±20 % in 0.5 % steps with every contract's gamma recomputed at that spot; none when the sign never changes. |
+| Call / put wall | The strike at or above spot with the largest positive GEX / at or below spot with the most negative GEX. |
+| Max pain | The listed strike minimizing Σ OI × multiplier × intrinsic value at expiry. |
+| ATM IV, 25Δ risk reversal | Mean IV of the two contracts nearest spot; call IV at +0.25 delta minus put IV at −0.25 delta (points). |
+| Expected move | S × σ_ATM × √t (one standard deviation); the daily version uses the previous close and the IV known at the day's open. |
+| IV rank / percentile | (IV − min) ÷ (max − min) × 100 and percentile against the previous year of daily rows. |
+| Premium, bias | Price × contracts × multiplier; bullish = bought calls or sold puts, bearish = bought puts or sold calls, unknown aggressor = neither. |
+| NOPE | Σ Δ × contracts × multiplier of a bar's option trades ÷ the bar's underlying volume × 100. |
+
+- **Chain studies** (dealer positioning, greek exposure by strike, strike matrix, strike lanes, strike distribution and max pain, most active contracts, volatility surface, probability cloud, expected move, contract odds, stance, options dashboard, volatility context): levels start at the bar where their snapshot became known; the current chain is a snapshot, not a history.
+- **Snapshot history** (gamma map by bar, open-interest changes, wall history): uses the 30-minute snapshots Trading Hub records while an options study is open; bars without a snapshot are left empty.
+- **Flow studies** (premium footprint and heatmap by strike, options at price, flow VWAP, large trade marks and table, option tape with sweeps, last-bar flow, statistics, market statistics, venue share, premium by expiry; panes NOPE, aggressor side, net flow, volume, greek flow, sentiment, premium tide): each bar uses only trades executed inside it, so closed bars never change; bars outside the loaded trade range are gaps, not zero.
+- **Daily history panes** (IV rank, volatility regime, skew history, risk reversal, exposure history, variance risk premium, options history, sentiment gauge): a daily row describes one UTC day and is known only after that day ends, so each bar uses the latest earlier row (at most four days old) and is compared only with rows before it; bars that end after today's live snapshot use that snapshot.
+- **Day type** classifies each completed 10-minute sample of the last hour as Pinned, Trending, Volatile or Unsettled against one standard deviation from the IV known when the sample closed (without options data, realized volatility of the preceding day of samples, never including the sample itself). The last state is marked as forming; persistence odds count only completed samples.
+- **Macro**: **Change-point detection (CUSUM)** on normalized log returns; **Market HUD** (EMA/RSI trend, aggressor-buy share where the feed reports sides, relative volume, ATR and chart open-interest change); **Spot ETF flows** (needs an ETF flows connection; by default each US trading day appears on the next UTC day, when it is published, and days without a value are gaps; **On its trade date** is a labelled hindsight view); **Correlation coefficient** with another Binance symbol (bars without a candle of the other symbol are gaps); **Polymarket odds vs price** (public odds, requested only after you enter a market; each bar uses the last probability published before it closed).
+
+These are estimates from public positioning and model assumptions, not dealer books or advice. Network destinations are listed in [Privacy](./privacidad.md#network-access).
+
 ## Extended profile, VWAP and causal study pack
 
 The KVP capability adoption reuses the existing native catalog and persistent study types rather than adding a second analysis engine. Source attribution and the independent SMC/HTF implementation boundary are in [Third-party notices](../../THIRD_PARTY_NOTICES.md#kvp-capability-reference).

@@ -61,6 +61,8 @@ internal sealed partial class ConnectionsView : UserControl, IPage
         ConnectionKind.Oanda => MaterialIconKind.Earth,
         ConnectionKind.Alpaca => MaterialIconKind.Finance,
         ConnectionKind.Databento => MaterialIconKind.DatabaseArrowDownOutline,
+        ConnectionKind.OptionsData => MaterialIconKind.ChartBellCurve,
+        ConnectionKind.EtfFlows => MaterialIconKind.SwapVerticalBold,
         _ => MaterialIconKind.Bank,
     };
 
@@ -84,6 +86,8 @@ internal sealed partial class ConnectionsView : UserControl, IPage
                 ConnectionKind.Longbridge => "OAuth market data only; configured stock metadata",
                 ConnectionKind.AggregateCrypto => "non-executable composite of selected crypto markets",
                 ConnectionKind.PublicCrypto => "OKX, Bitget, Hyperliquid, Deribit, MEXC, Coinbase: public data, no account",
+                ConnectionKind.OptionsData => "chain, trades and history for the options studies",
+                ConnectionKind.EtfFlows => "daily spot ETF flows (BTC, ETH…) from your API",
                 _ => null,
             };
             object itemHeader = hint == null ? Ui.EnumName(kind) : Ui.V(1, new TextBlock { Text = Ui.EnumName(kind) }, new TextBlock { Text = hint, Classes = { "faint", "small" } });
@@ -166,6 +170,7 @@ internal sealed partial class ConnectionsView : UserControl, IPage
             ConnectionKind.Oanda => (p.Testnet ? "demo" : "real") + (string.IsNullOrWhiteSpace(p.OandaAccount) ? "" : " · " + p.OandaAccount),
             ConnectionKind.Alpaca => string.IsNullOrWhiteSpace(p.ApiKey) ? "no credentials" : $"SIP history · live {p.AlpacaLiveFeed.ToUpperInvariant()}",
             ConnectionKind.Databento => "CME futures history (pay as you go)",
+            ConnectionKind.OptionsData or ConnectionKind.EtfFlows => DescribeExternal(p),
             _ => $"{p.IbHost}:{p.IbPort}",
         };
         return prefix + detail;
@@ -181,6 +186,7 @@ internal sealed partial class ConnectionsView : UserControl, IPage
         // el primero de cada tipo usa el id de sus datos (así los archivos de ticks quedan con un nombre claro)
         string defaultId = ConnectionProfile.DefaultId(kind);
         if (kind is ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento
+                or ConnectionKind.OptionsData or ConnectionKind.EtfFlows
             && _svc.Connections.Profiles.All(x => x.Id != defaultId))
             p.Id = defaultId;
         if (kind == ConnectionKind.Simulator) p.HistoryHours = 6;
@@ -233,7 +239,9 @@ internal sealed partial class ConnectionsView : UserControl, IPage
         var dataSection = Ui.V(14,
             Ui.H2("Market data"),
             Ui.Field("History when opening a chart", history, "Saved or downloaded data loads immediately; missing history comes from the connection."));
-        sections.Children.Add(Ui.Card(dataSection));
+        // Data-only connections without chart data hide the whole card, not just its contents.
+        var dataCard = Ui.Card(dataSection);
+        sections.Children.Add(dataCard);
         apply.Add(() => p.HistoryHours = (double)((ComboBoxItem)history.SelectedItem!).Tag!);
 
         switch (p.Kind)
@@ -284,8 +292,16 @@ internal sealed partial class ConnectionsView : UserControl, IPage
                 sections.Children.Add(Ui.Card(AlpacaSection(p, apply)));
                 break;
             case ConnectionKind.Databento:
-                dataSection.IsVisible = false;
+                dataCard.IsVisible = false;
                 sections.Children.Add(Ui.Card(DatabentoSection(p, apply)));
+                break;
+            case ConnectionKind.OptionsData:
+                dataCard.IsVisible = false;
+                sections.Children.Add(Ui.Card(OptionsDataSection(p, apply)));
+                break;
+            case ConnectionKind.EtfFlows:
+                dataCard.IsVisible = false;
+                sections.Children.Add(Ui.Card(EtfFlowsSection(p, apply)));
                 break;
         }
 
@@ -295,7 +311,7 @@ internal sealed partial class ConnectionsView : UserControl, IPage
         var delete = Ui.Button("Remove", MaterialIconKind.DeleteOutline, () => { }, "ghost");
         delete.IsVisible = _svc.Connections.Profiles.Count(x => x.Kind == p.Kind) > 1 || p.Kind is ConnectionKind.InteractiveBrokers or ConnectionKind.AmpFutures
             or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento
-            or ConnectionKind.Longbridge or ConnectionKind.AggregateCrypto or ConnectionKind.PublicCrypto;
+            or ConnectionKind.Longbridge or ConnectionKind.AggregateCrypto or ConnectionKind.PublicCrypto or ConnectionKind.OptionsData or ConnectionKind.EtfFlows;
 
         bool Save()
         {
@@ -370,6 +386,8 @@ internal sealed partial class ConnectionsView : UserControl, IPage
         };
 
         var kindBadge = new Border { Child = Ui.H(6, Ui.Icon(IconOf(p.Kind), 14, Ui.Accent), new TextBlock { Text = Ui.EnumName(p.Kind), FontSize = 12 }), Classes = { "pill" } };
+        // A badge repeating the name adds nothing and crowds long names.
+        kindBadge.IsVisible = p.Name != Ui.EnumName(p.Kind);
         var titleRow = new DockPanel();
         // el interruptor va con las acciones: en ventanas angostas no se superpone con «Eliminar»
         enabled.VerticalAlignment = VerticalAlignment.Center;

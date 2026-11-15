@@ -41,6 +41,8 @@ For Bybit strategy ownership, a profile/display name is not an account identity.
 | Longbridge | Configured quotes, recent tape, candles and partial depth. | Client ID, explicit OAuth grant and instrument/session metadata. | Data only; no Longbridge order route. |
 | Aggregate crypto | Composite trade/candle data from the selected crypto markets (Binance, Bybit, OKX, Bitget, Hyperliquid, Deribit, MEXC, Coinbase; spot and/or perpetual) with constituent coverage. | Public constituent data; no keys. | None: the composite price is not an executable venue, including ordinary simulation. |
 | Public crypto market | OKX (swaps or spot), Bitget (USDT futures or spot), Hyperliquid, Deribit and MEXC perpetuals, Coinbase spot: live trades, book and candles. | None (public data). | Simulated account only; no venue order route. |
+| Options data | Option chain, option trades and daily option history for the options studies. | Deribit: none (public BTC/ETH data). Custom JSON API: your provider's URL and, if required, its key. | None: study data only, never a chart market or order route. |
+| ETF flows | Daily spot ETF net flows for the **Spot ETF flows** study. | Your provider's URL and, if required, its key. | None: study data only. |
 
 Individual supported market-data sources can feed ordinary simulation; practice uses its isolated run account. The aggregate composite intentionally exposes **no order route**. Provider eligibility, subscriptions, API approval, retention, free tiers and prices can change; verify them with the provider rather than assuming the original project's advertised allowances still apply.
 
@@ -162,6 +164,23 @@ Historical CME ticks, including aggressor side and long history beyond Rithmic r
 - Enter the `db-…` API key; signup/pricing links are provided.
 - **Test connection** reports date availability and estimates a day of NQ tick data without downloading it.
 - No live feed or instrument-search entry: use **Data → CME futures with Databento**. See [Data](./datos.md#databento).
+
+## Options data
+
+Supplies the options studies (dealer gamma, walls, max pain, IV rank, skew, premium flow, options dashboard and the rest of the **Options** library group). Until an enabled **Options data** connection exists, every options study shows *Waiting for an options data connection* and makes no request; saving and enabling one configures open charts without a restart, and disabling it returns them to waiting. Only the first enabled options connection is used. The chart's base asset selects the underlying (BTCUSDT → BTC).
+
+- **Deribit (public, BTC and ETH)** needs no account or key. Trading Hub reads `get_book_summary_by_currency` for the chain (coin prices converted to USD with Deribit's index; the index, Deribit's estimated delivery price, is the spot reference and greeks use each expiry's forward), `get_last_trades_by_currency_and_time` for trades (aggressor side from `direction`) and `get_volatility_index_data` for daily history (DVOL, a 30-day implied-volatility index). Deribit applies credit-based rate limits; Trading Hub requests the chain at most once a minute per underlying (every 5–10 minutes for most chain studies), daily history hourly and new trades about once a minute, in pages of 1,000 trades and at most 50 pages per window.
+- **Custom JSON API** is your own paid or self-hosted provider. Trading Hub requests `GET {base}/chain?underlying=BTC`, `GET {base}/trades?underlying=BTC&from=…&to=…` and `GET {base}/daily?underlying=BTC&from=…&to=…` (ISO UTC times) and sends the optional key as a Bearer token or in the header you name. IV is a fraction (0.55 = 55 %), prices are USD per unit of the underlying and `contractSize` is the multiplier (default 1; 100 for US equity options). Missing greeks are computed from IV; other missing values stay unknown rather than zero. The **Underlyings** list limits which charts use it. The exact JSON fields are shown under the connection.
+- **Test connection** reads one chain and reports its contracts, expiries, spot and snapshot time.
+- Option trades are loaded one day at a time back to five days by default (up to 30 when **Options at price** asks for more). Bars outside the loaded trade range are gaps in the flow panes.
+- A Deribit request window stops after 50 pages (50,000 trades). Coverage then ends at the last complete millisecond; the rest of that window is recorded as a gap, never as zero trades. Trade studies say so (*Partial: trades capped at 50000 per request; 2026-11-05 10:00–14:30 UTC not loaded yet* in an overlay's card or at the top of a pane), the affected bars stay empty, and later refreshes continue paging from where the window stopped until the gap closes.
+- While an options study requests the chain, Trading Hub records at most one per-strike snapshot every 30 minutes (kept a week) and one daily summary per day under the market-data folder in `Options/`. Snapshot studies (gamma map by bar, open-interest changes, wall history) and the daily history use these recordings; the past is never reconstructed.
+
+## ETF flows
+
+Supplies the **Spot ETF flows** study. Without an enabled **ETF flows** connection it waits and makes no request. Trading Hub requests `GET {base}/flows?asset=BTC&from=YYYY-MM-DD&to=YYYY-MM-DD`, expecting `[{"date":"2026-11-03","net":-123400000,"funds":{"IBIT":-80000000}}]` in USD (or `netMillions` in millions; `{"data":[…]}` is also accepted) and sends the optional key as a Bearer token or in the header you name. Days without a net value are skipped, not treated as zero. The cache refreshes hourly. **Test connection** reads the last two weeks of the first listed asset (BTC by default).
+
+API keys for both connections are stored in the private credential store, never in `connections.json`. A custom API is called only while its connection is enabled; check your provider's rate limits, terms and prices.
 
 ## Interactive Brokers
 

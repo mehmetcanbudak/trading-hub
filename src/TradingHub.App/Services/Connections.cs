@@ -371,6 +371,8 @@ public enum ConnectionKind
     [Display(Name = "Longbridge (data only)")] Longbridge,
     [Display(Name = "Aggregate crypto (data only)")] AggregateCrypto,
     [Display(Name = "Public crypto market (data only)")] PublicCrypto,
+    [Display(Name = "Options data")] OptionsData,
+    [Display(Name = "ETF flows")] EtfFlows,
 }
 
 /// <summary>Una conexión configurada (los secretos van al llavero, no a este archivo).</summary>
@@ -459,11 +461,13 @@ public sealed partial class ConnectionProfile
         ConnectionKind.Oanda => TradingHub.Feeds.Oanda.OandaFeed.FeedId,
         ConnectionKind.Alpaca => TradingHub.Feeds.Alpaca.AlpacaFeed.FeedId,
         ConnectionKind.Databento => "databento",
+        // Study data only: an id no chart feed or stored history ever uses.
+        ConnectionKind.OptionsData or ConnectionKind.EtfFlows => "external-" + Id,
         _ => "ib",
     };
 
-    /// <summary>Chart market-data capability; IB remains strictly data-only.</summary>
-    [JsonIgnore] public bool HasMarketData => Kind != ConnectionKind.Databento;
+    /// <summary>Chart market-data capability; IB remains strictly data-only; options and ETF data feed studies only.</summary>
+    [JsonIgnore] public bool HasMarketData => Kind is not (ConnectionKind.Databento or ConnectionKind.OptionsData or ConnectionKind.EtfFlows);
 
     /// <summary>Id por defecto del primer perfil de cada tipo (el mismo de sus datos).</summary>
     public static string DefaultId(ConnectionKind kind) => kind switch
@@ -473,6 +477,8 @@ public sealed partial class ConnectionProfile
         ConnectionKind.Oanda => TradingHub.Feeds.Oanda.OandaFeed.FeedId,
         ConnectionKind.Alpaca => TradingHub.Feeds.Alpaca.AlpacaFeed.FeedId,
         ConnectionKind.Databento => "databento",
+        ConnectionKind.OptionsData => "options-data",
+        ConnectionKind.EtfFlows => "etf-flows",
         _ => Guid.NewGuid().ToString("N")[..8],
     };
 
@@ -755,6 +761,7 @@ public sealed partial class ConnectionManager
             ConnectionKind.Oanda => new TradingHub.Feeds.Oanda.OandaFeed(OandaSettingsOf(p), network: _networkFactory()),
             ConnectionKind.Alpaca => new TradingHub.Feeds.Alpaca.AlpacaFeed(AlpacaSettingsOf(p), network: _networkFactory()),
             ConnectionKind.Databento => throw new NotSupportedException("Databento does not provide live data here: use Data to download futures history."),
+            ConnectionKind.OptionsData or ConnectionKind.EtfFlows => throw new NotSupportedException("This connection supplies data to studies (options or ETF flows), not a chart market."),
             _ => throw new NotSupportedException("This connection has no integrated market-data feed."),
         };
         _feeds[p.Id] = f;
@@ -1083,6 +1090,9 @@ public sealed partial class ConnectionManager
                     return await ((TradingHub.Feeds.Oanda.OandaFeed)GetFeed(p.Id)).TestAsync(ct);
                 case ConnectionKind.Alpaca:
                     return await ((TradingHub.Feeds.Alpaca.AlpacaFeed)GetFeed(p.Id)).TestAsync(ct);
+                case ConnectionKind.OptionsData:
+                case ConnectionKind.EtfFlows:
+                    return await TestExternalAsync(p, ct);
                 case ConnectionKind.Databento:
                 {
                     if (string.IsNullOrWhiteSpace(GetSecret(p))) return (false, "Databento API key is missing.");
