@@ -58,6 +58,8 @@ Public charts, DOM, tape and history need no account. For trading:
 3. For real trading, enable **Allow REAL orders from Trading Hub**. Otherwise it stays read-only and is not offered as a trading destination.
 4. Review per-real-order confirmation, enabled by default, and maximum order quantity. **0 means unlimited.**
 
+Orders placed on Binance's website or by another app appear unowned. Dragging one to a new price or size makes Trading Hub cancel and replace it as a manual order. If it has already partly filled, Trading Hub first reads that order's executions and executed quantity from Binance (`userTrades`/`myTrades` with its `orderId`, then the order itself). Those earlier fills stay the website's and only later fills count as yours. If the two reads disagree (for example the order filled again in between), the history does not cover the executed quantity, or the read fails, the drag is refused with a "Not modified" message and the order stays unowned and unchanged. Drag again to retry.
+
 ## Bybit
 
 Choose **Demo**, **Testnet** or **Real** explicitly. Demo uses Bybit's demo execution environment with public main-market data; Testnet has its own market-data/history identity. API key and secret must belong to the selected environment. Real orders additionally require **Allow REAL orders from Trading Hub**, the existing confirmations and configured quantity limits. Never grant withdrawal permission.

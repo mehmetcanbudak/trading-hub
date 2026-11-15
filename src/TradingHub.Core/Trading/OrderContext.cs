@@ -1785,9 +1785,11 @@ public static class OrderActions
             protective: reducing, maximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(after)));
     }
     public static Order Replace(ITradingAccount account, Order order, decimal price, decimal quantity) =>
-        account.Replace(order, account.OrderContext.PrepareReplacement(order, price, quantity));
+        account is IAuthoritativeAdoption venue && venue.TryAdoptAndReplace(order, price, quantity) ? order
+            : account.Replace(order, account.OrderContext.PrepareReplacement(order, price, quantity));
     public static Order Reprice(ITradingAccount account, Order order, decimal price) =>
-        account.Replace(order, account.OrderContext.PreparePriceUpdate(order, price));
+        account is IAuthoritativeAdoption venue && venue.TryAdoptAndReplace(order, price, null) ? order
+            : account.Replace(order, account.OrderContext.PreparePriceUpdate(order, price));
     public static void Flatten(ITradingAccount account)
     {
         if (account is ICoordinatedPositionClose coordinated)
