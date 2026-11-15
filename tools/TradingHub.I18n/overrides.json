@@ -22774,5 +22774,13 @@
   "Error draining native order requests": {
     "es": "Error al completar las solicitudes de órdenes nativas",
     "zh-CN": "完成原生订单请求时出错"
+  },
+  "{0} · waiting for an earlier reply ({1} queued)": {
+    "es": "{0} · esperando la respuesta de una solicitud anterior ({1} en cola)",
+    "zh-CN": "{0} · 正在等待先前请求的回复（{1} 个排队中）"
+  },
+  "Sending queued order requests before quitting…": {
+    "es": "Enviando las solicitudes de órdenes en cola antes de salir…",
+    "zh-CN": "退出前正在发送排队中的订单请求…"
   }
 }

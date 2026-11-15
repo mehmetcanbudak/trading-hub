@@ -234,6 +234,15 @@ internal static partial class SafetyScene
                     "Fixture clearing gesture requested; check account status for confirmation.",
                 }),
                 $"each gesture shows the error its own account call reported, even after a later queued gesture cleared it («{Shown()}»)");
+
+            shown.Clear();
+            account.QueuedRequests = 2; // requests issued on the account still waiting for an earlier reply
+            var queued = tv.AccountActionAsync(chart, a => a.CancelAt(1m), "Fixture queued gesture");
+            Settle(queued);
+            account.QueuedRequests = 0;
+            check(queued.IsCompletedSuccessfully && shown.LastOrDefault() ==
+                    "Fixture queued gesture requested; check account status for confirmation. · waiting for an earlier reply (2 queued)",
+                $"a gesture's status shows the account's requests still waiting for an earlier reply («{Shown()}»)");
         }
         finally
         {
@@ -266,11 +275,14 @@ internal sealed class FixtureLaneAccount(ITradingAccount display) : ITradingAcco
 }
 
 /// <summary>A thread-safe fixture account for gesture outcomes: Cancel all reports an error, Cancel at clears it, like a
-/// broker whose next action replaces its last error. It never routes an order.</summary>
-internal sealed class FixtureOutcomeAccount(ITradingAccount display) : ITradingAccount, IThreadSafeOrderEntry
+/// broker whose next action replaces its last error; its queued request count is set by the scene. It never routes an
+/// order.</summary>
+internal sealed class FixtureOutcomeAccount(ITradingAccount display) : ITradingAccount, IThreadSafeOrderEntry, INativeSendQueue
 {
     public const string CancelAllError = "Fixture: the cancellation was not queued.";
     private volatile string? _error;
+    private volatile int _queued;
+    public int QueuedRequests { get => _queued; set => _queued = value; }
     public OrderContext OrderContext { get; } = OrderContext.EphemeralSimulation("SAFETY-OUTCOMES");
     public IExecutionSource Executions => OrderContext.Executions;
     public string Name => "Fixture outcomes";

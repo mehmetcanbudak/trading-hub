@@ -552,7 +552,7 @@ public sealed class BinanceAccountClient : IDisposable
 /// remain unavailable (0); strategy cost accounting continues to come from its own fills.
 /// </para>
 /// </remarks>
-public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, ICoordinatedPositionOperations, IDisposable
+public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, ICoordinatedPositionOperations, INativeSendQueue, IDisposable
 {
     /// <summary>Starts the <see cref="Order.ExchangeOrderId"/> of a conditional order: an algo id is not an order id.</summary>
     private const string AlgoPrefix = "algo:";
@@ -2172,7 +2172,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         var turn = _sendTurns.Take();
         _ = Task.Run(async () =>
         {
-            bool handed = false;
+            HandedTurn? handoff = null;
             try
             {
                 // A reverse adds exposure: it waits for earlier replies without the reducing bound.
@@ -2189,8 +2189,8 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
                 var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, plan.Direction, OrderTypes.Market,
                     BinanceAccountClient.NormalizeWireNumber(plan.Quantity), 0, ReduceOnly: !reverse, Comment: reverse ? "Reverse" : "Close",
                     Protective: !reverse, MaximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(net))));
-                handed = true;
-                Submit(intent, new HandedTurn(turn, inOrder && confirmed, plan.Note));
+                handoff = new HandedTurn(turn, inOrder && confirmed, plan.Note);
+                Submit(intent, handoff);
             }
             catch (Exception ex)
             {
@@ -2200,7 +2200,8 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             }
             finally
             {
-                if (!handed) turn.Release();
+                // Released here unless the order's send took the turn over (whatever Submit threw).
+                if (handoff is not { Claimed: true }) turn.Release();
             }
         });
     }
@@ -2217,8 +2218,15 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     }
 
     /// <summary>A send turn already taken and waited for by a position order, handed to the order it planned: whether it
-    /// went in order with a confirmed position, and the note to show once the order is accepted.</summary>
-    private sealed record HandedTurn(NativeSendTurns.Turn Turn, bool InOrder, string? Note);
+    /// went in order with a confirmed position, and the note to show once the order is accepted. The order's send claims
+    /// it; until then the position order still owns (and releases) it.</summary>
+    private sealed class HandedTurn(NativeSendTurns.Turn turn, bool inOrder, string? note)
+    {
+        public NativeSendTurns.Turn Turn { get; } = turn;
+        public bool InOrder { get; } = inOrder;
+        public string? Note { get; } = note;
+        public bool Claimed { get; set; }
+    }
 
     /// <summary>
     /// The position a position order is planned from: once every market order in flight when it was issued is known to
@@ -2283,11 +2291,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     private Order Submit(PreparedOrderIntent intent, HandedTurn? handed)
     {
         lock (_gate)
-            if (_byClient.TryGetValue(intent.ClientOrderId, out var existing))
-            {
-                handed?.Turn.Release();
-                return existing.Order;
-            }
+            if (_byClient.TryGetValue(intent.ClientOrderId, out var existing)) return existing.Order;
         var request = intent.Request;
         var dir = request.Direction;
         var type = request.Type;
@@ -2299,7 +2303,6 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             ? BindOwnedOrder(order, intent) : "The prepared instrument does not match this broker.";
         if (bindingError != null)
         {
-            handed?.Turn.Release();
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
             LastError = bindingError;
@@ -2310,16 +2313,13 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         decimal px = BinanceAccountClient.NormalizeWireNumber(Instrument.RoundPrice(price));
         lock (_gate)
         {
-            if (_byClient.TryGetValue(intent.ClientOrderId, out var existing))
-            {
-                handed?.Turn.Release();
-                return existing.Order;
-            }
+            if (_byClient.TryGetValue(intent.ClientOrderId, out var existing)) return existing.Order;
             _byOrder[order] = t;
             SetClientIdentity(t, intent);
             // The send turn is taken where the order is issued, so this broker's requests reach Binance in issue order (a
             // position order hands over the turn it took when it was issued).
             var turn = handed?.Turn ?? _sendTurns.Take();
+            if (handed != null) handed.Claimed = true;
             t.Last = Task.Run(() => InTurnAsync(turn, () => SubmitAsync(t, turn, type, qty, px, reduceOnly, handed)));
         }
 
@@ -2347,8 +2347,8 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         bool inOrder = true;
         try
         {
-            inOrder = await turn.WaitAsync(reduceOnly || t.Intent!.Request.Protective, _cts.Token).ConfigureAwait(false) &&
-                (handed?.InOrder ?? true);
+            // A handed-over turn was already waited for when it was planned: it is not waited for again.
+            inOrder = handed?.InOrder ?? await turn.WaitAsync(reduceOnly || t.Intent!.Request.Protective, _cts.Token).ConfigureAwait(false);
             await WaitForNativeReplayAsync().ConfigureAwait(false);
             Task<BinanceOpenOrder>? placement = null;
             Task<BinanceAlgoOrder>? algoPlacement = null;
@@ -3034,6 +3034,9 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     private readonly NativeSendTurns _sendTurns = new();
 
     internal int QueuedSends => _sendTurns.Waiting;
+
+    /// <summary>Requests this broker issued that wait for an earlier reply.</summary>
+    public int QueuedRequests => _sendTurns.Queued;
 
     /// <summary>Completes once every order request this broker already issued was answered, refused or failed. Quit awaits
     /// it before the broker closes.</summary>

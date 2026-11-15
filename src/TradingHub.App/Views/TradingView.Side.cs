@@ -856,7 +856,7 @@ public sealed partial class TradingView
             return placed;
         });
         if (!sent) return null;
-        GestureStatus(desc + " submitted");
+        GestureStatus(acc, desc + " submitted");
         chart.Model?.Invalidate();
         return order;
     }
@@ -874,7 +874,7 @@ public sealed partial class TradingView
         var br = _svc.BracketsFor(acc);
         var (sent, message) = await OrderGestureAsync(acc, desc, () => br.Move(order, price));
         if (!sent) return;
-        GestureStatus(GestureOutcome(acc, desc, message));
+        GestureStatus(acc, GestureOutcome(acc, desc, message));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -896,7 +896,7 @@ public sealed partial class TradingView
 
         var (sent, msg) = await OrderGestureAsync(acc, label, drop);
         if (!sent) return;
-        if (GestureOutcome(acc, label, msg) is { Length: > 0 } shown) GestureStatus(shown);
+        if (GestureOutcome(acc, label, msg) is { Length: > 0 } shown) GestureStatus(acc, shown);
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -912,7 +912,7 @@ public sealed partial class TradingView
         // The error is read in the lane, right after this gesture's account call: a later queued gesture may clear it.
         var (sent, error) = await OrderGestureAsync(acc, message, () => { action(acc); return acc.LastError; });
         if (!sent) return;
-        GestureStatus(error is { Length: > 0 } ? error : $"{message} requested; check account status for confirmation.");
+        GestureStatus(acc, error is { Length: > 0 } ? error : $"{message} requested; check account status for confirmation.");
     }
 
     /// <summary>Reverses the position: it opens the other side, so it needs real-order permission like an entry.</summary>
@@ -926,7 +926,7 @@ public sealed partial class TradingView
         var br = _svc.BracketsFor(acc);
         var (sent, message) = await OrderGestureAsync(acc, description, () => action(br));
         if (!sent) return;
-        GestureStatus(GestureOutcome(acc, description, message));
+        GestureStatus(acc, GestureOutcome(acc, description, message));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -936,7 +936,7 @@ public sealed partial class TradingView
     {
         var (sent, message) = await OrderGestureAsync(acc, label, () => action(br));
         if (!sent) return;
-        if (GestureOutcome(acc, label, message) is { Length: > 0 } shown) GestureStatus(shown);
+        if (GestureOutcome(acc, label, message) is { Length: > 0 } shown) GestureStatus(acc, shown);
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -963,7 +963,7 @@ public sealed partial class TradingView
         catch (Exception error)
         {
             CrashLog.Write(error);
-            GestureStatus($"{label}: error after submission; check orders and position: {error.Message}");
+            GestureStatus(acc, $"{label}: error after submission; check orders and position: {error.Message}");
             return (false, default!);
         }
     }
@@ -975,11 +975,15 @@ public sealed partial class TradingView
     private static string GestureOutcome(ITradingAccount acc, string label, string message) =>
         message.Length == 0 && OrderActionLanes.RunsOffCaller(acc) ? label : message;
 
-    /// <summary>A gesture's result; gestures still waiting in a lane stay visible in the same status line.</summary>
-    private void GestureStatus(string message)
+    /// <summary>A gesture's result; gestures still waiting in a lane, and the account's requests still waiting for an
+    /// earlier reply before they are sent (Tradovate, Binance), stay visible in the same status line.</summary>
+    private void GestureStatus(ITradingAccount acc, string message)
     {
         int pending = _svc.OrderLanes.Pending.Count;
-        _status(pending == 0 ? message : $"{message} · {pending} order action(s) pending");
+        if (pending > 0) message = $"{message} · {pending} order action(s) pending";
+        if (acc is INativeSendQueue { QueuedRequests: > 0 and var queued })
+            message = $"{message} · waiting for an earlier reply ({queued} queued)";
+        _status(message);
     }
 
     private async void OnDomOrder(DomColumn col, decimal price, bool cancel)
@@ -993,7 +997,7 @@ public sealed partial class TradingView
             string label = $"Cancel orders at {acc.Instrument.FormatPrice(price)}";
             var (sent, error) = await OrderGestureAsync(acc, label, () => { acc.CancelAt(price); return acc.LastError; });
             if (!sent) return;
-            GestureStatus(error is { Length: > 0 } ? error : $"Order cancellation requested at {acc.Instrument.FormatPrice(price)}; check account status for confirmation.");
+            GestureStatus(acc, error is { Length: > 0 } ? error : $"Order cancellation requested at {acc.Instrument.FormatPrice(price)}; check account status for confirmation.");
             return;
         }
 

@@ -259,7 +259,7 @@ public sealed partial class AccountsRithmicCloseRegressionTests
             Volatile.Write(ref quit, fixture.Services.ShutdownAsync());
         }
         finally { buyReply.TrySetResult(); }
-        await quit!.WaitAsync(AppServices.NativeSendDrainLimit + Deadline);
+        await quit!.WaitAsync(fixture.Services.NativeSendDrainLimit + Deadline);
         Assert.Contains(("Sell", false), Arrivals());
     }
 
@@ -299,8 +299,33 @@ public sealed partial class AccountsRithmicCloseRegressionTests
             Volatile.Write(ref hold, 0);
             positionRelease.TrySetResult();
         }
-        await observed.WaitAsync(AppServices.NativeSendDrainLimit + Deadline);
+        await observed.WaitAsync(fixture.Services.NativeSendDrainLimit + Deadline);
         Assert.True(sellAtQuit, "Shutdown completed before the queued Binance close was sent.");
+    }
+
+    /// <summary>A request that never settles: quit's native drain (QuitFlow) waits for it until the deadline, and the
+    /// shutdown drain that follows shares that deadline instead of waiting the whole limit again.</summary>
+    [Fact]
+    public async Task Quit_waits_for_unsettled_native_sends_against_one_deadline()
+    {
+        using var tradovate = new FakeTradovate();
+        using var feed = new TradovateFeed(() => tradovate.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        using var rithmic = new FakeRithmicServer();
+        await using var fixture = new AccountsCloseFixture(rithmic);
+        Private<Dictionary<string, TradovateTradingSession>>(fixture.Services, "_tradovateSessions")["drain-tradovate"] = session;
+        var limit = TimeSpan.FromMilliseconds(400);
+        fixture.Services.NativeSendDrainLimit = limit;
+        var neverAnswered = session.SendTurns(101).Take();
+        try
+        {
+            var started = DateTime.UtcNow;
+            await fixture.Services.DrainNativeSendsAsync().WaitAsync(Deadline); // quit
+            Assert.True(DateTime.UtcNow - started >= limit - TimeSpan.FromMilliseconds(50), "The drain did not wait for the unsettled request.");
+            var shutdown = fixture.Services.DrainNativeSendsAsync();
+            Assert.True(shutdown.IsCompleted, "The shutdown drain waited a second full limit for the same request.");
+        }
+        finally { neverAnswered.Release(); }
     }
 
     private static T Private<T>(object target, string name) =>

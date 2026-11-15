@@ -56,7 +56,7 @@ public sealed class NativeSendTurns
     private readonly object _gate = new();
     private readonly TimeSpan _reducingWait;
     private Task _tail = Task.CompletedTask;
-    private int _waiting;
+    private int _waiting, _outstanding;
 
     public NativeSendTurns() : this(ReducingWait) { }
 
@@ -64,6 +64,12 @@ public sealed class NativeSendTurns
 
     /// <summary>Requests currently waiting for an earlier turn.</summary>
     public int Waiting => Volatile.Read(ref _waiting);
+
+    /// <summary>
+    /// Requests issued after the oldest one still unanswered: they wait for an earlier reply before they are sent.
+    /// Counted from the moment a turn is taken, so it already includes a request issued a moment ago.
+    /// </summary>
+    public int Queued => Math.Max(0, Volatile.Read(ref _outstanding) - 1);
 
     /// <summary>Completes once every turn taken so far was released: the requests already issued were answered, refused
     /// or failed (quit waits for it before connections close). Never faults.</summary>
@@ -82,6 +88,7 @@ public sealed class NativeSendTurns
             // A turn released early (a reducing request sent after its bounded wait) never lets a later one pass an
             // earlier one still outstanding. Neither task faults.
             _tail = Task.WhenAll(previous, done.Task);
+            Interlocked.Increment(ref _outstanding);
             return new Turn(this, previous, done);
         }
     }
@@ -123,6 +130,9 @@ public sealed class NativeSendTurns
         }
 
         /// <summary>Lets later requests go. Idempotent.</summary>
-        public void Release() => _done.TrySetResult();
+        public void Release()
+        {
+            if (_done.TrySetResult()) Interlocked.Decrement(ref _owner._outstanding);
+        }
     }
 }

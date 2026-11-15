@@ -967,14 +967,24 @@ public sealed partial class AppServices
         return completion.Task;
     }
 
-    /// <summary>The longest quit waits for issued native order requests: a reducing request's wait for earlier replies,
-    /// its position confirmation, and its own HTTP reply.</summary>
-    internal static readonly TimeSpan NativeSendDrainLimit = TimeSpan.FromSeconds(30);
+    /// <summary>The longest quit waits for issued native order requests, in total: a reducing request's wait for earlier
+    /// replies, its position confirmation, and its own HTTP reply (tests shorten it).</summary>
+    internal TimeSpan NativeSendDrainLimit
+    {
+        get => _nativeSendDrainLimit ?? TimeSpan.FromSeconds(30);
+        set => _nativeSendDrainLimit = value;
+    }
+
+    private TimeSpan? _nativeSendDrainLimit;
+
+    private DateTime? _nativeDrainDeadline;
 
     /// <summary>
-    /// Waits, bounded by <see cref="NativeSendDrainLimit"/>, until every order request already issued on a Tradovate
-    /// session or a Binance broker was answered, refused or failed: a confirmed Close or Cancel queued behind an earlier
-    /// order's reply is sent before quit closes brokers and connections. Logged when the bound is reached.
+    /// Waits until every order request already issued on a Tradovate session or a Binance broker was answered, refused
+    /// or failed: a confirmed Close or Cancel queued behind an earlier order's reply is sent before quit closes brokers
+    /// and connections. Quit and shutdown (both on the UI thread) each drain what was issued by then, against one
+    /// deadline, <see cref="NativeSendDrainLimit"/> after the first drain: quitting never waits for it twice. Logged when
+    /// the deadline is reached.
     /// </summary>
     internal async Task DrainNativeSendsAsync()
     {
@@ -982,8 +992,15 @@ public sealed partial class AppServices
         foreach (var session in _tradovateSessions.Values.Concat(_retiredTradovateSessions)) idle.Add(session.SendsIdle);
         foreach (var broker in _realBrokers.Values.Concat(_replacedBrokers).OfType<BinanceBroker>().Distinct()) idle.Add(broker.SendsIdle);
         var all = Task.WhenAll(idle);
-        // The caller's context is kept: shutdown continues on it and reads UI-owned broker maps afterwards.
-        if (await Task.WhenAny(all, Task.Delay(NativeSendDrainLimit)) == all) return;
+        var deadline = _nativeDrainDeadline ??= DateTime.UtcNow + NativeSendDrainLimit;
+        if (all.IsCompleted) return;
+        var left = deadline - DateTime.UtcNow;
+        if (left > TimeSpan.Zero)
+        {
+            _live?.Notify("Sending queued order requests before quitting…");
+            // The caller's context is kept: shutdown continues on it and reads UI-owned broker maps afterwards.
+            if (await Task.WhenAny(all, Task.Delay(left)) == all) return;
+        }
         this.LogWarn("Order requests were still waiting to be sent or answered when Trading Hub quit; check orders and positions at the broker.");
     }
 

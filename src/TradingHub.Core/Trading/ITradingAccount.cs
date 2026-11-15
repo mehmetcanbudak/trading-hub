@@ -54,6 +54,13 @@ public interface IThreadSafeOrderEntry
 {
 }
 
+/// <summary>An account that sends its order requests one at a time, each after the venue answered the previous one.</summary>
+public interface INativeSendQueue
+{
+    /// <summary>Requests issued on this account that wait for an earlier request's reply before they are sent.</summary>
+    int QueuedRequests { get; }
+}
+
 /// <summary>Client-coordinated close. Acceptance is not native reduction enforcement or completion.</summary>
 public interface ICoordinatedPositionClose
 {

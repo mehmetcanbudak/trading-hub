@@ -461,6 +461,85 @@ public sealed class NativeSendOrderTests : IDisposable
         await Until(() => rig.Arrivals().Any(a => a.Route == "/v1/order/modifyorder"), () => rig.Broker.LastError);
     }
 
+    /// <summary>A close whose bounded wait behind an unanswered buy timed out is sent right then: its order does not wait
+    /// a second bound when it is submitted.</summary>
+    [Fact]
+    public async Task Tradovate_close_behind_an_unanswered_buy_is_sent_after_one_bounded_wait()
+    {
+        using var rig = new TradovateRig(1);
+        var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        long sellArrived = 0;
+        rig.Intercept = async (_, arrival) =>
+        {
+            if (arrival.Action == "Sell") Interlocked.CompareExchange(ref sellArrived, DateTime.UtcNow.Ticks, 0);
+            if (arrival.Action == "Buy") await buyReply.Task;
+            return null;
+        };
+        var bound = TimeSpan.FromMilliseconds(1500);
+        rig.Session.SendTurnWait = bound;
+        await rig.StartAsync(_orders, 1);
+        rig.Broker.CloseConfirmationWait = TimeSpan.FromMilliseconds(100);
+        try
+        {
+            OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Buy, 1);
+            await Until(() => rig.Placed("Buy").Length == 1, () => rig.Broker.LastError);
+            var issued = DateTime.UtcNow;
+            OrderActions.Flatten(rig.Broker);
+            await Until(() => Interlocked.Read(ref sellArrived) != 0, () => rig.Broker.LastError);
+            var waited = new DateTime(Interlocked.Read(ref sellArrived), DateTimeKind.Utc) - issued;
+            Assert.True(waited >= bound - TimeSpan.FromMilliseconds(50), $"The close was sent after {waited.TotalMilliseconds} ms, before its bound.");
+            Assert.True(waited < bound * 2 - TimeSpan.FromMilliseconds(300), $"The close waited {waited.TotalMilliseconds} ms: a second bound.");
+        }
+        finally { buyReply.TrySetResult(); }
+    }
+
+    /// <summary>Submitting a planned close throws after its send turn was handed over (here, a Changed subscriber that
+    /// throws while the close is published): the turn is not leaked, so a later new-exposure order is still sent and
+    /// the account's sends become idle.</summary>
+    [Fact]
+    public async Task Tradovate_position_order_whose_submission_throws_does_not_hold_later_requests()
+    {
+        using var rig = new TradovateRig(1);
+        await rig.StartAsync(_orders, 1);
+        int armed = 1;
+        rig.Broker.Changed += () =>
+        {
+            if (rig.Broker.ActiveOrders.Any(o => o.Comment == "Close") && Interlocked.Exchange(ref armed, 0) == 1)
+                throw new InvalidOperationException("Fixture subscriber failed.");
+        };
+        OrderActions.Flatten(rig.Broker);
+        await Until(() => Volatile.Read(ref armed) == 0, () => rig.Broker.LastError);
+        OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Buy, 1);
+        await Until(() => rig.Placed("Buy").Length == 1, () => $"{rig.Broker.LastError}; queued {rig.Broker.QueuedRequests}");
+        await rig.Session.SendsIdle.WaitAsync(Deadline);
+    }
+
+    /// <summary>The requests waiting for an earlier reply are counted from the moment they are issued (the gesture status
+    /// shows them), and the count returns to zero once the replies arrived.</summary>
+    [Fact]
+    public async Task Tradovate_requests_waiting_for_an_earlier_reply_are_counted_from_issue()
+    {
+        using var rig = new TradovateRig(1);
+        var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Intercept = async (_, arrival) =>
+        {
+            if (arrival.Action == "Buy") await buyReply.Task;
+            return null;
+        };
+        await rig.StartAsync(_orders, 1);
+        try
+        {
+            OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Buy, 1);
+            Assert.Equal(0, rig.Broker.QueuedRequests);
+            OrderActions.Flatten(rig.Broker);
+            Assert.Equal(1, rig.Broker.QueuedRequests);
+        }
+        finally { buyReply.TrySetResult(); }
+        await Until(() => rig.Placed("Sell").Length == 1, () => rig.Broker.LastError);
+        await rig.Session.SendsIdle.WaitAsync(Deadline);
+        Assert.Equal(0, rig.Broker.QueuedRequests);
+    }
+
     private static async Task Until(Func<bool> condition, Func<string?> diagnostics)
     {
         var deadline = DateTime.UtcNow + Deadline;

@@ -717,7 +717,7 @@ internal sealed class TradovateOrderRejectedException(string message) : Exceptio
 /// Una cuenta de Tradovate operando un futuro (ES → el contrato del mes, ESZ6). Sirve con los gráficos de cualquier
 /// conexión de futuros (Tradovate, Rithmic): el Chart Trader, el DOM, los stops y las estrategias operan igual.
 /// </summary>
-public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, INativeProtection, ICoordinatedPositionOperations, IDisposable
+public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, INativeProtection, ICoordinatedPositionOperations, INativeSendQueue, IDisposable
 {
     private readonly InstrumentData _data;
     private readonly TradovateTradingSession _session;
@@ -756,6 +756,9 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
     /// <summary>How long Close position waits for a position that includes earlier market orders (tests shorten it).</summary>
     internal TimeSpan CloseConfirmationWait { get; set; } = NativeSendTurns.ReducingWait;
+
+    /// <summary>Requests issued on this account (by any instrument or the Accounts page) waiting for an earlier reply.</summary>
+    public int QueuedRequests => _session.SendTurns(_account.Id).Queued;
     // Published whole under _gate and never mutated afterwards, so readers need no lock: the working handles of the
     // last Sync, and _pending as of its last change.
     private volatile List<Order> _active = new();
@@ -1375,7 +1378,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         var turn = _session.SendTurns(_account.Id).Take();
         _ = Task.Run(async () =>
         {
-            bool handed = false;
+            HandedTurn? handoff = null;
             try
             {
                 await ContractAsync().ConfigureAwait(false);
@@ -1393,8 +1396,8 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                 var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, plan.Direction, OrderTypes.Market,
                     plan.Quantity, 0, ReduceOnly: !reverse, Comment: reverse ? "Reverse" : "Close", Protective: !reverse,
                     MaximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(net))));
-                handed = true;
-                Submit(intent, new HandedTurn(turn, inOrder && confirmed, plan.Note));
+                handoff = new HandedTurn(turn, inOrder && confirmed, plan.Note);
+                Submit(intent, handoff);
             }
             catch (Exception ex)
             {
@@ -1404,7 +1407,8 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
             }
             finally
             {
-                if (!handed) turn.Release();
+                // Released here unless the order's dispatch took the turn over (whatever Submit threw).
+                if (handoff is not { Claimed: true }) turn.Release();
             }
         });
     }
@@ -1421,17 +1425,20 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
     }
 
     /// <summary>A send turn already taken and waited for by a position order, handed to the order it planned: whether it
-    /// went in order with a confirmed position, and the note to show once the order is accepted.</summary>
-    private sealed record HandedTurn(NativeSendTurns.Turn Turn, bool InOrder, string? Note);
+    /// went in order with a confirmed position, and the note to show once the order is accepted. The order's dispatch
+    /// claims it; until then the position order still owns (and releases) it.</summary>
+    private sealed class HandedTurn(NativeSendTurns.Turn turn, bool inOrder, string? note)
+    {
+        public NativeSendTurns.Turn Turn { get; } = turn;
+        public bool InOrder { get; } = inOrder;
+        public string? Note { get; } = note;
+        public bool Claimed { get; set; }
+    }
 
     private Order Submit(PreparedOrderIntent intent, HandedTurn? handed)
     {
         lock (_gate)
-            if (_byClientId.TryGetValue(intent.ClientOrderId, out var existing))
-            {
-                handed?.Turn.Release();
-                return existing;
-            }
+            if (_byClientId.TryGetValue(intent.ClientOrderId, out var existing)) return existing;
         var request = intent.Request;
         var dir = request.Direction;
         var type = request.Type;
@@ -1443,7 +1450,6 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
             ? BindOwnedOrder(order, intent) : "The prepared instrument does not match this broker.";
         if (bindingError != null || !validQuantity)
         {
-            handed?.Turn.Release();
             order.State = OrderStates.Failed;
             order.Status = OrderStatus.Rejected;
             LastError = bindingError ?? NativeFuturesQuantity.Error;
@@ -1456,19 +1462,19 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         string clientOrderId = intent.ClientOrderId;
         lock (_gate)
         {
-            if (_byClientId.TryGetValue(clientOrderId, out var existing))
-            {
-                handed?.Turn.Release();
-                return existing;
-            }
+            if (_byClientId.TryGetValue(clientOrderId, out var existing)) return existing;
             _byClientId.Add(clientOrderId, order);
             _pending.Add(order);
             _pendingSnapshot = _pending.ToArray();
             _intents[order] = intent;
         }
-        Sync();
         var leg = new PendingLeg(order, intent, dir, type, price, q, handed);
-        if (!TryDeferLinkedLeg(leg)) DispatchSingle(leg);
+        // A registered order is always dispatched (and claims its turn), even when publishing it throws.
+        try { Sync(); }
+        finally
+        {
+            if (!TryDeferLinkedLeg(leg)) DispatchSingle(leg);
+        }
         return order;
     }
 
@@ -1511,13 +1517,15 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         // Taken where the order is issued, so the account's requests reach Tradovate in issue order (a position order
         // hands over the turn it took when it was issued).
         var turn = handed?.Turn ?? _session.SendTurns(_account.Id).Take();
+        if (handed != null) handed.Claimed = true;
         _ = Task.Run(async () =>
         {
             bool placementStarted = false;
             try
             {
                 var (_, contract) = await ContractAsync().ConfigureAwait(false);
-                bool inOrder = await turn.WaitAsync(Reducing(intent), _cts.Token).ConfigureAwait(false) && (handed?.InOrder ?? true);
+                // A handed-over turn was already waited for when it was planned: it is not waited for again.
+                bool inOrder = handed?.InOrder ?? await turn.WaitAsync(Reducing(intent), _cts.Token).ConfigureAwait(false);
                 await WaitForNativeReplayAsync().ConfigureAwait(false);
                 decimal px = price > 0 ? Instrument.RoundPrice(price) : 0;
                 string ot = type == OrderTypes.Market ? "Market" : type == OrderTypes.Stop ? "Stop" : "Limit";
