@@ -101,6 +101,7 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 | live-excursions | Actual excursion service recalculates MAE/MFE from owned raw history after correcting the same entry execution; no broker data or model calls. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
 | panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
+| dom-book | DOM book-reading features (auto tick, notional, size/total/changes/recent columns, marks, stats, mirror), the DOM trading lock and the tape notional filter; restores defaults. |
 | footprint | Footprint text colors and editor. |
 | mercado | Regime analysis and condition-filtered reruns. |
 | theme | Dark/light themes and chart settings. |

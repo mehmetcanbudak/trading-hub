@@ -103,14 +103,20 @@ public sealed partial class TradingView
     private Control BuildDomSection()
     {
         _domStep = new ChoiceButton<int>(MaterialIconKind.FormatLineSpacing,
-            new[] { 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 }.Select(n => (n, $"{n} tick{(n > 1 ? "s" : "")}")),
-            "Group DOM price levels", n => $"×{n}");
+            new[] { (0, "Automatic") }.Concat(new[] { 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 }.Select(n => (n, $"{n} tick{(n > 1 ? "s" : "")}"))),
+            "Group DOM price levels (automatic: rows span the range set in DOM settings)", n => n == 0 ? "Auto" : $"×{n}");
         _domStep.MinHeight = 26;
         _domStep.Padding = new Thickness(8, 2);
+        _domStep.Select(_svc.Settings.Dom.AutoStep ? 0 : 1);
         _domStep.Changed += n =>
         {
+            if (_svc.Settings.Dom.AutoStep != (n == 0))
+            {
+                _svc.Settings.Dom.AutoStep = n == 0;
+                _svc.Settings.Save();
+            }
             if (_dom.Dom == null) return;
-            _dom.Dom.Step = n;
+            if (n > 0) _dom.Dom.Step = n;
             _dom.Dom.ResetVolume();
             _dom.Recenter();
         };
@@ -125,13 +131,15 @@ public sealed partial class TradingView
                 Ui.Text("Click Ask: limit sell (or stop below market price)."),
                 Ui.Text(Os.IsWindows ? "Right-click or Alt+click: cancel orders at that price." : "Right-click or Option-click: cancel orders at that price."),
                 Ui.Text("Drag your own order to change its price."),
+                Ui.Text("The lock in the header switches DOM trading off: the DOM becomes read-only (chart trading is unaffected)."),
                 Ui.Text("Scroll wheel: navigate · center button: return to price."),
-                Ui.Faint("DOM settings control columns, sizing, colors, and optional double-click trading.")).Also(v => v.Margin = new Thickness(12)),
+                Ui.Faint("DOM settings control columns, sizing, colors, optional double-click trading and book reading (auto tick, notional, changes, stats, mirror).")).Also(v => v.Margin = new Thickness(12)),
         };
 
         var buttonsToggle = Ui.IconButton(MaterialIconKind.GestureTapButton, "Show or hide order-entry buttons (market, limit, cancel, close)", ToggleDomButtons, 15);
         var header = SectionHeader("DOM", () => SetPanel("dom", false),
             _domStep,
+            BuildDomLock(),
             buttonsToggle,
             Ui.IconButton(MaterialIconKind.ImageFilterCenterFocus, "Center on price", () => _dom.Recenter(), 15),
             Ui.IconButton(MaterialIconKind.Tune, "Configure DOM (columns, sizes, colors)", () => OpenDomSettings(), 15),
@@ -139,10 +147,14 @@ public sealed partial class TradingView
             help);
         _dom.OrderRequested += OnDomOrder;
         _dom.Message += msg => _status(msg);
-        _dom.OrderMoved += (o, price) => _ = MoveOrderAsync(_active, o, price);
+        _dom.OrderMoved += (o, price) =>
+        {
+            if (DomOrderAllowed()) _ = MoveOrderAsync(_active, o, price);
+        };
         _dom.MinHeight = 80;
         _domButtons = BuildDomButtons();
         _domButtons.IsVisible = _svc.Settings.ShowDomButtons;
+        ApplyDomTrading();
         var box = new DockPanel();
         DockPanel.SetDock(header, Dock.Top);
         box.Children.Add(header);
@@ -222,24 +234,25 @@ public sealed partial class TradingView
         qtyRow.Children.Add(_qtyPresets);
         ToolTip.SetTip(_qty, "Quantity for DOM and these order buttons");
 
-        var panel = Ui.V(6,
-            qtyRow,
-            Row(B("Buy MKT", "buy", "Market buy", () => _ = TradeAsync(_active, OrderTypes.Market, OrderDirections.Buy, 0, QtyOf(_active))),
-                B("Sell MKT", "sell", "Market sell", () => _ = TradeAsync(_active, OrderTypes.Market, OrderDirections.Sell, 0, QtyOf(_active)))),
-            Row(B("B. Bid", "buy-soft", "Limit buy at bid (joins bid queue)", () => AtBook(OrderDirections.Buy, ask: false)),
-                B("B. Ask", "buy-soft", "Limit buy at ask (subject to liquidity)", () => AtBook(OrderDirections.Buy, ask: true)),
-                B("S. Bid", "sell-soft", "Limit sell at bid (subject to liquidity)", () => AtBook(OrderDirections.Sell, ask: false)),
-                B("S. Ask", "sell-soft", "Limit sell at ask (joins ask queue)", () => AtBook(OrderDirections.Sell, ask: true))),
-            Row(B("Cancel", "", "Cancel all orders", () => _ = AccountActionAsync(_active, a => a.CancelAll(), "Cancel all orders")),
-                B("Reverse", "", "Reverse position", () => _ = ReverseAsync(_active)),
-                B("Close position", "primary", "Closes position at market and cancels orders", () => _ = AccountActionAsync(_active, a => OrderActions.Flatten(a), "Close position"))));
+        var marketRow = Row(B("Buy MKT", "buy", "Market buy", () => { if (DomOrderAllowed()) _ = TradeAsync(_active, OrderTypes.Market, OrderDirections.Buy, 0, QtyOf(_active)); }),
+            B("Sell MKT", "sell", "Market sell", () => { if (DomOrderAllowed()) _ = TradeAsync(_active, OrderTypes.Market, OrderDirections.Sell, 0, QtyOf(_active)); }));
+        var bookRow = Row(B("B. Bid", "buy-soft", "Limit buy at bid (joins bid queue)", () => { if (DomOrderAllowed()) AtBook(OrderDirections.Buy, ask: false); }),
+            B("B. Ask", "buy-soft", "Limit buy at ask (subject to liquidity)", () => { if (DomOrderAllowed()) AtBook(OrderDirections.Buy, ask: true); }),
+            B("S. Bid", "sell-soft", "Limit sell at bid (subject to liquidity)", () => { if (DomOrderAllowed()) AtBook(OrderDirections.Sell, ask: false); }),
+            B("S. Ask", "sell-soft", "Limit sell at ask (joins ask queue)", () => { if (DomOrderAllowed()) AtBook(OrderDirections.Sell, ask: true); }));
+        var accountRow = Row(B("Cancel", "", "Cancel all orders", () => { if (DomOrderAllowed()) _ = AccountActionAsync(_active, a => a.CancelAll(), "Cancel all orders"); }),
+            B("Reverse", "", "Reverse position", () => { if (DomOrderAllowed()) _ = ReverseAsync(_active); }),
+            B("Close position", "primary", "Closes position at market and cancels orders", () => { if (DomOrderAllowed()) _ = AccountActionAsync(_active, a => OrderActions.Flatten(a), "Close position"); }));
+        _domOrderRows.Clear();
+        _domOrderRows.AddRange(new Control[] { marketRow, bookRow, accountRow });
+        var panel = Ui.V(6, qtyRow, marketRow, bookRow, accountRow);
         panel.Margin = new Thickness(10, 8, 10, 10);
         return new Border { Child = panel, BorderBrush = Ui.Line, BorderThickness = new Thickness(0, 1, 0, 0), Background = Ui.Bg1 };
     }
 
     private Control BuildTapeSection()
     {
-        var header = SectionHeader("Trade tape", () => SetPanel("tape", false), BuildDetachButton("tape"));
+        var header = SectionHeader("Trade tape", () => SetPanel("tape", false), BuildTapeFilter(), BuildDetachButton("tape"));
         _tape.MinHeight = 50;
         var box = new DockPanel();
         DockPanel.SetDock(header, Dock.Top);
@@ -392,6 +405,9 @@ public sealed partial class TradingView
         var w = new DomSettingsWindow(_svc.Settings.Dom, () =>
         {
             _dom.ApplySettings(_svc.Settings.Dom);
+            SyncDomStep();
+            if (_tape.Tape != null) _tape.Tape.Unit = _svc.Settings.Dom.Unit;
+            _tape.InvalidateVisual();
             _svc.Settings.Save();
         });
         w.Show(owner);
@@ -597,12 +613,14 @@ public sealed partial class TradingView
         if (force || _dom.Dom?.Data != data || _dom.Dom?.Broker != account)
         {
             _dom.Dom = new DomModel(data, _svc.Settings.Dom) { Broker = account, Brackets = tab.Model.Brackets, OrderQuantity = QtyOf(tab), Step = 1 };
-            _domStep?.Select(1);
+            _domStep?.Select(_svc.Settings.Dom.AutoStep ? 0 : 1);
             _tape.Tape = new TapeModel(data)
             {
                 TimeZone = tab.Model.Settings.TimeZone,
                 BlindReplay = tab.Model.Settings.BlindReplay,
                 BlindReplayStart = tab.Model.Settings.BlindReplayStart,
+                MinNotional = _svc.Settings.TapeMinNotional,
+                Unit = _svc.Settings.Dom.Unit,
             };
         }
 
@@ -899,6 +917,7 @@ public sealed partial class TradingView
 
     private async void OnDomOrder(DomColumn col, decimal price, bool cancel)
     {
+        if (!DomOrderAllowed()) return;
         var chart = _active;
         var acc = AccountOf(chart);
         if (acc == null || chart?.Model == null) return;

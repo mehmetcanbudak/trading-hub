@@ -393,6 +393,13 @@ internal static partial class SafetyScene
             Check(sim.Position.Volume == 0, "the simulated position closes without a dialog");
         });
 
+        Part("DOM trading switch", () =>
+        {
+            realProfile.AllowRealOrders = true;
+            realProfile.Enabled = true;
+            DomTradingSwitch(window, pump, tv, chart, real, Check, Shot, Status);
+        });
+
         Part("live strategy guards", () =>
         {
             realProfile.AllowRealOrders = true;

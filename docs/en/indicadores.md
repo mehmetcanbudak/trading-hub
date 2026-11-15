@@ -185,7 +185,8 @@ The KVP capability adoption reuses the existing native catalog and persistent st
 | **Higher-timeframe structure** | Mapped or explicitly selected periods, closed HTF candles/FVG, PO3/T-Spot and projections. Forming previews are explicitly labelled and are not silently published as confirmed strategy values. |
 | **Triple Bollinger** | Three independently mapped/configured periods, completed-candle length and population deviation multipliers. Warmup stays unavailable; monthly aggregation follows actual session calendars. |
 | **VWAP Claire** | Explicitly **bar-based HLC3 estimates**, with 30/90/365-calendar-day completed-session windows and optional session/week/month anchors. Values are held within the current session; short history is partial, not tick-exact VWAP. |
-| **Orderbook Delta** | Recorded-depth bid/ask, delta, imbalance and change; explicit sample-average, duration-average, last or maximum semantics. See [Depth fidelity](./datos.md#recorded-depth-and-heatmap-fidelity). |
+| **Orderbook Delta** | Recorded-depth bid/ask, delta, imbalance and change; explicit sample-average, duration-average, last or maximum semantics; tick distance or a mid-relative 0–X % band. See [Depth fidelity](./datos.md#recorded-depth-and-heatmap-fidelity). |
+| **Order book changes** / **Large book orders** | Recorded snapshot differences per price (added, filled by observed footprint, pulled) and large-level pull/chase **heuristics**; gaps and stale intervals are skipped and counted. See [Book-change studies](./graficos.md#book-change-studies). |
 
 Raw prints, measured compact buckets, synthetic OHLC and inferred aggressor sides remain distinct through the SDK. Measured compact rows may support an explicitly aggregated profile; they are not individual Big Trades or observed event-complete footprints. Estimated OHLC opt-ins remain visible. Repeated forming-bar replacement must replace the prior contribution rather than add it again.
 

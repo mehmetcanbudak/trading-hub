@@ -1,3 +1,4 @@
+using System.Globalization;
 using SkiaSharp;
 using TradingHub.Data;
 using TradingHub.Indicators;
@@ -10,19 +11,25 @@ namespace TradingHub.Charting.Dom;
 
 /// <summary>
 /// Libro de órdenes vertical (DOM / escalera de precios) al estilo SmartDOM: órdenes propias,
-/// bid, precio, ask y volumen operado en la sesión por precio. Se opera haciendo clic.
+/// bid, precio, ask y volumen operado en la sesión por precio. Se opera haciendo clic (if DOM trading is on).
+/// Optional book-reading features: auto tick, quantity/notional unit, cumulative totals, recorded book changes,
+/// recently traded volume, distance marks, a stats bar and a hover mirror.
 /// </summary>
 public sealed class DomModel
 {
+    // Traded volume per instrument tick: rows are built when drawing, so changing the step never rescans trades.
     private readonly Dictionary<long, (decimal Bid, decimal Ask)> _sessionVolume = new();
     private int _processed;
     private DateOnly _sessionDate;
+    private DateTime _changesAt = DateTime.MinValue;
+    private int _changesWindow;
 
     public DomModel(InstrumentData data, DomSettings? settings = null)
     {
         Data = data;
         Settings = settings ?? new DomSettings();
         AutoCenter = Settings.AutoCenter;
+        Clock = () => data.Feed is TradingHub.Feeds.ReplayFeed replay ? replay.Clock : data.Feed.Now;
         data.TradesAppended += (_, _) => UpdateVolume();
         data.HistoryLoaded += () =>
         {
@@ -43,7 +50,7 @@ public sealed class DomModel
     /// <summary>Configuración visual y de comportamiento (compartida entre DOMs).</summary>
     public DomSettings Settings { get; set; }
 
-    /// <summary>Ticks del instrumento por fila del DOM.</summary>
+    /// <summary>Ticks del instrumento por fila del DOM (chosen by the renderer with auto tick).</summary>
     public int Step { get; set; } = 1;
 
     /// <summary>Precio (en ticks) de la fila central cuando no está centrado automáticamente.</summary>
@@ -61,8 +68,17 @@ public sealed class DomModel
 
     public SessionSettings Session { get; set; } = SessionSettings.CryptoUtc;
 
-    /// <summary>Volumen operado en la sesión por fila (bid = vendedores agresivos, ask = compradores agresivos).</summary>
+    /// <summary>Clock for the book-change and recent-trade windows (the feed's clock, so replay and fixtures stay causal).</summary>
+    public Func<DateTime> Clock { get; set; }
+
+    /// <summary>Volumen operado en la sesión por tick (bid = vendedores agresivos, ask = compradores agresivos).</summary>
     public IReadOnlyDictionary<long, (decimal Bid, decimal Ask)> SessionVolume => _sessionVolume;
+
+    /// <summary>Recorded book changes in the window, at exact ticks (null before the first refresh).</summary>
+    public BookChangesResult? RecentChanges { get; private set; }
+
+    /// <summary>Short reason the book changes are unavailable or partial; null when complete.</summary>
+    public string? RecentChangesStatus { get; private set; }
 
     public long RowOf(long ticks) => CandleSeries.FloorDiv(ticks, Step);
 
@@ -81,10 +97,10 @@ public sealed class DomModel
         for (int i = _processed; i < store.Count; i++)
         {
             if (store.GetId(i) < 0) continue; // historia en velas: no son operaciones reales
-            long row = RowOf(store.GetPriceTicks(i));
-            _sessionVolume.TryGetValue(row, out var v);
+            long tick = store.GetPriceTicks(i);
+            _sessionVolume.TryGetValue(tick, out var v);
             var vol = store.GetVolume(i);
-            _sessionVolume[row] = store.GetSide(i) == TradeSide.Sell ? (v.Bid + vol, v.Ask) : (v.Bid, v.Ask + vol);
+            _sessionVolume[tick] = store.GetSide(i) == TradeSide.Sell ? (v.Bid + vol, v.Ask) : (v.Bid, v.Ask + vol);
         }
 
         _processed = store.Count;
@@ -97,6 +113,79 @@ public sealed class DomModel
         _sessionDate = default;
         UpdateVolume();
     }
+
+    /// <summary>Clock skew allowed between trade and book timestamps when matching removed size to trades.</summary>
+    public static readonly TimeSpan TradeSkew = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Book changes over the window from the opt-in depth recording (no second recorder): consecutive received
+    /// snapshots inside the window are compared and removals are matched to observed trades. Refreshed at most once a second.
+    /// </summary>
+    public BookChangesResult RefreshChanges(DateTime now, bool force = false)
+    {
+        int seconds = Math.Clamp(Settings.ChangeWindowSeconds, 5, 3600);
+        if (!force && RecentChanges != null && seconds == _changesWindow && now >= _changesAt && now - _changesAt < TimeSpan.FromSeconds(1))
+            return RecentChanges;
+        _changesAt = now;
+        _changesWindow = seconds;
+        var history = Data.DepthHistory;
+        var from = now - TimeSpan.FromSeconds(seconds);
+        var query = history.Query(from, now);
+        if (query.Samples.Count == 0)
+        {
+            RecentChanges = BookChangesResult.Empty;
+            RecentChangesStatus = history.Status.RecordingState == DepthRecordingState.Recording
+                ? "No recorded depth in the window" : "Depth recording is off";
+            return RecentChanges;
+        }
+        var trades = new List<BookTrade>();
+        var store = Data.Trades;
+        for (int i = store.LowerBound(from - TradeSkew); i < store.Count; i++)
+        {
+            var time = store.GetTime(i);
+            if (time > now + TradeSkew) break;
+            if (store.GetId(i) < 0) continue;
+            trades.Add(new BookTrade(time, store.GetPriceTicks(i), store.GetVolume(i), store.GetSide(i)));
+        }
+        // Preceding is outside the window: only snapshots received inside it are compared.
+        RecentChanges = BookChanges.Compute(query.Samples, null, new TimedBookTrades(trades, TradeSkew),
+            new BookChangeOptions { MaxAge = history.Options.MaxAge });
+        RecentChangesStatus = !RecentChanges.IsAvailable ? "No comparable snapshots"
+            : RecentChanges.SkippedTransitions > 0 ? "Partial: gaps or stale intervals skipped" : null;
+        return RecentChanges;
+    }
+
+    /// <summary>Recently traded volume per tick in the window (observed prints only).</summary>
+    public Dictionary<long, (decimal Bid, decimal Ask)> RecentTraded(DateTime now)
+    {
+        var result = new Dictionary<long, (decimal Bid, decimal Ask)>();
+        var store = Data.Trades;
+        var since = now - TimeSpan.FromSeconds(Math.Clamp(Settings.ChangeWindowSeconds, 5, 3600));
+        for (int i = store.Count - 1; i >= 0; i--)
+        {
+            var time = store.GetTime(i);
+            if (time < since) break;
+            if (time > now || store.GetId(i) < 0) continue;
+            long tick = store.GetPriceTicks(i);
+            result.TryGetValue(tick, out var v);
+            var vol = store.GetVolume(i);
+            result[tick] = store.GetSide(i) == TradeSide.Sell ? (v.Bid + vol, v.Ask) : (v.Bid, v.Ask + vol);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Auto tick: the visible rows span ± the chosen range around the price, but never more than the received book
+    /// (<paramref name="bookHalfSpan"/>: price distance to the farthest level on the shorter side; 0 = unknown).
+    /// </summary>
+    public static int AutoStepFor(decimal price, decimal tick, int rows, double rangePercent, decimal bookHalfSpan = 0)
+    {
+        if (price <= 0 || tick <= 0 || rows <= 0) return 1;
+        double half = (double)price * Math.Clamp(rangePercent, 0.01, 50) / 100;
+        if (bookHalfSpan > 0) half = Math.Min(half, (double)bookHalfSpan);
+        long raw = (long)Math.Ceiling(half * 2 / rows / (double)tick);
+        return Math.Max(1, CandleSeries.NiceStep(Math.Max(1, raw)));
+    }
 }
 
 /// <summary>Dibuja el DOM y resuelve los clics.</summary>
@@ -107,7 +196,7 @@ public sealed class DomRenderer
     private readonly SKPaint _text = new() { IsAntialias = true };
     private readonly List<(DomColumn Col, float X, float W)> _cols = new();
 
-    private float _width, _height, _headerH, _rowH = 18;
+    private float _width, _height, _headerH, _statsH, _rowH = 18;
     private long _topRow;
     private int _rows;
 
@@ -120,7 +209,7 @@ public sealed class DomRenderer
         set => _theme = value;
     }
 
-    /// <summary>Alto del encabezado en el último dibujo.</summary>
+    /// <summary>Alto del encabezado (stats bar + column labels) en el último dibujo.</summary>
     public float HeaderHeight => _headerH;
 
     /// <summary>Fila de arriba en el último dibujo (si cambia, el DOM se movió).</summary>
@@ -137,15 +226,35 @@ public sealed class DomRenderer
         DomColumn.Delta => new[] { "Delta", "Δ" },
         DomColumn.TradedBid => new[] { "Vol. bid", "V.bid", "Vb" },
         DomColumn.TradedAsk => new[] { "Vol. ask", "V.ask", "Va" },
+        DomColumn.Size => new[] { "Size", "Sz.", "#" },
+        DomColumn.Total => new[] { "Total", "Tot.", "Σ" },
+        DomColumn.Changes => new[] { "Changes", "± book", "±" },
+        DomColumn.Recent => new[] { "Recent", "Rec.", "R" },
         _ => new[] { c.ToString() },
     };
 
-    /// <summary>El rótulo más largo que entra en el ancho, o null si no entra ninguno.</summary>
+    /// <summary>El rótulo más largo que entra en el ancho (translated), o null si no entra ninguno.</summary>
     public static string? FitLabel(DomColumn c, float width, Func<string, float> measure)
     {
         foreach (var s in HeaderLabels(c))
-            if (measure(s) <= width - 6) return s;
+        {
+            string label = UiText.Tr(s);
+            if (measure(label) <= width - 6) return label;
+        }
         return null;
+    }
+
+    /// <summary>Short text of a size in the chosen unit (notional = size × price × point value).</summary>
+    public static string Amount(decimal size, decimal price, DomUnit unit, int decimals, decimal pointValue = 1)
+    {
+        if (unit != DomUnit.Notional) return VolumeFormat.Compact(size, decimals);
+        decimal notional = size * price * pointValue, a = Math.Abs(notional);
+        var c = CultureInfo.InvariantCulture;
+        string s = a >= 1_000_000_000 ? (a / 1_000_000_000).ToString("0.##", c) + "B"
+            : a >= 1_000_000 ? (a / 1_000_000).ToString("0.##", c) + "M"
+            : a >= 1_000 ? (a / 1_000).ToString("0.#", c) + "K"
+            : a.ToString("0", c);
+        return (notional < 0 ? "-" : "") + s;
     }
 
     /// <summary>Reparte el ancho; la columna de precio nunca queda más angosta que el precio (si no, se corta).</summary>
@@ -208,22 +317,36 @@ public sealed class DomRenderer
         var t = Theme;
         var inst = dom.Instrument;
         var book = dom.Data.Depth;
+        var unit = s.Unit;
+        decimal pointValue = inst.PointValue > 0 ? inst.PointValue : 1;
 
         // la letra nunca más alta que la fila
         float size = Math.Min(Math.Clamp(s.FontSize, 7, 24), _rowH - 3);
         var font = RenderContext.GetFont(t.FontFamily, size, false, false);
         var bold = RenderContext.GetFont(t.FontFamily, size, true, false);
-        decimal sample = dom.Data.LastPrice > 0 ? dom.Data.LastPrice : inst.TickSize * 100_000;
+        decimal last = dom.Data.LastPrice > 0 ? dom.Data.LastPrice : book.HasBid ? inst.FromTicks(book.BestBidTicks) : 0;
+        decimal sample = last > 0 ? last : inst.TickSize * 100_000;
         ComputeColumns(s, width, RenderContext.MeasureWidth(bold, inst.FormatPrice(sample)) + 10);
         var small = RenderContext.GetFont(t.FontFamily, Math.Max(7, size - 1.5f), false, false);
         var header = RenderContext.GetFont(t.FontFamily, Math.Clamp(s.FontSize - 1.5f, 8, 14), false, false);
-        _headerH = s.ShowHeader ? MathF.Ceiling(header.Spacing + 9) : 0;
+        _statsH = s.ShowStats ? MathF.Ceiling(header.Spacing * 2 + 10) : 0;
+        _headerH = _statsH + (s.ShowHeader ? MathF.Ceiling(header.Spacing + 9) : 0);
 
         _fill.Color = t.BackgroundTop;
         canvas.DrawRect(0, 0, width, height, _fill);
 
         _rows = Math.Max(1, (int)((height - _headerH) / _rowH));
         int drawRows = _rows + 1; // fila parcial abajo
+
+        // auto tick: rows span ± the chosen range, never wider than the received book's shorter side
+        if (s.AutoStep && last > 0)
+        {
+            decimal reach = 0;
+            if (book.HasBid && book.HasAsk)
+                reach = Math.Min(last - inst.FromTicks(book.Bids[^1].PriceTicks), inst.FromTicks(book.Asks[^1].PriceTicks) - last);
+            dom.Step = DomModel.AutoStepFor(last, inst.TickSize, _rows, s.AutoRangePercent, Math.Max(reach, inst.TickSize * 10));
+        }
+
         long lastTicks = dom.Data.Trades.Count > 0 ? dom.Data.Trades.GetPriceTicks(dom.Data.Trades.Count - 1) : (book.HasBid ? book.BestBidTicks : 0);
         long lastRow = dom.RowOf(lastTicks);
         long centerRow = dom.RowOf(dom.CenterTicks);
@@ -232,6 +355,7 @@ public sealed class DomRenderer
 
         long center = dom.RowOf(dom.CenterTicks);
         _topRow = center + _rows / 2;
+        long bottomRow = _topRow - drawRows + 1;
 
         // libro por fila
         var bids = new Dictionary<long, decimal>();
@@ -240,21 +364,99 @@ public sealed class DomRenderer
         foreach (var l in book.Asks) asks[dom.RowOf(l.PriceTicks)] = asks.GetValueOrDefault(dom.RowOf(l.PriceTicks)) + l.Size;
         long bestBidRow = book.HasBid ? dom.RowOf(book.BestBidTicks) : long.MinValue;
         long bestAskRow = book.HasAsk ? dom.RowOf(book.BestAskTicks) : long.MaxValue;
+        decimal mid = book.HasBid && book.HasAsk ? (inst.FromTicks(book.BestBidTicks) + inst.FromTicks(book.BestAskTicks)) / 2 : last;
 
-        decimal maxBook = 0, maxVol = 0, maxDelta = 0, maxSide = 0;
-        for (int i = 0; i < drawRows; i++)
+        // session volume per row (stored per tick)
+        var session = new Dictionary<long, (decimal Bid, decimal Ask)>();
+        foreach (var (tick, v) in dom.SessionVolume)
         {
-            long r = _topRow - i;
-            maxBook = Math.Max(maxBook, Math.Max(bids.GetValueOrDefault(r), asks.GetValueOrDefault(r)));
-            if (!dom.SessionVolume.TryGetValue(r, out var sv)) continue;
-            maxVol = Math.Max(maxVol, sv.Bid + sv.Ask);
-            maxDelta = Math.Max(maxDelta, Math.Abs(sv.Ask - sv.Bid));
-            maxSide = Math.Max(maxSide, Math.Max(sv.Bid, sv.Ask));
+            long r = dom.RowOf(tick);
+            if (r < bottomRow || r > _topRow) continue;
+            var cur = session.GetValueOrDefault(r);
+            session[r] = (cur.Bid + v.Bid, cur.Ask + v.Ask);
         }
 
-        int bookDec = FootprintRendererShim.Decimals(maxBook, inst.VolumeDecimals);
-        int volDec = FootprintRendererShim.Decimals(maxVol, inst.VolumeDecimals);
+        // optional columns: computed only when shown
+        var cumBid = new Dictionary<long, decimal>();
+        var cumAsk = new Dictionary<long, decimal>();
+        if (Has(DomColumn.Total))
+        {
+            decimal acc = 0;
+            foreach (var r in bids.Keys.Where(r => r <= bestBidRow).OrderByDescending(r => r)) cumBid[r] = acc += bids[r];
+            acc = 0;
+            foreach (var r in asks.Keys.Where(r => r >= bestAskRow).OrderBy(r => r)) cumAsk[r] = acc += asks[r];
+        }
+
+        var now = dom.Clock();
+        var change = new Dictionary<long, decimal>();
+        if (Has(DomColumn.Changes))
+        {
+            var changes = dom.RefreshChanges(now);
+            foreach (var (tick, c) in changes.Levels)
+            {
+                long r = dom.RowOf(tick);
+                change[r] = change.GetValueOrDefault(r) + c.Net;
+            }
+            foreach (var r in change.Where(p => p.Value == 0).Select(p => p.Key).ToList()) change.Remove(r);
+        }
+
+        var recent = new Dictionary<long, (decimal Bid, decimal Ask)>();
+        if (Has(DomColumn.Recent))
+            foreach (var (tick, v) in dom.RecentTraded(now))
+            {
+                long r = dom.RowOf(tick);
+                var cur = recent.GetValueOrDefault(r);
+                recent[r] = (cur.Bid + v.Bid, cur.Ask + v.Ask);
+            }
+
+        decimal PriceOf(long r) => r * dom.Step * inst.TickSize;
+        decimal U(decimal amount, long r) => unit == DomUnit.Notional ? amount * PriceOf(r) * pointValue : amount;
+        decimal BookAt(long r) => r >= bestAskRow ? asks.GetValueOrDefault(r) : r <= bestBidRow ? bids.GetValueOrDefault(r) : 0;
+
+        decimal maxBook = 0, maxVol = 0, maxDelta = 0, maxSide = 0, maxCum = 0, maxChange = 0, maxRecent = 0;
+        decimal rawBook = 0, rawVol = 0;
+        for (long r = bottomRow; r <= _topRow; r++)
+        {
+            decimal side = Math.Max(bids.GetValueOrDefault(r), asks.GetValueOrDefault(r));
+            rawBook = Math.Max(rawBook, side);
+            maxBook = Math.Max(maxBook, U(side, r));
+            maxCum = Math.Max(maxCum, U(Math.Max(cumBid.GetValueOrDefault(r), cumAsk.GetValueOrDefault(r)), r));
+            if (change.TryGetValue(r, out var ch)) maxChange = Math.Max(maxChange, Math.Abs(U(ch, r)));
+            if (recent.TryGetValue(r, out var rc)) maxRecent = Math.Max(maxRecent, U(rc.Bid + rc.Ask, r));
+            if (!session.TryGetValue(r, out var sv)) continue;
+            rawVol = Math.Max(rawVol, sv.Bid + sv.Ask);
+            maxVol = Math.Max(maxVol, U(sv.Bid + sv.Ask, r));
+            maxDelta = Math.Max(maxDelta, Math.Abs(U(sv.Ask - sv.Bid, r)));
+            maxSide = Math.Max(maxSide, U(Math.Max(sv.Bid, sv.Ask), r));
+        }
+
+        // highlight: a fixed size (in the chosen unit), optionally the largest visible sizes, otherwise none
+        decimal largeAt = s.LargeSize > 0 ? s.LargeSize : decimal.MaxValue;
+        if (s.LargeSize <= 0 && s.AutoLargeSize)
+        {
+            var sizes = new List<decimal>();
+            for (long r = bottomRow; r <= _topRow; r++)
+            {
+                decimal v = U(BookAt(r), r);
+                if (v > 0) sizes.Add(v);
+            }
+            sizes.Sort();
+            if (sizes.Count >= 5) largeAt = Math.Max(sizes[^1] * 0.85m, sizes[sizes.Count / 2] * 3);
+        }
+
+        int bookDec = FootprintRendererShim.Decimals(rawBook, inst.VolumeDecimals);
+        int volDec = FootprintRendererShim.Decimals(rawVol, inst.VolumeDecimals);
         int hoverRow = mouseY is float my && my > _headerH ? (int)((my - _headerH) / _rowH) : -1;
+
+        // distance marks: the row nearest each percentage of the mid price, on both sides
+        var marks = new Dictionary<long, string>();
+        if (mid > 0)
+            foreach (var pct in s.Marks())
+            {
+                string label = pct.ToString("0.##", CultureInfo.InvariantCulture) + "%";
+                marks.TryAdd(dom.RowOf(inst.ToTicks(mid * (1 + (decimal)pct / 100))), label);
+                marks.TryAdd(dom.RowOf(inst.ToTicks(mid * (1 - (decimal)pct / 100))), label);
+            }
 
         // fondos de fila
         var bidBg = C(s.BidBackground);
@@ -277,9 +479,9 @@ public sealed class DomRenderer
         var sellVol = C(s.SellVolumeColor);
         var lastColor = C(s.LastPriceColor);
         var priceText = C(s.PriceText);
-        var large = lastColor;
         var pos = dom.Broker?.Position;
         long posRow = pos != null && pos.Volume != 0 ? dom.RowOf(inst.ToTicks(pos.AveragePrice)) : long.MinValue;
+        var cell = new CellStyle(s, bookDec, font, bold, lastColor, largeAt, unit, pointValue);
 
         foreach (var (col, x, w) in _cols)
         {
@@ -289,17 +491,56 @@ public sealed class DomRenderer
             {
                 long r = _topRow - i;
                 float y = _headerH + i * _rowH;
+                decimal px = PriceOf(r);
                 switch (col)
                 {
                     case DomColumn.Bid when r <= bestBidRow && bids.TryGetValue(r, out var bsz) && bsz > 0:
-                        BookCell(canvas, x, y, w, bsz, maxBook, bidColor, r == bestBidRow, rightAligned: true, s, bookDec, font, bold, large);
+                        BookCell(canvas, x, y, w, bsz, px, maxBook, bidColor, r == bestBidRow, rightAligned: true, cell, null);
                         break;
                     case DomColumn.Ask when r >= bestAskRow && asks.TryGetValue(r, out var asz) && asz > 0:
-                        BookCell(canvas, x, y, w, asz, maxBook, askColor, r == bestAskRow, rightAligned: false, s, bookDec, font, bold, large);
+                        BookCell(canvas, x, y, w, asz, px, maxBook, askColor, r == bestAskRow, rightAligned: false, cell, null);
                         break;
+                    case DomColumn.Size:
+                    {
+                        decimal sz = BookAt(r);
+                        if (sz > 0)
+                            BookCell(canvas, x, y, w, sz, px, maxBook, r >= bestAskRow ? askColor : bidColor, r == bestAskRow || r == bestBidRow, rightAligned: true, cell, marks.GetValueOrDefault(r));
+                        else if (marks.TryGetValue(r, out var mark)) Text(canvas, mark, x, y, w, small, t.TextDim, -1);
+                        break;
+                    }
+                    case DomColumn.Total:
+                    {
+                        decimal cum = r >= bestAskRow ? cumAsk.GetValueOrDefault(r) : r <= bestBidRow ? cumBid.GetValueOrDefault(r) : 0;
+                        if (cum <= 0 || maxCum <= 0) break;
+                        float bw = (float)(U(cum, r) / maxCum) * (w - 4);
+                        _fill.Color = (r >= bestAskRow ? askColor : bidColor).WithAlpha(60);
+                        canvas.DrawRect(x + w - 2 - bw, y + 2, bw, _rowH - 4, _fill);
+                        Text(canvas, Amount(cum, px, unit, bookDec, pointValue), x, y, w, small, t.Text, 1);
+                        break;
+                    }
+                    case DomColumn.Changes when change.TryGetValue(r, out var ch) && maxChange > 0:
+                    {
+                        float bw = (float)(Math.Abs(U(ch, r)) / maxChange) * (w / 2 - 2);
+                        float cx = x + w / 2;
+                        _fill.Color = (ch > 0 ? buyVol : sellVol).WithAlpha(170);
+                        canvas.DrawRect(ch > 0 ? cx : cx - bw, y + 2, bw, _rowH - 4, _fill);
+                        Text(canvas, (ch > 0 ? "+" : "−") + Amount(Math.Abs(ch), px, unit, bookDec, pointValue), x, y, w, small, t.Text, ch > 0 ? -1 : 1);
+                        break;
+                    }
+                    case DomColumn.Recent when recent.TryGetValue(r, out var rc) && maxRecent > 0:
+                    {
+                        decimal tot = rc.Bid + rc.Ask;
+                        float vw = (float)(U(tot, r) / maxRecent) * (w - 4);
+                        float bidW = tot > 0 ? vw * (float)(rc.Bid / tot) : 0;
+                        _fill.Color = sellVol;
+                        canvas.DrawRect(x + 2, y + 2, bidW, _rowH - 4, _fill);
+                        _fill.Color = buyVol;
+                        canvas.DrawRect(x + 2 + bidW, y + 2, vw - bidW, _rowH - 4, _fill);
+                        Text(canvas, Amount(tot, px, unit, volDec, pointValue), x, y, w, small, t.Text, -1);
+                        break;
+                    }
                     case DomColumn.Price:
                     {
-                        decimal price = r * dom.Step * inst.TickSize;
                         bool isLast = r == lastRow;
                         if (isLast)
                         {
@@ -307,51 +548,59 @@ public sealed class DomRenderer
                             canvas.DrawRect(x + 1, y + 1, w - 2, _rowH - 2, _fill);
                         }
 
-                        bool round = price % (inst.TickSize * dom.Step * 10) == 0;
-                        Text(canvas, inst.FormatPrice(price), x, y, w, isLast ? bold : font, isLast ? SKColors.Black : round ? t.Text : priceText, 0);
+                        bool round = px % (inst.TickSize * dom.Step * 10) == 0;
+                        Text(canvas, inst.FormatPrice(px), x, y, w, isLast ? bold : font, isLast ? SKColors.Black : round ? t.Text : priceText, 0);
+                        if (!isLast && marks.ContainsKey(r))
+                        {
+                            _fill.Color = t.TextDim.WithAlpha(160);
+                            canvas.DrawRect(x + 1, y + _rowH - 2, w - 2, 1, _fill);
+                        }
                         break;
                     }
-                    case DomColumn.Volume when dom.SessionVolume.TryGetValue(r, out var sv) && maxVol > 0:
+                    case DomColumn.Volume when session.TryGetValue(r, out var sv) && maxVol > 0:
                     {
                         decimal tot = sv.Bid + sv.Ask;
-                        float vw = (float)(tot / maxVol) * (w - 4);
+                        float vw = (float)(U(tot, r) / maxVol) * (w - 4);
                         float bidW = tot > 0 ? vw * (float)(sv.Bid / tot) : 0;
                         _fill.Color = sellVol;
                         canvas.DrawRect(x + 2, y + 2, bidW, _rowH - 4, _fill);
                         _fill.Color = buyVol;
                         canvas.DrawRect(x + 2 + bidW, y + 2, vw - bidW, _rowH - 4, _fill);
-                        Text(canvas, VolumeFormat.Compact(tot, volDec), x, y, w, small, t.Text, -1);
+                        Text(canvas, Amount(tot, px, unit, volDec, pointValue), x, y, w, small, t.Text, -1);
                         break;
                     }
-                    case DomColumn.Delta when dom.SessionVolume.TryGetValue(r, out var sv) && maxDelta > 0:
+                    case DomColumn.Delta when session.TryGetValue(r, out var sv) && maxDelta > 0:
                     {
                         decimal d = sv.Ask - sv.Bid;
                         if (d == 0) break;
-                        float dw = (float)(Math.Abs(d) / maxDelta) * (w - 4);
+                        float dw = (float)(Math.Abs(U(d, r)) / maxDelta) * (w - 4);
                         _fill.Color = d > 0 ? buyVol : sellVol;
                         canvas.DrawRect(x + 2, y + 2, dw, _rowH - 4, _fill);
-                        Text(canvas, (d > 0 ? "+" : "") + VolumeFormat.Compact(d, volDec), x, y, w, small, t.Text, -1);
+                        Text(canvas, (d > 0 ? "+" : "") + Amount(d, px, unit, volDec, pointValue), x, y, w, small, t.Text, -1);
                         break;
                     }
-                    case DomColumn.TradedBid when dom.SessionVolume.TryGetValue(r, out var sv) && sv.Bid > 0 && maxSide > 0:
+                    case DomColumn.TradedBid when session.TryGetValue(r, out var sv) && sv.Bid > 0 && maxSide > 0:
                     {
-                        float bw = (float)(sv.Bid / maxSide) * (w - 4);
+                        float bw = (float)(U(sv.Bid, r) / maxSide) * (w - 4);
                         _fill.Color = sellVol;
                         canvas.DrawRect(x + w - 2 - bw, y + 2, bw, _rowH - 4, _fill);
-                        Text(canvas, VolumeFormat.Compact(sv.Bid, volDec), x, y, w, small, t.Text, 1);
+                        Text(canvas, Amount(sv.Bid, px, unit, volDec, pointValue), x, y, w, small, t.Text, 1);
                         break;
                     }
-                    case DomColumn.TradedAsk when dom.SessionVolume.TryGetValue(r, out var sv) && sv.Ask > 0 && maxSide > 0:
+                    case DomColumn.TradedAsk when session.TryGetValue(r, out var sv) && sv.Ask > 0 && maxSide > 0:
                     {
-                        float aw = (float)(sv.Ask / maxSide) * (w - 4);
+                        float aw = (float)(U(sv.Ask, r) / maxSide) * (w - 4);
                         _fill.Color = buyVol;
                         canvas.DrawRect(x + 2, y + 2, aw, _rowH - 4, _fill);
-                        Text(canvas, VolumeFormat.Compact(sv.Ask, volDec), x, y, w, small, t.Text, -1);
+                        Text(canvas, Amount(sv.Ask, px, unit, volDec, pointValue), x, y, w, small, t.Text, -1);
                         break;
                     }
                 }
             }
 
+            // an unavailable recorded-changes column says so instead of looking like "no changes" (full reason: stats bar)
+            if (col == DomColumn.Changes && dom.RecentChanges is { IsAvailable: false })
+                Text(canvas, dom.Data.DepthHistory.Status.RecordingState == DepthRecordingState.Recording ? "No data" : "Recording off", x, _headerH, w, small, t.TextDim, -1);
             canvas.Restore();
         }
 
@@ -408,19 +657,25 @@ public sealed class DomRenderer
         foreach (var (_, x, _) in _cols.Skip(1))
         {
             float xx = MathF.Floor(x) + 0.5f;
-            canvas.DrawLine(xx, 0, xx, height, _stroke);
+            canvas.DrawLine(xx, _statsH, xx, height, _stroke);
         }
 
+        if (s.HoverMirror && hoverRow >= 0 && hoverRow < drawRows && mid > 0)
+            DrawMirror(canvas, dom, _topRow - hoverRow, mid, bids, asks, bestBidRow, bestAskRow, unit, pointValue, small, bookDec);
+        if (s.ShowStats) DrawStats(canvas, dom, book, mid, unit, pointValue, header);
         if (s.ShowHeader) DrawHeader(canvas, header);
     }
 
-    private void BookCell(SKCanvas canvas, float x, float y, float w, decimal size, decimal max, SKColor color, bool best, bool rightAligned,
-        DomSettings s, int decimals, SKFont font, SKFont bold, SKColor large)
+    private readonly record struct CellStyle(DomSettings Settings, int Decimals, SKFont Font, SKFont Bold, SKColor Large, decimal LargeAt, DomUnit Unit, decimal PointValue);
+
+    private void BookCell(SKCanvas canvas, float x, float y, float w, decimal size, decimal price, decimal max, SKColor color, bool best, bool rightAligned,
+        CellStyle style, string? mark)
     {
-        if (s.BookBars)
+        decimal value = style.Unit == DomUnit.Notional ? size * price * style.PointValue : size;
+        if (style.Settings.BookBars)
         {
             _fill.Color = color.WithAlpha(best ? (byte)230 : (byte)150);
-            float bw = max > 0 ? (float)(size / max) * (w - 2) : 0;
+            float bw = max > 0 ? (float)(value / max) * (w - 2) : 0;
             canvas.DrawRect(rightAligned ? x + w - 1 - bw : x + 1, y + 1, bw, _rowH - 2, _fill);
         }
         else if (best)
@@ -429,20 +684,138 @@ public sealed class DomRenderer
             canvas.DrawRect(x + 1, y + 1, w - 2, _rowH - 2, _fill);
         }
 
-        bool isLarge = s.LargeSize > 0 && size >= s.LargeSize;
+        bool isLarge = value >= style.LargeAt;
         if (isLarge)
         {
-            _stroke.Color = large;
+            _stroke.Color = style.Large;
             _stroke.StrokeWidth = 1.5f;
             canvas.DrawRect(x + 1.5f, y + 1.5f, w - 3, _rowH - 3, _stroke);
             _stroke.StrokeWidth = 1;
         }
 
-        Text(canvas, VolumeFormat.Compact(size, decimals), x, y, w, best || isLarge ? bold : font, SKColors.White, rightAligned ? 1 : -1);
+        if (mark != null) Text(canvas, mark, x, y, w, RenderContext.GetFont(Theme.FontFamily, Math.Max(7, style.Font.Size - 2), false, false), Theme.TextDim, rightAligned ? -1 : 1);
+        Text(canvas, Amount(size, price, style.Unit, style.Decimals, style.PointValue), x, y, w, best || isLarge ? style.Bold : style.Font, SKColors.White, rightAligned ? 1 : -1);
+    }
+
+    /// <summary>
+    /// Stats bar: spread and, within 0.5 / 2 / 10 % of the mid, each side's resting size with a bid/ask split bar.
+    /// "≥" marks a band deeper than the received book (only received levels are summed).
+    /// </summary>
+    private void DrawStats(SKCanvas canvas, DomModel dom, DepthSnapshot book, decimal mid, DomUnit unit, decimal pointValue, SKFont font)
+    {
+        var t = Theme;
+        var inst = dom.Instrument;
+        _fill.Color = t.AxisBackground;
+        canvas.DrawRect(0, 0, _width, _statsH, _fill);
+        float y1 = font.Spacing + 2, y2 = font.Spacing * 2 + 6;
+        if (mid <= 0 || !book.HasBid || !book.HasAsk)
+        {
+            _text.Color = t.TextDim;
+            canvas.DrawUiText(UiText.Tr("No two-sided book"), 6, y1, font, _text);
+            return;
+        }
+
+        (decimal Sum, bool Partial) Band(BookLevel[] side, decimal pct, bool bidSide)
+        {
+            decimal limit = bidSide ? mid * (1 - pct / 100) : mid * (1 + pct / 100), sum = 0;
+            foreach (var l in side)
+            {
+                decimal p = inst.FromTicks(l.PriceTicks);
+                if (bidSide ? p < limit : p > limit) return (sum, false);
+                sum += unit == DomUnit.Notional ? l.Size * p * pointValue : l.Size;
+            }
+            return (sum, true);
+        }
+
+        decimal spread = inst.FromTicks(book.BestAskTicks) - inst.FromTicks(book.BestBidTicks);
+        string F(decimal v) => unit == DomUnit.Notional ? Amount(v, 1, DomUnit.Notional, 0) : VolumeFormat.Compact(v, FootprintRendererShim.Decimals(v, inst.VolumeDecimals));
+        string bp = ((double)(spread / mid) * 1e4).ToString("0.0", CultureInfo.InvariantCulture);
+        string head = UiText.Tr($"Spread {inst.FormatPrice(spread)} ({bp} bp) · ×{dom.Step} tick");
+        if (Has(DomColumn.Changes) && dom.RecentChanges is { IsAvailable: true } changes)
+            head += " · " + UiText.Tr($"changes: {changes.Comparisons} comparisons, {changes.SkippedTransitions} skipped");
+        else if (Has(DomColumn.Changes) && dom.RecentChangesStatus is { } why)
+            head += " · " + UiText.Tr(why);
+        _text.Color = t.TextDim;
+        canvas.DrawUiText(head, 6, y1, font, _text);
+        float x = 6;
+        var bidC = C(dom.Settings.BidColor).WithAlpha(200);
+        var askC = C(dom.Settings.AskColor).WithAlpha(200);
+        foreach (var pct in new[] { 0.5m, 2m, 10m })
+        {
+            var b = Band(book.Bids, pct, true);
+            var a = Band(book.Asks, pct, false);
+            string label = pct.ToString("0.#", CultureInfo.InvariantCulture) + "%";
+            _text.Color = t.TextDim;
+            canvas.DrawUiText(label, x, y2, font, _text);
+            x += RenderContext.MeasureWidth(font, label) + 3;
+            float bw = 28, h = font.Size * 0.7f;
+            decimal total = a.Sum + b.Sum;
+            float split = total > 0 ? (float)(b.Sum / total) * bw : bw / 2;
+            _fill.Color = bidC;
+            canvas.DrawRect(x, y2 - h, split, h, _fill);
+            _fill.Color = askC;
+            canvas.DrawRect(x + split, y2 - h, bw - split, h, _fill);
+            x += bw + 3;
+            string v = (b.Partial ? "≥" : "") + F(b.Sum) + "/" + (a.Partial ? "≥" : "") + F(a.Sum);
+            _text.Color = t.Text;
+            canvas.DrawUiText(v, x, y2, font, _text);
+            x += RenderContext.MeasureWidth(font, v) + 10;
+            if (x > _width - 40) break;
+        }
+
+        _stroke.Color = new SKColor(40, 46, 60);
+        canvas.DrawLine(0, _statsH - 0.5f, _width, _statsH - 0.5f, _stroke);
+    }
+
+    /// <summary>Hover mirror: resting size from the price to the hovered row against the same distance on the other side.</summary>
+    private void DrawMirror(SKCanvas canvas, DomModel dom, long hover, decimal mid, Dictionary<long, decimal> bids, Dictionary<long, decimal> asks,
+        long bestBidRow, long bestAskRow, DomUnit unit, decimal pointValue, SKFont font, int dec)
+    {
+        var inst = dom.Instrument;
+        long midRow = dom.RowOf(inst.ToTicks(mid));
+        long distance = Math.Abs(hover - midRow);
+        if (distance == 0) return;
+        bool above = hover > midRow;
+        decimal near = 0, far = 0;
+        for (long k = 0; k <= distance; k++)
+        {
+            long ra = midRow + k, rb = midRow - k;
+            decimal va = ra >= bestAskRow ? asks.GetValueOrDefault(ra) : 0, vb = rb <= bestBidRow ? bids.GetValueOrDefault(rb) : 0;
+            if (unit == DomUnit.Notional)
+            {
+                va *= ra * dom.Step * inst.TickSize * pointValue;
+                vb *= rb * dom.Step * inst.TickSize * pointValue;
+            }
+            if (above) { near += va; far += vb; }
+            else { near += vb; far += va; }
+        }
+
+        long mirror = midRow - (hover - midRow);
+        int iMirror = (int)(_topRow - mirror);
+        if (iMirror >= 0 && iMirror <= _rows)
+        {
+            _stroke.Color = new SKColor(242, 181, 58, 200);
+            canvas.DrawRect(0.5f, _headerH + iMirror * _rowH + 0.5f, _width - 1, _rowH - 1, _stroke);
+        }
+
+        decimal away = Math.Abs(hover * dom.Step * inst.TickSize - mid) / mid * 100;
+        string nearSide = UiText.Tr(above ? "asks" : "bids"), farSide = UiText.Tr(above ? "bids" : "asks");
+        string ratio = near > 0 && far > 0 ? (far >= near ? $"{farSide} ×{(far / near).ToString("0.00", CultureInfo.InvariantCulture)}" : $"{nearSide} ×{(near / far).ToString("0.00", CultureInfo.InvariantCulture)}") : "";
+        string text = $"±{away.ToString("0.##", CultureInfo.InvariantCulture)}% · {nearSide} {Amount(near, 1, unit, dec)} · {farSide} {Amount(far, 1, unit, dec)}" + (ratio.Length > 0 ? " · " + ratio : "");
+        float tw = RenderContext.MeasureWidth(font, text) + 10;
+        int iHover = (int)(_topRow - hover);
+        float y = _headerH + iHover * _rowH + (above ? _rowH + 2 : -font.Spacing - 6);
+        y = Math.Clamp(y, _headerH, Math.Max(_headerH, _height - font.Spacing - 6));
+        float x = Math.Max(2, _width - tw - 4);
+        _fill.Color = new SKColor(20, 24, 32, 235);
+        canvas.DrawRoundRect(new SKRect(x, y, x + tw, y + font.Spacing + 4), 4, 4, _fill);
+        _text.Color = new SKColor(235, 235, 240);
+        canvas.DrawUiText(text, x + 5, y + font.Spacing, font, _text);
     }
 
     private void Text(SKCanvas canvas, string s, float x, float y, float w, SKFont f, SKColor color, int align)
     {
+        s = UiText.Tr(s);
         float tw = RenderContext.MeasureWidth(f, s);
         float tx = align < 0 ? x + 4 : align > 0 ? x + w - 4 - tw : x + (w - tw) / 2;
         float ty = y + _rowH / 2 - (f.Metrics.Ascent + f.Metrics.Descent) / 2;
@@ -453,16 +826,17 @@ public sealed class DomRenderer
     private void DrawHeader(SKCanvas canvas, SKFont font)
     {
         var t = Theme;
+        float top = _statsH, h = _headerH - _statsH;
         _fill.Color = t.AxisBackground;
-        canvas.DrawRect(0, 0, _width, _headerH, _fill);
-        float baseline = _headerH / 2 - (font.Metrics.Ascent + font.Metrics.Descent) / 2;
+        canvas.DrawRect(0, top, _width, h, _fill);
+        float baseline = top + h / 2 - (font.Metrics.Ascent + font.Metrics.Descent) / 2;
         foreach (var (col, x, w) in _cols)
         {
             // el rótulo se abrevia según el ancho y nunca se sale de su columna
             var label = FitLabel(col, w, s => RenderContext.MeasureWidth(font, s));
             if (label == null) continue;
             canvas.Save();
-            canvas.ClipRect(new SKRect(x, 0, x + w, _headerH));
+            canvas.ClipRect(new SKRect(x, top, x + w, _headerH));
             _text.Color = t.TextDim;
             canvas.DrawUiText(label, x + w / 2 - RenderContext.MeasureWidth(font, label) / 2, baseline, font, _text);
             canvas.Restore();
@@ -500,7 +874,7 @@ public sealed class DomRenderer
         return null;
     }
 
-    /// <summary>Clic en el DOM: opera directo en el broker (sin confirmación).</summary>
+    /// <summary>Clic en el DOM: opera directo en el broker (sin confirmación). Only reached through <see cref="DomOrderGestures"/>.</summary>
     public string? Click(DomModel dom, float x, float y, bool right, bool cancelModifier)
     {
         var hit = HitTest(dom, x, y);

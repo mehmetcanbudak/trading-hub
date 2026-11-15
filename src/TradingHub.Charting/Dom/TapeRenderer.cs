@@ -21,6 +21,14 @@ public sealed class TapeModel
     /// <summary>Volumen mínimo para mostrar.</summary>
     public decimal MinVolume { get; set; }
 
+    /// <summary>Only prints of at least this notional (quantity × price × point value; 0 = all).</summary>
+    public decimal MinNotional { get; set; }
+
+    /// <summary>Unit of the volume column (the DOM's unit).</summary>
+    public DomUnit Unit { get; set; } = DomUnit.Quantity;
+
+    public decimal Notional(decimal volume, decimal price) => volume * price * (Data.Instrument.PointValue > 0 ? Data.Instrument.PointValue : 1);
+
     /// <summary>A partir de este volumen la fila se resalta.</summary>
     public decimal HighlightVolume { get; set; }
 
@@ -79,7 +87,9 @@ public sealed class TapeRenderer
         _text.Color = t.TextDim;
         canvas.DrawUiText(tape.BlindReplay ? "Elapsed" : "Time", c1, 14, head, _text);
         canvas.DrawUiText("Price", c2, 14, head, _text);
-        canvas.DrawUiText("Volume", c3 - RenderContext.MeasureWidth(head, "Volume"), 14, head, _text);
+        string volumeHeader = tape.Unit == DomUnit.Notional ? UiText.Tr("Notional") : UiText.Tr("Volume");
+        if (tape.MinNotional > 0) volumeHeader = "≥ " + DomRenderer.Amount(tape.MinNotional, 1, DomUnit.Notional, 0) + " · " + volumeHeader;
+        canvas.DrawUiText(volumeHeader, c3 - head.MeasureUiText(volumeHeader), 14, head, _text);
 
         int maxRows = (int)((height - HeaderH) / RowH) + 1;
         if (tape.Anchor is { } anchor && anchor >= tape.Data.Trades.Count - 1) tape.Anchor = null;
@@ -101,7 +111,7 @@ public sealed class TapeRenderer
             _text.Color = big ? SKColors.White : col;
             canvas.DrawUiText(tape.DisplayTime(r.Time), c1, y + baseOff, f, _text);
             canvas.DrawUiText(inst.FormatPrice(r.Price), c2, y + baseOff, f, _text);
-            string v = VolumeFormat.Compact(r.Volume, dec);
+            string v = DomRenderer.Amount(r.Volume, r.Price, tape.Unit, dec, inst.PointValue > 0 ? inst.PointValue : 1);
             canvas.DrawUiText(v, c3 - RenderContext.MeasureWidth(f, v), y + baseOff, f, _text);
         }
 
@@ -200,7 +210,8 @@ public sealed class TapeRenderer
             }
 
             scanned += count;
-            if (vol >= tape.MinVolume) res.Add(new Row(new DateTime(t, DateTimeKind.Utc), price, vol, side, count));
+            if (vol >= tape.MinVolume && (tape.MinNotional <= 0 || tape.Notional(vol, price) >= tape.MinNotional))
+                res.Add(new Row(new DateTime(t, DateTimeKind.Utc), price, vol, side, count));
             i = j;
         }
 
