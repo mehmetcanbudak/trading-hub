@@ -624,8 +624,9 @@ public sealed partial class AppServices
             var context = TradingContext(tp, accountId, "Tradovate", "futures",
                 (session.IsDemo ? "demo|" : "live|") + PublicEndpoint(session.Connection.RestBase),
                 session.Accounts.Any(a => a.Id == id) ? id.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
+            // The opt-in is read at each protection placement, so switching it in Connections needs no reconnection.
             return Cache(key, tp, new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc,
-                $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}", context), session.Connection);
+                $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}", context, () => tp.ExchangeSideProtection), session.Connection);
         }
 
         if (accountId.StartsWith("rithmic|", StringComparison.Ordinal))

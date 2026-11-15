@@ -67,7 +67,8 @@ public sealed class PendingBracket
 public sealed class BracketManager : IDisposable
 {
     private readonly object _gate = new();
-    private enum ExitPhase { Waiting, Working, Replacing, CancelPending, Settled }
+    // Dissolving: the venue cancelled a linked leg nobody here asked to cancel; held until its cause is confirmed.
+    private enum ExitPhase { Waiting, Working, Replacing, CancelPending, Settled, Dissolving }
 
     private sealed class ExitIntent
     {
@@ -83,6 +84,9 @@ public sealed class BracketManager : IDisposable
         public decimal RequestedPrice;
         public decimal? FailedTotal;
         public decimal FailedPrice;
+        // The cancelled linked leg whose cause is being confirmed, and when it was seen cancelled.
+        public OwnedExit? Dissolved;
+        public DateTime DissolvedAt;
     }
 
     private sealed class OwnedExit
@@ -91,6 +95,19 @@ public sealed class BracketManager : IDisposable
         public required Order Latest;
         public required ExitIntent Intent;
         public decimal Booked;
+        // Sent as one venue-linked stop/target group; Partner is the other leg of that group.
+        public bool Linked;
+        public OwnedExit? Partner;
+        // This app asked the venue to remove this leg (not a resize): a venue cancelling its partner is then a dissolved link.
+        public bool RemovalRequested;
+        // The partner's cumulative execution while this leg was working and already sized to the remaining position:
+        // only executions beyond it can explain a later venue cancellation of this leg.
+        public decimal PartnerBaseline;
+        // The reported |position| when that baseline was taken: a replacement waits until the reported position has fallen
+        // by the partner's later executions and the venue dates that report no earlier than the partner's last fill.
+        public decimal VolumeAtBaseline;
+        // This app asked the venue to cancel this leg (from any path), recorded while the broker still remembers it.
+        public bool CancelSeen;
     }
 
     private readonly List<ExitIntent> _exits = new();
@@ -110,6 +127,9 @@ public sealed class BracketManager : IDisposable
     private bool _syncAgain;
     private bool _targetFillObserved;
     private bool _disposeRequested;
+    // The venue refused or dissolved this position's linked pair: app-managed protection until the next position.
+    private bool _linkFallback;
+    private string? _protectionNote;
 
     public BracketManager(ITradingAccount account)
     {
@@ -131,6 +151,13 @@ public sealed class BracketManager : IDisposable
 
     /// <summary>Avisos para la barra de estado (OCO, breakeven…). Puede llegar desde otro hilo.</summary>
     public event Action<string>? Message;
+
+    /// <summary>Time source for the bounded wait on a dissolved exchange-side link (replaceable for deterministic checks).</summary>
+    public Func<DateTime> Clock { get; set; } = static () => DateTime.UtcNow;
+
+    /// <summary>How long a venue-cancelled linked leg waits for its cause (the partner's fill and position report) before
+    /// the position is reported as having a protection gap.</summary>
+    public TimeSpan LinkDissolutionWait { get; set; } = TimeSpan.FromSeconds(30);
 
     private Instrument Inst => Account.Instrument;
     private decimal Volume => Account.Position.Volume;
@@ -224,6 +251,35 @@ public sealed class BracketManager : IDisposable
     public PendingBracket? PendingFor(Order entry)
     {
         lock (_gate) return _pending.FirstOrDefault(p => Same(p.Entry, entry));
+    }
+
+    /// <summary>
+    /// How the working stop and targets are held. Exchange-side only when every working leg was sent linked and the venue
+    /// reports its group; an unacknowledged or partial link is reported as app-managed.
+    /// </summary>
+    public ProtectionMode Mode
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var working = Working(BracketRole.StopLoss).Concat(Working(BracketRole.Target)).ToList();
+                if (working.Count == 0) return ProtectionMode.None;
+                return Account is INativeProtection native && working.Count == 2 &&
+                    working.All(w => w.Intent.Current is { Linked: true, Partner: not null } && native.ProtectionGroupOf(w.Order) != null)
+                    ? ProtectionMode.ExchangeSide : ProtectionMode.AppManaged;
+            }
+        }
+    }
+
+    /// <summary>Why opted-in exchange-side protection is not in use for this position (venue refusal, dissolved link or an
+    /// unrepresentable layout); null when nothing fell back.</summary>
+    public string? ProtectionNote
+    {
+        get
+        {
+            lock (_gate) return _protectionNote ?? (Account as INativeProtection)?.NativeProtectionFault;
+        }
     }
 
     /// <summary>Resultado en dinero si la posición (o la cantidad dada) se cerrara en ese precio.</summary>
@@ -413,9 +469,11 @@ public sealed class BracketManager : IDisposable
     });
 
     /// <summary>Lleva el stop al precio de entrada (más el margen de la plantilla).</summary>
-    public string MoveStopToBreakeven() => Run(MoveStopToBreakevenCore);
+    public string MoveStopToBreakeven() => Run(() => MoveStopToBreakevenCore(automatic: false));
 
-    private string MoveStopToBreakevenCore()
+    // The automatic move after the first target keeps a dissolved stop waiting for its position check (it only updates the
+    // price to place); an explicit move ends the wait.
+    private string MoveStopToBreakevenCore(bool automatic)
     {
         if (NotReady is { } pending) return pending;
         decimal v = Volume;
@@ -424,7 +482,8 @@ public sealed class BracketManager : IDisposable
         if (Validate(BracketRole.StopLoss, be, Math.Sign(v), Account.LastPrice) != null)
             return "Not enough profit yet to move the stop to breakeven.";
         var stop = Desired(BracketRole.StopLoss).FirstOrDefault();
-        if (stop != null) ChangeExit(stop, be, ExitQuantity);
+        if (stop is { Phase: ExitPhase.Dissolving } && automatic) stop.Price = be;
+        else if (stop != null) ChangeExit(stop, be, ExitQuantity);
         else QueueExit(BracketRole.StopLoss, Math.Sign(v), ExitQuantity, be);
         return $"Stop at breakeven ({Inst.FormatPrice(be)})";
     }
@@ -664,6 +723,7 @@ public sealed class BracketManager : IDisposable
         {
             _exitCapacity = 0;
             if (CancelManaged() > 0) Message?.Invoke("Position closed: remaining stop and target cancellation requested.");
+            _protectionNote = null;
             _targetHits = 0;
             _targetFillObserved = false;
         }
@@ -675,9 +735,13 @@ public sealed class BracketManager : IDisposable
             _entryPrice = Account.Position.AveragePrice;
             _targetHits = 0;
             _targetFillObserved = false;
+            _linkFallback = false;
+            _protectionNote = null;
             var source = filledEntry ?? _pending.FirstOrDefault(p =>
                 p.Side == Math.Sign(v) && Live(p.Entry).Status == OrderStatus.PartlyFilled);
-            if (source != null && (source.StopTicks != null || source.Targets.Count > 0))
+            // Protection the venue already holds for this position is adopted, never placed a second time.
+            if (AdoptNativeProtection()) { }
+            else if (source != null && (source.StopTicks != null || source.Targets.Count > 0))
             {
                 string message = PlaceBrackets(source.Side, _entryPrice, source.StopTicks, source.Targets);
                 Message?.Invoke(message);
@@ -695,7 +759,8 @@ public sealed class BracketManager : IDisposable
             _exitCapacity = Math.Max(0, Math.Abs(v) - unreported);
             _entryPrice = Account.Position.AveragePrice;
             bool none = !Desired(BracketRole.StopLoss).Any() && !Desired(BracketRole.Target).Any();
-            if (none && filledEntry != null && (filledEntry.StopTicks != null || filledEntry.Targets.Count > 0))
+            if (none && AdoptNativeProtection()) { }
+            else if (none && filledEntry != null && (filledEntry.StopTicks != null || filledEntry.Targets.Count > 0))
             {
                 string message = PlaceBrackets(filledEntry.Side, _entryPrice, filledEntry.StopTicks, filledEntry.Targets);
                 Message?.Invoke(message);
@@ -705,6 +770,7 @@ public sealed class BracketManager : IDisposable
 
         if (v != 0)
         {
+            AdoptNativeProtection();
             ResizeToPosition();
             if (_targetFillObserved)
             {
@@ -712,7 +778,7 @@ public sealed class BracketManager : IDisposable
                 bool first = _targetHits++ == 0;
                 if (first && Template.BreakevenAfterFirstTarget && Desired(BracketRole.StopLoss).Any())
                 {
-                    string message = MoveStopToBreakevenCore();
+                    string message = MoveStopToBreakevenCore(automatic: true);
                     Message?.Invoke($"Target filled · {message}");
                 }
                 else Message?.Invoke("Target filled: stop adjusted to the remaining position.");
@@ -728,6 +794,7 @@ public sealed class BracketManager : IDisposable
         foreach (var owned in _owned)
         {
             var order = Current(owned);
+            if (owned.Linked && !owned.CancelSeen && CancelRequested(owned)) owned.CancelSeen = true;
             decimal filled = Executed(order);
             decimal delta = Math.Max(0, filled - owned.Booked);
             if (delta > 0)
@@ -763,14 +830,124 @@ public sealed class BracketManager : IDisposable
                     Message?.Invoke("Stop/target amendment was not confirmed: existing working protection remains owned.");
                 }
             }
-            if (!Terminal(order)) continue;
+            if (!Terminal(order))
+            {
+                if (owned.Partner is { } seen && order.Unfilled <= ExitQuantity)
+                {
+                    owned.PartnerBaseline = Executed(Current(seen));
+                    owned.VolumeAtBaseline = Math.Abs(Volume);
+                }
+                continue;
+            }
             bool replacement = intent.Phase == ExitPhase.CancelPending && intent.Quantity > 0;
+            bool refused = !replacement && LinkRefused(intent, owned, order);
+            bool dissolving = !replacement && !refused && LinkCancelledByVenue(intent, owned, order);
             intent.Current = null;
             intent.CancelIdentity = null;
-            intent.Phase = replacement ? ExitPhase.Waiting : ExitPhase.Settled;
-            if (!replacement) intent.Quantity = 0;
+            intent.Phase = replacement || refused ? ExitPhase.Waiting : dissolving ? ExitPhase.Dissolving : ExitPhase.Settled;
+            if (!replacement && !refused && !dissolving) intent.Quantity = 0;
+            if (refused)
+            {
+                _linkFallback = true;
+                _protectionNote = "The venue refused exchange-side protection: app-managed stop and target are used for this position.";
+                Message?.Invoke(_protectionNote);
+            }
+            if (dissolving)
+            {
+                intent.Dissolved = owned;
+                intent.DissolvedAt = Clock();
+            }
+        }
+        ResolveDissolutions();
+    }
+
+    /// <summary>
+    /// Decides each venue-cancelled linked leg on the evidence available now, and again on later syncs: venue events
+    /// (cancellation, the partner's fill, the position) arrive separately and in any order. The leg is replaced only for a
+    /// confirmed cause and only once the reported position agrees with the booked fills, sized from that position.
+    /// </summary>
+    private void ResolveDissolutions()
+    {
+        foreach (var intent in _exits.Where(e => e.Phase == ExitPhase.Dissolving).ToList())
+        {
+            var leg = intent.Dissolved!;
+            if (intent.Quantity <= 0)
+            {
+                Settle(intent, gap: null); // removed or superseded by the user (Apply template, a resize to zero): never revived
+                continue;
+            }
+            var partner = leg.Partner;
+            var other = partner != null ? Current(partner) : null;
+            bool stopping = intent.Role == BracketRole.StopLoss;
+            if (Volume == 0 || ExitQuantity == 0 || intent.Generation != _generation || intent.Side != Math.Sign(Volume) ||
+                partner == null || other == null)
+            {
+                Settle(intent, gap: null); // the position closed: nothing left to protect
+                continue;
+            }
+            decimal partnerExecuted = Executed(other) - leg.PartnerBaseline;
+            bool partnerDone = Terminal(other) && Executed(other) <= partner.Booked;
+            bool cause;
+            if (partner.RemovalRequested || partner.CancelSeen || CancelRequested(partner))
+                // This app removed the partner (brackets, DOM, order list): await its outcome, then this leg is needed.
+                cause = partnerDone && (other.Status == OrderStatus.Canceled || partnerExecuted > 0);
+            else if (partnerExecuted > 0) cause = true; // the partner executed (even completely) after this leg was sized
+            else if (Terminal(other)) { Settle(intent, gap: null); continue; } // both cancelled, nobody here asked: respected
+            else cause = false;
+
+            // Confirmed once the fills are booked, the reported position has fallen by them, and that report is at least as
+            // recent as the partner's last fill: an older report can neither confirm nor size the replacement.
+            bool confirmed = NotReady == null && Executed(other) <= partner.Booked &&
+                Math.Abs(Volume) <= leg.VolumeAtBaseline - Math.Max(0, partnerExecuted) &&
+                (partnerExecuted <= 0 || Account is not INativeProtection native || native.PositionReflects(other));
+            if (cause && confirmed)
+            {
+                intent.Dissolved = null;
+                intent.Phase = ExitPhase.Waiting;
+                intent.Quantity = Math.Min(intent.Quantity, ExitQuantity);
+                _linkFallback = true;
+                _protectionNote = "The venue cancelled one linked leg while the position remains open: app-managed protection replaces it.";
+                Message?.Invoke(_protectionNote);
+                continue;
+            }
+            if (Clock() - intent.DissolvedAt > LinkDissolutionWait)
+            {
+                if (cause && Executed(other) <= partner.Booked)
+                {
+                    // The cause is established but the position rule did not confirm (for example a position report that
+                    // already included the fill): place it, sized from the booked fills and the reported position.
+                    intent.Dissolved = null;
+                    intent.Phase = ExitPhase.Waiting;
+                    intent.Quantity = Math.Min(intent.Quantity, ExitQuantity);
+                    _linkFallback = true;
+                    _protectionNote = "The venue cancelled one linked leg while the position remains open: app-managed protection replaces it.";
+                    Message?.Invoke(_protectionNote);
+                    continue;
+                }
+                Settle(intent, stopping
+                    ? "Protection gap: the venue cancelled the linked stop without a confirmed cause; no stop is working for this position."
+                    : "Protection gap: the venue cancelled the linked target without a confirmed cause; no target is working for this position.");
+                Message?.Invoke(_protectionNote!);
+                continue;
+            }
+            _protectionNote = stopping
+                ? "Protection gap: the venue cancelled the linked stop; waiting for its fills and position to confirm the remaining position."
+                : "Protection gap: the venue cancelled the linked target; waiting for its fills and position to confirm the remaining position.";
         }
     }
+
+    private void Settle(ExitIntent intent, string? gap)
+    {
+        intent.Dissolved = null;
+        intent.Phase = ExitPhase.Settled;
+        intent.Quantity = 0;
+        if (gap != null) _protectionNote = gap;
+        else if (_protectionNote?.StartsWith("Protection gap:", StringComparison.Ordinal) == true &&
+            !_exits.Any(e => e.Phase == ExitPhase.Dissolving)) _protectionNote = null;
+    }
+
+    private bool CancelRequested(OwnedExit owned) => Account is INativeProtection native &&
+        (native.CancelRequested(owned.Handle) || native.CancelRequested(owned.Latest));
 
     private void QueueExit(BracketRole role, int side, decimal quantity, decimal price) =>
         _exits.Add(new ExitIntent
@@ -779,11 +956,19 @@ public sealed class BracketManager : IDisposable
             Quantity = quantity, Phase = ExitPhase.Waiting,
         });
 
-    private static void ChangeExit(ExitIntent intent, decimal price, decimal quantity)
+    // An explicit change (a new stop price, breakeven, a resize) ends a dissolved link's wait: the leg is placed at once as
+    // app-managed protection.
+    private void ChangeExit(ExitIntent intent, decimal price, decimal quantity)
     {
         intent.Price = price;
         intent.Quantity = quantity;
         intent.FailedTotal = null;
+        if (intent.Phase != ExitPhase.Dissolving) return;
+        intent.Dissolved = null;
+        intent.Phase = ExitPhase.Waiting;
+        _linkFallback = true;
+        if (_protectionNote?.StartsWith("Protection gap:", StringComparison.Ordinal) == true &&
+            !_exits.Any(e => e.Phase == ExitPhase.Dissolving)) _protectionNote = null;
     }
 
     private void ResizeToPosition()
@@ -923,6 +1108,7 @@ public sealed class BracketManager : IDisposable
             string identity = Identity(order);
             if (intent.CancelIdentity == identity) continue;
             intent.CancelIdentity = identity;
+            if (intent.Quantity == 0) owned.RemovalRequested = true;
             try { Account.Cancel(order); }
             catch
             {
@@ -935,24 +1121,118 @@ public sealed class BracketManager : IDisposable
         if (!allowPlacement || Volume == 0) return;
         // A prior position's unresolved exits must never be mistaken for a new position's protection.
         if (_exits.Any(e => e.Generation != _generation && e.Current != null)) return;
-        foreach (var intent in _exits.Where(e => e.Phase == ExitPhase.Waiting && e.Quantity > 0).ToList())
+        var waiting = _exits.Where(e => e.Phase == ExitPhase.Waiting && e.Quantity > 0).ToList();
+        // An opted-in venue links exactly one stop and one target for the whole position; anything else stays app-managed.
+        using var link = waiting.Count > 0 && LinkablePair(waiting) is { } native ? native.LinkProtection(Account.OrderContext.ManualOwner) : null;
+        OwnedExit? first = null;
+        foreach (var intent in waiting)
         {
             if (intent.Generation != _generation || intent.Side != Math.Sign(Volume)) continue;
             if (_exits.Any(e => e.Role == intent.Role && PendingChange(e))) continue;
             decimal quantity = Math.Min(intent.Quantity, ExitQuantity);
-            if (intent.Role == BracketRole.Target)
-            {
-                decimal working = Working(BracketRole.Target).Sum(e => e.Order.Unfilled);
-                quantity = Math.Min(quantity, Math.Max(0, ExitQuantity - working));
-            }
+            // Working exits of the same role already cover part of the position: never protect more than it holds.
+            decimal covered = Working(intent.Role).Sum(e => e.Order.Unfilled);
+            quantity = Math.Min(quantity, Math.Max(0, ExitQuantity - covered));
             if (quantity <= 0) continue;
             var order = OrderActions.Manual(Account, intent.Role == BracketRole.StopLoss ? OrderTypes.Stop : OrderTypes.Limit, intent.Side > 0 ? OrderDirections.Sell : OrderDirections.Buy, quantity, intent.Price, intent.Role == BracketRole.StopLoss ? "SL" : "TP", reduceOnly: true);
-            var owned = new OwnedExit { Handle = order, Latest = order, Intent = intent };
+            var owned = new OwnedExit { Handle = order, Latest = order, Intent = intent, Linked = link != null, VolumeAtBaseline = Math.Abs(Volume) };
+            if (link != null)
+            {
+                if (first == null) first = owned;
+                else (first.Partner, owned.Partner) = (owned, first);
+            }
             _owned.Add(owned);
             intent.Current = owned;
             intent.Phase = ExitPhase.Working;
             _syncAgain = true;
         }
+        if (first is { Partner: null }) first.Linked = false;
+    }
+
+    /// <summary>
+    /// The venue to link the waiting exits through, when this connection offers linked protection and they are exactly one
+    /// stop and one target of the current position, each for its whole quantity, with nothing else working.
+    /// </summary>
+    private INativeProtection? LinkablePair(List<ExitIntent> waiting)
+    {
+        if (Account is not INativeProtection native || (native.NativeProtection & NativeProtectionFeatures.LinkedStopAndTarget) == 0)
+            return null;
+        if (_linkFallback) return null;
+        var current = _exits.Where(e => e.Generation == _generation && (e.Quantity > 0 || e.Current != null)).ToList();
+        var stop = waiting.Where(e => e.Role == BracketRole.StopLoss).ToList();
+        var target = waiting.Where(e => e.Role == BracketRole.Target).ToList();
+        decimal whole = ExitQuantity;
+        bool pair = current.Count == 2 && current.All(e => e.Current == null) && stop.Count == 1 && target.Count == 1 &&
+            stop[0].Generation == _generation && target[0].Generation == _generation &&
+            stop[0].Side == Math.Sign(Volume) && target[0].Side == stop[0].Side &&
+            stop[0].Quantity == whole && target[0].Quantity == whole && !_exits.Any(PendingChange);
+        if (pair)
+        {
+            _protectionNote = null;
+            return native;
+        }
+        _protectionNote = "App-managed protection: an exchange-side pair needs exactly one stop and one target for the whole position.";
+        return null;
+    }
+
+    private bool StillProtecting(ExitIntent intent, OwnedExit owned) =>
+        owned.Linked && intent.Phase != ExitPhase.CancelPending && intent.Quantity > 0 &&
+        intent.Generation == _generation && intent.Side == Math.Sign(_lastVolume) && ExitQuantity > 0;
+
+    // A refused linked submission never worked, so nothing executed: it is sent again at once as app-managed protection.
+    private bool LinkRefused(ExitIntent intent, OwnedExit owned, Order order) =>
+        order.Status == OrderStatus.Rejected && StillProtecting(intent, owned);
+
+    // A linked leg the venue cancelled although this app (including Cancel all and Close position) never asked it to:
+    // its cause is confirmed before anything is sent (ResolveDissolutions).
+    private bool LinkCancelledByVenue(ExitIntent intent, OwnedExit owned, Order order) =>
+        order.Status == OrderStatus.Canceled && StillProtecting(intent, owned) && !owned.CancelSeen && !CancelRequested(owned);
+
+    /// <summary>
+    /// Adopts a venue-linked stop/target pair this account's manual protection placed earlier and that is still working
+    /// (after a restart or a reopened chart), so protection the venue already holds is never duplicated.
+    /// </summary>
+    private bool AdoptNativeProtection()
+    {
+        if (Account is not INativeProtection native || Volume == 0) return false;
+        if (_exits.Any(e => e.Generation == _generation && (e.Quantity > 0 || e.Current != null))) return false;
+        var exit = ExitDirection;
+        string owner = Account.OrderContext.ManualOwner.Id;
+        var groups = Account.ActiveOrders
+            .Where(o => !Terminal(o) && o.Direction == exit && o.OwnerId == owner && !_owned.Any(x => Same(x.Handle, o) || Same(x.Latest, o)))
+            .Select(o => (Order: o, Group: native.ProtectionGroupOf(o)))
+            .Where(x => x.Group != null)
+            .GroupBy(x => x.Group!, StringComparer.Ordinal);
+        foreach (var group in groups)
+        {
+            var legs = group.Select(x => x.Order).ToList();
+            var stop = legs.FirstOrDefault(o => o.Type == OrderTypes.Stop);
+            var target = legs.FirstOrDefault(o => o.Type == OrderTypes.Limit);
+            if (legs.Count != 2 || stop == null || target == null) continue;
+            var stopLeg = AdoptLeg(stop, BracketRole.StopLoss);
+            var targetLeg = AdoptLeg(target, BracketRole.Target);
+            (stopLeg.Partner, targetLeg.Partner) = (targetLeg, stopLeg);
+            (stopLeg.PartnerBaseline, targetLeg.PartnerBaseline) = (Executed(target), Executed(stop));
+            stopLeg.VolumeAtBaseline = targetLeg.VolumeAtBaseline = Math.Abs(Volume);
+            _protectionNote = null;
+            Message?.Invoke($"Exchange-side stop {Inst.FormatPrice(PriceOf(stop))} and target {Inst.FormatPrice(PriceOf(target))} adopted from the venue.");
+            return true;
+        }
+        return false;
+    }
+
+    private OwnedExit AdoptLeg(Order order, BracketRole role)
+    {
+        var intent = new ExitIntent
+        {
+            Role = role, Side = Math.Sign(Volume), Generation = _generation, Price = PriceOf(order),
+            Quantity = order.Unfilled, Phase = ExitPhase.Working,
+        };
+        var owned = new OwnedExit { Handle = order, Latest = order, Intent = intent, Booked = Executed(order), Linked = true };
+        _owned.Add(owned);
+        _exits.Add(intent);
+        intent.Current = owned;
+        return owned;
     }
 
     private static string Fmt(decimal q) => q.ToString("0.########", System.Globalization.CultureInfo.InvariantCulture);
@@ -964,7 +1244,7 @@ public sealed class BracketManager : IDisposable
         if (!_disposeRequested || _busy || _entryCancels.Count > 0 || _entryMoves.Count > 0) return;
         foreach (var intent in _exits)
         {
-            if (PendingChange(intent) || (intent.Phase == ExitPhase.Waiting && intent.Quantity > 0)) return;
+            if (PendingChange(intent) || intent.Phase == ExitPhase.Dissolving || (intent.Phase == ExitPhase.Waiting && intent.Quantity > 0)) return;
             if (Account is not ITrackedOrderReplacement && intent.Current is { } owned &&
                 !Terminal(Current(owned)) && owned.Handle.ExchangeOrderId.Length == 0) return;
         }

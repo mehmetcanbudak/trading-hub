@@ -402,6 +402,9 @@ public sealed partial class ConnectionProfile
     public bool ConfirmOrders { get; set; } = true;
     public decimal MaxOrderQuantity { get; set; }
 
+    /// <summary>Opt-in venue-native linked stop/target (Tradovate OCO). Off by default: protection stays app-managed.</summary>
+    public bool ExchangeSideProtection { get; set; }
+
     // Rithmic
     public string RithmicUri { get; set; } = RithmicGateways.TestUri;
     public string RithmicSystem { get; set; } = "Rithmic Test";
