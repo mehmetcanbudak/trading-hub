@@ -195,34 +195,30 @@ public class WindowsIntegrationTests
     [Fact]
     public async Task PromptStdin_PreservesUnicodeWhitespaceAndShellCharactersWithoutAddingANewline()
     {
-        bool windows = OperatingSystem.IsWindows();
-        var executable = windows
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
-            : "/bin/cat";
-        var psi = new ProcessStartInfo(executable)
+        // The consumer is a byte-exact .NET echo on every platform. Windows PowerShell 5.1 took 9.7-13.6 s of a 15 s
+        // budget on passing hosted runners (cold start under suite load) and twice exceeded it on ARM64; its startup
+        // and console decoding are not the transport under test.
+        var psi = new ProcessStartInfo(StrategyMcpEnvironmentTests.DotnetHost())
         {
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8,
+            StandardInputEncoding = new UTF8Encoding(false),
         };
-        if (windows)
-        {
-            psi.ArgumentList.Add("-NoProfile");
-            psi.ArgumentList.Add("-NonInteractive");
-            psi.ArgumentList.Add("-Command");
-            psi.ArgumentList.Add("[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); " +
-                "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); [Console]::Write([Console]::In.ReadToEnd())");
-        }
+        psi.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "AssistantCliFixture", "TradingHub.AssistantCliFixture.dll"));
+        psi.ArgumentList.Add("--echo-stdin");
 
         var prompt = "  start\r\nquotes \" ' \\ & | ^ %PATH% ! $ `\t中文 😀\n" + new string('x', 40_000) + "  end";
         using var process = Process.Start(psi)!;
         try
         {
-            var output = process.StandardOutput.ReadToEndAsync();
+            // Raw bytes: a decoding reader would silently drop a byte-order mark that FeedStdinAsync must never write.
+            using var raw = new MemoryStream();
+            var output = process.StandardOutput.BaseStream.CopyToAsync(raw);
             var error = process.StandardError.ReadToEndAsync();
             await ClaudeCodeBridge.FeedStdinAsync(process, prompt).WaitAsync(TimeSpan.FromSeconds(15));
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            Assert.Equal(prompt, await output);
+            await output;
+            Assert.Equal(new UTF8Encoding(false).GetBytes(prompt), raw.ToArray());
             Assert.Equal("", await error);
             Assert.Equal(0, process.ExitCode);
         }
