@@ -22606,5 +22606,117 @@
   "Labels on the right": {
     "es": "Etiquetas a la derecha",
     "zh-CN": "标签在右侧"
+  },
+  "App-managed protection": {
+    "es": "Protección gestionada por la app",
+    "zh-CN": "由应用管理的保护"
+  },
+  "App-managed protection: an exchange-side pair needs exactly one stop and one target for the whole position.": {
+    "es": "Protección gestionada por la app: un par en el exchange necesita exactamente un stop y un objetivo para toda la posición.",
+    "zh-CN": "由应用管理的保护：交易所端的组合需要恰好一个止损和一个目标，覆盖整个持仓。"
+  },
+  "Exchange-side protection": {
+    "es": "Protección en el exchange",
+    "zh-CN": "交易所端保护"
+  },
+  "Exchange-side protection (Tradovate OCO)": {
+    "es": "Protección en el exchange (OCO de Tradovate)",
+    "zh-CN": "交易所端保护（Tradovate OCO）"
+  },
+  "Exchange-side protection was refused: app-managed stop loss and take profit are placed instead.": {
+    "es": "La protección en el exchange fue rechazada: en su lugar se colocan un stop loss y un take profit gestionados por la app.",
+    "zh-CN": "交易所端保护被拒绝：改为下达由应用管理的止损和止盈。"
+  },
+  "Exchange-side stop {0} and target {1} adopted from the venue.": {
+    "es": "Se adoptaron del exchange el stop {0} y el objetivo {1}.",
+    "zh-CN": "已从交易场所接管止损 {0} 和目标 {1}。"
+  },
+  "Linked at the venue: when one leg fills, the venue cancels the other even if Trading Hub is closed.": {
+    "es": "Vinculados en el exchange: cuando una pata se ejecuta, el exchange cancela la otra aunque Trading Hub esté cerrado.",
+    "zh-CN": "已在交易场所关联：一边成交时，即使 Trading Hub 已关闭，交易场所也会取消另一边。"
+  },
+  "Off by default. When on, a stop and a target that together cover the whole position are sent as one Tradovate OCO: when one fills, Tradovate cancels the other even if Trading Hub is closed. Partial targets, a lone stop or a refused OCO stay app-managed. Tradovate documents neither reduce-only orders nor how OCO legs follow partial fills, so keep Trading Hub running to resize the remaining leg.": {
+    "es": "Desactivado por defecto. Al activarlo, un stop y un objetivo que juntos cubren toda la posición se envían como un único OCO de Tradovate: cuando uno se ejecuta, Tradovate cancela el otro aunque Trading Hub esté cerrado. Los objetivos parciales, un stop solo o un OCO rechazado siguen gestionados por la app. Tradovate no documenta órdenes reduce-only ni cómo las patas de un OCO siguen las ejecuciones parciales, así que mantén Trading Hub abierto para ajustar la pata restante.",
+    "zh-CN": "默认关闭。开启后，合计覆盖整个持仓的一个止损和一个目标会作为一个 Tradovate OCO 发送：其中一个成交时，即使 Trading Hub 已关闭，Tradovate 也会取消另一个。部分目标、单独的止损或被拒绝的 OCO 仍由应用管理。Tradovate 既未说明只减仓订单，也未说明 OCO 各边如何跟随部分成交，因此请保持 Trading Hub 运行以调整剩余一边的数量。"
+  },
+  "Stops and targets": {
+    "es": "Stops y objetivos",
+    "zh-CN": "止损和目标"
+  },
+  "Stops and targets on this connection are app-managed: Trading Hub does not use a venue-linked stop/target contract here.": {
+    "es": "Los stops y objetivos de esta conexión los gestiona la app: aquí Trading Hub no usa un contrato de stop/objetivo vinculado en el exchange.",
+    "zh-CN": "此连接上的止损和目标由应用管理：Trading Hub 在此不使用交易场所关联的止损/目标合约。"
+  },
+  "The venue cancelled one linked leg while the position remains open: app-managed protection replaces it.": {
+    "es": "El exchange canceló una pata vinculada mientras la posición sigue abierta: la reemplaza una protección gestionada por la app.",
+    "zh-CN": "持仓仍未平仓时交易场所取消了一个关联边：由应用管理的保护将其替代。"
+  },
+  "The venue refused exchange-side protection: app-managed stop and target are used for this position.": {
+    "es": "El exchange rechazó la protección en el exchange: para esta posición se usan un stop y un objetivo gestionados por la app.",
+    "zh-CN": "交易场所拒绝了交易所端保护：此持仓改用由应用管理的止损和目标。"
+  },
+  "Trading Hub cancels and resizes the remaining stop and target while it runs.": {
+    "es": "Trading Hub cancela y ajusta el stop y el objetivo restantes mientras está abierto.",
+    "zh-CN": "Trading Hub 运行期间会取消并调整剩余的止损和目标。"
+  },
+  "Tradovate OCO acceptance is unknown: no order ID returned.": {
+    "es": "No se sabe si Tradovate aceptó el OCO: no se recibió ningún ID de orden.",
+    "zh-CN": "无法确定 Tradovate 是否接受了 OCO：未返回订单 ID。"
+  },
+  "Tradovate OCO acceptance is unknown;": {
+    "es": "No se sabe si Tradovate aceptó el OCO;",
+    "zh-CN": "无法确定 Tradovate 是否接受了 OCO；"
+  },
+  "Tradovate OCO acceptance is unknown; awaiting client-tag reconciliation: ": {
+    "es": "No se sabe si Tradovate aceptó el OCO; se espera la conciliación por etiqueta del cliente: ",
+    "zh-CN": "无法确定 Tradovate 是否接受了 OCO；正在等待客户端标签对账："
+  },
+  "Tradovate OCO acceptance is unknown; awaiting client-tag reconciliation: {0}": {
+    "es": "No se sabe si Tradovate aceptó el OCO; se espera la conciliación por etiqueta del cliente: {0}",
+    "zh-CN": "无法确定 Tradovate 是否接受了 OCO；正在等待客户端标签对账：{0}"
+  },
+  "Tradovate linked protection could not be re-owned after restart: ": {
+    "es": "No se pudo volver a asumir la protección vinculada de Tradovate tras reiniciar: ",
+    "zh-CN": "重启后无法重新接管 Tradovate 关联保护："
+  },
+  "Tradovate linked protection could not be re-owned after restart: {0}": {
+    "es": "No se pudo volver a asumir la protección vinculada de Tradovate tras reiniciar: {0}",
+    "zh-CN": "重启后无法重新接管 Tradovate 关联保护：{0}"
+  },
+  "Tradovate refused the exchange-side OCO: ": {
+    "es": "Tradovate rechazó el OCO en el exchange: ",
+    "zh-CN": "Tradovate 拒绝了交易所端 OCO："
+  },
+  "Tradovate refused the exchange-side OCO: {0}": {
+    "es": "Tradovate rechazó el OCO en el exchange: {0}",
+    "zh-CN": "Tradovate 拒绝了交易所端 OCO：{0}"
+  },
+  "Tradovate rejected OCO: ": {
+    "es": "Tradovate rechazó el OCO: ",
+    "zh-CN": "Tradovate 拒绝了 OCO："
+  },
+  "Tradovate rejected OCO: {0}": {
+    "es": "Tradovate rechazó el OCO: {0}",
+    "zh-CN": "Tradovate 拒绝了 OCO：{0}"
+  },
+  "Protection gap:": {
+    "es": "Hueco de protección:",
+    "zh-CN": "保护缺口："
+  },
+  "Protection gap: the venue cancelled the linked stop without a confirmed cause; no stop is working for this position.": {
+    "es": "Hueco de protección: el exchange canceló el stop vinculado sin una causa confirmada; esta posición no tiene ningún stop activo.",
+    "zh-CN": "保护缺口：交易场所在没有确认原因的情况下取消了关联止损；此持仓当前没有有效的止损。"
+  },
+  "Protection gap: the venue cancelled the linked stop; waiting for its fills and position to confirm the remaining position.": {
+    "es": "Hueco de protección: el exchange canceló el stop vinculado; se esperan sus ejecuciones y la posición para confirmar la posición restante.",
+    "zh-CN": "保护缺口：交易场所取消了关联止损；正在等待成交和持仓报告以确认剩余持仓。"
+  },
+  "Protection gap: the venue cancelled the linked target without a confirmed cause; no target is working for this position.": {
+    "es": "Hueco de protección: el exchange canceló el objetivo vinculado sin una causa confirmada; esta posición no tiene ningún objetivo activo.",
+    "zh-CN": "保护缺口：交易场所在没有确认原因的情况下取消了关联目标；此持仓当前没有有效的目标。"
+  },
+  "Protection gap: the venue cancelled the linked target; waiting for its fills and position to confirm the remaining position.": {
+    "es": "Hueco de protección: el exchange canceló el objetivo vinculado; se esperan sus ejecuciones y la posición para confirmar la posición restante.",
+    "zh-CN": "保护缺口：交易场所取消了关联目标；正在等待成交和持仓报告以确认剩余持仓。"
   }
 }
