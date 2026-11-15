@@ -4091,6 +4091,7 @@
   "Label width (px)": "标签宽度（像素）",
   "Labels": "标签",
   "Labels (wick / retest)": "标签（影线 / 回测）",
+  "Labels on the right": "标签在右侧",
   "Laboratory": "实验室",
   "Laboratory mode: Claude can download data, run backtests, optimization, walk-forward and Monte Carlo, assess the strategy and save a report in Reports.": "实验室模式：Claude 可以自行下载数据，运行回测、优化、滚动前推和 Monte Carlo，判断策略是盈利还是亏损，并在“报告”标签页中留下报告。",
   "Laboratory mode: the selected assistant can download data, run backtests, optimization, walk-forward and Monte Carlo, assess strategies and save reports. Financial changes remain proposals.": "实验室模式：所选助手可下载数据、运行回测、优化、滚动验证和蒙特卡洛分析、评估策略并保存报告。财务更改仍仅为提案。",

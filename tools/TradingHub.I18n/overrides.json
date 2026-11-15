@@ -22598,5 +22598,13 @@
   "Display only: hides the shading of the scheduled bars; never changes the simulation, strategy series or alerts.": {
     "es": "Solo visual: oculta el sombreado de las velas del programa; nunca cambia la simulación, las series para estrategias ni las alertas.",
     "zh-CN": "仅显示：隐藏计划K线的阴影；绝不改变模拟、策略序列或警报。"
+  },
+  "Prices": {
+    "es": "Precios",
+    "zh-CN": "价格"
+  },
+  "Labels on the right": {
+    "es": "Etiquetas a la derecha",
+    "zh-CN": "标签在右侧"
   }
 }
