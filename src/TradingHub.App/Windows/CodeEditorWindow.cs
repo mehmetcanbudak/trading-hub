@@ -69,12 +69,13 @@ internal sealed class CodeEditorWindow : Window
     private Control Build()
     {
         var add = Ui.Button("New", MaterialIconKind.Plus, () => _ = NewAsync());
+        var addScript = Ui.IconButton(MaterialIconKind.ScriptTextOutline, "New KVS script (simple language: param / input / output / onBar)", () => _ = NewScriptAsync(), 17);
         var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, Os.IsWindows ? "Open folder in File Explorer" : "Open folder in Finder", () => Shell.OpenFolder(AppPaths.UserIndicators));
         var pine = Ui.IconButton(MaterialIconKind.Import, "Import Pine source for local review before any assistant handoff", () => _ = ImportPineAsync(), 17);
         var rename = Ui.IconButton(MaterialIconKind.RenameBox, "Rename this file without changing its C# type or saved identities", () => _ = RenameAsync(), 17);
         var delete = Ui.IconButton(MaterialIconKind.DeleteOutline, "Delete this source file", () => _ = DeleteAsync(), 17);
         var reload = Ui.IconButton(MaterialIconKind.Refresh, "Reload the selected file from disk", () => _ = ReloadAsync(), 17);
-        var head = Ui.V(8, Ui.H3("Files"), Ui.H(3, pine, rename, delete, reload, folder, add));
+        var head = Ui.V(8, Ui.H3("Files"), Ui.H(3, pine, rename, delete, reload, folder, addScript, add));
         head.Margin = new Thickness(0, 0, 0, 10);
         _files.SelectionChanged += (_, _) =>
         {
@@ -89,7 +90,7 @@ internal sealed class CodeEditorWindow : Window
         left.Children.Add(head);
         var note = new TextBlock
         {
-            Text = "Saving recompiles custom C# with the current Trading Hub compiler. Renaming a file never renames its types, series IDs, saved chart references or templates. Pine imports stay local text until you explicitly send the reviewed source.",
+            Text = "Saving recompiles custom C# and KVS scripts with the current Trading Hub compiler. Renaming a file never renames its types, series IDs, saved chart references or templates. Pine imports stay local text until you explicitly send the reviewed source.",
             Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0),
         };
         DockPanel.SetDock(note, Dock.Bottom);
@@ -121,9 +122,10 @@ internal sealed class CodeEditorWindow : Window
     private void FillFiles(string? select = null)
     {
         _files.Items.Clear();
-        foreach (string file in _sources.Paths())
+        foreach (string file in _sources.EditablePaths())
         {
-            var row = Ui.H(8, Ui.Icon(MaterialIconKind.LanguageCsharp, 16, Ui.Accent), new TextBlock { Text = Path.GetRelativePath(_sources.Folder, file), TextTrimming = TextTrimming.CharacterEllipsis });
+            var icon = TradingHub.Scripting.KvsTranslator.IsScript(file) ? MaterialIconKind.ScriptTextOutline : MaterialIconKind.LanguageCsharp;
+            var row = Ui.H(8, Ui.Icon(icon, 16, Ui.Accent), new TextBlock { Text = Path.GetRelativePath(_sources.Folder, file), TextTrimming = TextTrimming.CharacterEllipsis });
             _files.Items.Add(new ListBoxItem { Content = row, Tag = file });
         }
         _files.SelectedItem = _files.Items.OfType<ListBoxItem>().FirstOrDefault(i => (string)i.Tag! == (select ?? _path)) ?? _files.Items.OfType<ListBoxItem>().FirstOrDefault();
@@ -193,6 +195,52 @@ internal sealed class CodeEditorWindow : Window
         }
         catch (Exception ex) { Error(ex); }
     }
+
+    /// <summary>Creates a <c>.kvs</c> script; it compiles through the same compiler and last-good catalog as C# files.</summary>
+    private async Task NewScriptAsync()
+    {
+        var name = await PromptDialog.ShowAsync(this, "New KVS script", "Script name", "MyScript", "Create");
+        if (name == null) return;
+        try
+        {
+            string file = new(name.Where(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-').ToArray());
+            if (file.Length == 0) throw new ArgumentException("Use letters or digits in the script name.");
+            if (_editor.IsDirty && !Save()) return;
+            string path = _sources.Create(file + TradingHub.Scripting.KvsTranslator.Extension, ScriptTemplate(name.Trim().Replace("\"", "", StringComparison.Ordinal)));
+            FillFiles(path);
+            SaveAndCompile();
+        }
+        catch (Exception ex) { Error(ex); }
+    }
+
+    /// <summary>A KVS starter: EMA bands with a breakout alert. English identifiers in every UI language.</summary>
+    internal static string ScriptTemplate(string display) => $$"""
+        // KVS script: saving compiles it and it appears in the indicator library under "My indicators".
+        // Functions: ema sma rma wma stdev highest lowest sum change cum crossover crossunder abs min max sqrt log pow round nz na.
+        // Inputs: ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time, trades.volume { side: "BUY" / "SELL" },
+        // trades.delta, trades.count, book.bid / book.ask / book.delta { within: ticks } (recorded depth only).
+        // A series with [n] is its value n bars ago: close[1] is the previous close.
+        name "{{display}}"
+
+        param length = 20 { min: 1, max: 500, description: "Average length (bars)" }
+        param mult = 2 { min: 0.1, max: 10, description: "Band width (standard deviations)" }
+
+        input src = ohlcv.close
+
+        output basis = line { overlay: true, color: "#f2b53a", width: 2 }
+        output upper = line { overlay: true, color: "#3d8bfd" }
+        output lower = line { overlay: true, color: "#3d8bfd" }
+
+        onBar {
+          basis = ema(src, length)
+          var dev = stdev(src, length)
+          upper = basis + mult * dev
+          lower = basis - mult * dev
+          if (crossover(src, upper)) {
+            alert("Closed above the upper band")
+          }
+        }
+        """;
 
     private async Task RenameAsync()
     {
