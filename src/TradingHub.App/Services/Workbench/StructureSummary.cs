@@ -104,12 +104,13 @@ public static class StructureSummary
         foreach (var trade in trades) data.Trades.Add(trade);
 
         var period = Period(timeframe);
-        using var model = new ChartModel(data, period);
+        // Private models: a summary must not admit to or evict from the open charts' shared candle cache, nor prebuild neighbours.
+        using var model = new ChartModel(data, period, sharedSeriesCache: false);
         var structure = Add(model, new MarketStructure());
         var higher = Higher(timeframe);
         var htf = Add(model, new HtfStructure { UseMappedPeriods = false, FirstPeriod = higher.First, SecondPeriod = higher.Second });
         // Calendar levels, sessions and VWAP read hourly bars at most, so a 4-hour summary uses the 1-hour candles for them.
-        using var hourly = timeframe == StructureTimeframe.Hours4 ? new ChartModel(data, ChartPeriod.H1) : null;
+        using var hourly = timeframe == StructureTimeframe.Hours4 ? new ChartModel(data, ChartPeriod.H1, sharedSeriesCache: false) : null;
         var context = hourly ?? model;
         var keys = Add(context, new KeyLevels());
         var sessions = Add(context, new SessionMap());

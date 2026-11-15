@@ -23982,5 +23982,13 @@
   "Liquidation stream not connected: {0}": {
     "es": "Flujo de liquidaciones sin conexión: {0}",
     "zh-CN": "强平数据流未连接：{0}"
+  },
+  "{0} lists no perpetual for {1}.": {
+    "es": "{0} no lista ningún perpetuo para {1}.",
+    "zh-CN": "{0} 未上线 {1} 的永续合约。"
+  },
+  "{0} lists {1} as {2}; its open interest and prices are converted to {3}.": {
+    "es": "{0} lista {1} como {2}; su interés abierto y sus precios se convierten a {3}.",
+    "zh-CN": "{0} 将 {1} 列为 {2}；其持仓量和价格已换算为 {3}。"
   }
 }

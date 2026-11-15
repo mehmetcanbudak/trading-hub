@@ -9968,6 +9968,8 @@
   "{0} isn't in your cTrader account.": "{0} no está en tu cuenta de cTrader.",
   "{0} laboratory: runs tests and saves reports. Financial changes remain proposals for review.": "Laboratorio de {0}: ejecuta pruebas y guarda reportes. Los cambios financieros siguen siendo propuestas para revisar.",
   "{0} less than {1}": "{0} menor que {1}",
+  "{0} lists no perpetual for {1}.": "{0} no lista ningún perpetuo para {1}.",
+  "{0} lists {1} as {2}; its open interest and prices are converted to {3}.": "{0} lista {1} como {2}; su interés abierto y sus precios se convierten a {3}.",
   "{0} live strategy(ies)": "{0} estrategia(s) en vivo",
   "{0} live strategy/strategies": "{0} estrategia(s) en vivo",
   "{0} long/short ratio failed: {1}": "Falló la relación largo/corto de {0}: {1}",

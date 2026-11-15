@@ -472,6 +472,8 @@ internal static class WorkbenchScene
                 ("okx.fixture", "/api/v5/rubik/stat/contracts/long-short-account-ratio-contract") => (200, """{"code":"0","data":[""" + string.Join(",", Newest(Period(query["period"]), from, to, 100)
                     .Select(t => $$"""["{{t}}","{{F(2 + 0.2 * Math.Sin(t / 1e7))}}"]""")) + """],"msg":""}"""),
                 // ---- Bitget
+                ("bitget.fixture", "/api/v2/mix/market/contracts") => (200, $$"""{"code":"00000","msg":"success","requestTime":{{now}},"data":[""" + string.Join(",", Coins
+                    .Select(c => $$"""{"symbol":"{{c.Coin}}USDT","baseCoin":"{{c.Coin}}","quoteCoin":"USDT","sizeMultiplier":"0.001","symbolType":"perpetual","symbolStatus":"normal","fundInterval":"8"}""")) + "]}"),
                 ("bitget.fixture", "/api/v2/mix/market/history-fund-rate") => (200, $$"""{"code":"00000","msg":"success","requestTime":{{now}},"data":[""" + string.Join(",", Newest(Settle, now - 10 * 24 * Hour, now, 100)
                     .Select(t => $$"""{"symbol":"BTCUSDT","fundingRate":"{{F(0.00007 * Math.Sin(t / 1e8))}}","fundingTime":"{{t}}"}""")) + "]}"),
                 ("bitget.fixture", "/api/v2/mix/market/current-fund-rate") => (200, $$"""{"code":"00000","msg":"success","requestTime":{{now}},"data":[""" + string.Join(",", Coins.Where(c => symbol == null || symbol == $"{c.Coin}USDT")

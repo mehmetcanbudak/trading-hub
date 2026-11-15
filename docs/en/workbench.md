@@ -78,6 +78,13 @@ venues' long/short account ratio, and observed long and short liquidations over 
 - **What each venue publishes:** Bitget and Hyperliquid publish current open interest only (no history, so no change
   figures); OKX publishes the long/short ratio itself (shares are derived from it); Hyperliquid publishes no long/short
   ratio. These cells say "not published" rather than showing a number.
+- **Contract units:** venues list some coins per thousand or million (Binance and Bitget 1000BONKUSDT, Hyperliquid
+  kPEPE, while Bitget lists PEPEUSDT and OKX PEPE-USDT-SWAP). Bitget and Hyperliquid listings are found through their
+  published instrument lists (read at most once an hour), not by renaming the symbol. When a venue quotes the coin in
+  another unit than the selected one, its open interest and prices are converted to the selected unit and the status
+  line says so (for example "Bitget lists 1000PEPEUSDT as PEPEUSDT; its open interest and prices are converted to
+  1000PEPE."); funding and premium are rates and need no conversion. A coin listed only in several other units is
+  treated as not listed.
 - **Liquidations** are streamed from Binance and Bybit only; OKX, Bitget and Hyperliquid show "not streamed".
 - **Funding board:** BTC, ETH, SOL, XRP, DOGE and the selected coin across the five venues, normalized to 8 hours,
   colour-scaled, with the largest venue spread annualized ((highest − lowest 8-hour rate) × 3 × 365, needs at least two

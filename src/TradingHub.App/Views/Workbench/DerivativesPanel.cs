@@ -46,6 +46,8 @@ internal sealed class DerivativesPanel : WorkbenchPanel
     private string? _watchSymbol;
     private DateTime _loadedAt = DateTime.MinValue, _lastTable, _boardLoadedAt = DateTime.MinValue, _flowAt = DateTime.MinValue;
     private PriceCvdSeries? _flow;
+    // Price/CVD re-reads the trade store in the background, one read at a time; the UI thread only snapshots the row range.
+    private readonly SingleFlightRefresher<PriceCvdSeries> _flowRefresh = new(work => Task.Run(work), work => Dispatcher.UIThread.Post(work));
     private (long Generation, decimal Minimum, long Minute, string? Symbol) _feedKey;
     private int _generation;
     private bool _loading, _boardLoading, _boardDirty = true;
@@ -55,7 +57,7 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         var s = context.Settings;
         var range = new Ui.Segmented<int>(new (int, string, string?)[] { (24, "24 hours", null), (72, "3 days", null), (168, "7 days", null) }) { Name = "DerivativesRange" };
         range.Select(s.DerivativesHours is 24 or 72 or 168 ? s.DerivativesHours : 24);
-        range.SelectionChanged += h => { s.DerivativesHours = h; context.Save(); _loadedAt = DateTime.MinValue; _flowAt = DateTime.MinValue; Load(); };
+        range.SelectionChanged += h => { s.DerivativesHours = h; context.Save(); _loadedAt = DateTime.MinValue; CancelFlow(); Load(); };
         var reload = Ui.Button("Reload", MaterialIconKind.Refresh, () => { _loadedAt = DateTime.MinValue; Load(); });
         reload.Name = "DerivativesReload";
         for (int c = 0; c < Columns.Length; c++) _table.ColumnDefinitions.Add(new ColumnDefinition(c == 0 ? new GridLength(130) : GridLength.Auto));
@@ -107,7 +109,7 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         _loading = false;
         _boardLoading = false;
         _loadedAt = DateTime.MinValue;
-        _flowAt = DateTime.MinValue;
+        CancelFlow();
         _flow = null;
         _feedKey = default;
         _boardDirty = true;
@@ -132,9 +134,24 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         LoadBoard();
     }
 
-    protected override void OnDeactivated() => Release();
+    protected override void OnDeactivated()
+    {
+        Release();
+        CancelFlow();
+    }
 
-    protected override void OnDispose() => Release();
+    protected override void OnDispose()
+    {
+        Release();
+        _flowRefresh.Dispose();
+    }
+
+    /// <summary>Drops the running and waiting price/CVD reads; the next refresh while active reads again.</summary>
+    private void CancelFlow()
+    {
+        _flowRefresh.Cancel();
+        _flowAt = DateTime.MinValue;
+    }
 
     private void Release()
     {
@@ -305,23 +322,45 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         if (!_loading) _status.Text = notes.Length == 0 ? $"{sel.DerivativesSymbol} · updated {_loadedAt.ToLocalTime():HH:mm:ss}" : string.Join(" · ", notes);
     }
 
-    /// <summary>Price and CVD panes from the instrument's own trades, recomputed at most every few seconds.</summary>
+    /// <summary>Price and CVD panes from the instrument's own trades, re-read in the background at most every few seconds.</summary>
     private void AddFlowCharts(WorkbenchSelection sel, List<DerivativesChart> charts, DateTime from, DateTime now, TimeSpan step)
     {
-        if (_flow == null || now - _flowAt >= FlowReload)
-        {
-            _flowAt = now;
-            _flow = DerivativesDashboard.PriceAndCvd(Trades(sel.Data.Trades, from), from, now, step);
-            _flowNote.Text = FlowNote(sel, _flow);
-        }
-        charts.Add(new($"{sel.Instrument.Symbol} · price", _flow.Price, false, v => WorkbenchFormat.Price(v)));
-        charts.Add(new($"{sel.Instrument.Symbol} · CVD (measured aggressor side)", _flow.Cvd, true, v => WorkbenchFormat.Compact(v), Flagged: _flow.Flagged));
+        if (IsActive && now - _flowAt >= FlowReload) RequestFlow(sel, from, now, step);
+        var flow = _flow;
+        charts.Add(new($"{sel.Instrument.Symbol} · price", flow?.Price ?? Array.Empty<double?>(), false, v => WorkbenchFormat.Price(v)));
+        charts.Add(new($"{sel.Instrument.Symbol} · CVD (measured aggressor side)", flow?.Cvd ?? Array.Empty<double?>(), true, v => WorkbenchFormat.Compact(v), Flagged: flow?.Flagged));
     }
 
-    private static IEnumerable<FlowTrade> Trades(TradingHub.Data.TradeStore store, DateTime from)
+    /// <summary>
+    /// Snapshots the store's published row count and the range's first row on the UI thread (a binary search), reads those
+    /// rows in the background and applies the result only if the selection is unchanged and no correction moved rows meanwhile.
+    /// A request while a read runs waits for it (coalesced), so reads never overlap.
+    /// </summary>
+    private void RequestFlow(WorkbenchSelection sel, DateTime from, DateTime now, TimeSpan step)
     {
-        for (int i = store.LowerBound(from); i < store.Count; i++)
+        _flowAt = now;
+        var store = sel.Data.Trades;
+        var view = TradingHub.Data.TradeStoreView.Capture(store);
+        int first = store.LowerBound(from);
+        int generation = _generation;
+        _flowRefresh.Request(ct => DerivativesDashboard.PriceAndCvd(Trades(store, first, view.Count, ct), from, now, step), flow =>
+        {
+            // A correction or replacement while the rows were read makes them inconsistent: drop and read again next time.
+            if (generation != _generation || !view.IsCurrent(store)) return;
+            _flow = flow;
+            _flowNote.Text = FlowNote(sel, flow);
+            Refresh();
+        });
+    }
+
+    /// <summary>Rows [<paramref name="first"/>, <paramref name="count"/>) published before the snapshot; cancellation is checked every 4096 rows.</summary>
+    private static IEnumerable<FlowTrade> Trades(TradingHub.Data.TradeStore store, int first, int count, CancellationToken ct)
+    {
+        for (int i = first; i < count; i++)
+        {
+            if ((i & 4095) == 0) ct.ThrowIfCancellationRequested();
             yield return new FlowTrade(store.GetTime(i), store.GetPrice(i), store.GetVolume(i), store.GetSide(i), store.GetProvenance(i));
+        }
     }
 
     private static string FlowNote(WorkbenchSelection sel, PriceCvdSeries flow)

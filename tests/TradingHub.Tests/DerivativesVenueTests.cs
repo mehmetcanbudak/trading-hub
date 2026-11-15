@@ -24,9 +24,22 @@ public sealed class DerivativesVenueTests
 
     private static HttpResponseMessage Status(HttpStatusCode code, string body) => new(code) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
-    private static DerivativesData Service(Http handler) => new(new DerivativesTransport(new HttpClient(handler), OwnsHttp: true,
-        BinanceRest: new Uri("https://binance.fixture"), BybitRest: new Uri("https://bybit.fixture"), UtcNow: () => Now, Delay: NoDelay,
+    private static DerivativesData Service(Http handler, Func<DateTime>? clock = null) => new(new DerivativesTransport(new HttpClient(handler), OwnsHttp: true,
+        BinanceRest: new Uri("https://binance.fixture"), BybitRest: new Uri("https://bybit.fixture"), UtcNow: clock ?? (() => Now), Delay: NoDelay,
         OkxRest: new Uri("https://okx.fixture"), BitgetRest: new Uri("https://bitget.fixture"), HyperliquidRest: new Uri("https://hyperliquid.fixture")));
+
+    /// <summary>One row of Bitget's /api/v2/mix/market/contracts answer, in the published shape (recorded 2026-11-15).</summary>
+    private static string BitgetContract(string symbol, string baseCoin, string sizeMultiplier) =>
+        $$"""{"symbol":"{{symbol}}","baseCoin":"{{baseCoin}}","quoteCoin":"USDT","buyLimitPriceRatio":"0.05","sellLimitPriceRatio":"0.05","feeRateUpRatio":"0.005","makerFeeRate":"0.0002","takerFeeRate":"0.0006","openCostUpRatio":"0.01","supportMarginCoins":["USDT"],"minTradeNum":"{{sizeMultiplier}}","priceEndStep":"1","volumePlace":"4","pricePlace":"1","sizeMultiplier":"{{sizeMultiplier}}","symbolType":"perpetual","minTradeUSDT":"5","maxSymbolOrderNum":"200","maxProductOrderNum":"1000","maxPositionNum":"200","symbolStatus":"normal","offTime":"-1","limitOpenTime":"-1","deliveryTime":"","deliveryStartTime":"","deliveryPeriod":"","launchTime":"","fundInterval":"8","minLever":"1","maxLever":"150","posLimit":"0.2","maintainTime":"","openTime":"","maxMarketOrderQty":"220","maxOrderQty":"1200","isRwa":"NO"}""";
+
+    /// <summary>
+    /// Both of Bitget's naming styles: PEPE is listed in single coins (PEPEUSDT) and BONK in thousands (1000BONKUSDT), and
+    /// CAT and 1000CAT are separate listings. Rows mirror the live answer of 2026-11-15.
+    /// </summary>
+    private static readonly string BitgetContracts = """{"code":"00000","msg":"success","requestTime":1794761102235,"data":["""
+        + string.Join(",", BitgetContract("BTCUSDT", "BTC", "0.0001"), BitgetContract("PEPEUSDT", "PEPE", "1000"), BitgetContract("1000BONKUSDT", "1000BONK", "1"),
+            BitgetContract("CATUSDT", "CAT", "0.01"), BitgetContract("1000CATUSDT", "1000CAT", "1"), BitgetContract("NOPEUSDT", "NOPE", "1"), BitgetContract("BADUSDT", "BAD", "1"))
+        + "]}";
 
     [Fact]
     public void Venue_ids_names_symbols_and_published_coverage_are_explicit()
@@ -35,13 +48,14 @@ public sealed class DerivativesVenueTests
         Assert.Equal(new[] { DerivativesData.Binance, DerivativesData.Bybit }, DerivativesData.Venues); // Liquidation-stream venues are unchanged.
         Assert.Equal(new[] { "OKX", "Bitget", "Hyperliquid" },
             new[] { DerivativesData.Okx, DerivativesData.Bitget, DerivativesData.Hyperliquid }.Select(DerivativesData.VenueName));
-        Assert.Equal("BTC-USDT-SWAP", DerivativesData.NativeSymbol(DerivativesData.Okx, "btcusdt"));
-        Assert.Equal("PEPE-USDT-SWAP", DerivativesData.NativeSymbol(DerivativesData.Okx, "1000PEPEUSDT"));
-        Assert.Equal("MOG-USDT-SWAP", DerivativesData.NativeSymbol(DerivativesData.Okx, "1000000MOGUSDT"));
-        Assert.Equal("1INCH-USDT-SWAP", DerivativesData.NativeSymbol(DerivativesData.Okx, "1INCHUSDT"));
-        Assert.Equal("BTCUSDT", DerivativesData.NativeSymbol(DerivativesData.Bitget, "BTCUSDT"));
-        Assert.Equal("BTC", DerivativesData.NativeSymbol(DerivativesData.Hyperliquid, "BTCUSDT"));
-        Assert.Equal("kPEPE", DerivativesData.NativeSymbol(DerivativesData.Hyperliquid, "1000PEPEUSDT"));
+        Assert.Equal("BTC-USDT-SWAP", DerivativesData.OkxNativeSymbol("btcusdt"));
+        Assert.Equal("PEPE-USDT-SWAP", DerivativesData.OkxNativeSymbol("1000PEPEUSDT"));
+        Assert.Equal("MOG-USDT-SWAP", DerivativesData.OkxNativeSymbol("1000000MOGUSDT"));
+        Assert.Equal("BABYDOGE-USDT-SWAP", DerivativesData.OkxNativeSymbol("1MBABYDOGEUSDT"));
+        Assert.Equal("1INCH-USDT-SWAP", DerivativesData.OkxNativeSymbol("1INCHUSDT"));
+        Assert.Equal(new[] { new ContractUnit("PEPE", 1000), new ContractUnit("PEPE", 1000), new ContractUnit("BABYDOGE", 1_000_000), new ContractUnit("SATS", 10_000),
+                new ContractUnit("1INCH", 1), new ContractUnit("BTC", 1), new ContractUnit("KAVA", 1) },
+            new[] { "1000PEPE", "kPEPE", "1MBABYDOGE", "10000SATS", "1INCH", "BTC", "KAVA" }.Select(ContractUnit.Of));
 
         Assert.Equal(new DerivativesVenueCoverage(true, true, true, false), DerivativesData.Coverage(DerivativesData.Okx));
         Assert.Equal(new DerivativesVenueCoverage(true, false, true, false), DerivativesData.Coverage(DerivativesData.Bitget));
@@ -153,6 +167,8 @@ public sealed class DerivativesVenueTests
             Assert.Equal("USDT-FUTURES", q["productType"]);
             switch (request.RequestUri!.AbsolutePath)
             {
+                case "/api/v2/mix/market/contracts":
+                    return Json(BitgetContracts);
                 case "/api/v2/mix/market/history-fund-rate":
                     int page = int.Parse(q["pageNo"]);
                     Assert.Equal(("BTCUSDT", "100"), (q["symbol"], q["pageSize"]));
@@ -171,13 +187,15 @@ public sealed class DerivativesVenueTests
         Assert.Equal(130, funding.Samples.Count);
         Assert.Equal((newest.AddHours(-8 * 129), newest), (funding.Samples[0].Time, funding.Samples[^1].Time));
         Assert.Equal(-0.0055m, funding.Samples[^1].RatePercent);
-        Assert.Equal(new[] { "1", "2" }, handler.Requests.Select(r => Query(r.Uri)["pageNo"]));
+        Assert.Equal(new[] { "1", "2" }, handler.Requests.Where(r => r.Uri.AbsolutePath.EndsWith("history-fund-rate", StringComparison.Ordinal)).Select(r => Query(r.Uri)["pageNo"]));
 
         var oi = await data.LoadOpenInterestAsync(DerivativesData.Bitget, "BTCUSDT", Now.AddHours(-24), Now, CancellationToken.None);
         // One current value is partial coverage of the range; the 1h/24h change stays unknown.
         Assert.Equal(OpenInterestAvailability.Partial, oi.Availability);
         Assert.Equal((Now, 36789.194400000104m), (Assert.Single(oi.Samples).Time, oi.Samples[0].Quantity));
         Assert.Null(oi.Message);
+        // The contract list is read once and reused.
+        Assert.Single(handler.Requests, r => r.Uri.AbsolutePath == "/api/v2/mix/market/contracts");
     }
 
     [Fact]
@@ -185,6 +203,7 @@ public sealed class DerivativesVenueTests
     {
         using var handler = new Http((request, _) => (request.RequestUri!.AbsolutePath, Query(request.RequestUri).GetValueOrDefault("symbol")) switch
         {
+            ("/api/v2/mix/market/contracts", null) => Json(BitgetContracts),
             ("/api/v2/mix/market/ticker", "BTCUSDT") => Json("""{"code":"00000","msg":"success","requestTime":1794756980763,"data":[{"symbol":"BTCUSDT","lastPr":"64731.6","askPr":"64731.6","bidPr":"64731.5","ts":"1794756980764","indexPrice":"64769.833478260869565","fundingRate":"0.00001","holdingAmount":"36789.194400000104","deliveryStartTime":null,"deliveryTime":null,"deliveryStatus":"","markPrice":"64731.6"}]}"""),
             ("/api/v2/mix/market/current-fund-rate", "BTCUSDT") => Json("""{"code":"00000","msg":"success","requestTime":1794756979939,"data":[{"symbol":"BTCUSDT","fundingRate":"0.00001","fundingRateInterval":"8","nextUpdate":"1794758400000","minFundingRate":"-0.003","maxFundingRate":"0.003"}]}"""),
             ("/api/v2/mix/market/account-long-short", "BTCUSDT") => Json($$"""{"code":"00000","msg":"success","requestTime":1794756982055,"data":[{"longAccountRatio":"0.7952","shortAccountRatio":"0.2048","longShortAccountRatio":"3.8828","ts":"{{Ms(Now.AddDays(-3))}}"},{"longAccountRatio":"0.8","shortAccountRatio":"0.2","longShortAccountRatio":"4","ts":"{{Ms(Now.AddHours(-1))}}"}]}"""),
@@ -207,6 +226,99 @@ public sealed class DerivativesVenueTests
         Assert.Equal("400: Parameter NOPEUSDT does not exist", http.Message);
         var code = await Assert.ThrowsAsync<InvalidOperationException>(() => data.LoadFundingAsync(DerivativesData.Bitget, "BADUSDT", Now.AddDays(-1), Now, CancellationToken.None));
         Assert.Equal("Parameter symbol cannot be empty", code.Message);
+    }
+
+    [Fact]
+    public async Task Bitget_resolves_both_naming_styles_through_its_contract_list_and_converts_to_the_requested_unit()
+    {
+        var clock = Now;
+        static string FundRate(string symbol) => $$"""{"symbol":"{{symbol}}","fundingRate":"0.0001","fundingRateInterval":"4","nextUpdate":"1794758400000"}""";
+        using var handler = new Http((request, _) =>
+        {
+            var q = Query(request.RequestUri!);
+            Assert.Equal("USDT-FUTURES", q["productType"]);
+            string? symbol = q.GetValueOrDefault("symbol");
+            // PEPE is quoted in single coins, BONK in thousands; sizes and prices are per the listed contract's base.
+            (string Size, string Price) market = symbol switch
+            {
+                "PEPEUSDT" => ("5000000000000", "0.0000091"),
+                "1000BONKUSDT" => ("2000000", "0.0185"),
+                _ => ("1", "1"),
+            };
+            return request.RequestUri!.AbsolutePath switch
+            {
+                "/api/v2/mix/market/contracts" => Json(BitgetContracts),
+                "/api/v2/mix/market/open-interest" => Json($$$"""{"code":"00000","msg":"success","requestTime":1794756981622,"data":{"openInterestList":[{"symbol":"{{{symbol}}}","size":"{{{market.Size}}}"}],"ts":"{{{Ms(Now)}}}"}}"""),
+                "/api/v2/mix/market/ticker" => Json($$"""{"code":"00000","msg":"success","requestTime":1794756980763,"data":[{"symbol":"{{symbol}}","lastPr":"{{market.Price}}","ts":"{{Ms(Now)}}","indexPrice":"{{market.Price}}","fundingRate":"0.0001","holdingAmount":"{{market.Size}}","markPrice":"{{market.Price}}"}]}"""),
+                // Without a symbol the venue answers every contract (the board's bulk request).
+                "/api/v2/mix/market/current-fund-rate" => Json("""{"code":"00000","msg":"success","requestTime":1794756979939,"data":["""
+                    + string.Join(",", (symbol == null ? new[] { "PEPEUSDT", "1000BONKUSDT", "CATUSDT" } : new[] { symbol }).Select(FundRate)) + "]}"),
+                _ => throw new InvalidOperationException("Unexpected fixture request: " + request.RequestUri),
+            };
+        });
+        using var data = Service(handler, () => clock);
+        string[] Natives(string path) => handler.Requests.Where(r => r.Uri.AbsolutePath == path).Select(r => Query(r.Uri)["symbol"]).ToArray();
+
+        // 1000PEPE requested, PEPEUSDT listed: open interest in thousands of PEPE, prices per thousand PEPE.
+        var pepe = await data.LoadOpenInterestAsync(DerivativesData.Bitget, "1000PEPEUSDT", Now.AddHours(-1), Now, CancellationToken.None);
+        Assert.Equal(5_000_000_000m, Assert.Single(pepe.Samples).Quantity);
+        Assert.Equal("Bitget lists 1000PEPEUSDT as PEPEUSDT; its open interest and prices are converted to 1000PEPE.", pepe.Message);
+        var pepeStats = await data.LoadMarketStatsAsync(DerivativesData.Bitget, "1000PEPEUSDT", CancellationToken.None);
+        Assert.Equal((0.0091m, 0.0091m, 0.01m), (pepeStats.MarkPrice, pepeStats.IndexPrice, pepeStats.FundingRatePercent));
+        // BONK requested, 1000BONKUSDT listed: open interest in single BONK, prices per BONK.
+        var bonk = await data.LoadOpenInterestAsync(DerivativesData.Bitget, "BONKUSDT", Now.AddHours(-1), Now, CancellationToken.None);
+        Assert.Equal(2_000_000_000m, Assert.Single(bonk.Samples).Quantity);
+        Assert.Equal("Bitget lists BONKUSDT as 1000BONKUSDT; its open interest and prices are converted to BONK.", bonk.Message);
+        Assert.Equal(0.0000185m, (await data.LoadMarketStatsAsync(DerivativesData.Bitget, "BONKUSDT", CancellationToken.None)).MarkPrice);
+        // The venue's own unit is used unchanged.
+        var same = await data.LoadOpenInterestAsync(DerivativesData.Bitget, "1000BONKUSDT", Now.AddHours(-1), Now, CancellationToken.None);
+        Assert.Equal((2_000_000m, (string?)null), (same.Samples[0].Quantity, same.Message));
+        // CAT and 1000CAT are separate listings; each request reaches its own.
+        await data.LoadOpenInterestAsync(DerivativesData.Bitget, "CATUSDT", Now.AddHours(-1), Now, CancellationToken.None);
+        await data.LoadOpenInterestAsync(DerivativesData.Bitget, "1000CATUSDT", Now.AddHours(-1), Now, CancellationToken.None);
+        Assert.Equal(new[] { "PEPEUSDT", "1000BONKUSDT", "1000BONKUSDT", "CATUSDT", "1000CATUSDT" }, Natives("/api/v2/mix/market/open-interest"));
+        Assert.Equal(new[] { "PEPEUSDT", "1000BONKUSDT" }, Natives("/api/v2/mix/market/ticker"));
+        var missing = await Assert.ThrowsAsync<InvalidDataException>(() => data.LoadFundingAsync(DerivativesData.Bitget, "ZZZUSDT", Now.AddDays(-1), Now, CancellationToken.None));
+        Assert.Equal("Bitget lists no perpetual for ZZZUSDT.", missing.Message);
+
+        // The board finds both styles too.
+        var board = await data.LoadFundingBoardAsync(DerivativesData.Bitget, new[] { "1000PEPEUSDT", "BONKUSDT", "ZZZUSDT" }, CancellationToken.None);
+        Assert.Equal(new[] { "1000PEPEUSDT", "BONKUSDT" }, board.Keys.Order());
+        Assert.Equal(0.02m, board["BONKUSDT"].Rate8hPercent);
+
+        // One contract-list read serves every request until it is an hour old.
+        int Lists() => handler.Requests.Count(r => r.Uri.AbsolutePath == "/api/v2/mix/market/contracts");
+        Assert.Equal(1, Lists());
+        clock = Now.AddMinutes(59);
+        await data.LoadOpenInterestAsync(DerivativesData.Bitget, "BTCUSDT", Now.AddHours(-1), Now.AddHours(1), CancellationToken.None);
+        Assert.Equal(1, Lists());
+        clock = Now.AddHours(1);
+        await data.LoadOpenInterestAsync(DerivativesData.Bitget, "BTCUSDT", Now.AddHours(-1), Now.AddHours(1), CancellationToken.None);
+        Assert.Equal(2, Lists());
+    }
+
+    [Fact]
+    public void Contract_resolution_prefers_the_same_unit_and_refuses_ambiguous_other_units()
+    {
+        var listed = new[] { ("CATUSDT", "CAT"), ("1000CATUSDT", "1000CAT"), ("PEPEUSDT", "PEPE"), ("kBONK", "kBONK") };
+        Assert.Equal(new VenueContract("CATUSDT", 1), DerivativesData.ResolveContract(listed, "CATUSDT"));
+        Assert.Equal(new VenueContract("1000CATUSDT", 1), DerivativesData.ResolveContract(listed, "1000catusdt"));
+        Assert.Null(DerivativesData.ResolveContract(listed, "1000000CATUSDT")); // Two other units: which coin is meant is unknown.
+        Assert.Equal(new VenueContract("PEPEUSDT", 0.001m), DerivativesData.ResolveContract(listed, "1000PEPEUSDT"));
+        Assert.Equal(new VenueContract("PEPEUSDT", 0.000001m), DerivativesData.ResolveContract(listed, "1MPEPEUSDT"));
+        Assert.Equal(new VenueContract("kBONK", 1), DerivativesData.ResolveContract(listed, "1000BONKUSDT"));
+        Assert.Equal(new VenueContract("kBONK", 1000), DerivativesData.ResolveContract(listed, "BONKUSDT"));
+        Assert.Null(DerivativesData.ResolveContract(listed, "BTCUSDT"));
+    }
+
+    [Fact]
+    public void Bitget_contract_list_follows_the_published_shape_and_skips_other_quotes_and_delisted_rows()
+    {
+        string delisted = BitgetContract("OLDUSDT", "OLD", "1").Replace("\"symbolStatus\":\"normal\"", "\"symbolStatus\":\"off\"", StringComparison.Ordinal);
+        string usdc = BitgetContract("BTCPERP", "BTC", "0.0001").Replace("\"quoteCoin\":\"USDT\"", "\"quoteCoin\":\"USDC\"", StringComparison.Ordinal);
+        using var doc = JsonDocument.Parse("""{"code":"00000","msg":"success","requestTime":1794761102235,"data":[""" + string.Join(",",
+            BitgetContract("1000BONKUSDT", "1000BONK", "1"), BitgetContract("PEPEUSDT", "PEPE", "1000"), delisted, usdc) + "]}");
+        Assert.Equal(new[] { ("1000BONKUSDT", "1000BONK"), ("PEPEUSDT", "PEPE") }, DerivativesData.ParseBitgetContracts(doc.RootElement));
     }
 
     // ================================================================ Hyperliquid
@@ -244,15 +356,26 @@ public sealed class DerivativesVenueTests
         Assert.Equal(720, funding.Samples.Count);
         Assert.All(funding.Samples, s => Assert.Equal(0.00125m, s.RatePercent));
         Assert.Equal(1, DerivativesDashboard.FundingIntervalHours(funding.Samples));
-        var bodies = handler.Requests.Select(r => JsonDocument.Parse(r.Body!).RootElement.GetProperty("startTime").GetInt64()).ToArray();
-        Assert.Equal(new[] { Ms(from), Ms(from.AddHours(499)) + 22 }, bodies);
+        // The coin is resolved from the universe (read once) before the funding pages.
+        var bodies = handler.Requests.Select(r => JsonDocument.Parse(r.Body!).RootElement).ToArray();
+        Assert.Equal("metaAndAssetCtxs", bodies[0].GetProperty("type").GetString());
+        Assert.Equal(new[] { Ms(from), Ms(from.AddHours(499)) + 22 }, bodies.Skip(1).Select(b => b.GetProperty("startTime").GetInt64()));
+        var unlisted = await Assert.ThrowsAsync<InvalidDataException>(() => data.LoadFundingAsync(DerivativesData.Hyperliquid, "NOPEUSDT", from, Settlement, CancellationToken.None));
+        Assert.Equal("Hyperliquid lists no perpetual for NOPEUSDT.", unlisted.Message);
+        Assert.Single(handler.Requests, r => r.Body!.Contains("metaAndAssetCtxs", StringComparison.Ordinal));
 
         var stats = await data.LoadMarketStatsAsync(DerivativesData.Hyperliquid, "BTCUSDT", CancellationToken.None);
         // The oracle price is the index; funding settles on the next full hour.
         Assert.Equal((64738.0m, 64769.0m, 0.00125m, Settlement, Now), (stats.MarkPrice, stats.IndexPrice, stats.FundingRatePercent, stats.NextFundingUtc, stats.Time));
         var oi = await data.LoadOpenInterestAsync(DerivativesData.Hyperliquid, "1000PEPEUSDT", Now.AddHours(-24), Now, CancellationToken.None);
         Assert.Equal(OpenInterestAvailability.Partial, oi.Availability);
-        Assert.Equal((Now, 5530291604m), (oi.Samples[0].Time, oi.Samples[0].Quantity));
+        Assert.Equal((Now, 5530291604m, (string?)null), (oi.Samples[0].Time, oi.Samples[0].Quantity, oi.Message));
+        // PEPE requested, kPEPE listed: open interest in single PEPE, prices per PEPE.
+        var pepe = await data.LoadOpenInterestAsync(DerivativesData.Hyperliquid, "PEPEUSDT", Now.AddHours(-24), Now, CancellationToken.None);
+        Assert.Equal(5530291604000m, pepe.Samples[0].Quantity);
+        Assert.Equal("Hyperliquid lists PEPEUSDT as kPEPE; its open interest and prices are converted to PEPE.", pepe.Message);
+        var pepeStats = await data.LoadMarketStatsAsync(DerivativesData.Hyperliquid, "PEPEUSDT", CancellationToken.None);
+        Assert.Equal((0.0000091m, 0.000009m), (pepeStats.MarkPrice, pepeStats.IndexPrice));
         // A delisted or absent coin is an error, not a zero.
         await Assert.ThrowsAsync<InvalidDataException>(() => data.LoadMarketStatsAsync(DerivativesData.Hyperliquid, "MATICUSDT", CancellationToken.None));
         Assert.Equal(OpenInterestAvailability.Unavailable, (await data.LoadOpenInterestAsync(DerivativesData.Hyperliquid, "ETHUSDT", Now.AddHours(-1), Now, CancellationToken.None)).Availability);
@@ -285,6 +408,7 @@ public sealed class DerivativesVenueTests
             ("binance.fixture", "/fapi/v1/fundingInfo") => Json("""[{"symbol":"GTCUSDT","adjustedFundingRateCap":"0.02000000","adjustedFundingRateFloor":"-0.02000000","fundingIntervalHours":4,"disclaimer":false,"updateTime":1791950460152}]"""),
             ("bybit.fixture", "/v5/market/tickers") => Json("""{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"symbol":"BTCUSDT","lastPrice":"64747.30","indexPrice":"64776.95","markPrice":"64747.20","fundingRate":"-0.00001358","nextFundingTime":"1794758400000","fundingIntervalHour":"8","fundingCap":"0.00333"},{"symbol":"BTCUSDT-26DEC25","fundingRate":"","nextFundingTime":"0","fundingIntervalHour":""}]},"retExtInfo":{},"time":1794756984000}"""),
             ("okx.fixture", "/api/v5/public/funding-rate") => Json("""{"code":"0","data":[{"fundingRate":"0.0000134820001958","fundingTime":"1794758400000","instId":"BTC-USDT-SWAP","nextFundingTime":"1794787200000"},{"fundingRate":"0.00005","fundingTime":"1794758400000","instId":"GTC-USDT-SWAP","nextFundingTime":""}],"msg":""}"""),
+            ("bitget.fixture", "/api/v2/mix/market/contracts") => Json(BitgetContracts),
             ("bitget.fixture", "/api/v2/mix/market/current-fund-rate") => Json("""{"code":"00000","msg":"success","requestTime":1794757061722,"data":[{"symbol":"BTCUSDT","fundingRate":"0.00001","fundingRateInterval":"8","nextUpdate":"1794758400000"},{"symbol":"PEPEUSDT","fundingRate":"-0.0001","fundingRateInterval":"4","nextUpdate":"1794758400000"}]}"""),
             ("hyperliquid.fixture", "/info") => Json(HyperliquidContexts),
             _ => throw new InvalidOperationException("Unexpected fixture request: " + request.RequestUri),
@@ -303,11 +427,11 @@ public sealed class DerivativesVenueTests
         Assert.False(okx.ContainsKey("GTCUSDT")); // Without the following settlement the interval is unknown, so the row is left out.
         Assert.Equal("ANY", Query(handler.Requests.Single(r => r.Uri.Host == "okx.fixture").Uri)["instId"]);
         var bitget = await data.LoadFundingBoardAsync(DerivativesData.Bitget, symbols, CancellationToken.None);
-        Assert.Equal(-0.02m, bitget["1000PEPEUSDT"].Rate8hPercent); // Listed as PEPEUSDT on Bitget.
+        Assert.Equal(-0.02m, bitget["1000PEPEUSDT"].Rate8hPercent); // Listed as PEPEUSDT on Bitget, found through its contract list.
         var hyperliquid = await data.LoadFundingBoardAsync(DerivativesData.Hyperliquid, symbols, CancellationToken.None);
         Assert.Equal((0.00125m, 1d, 0.01m), (hyperliquid["BTCUSDT"].RatePercent, hyperliquid["BTCUSDT"].IntervalHours, hyperliquid["BTCUSDT"].Rate8hPercent));
         Assert.Equal(-0.00248m, hyperliquid["1000PEPEUSDT"].Rate8hPercent);
-        Assert.Equal(6, handler.Requests.Count); // Bulk endpoints only: two for Binance, one per other venue.
+        Assert.Equal(7, handler.Requests.Count); // Bulk endpoints only: two for Binance and Bitget (its contract list), one per other venue.
     }
 
     [Fact]

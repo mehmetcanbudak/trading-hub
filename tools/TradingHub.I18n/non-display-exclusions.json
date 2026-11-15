@@ -388,39 +388,39 @@
     "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
   },
   "{0}/api/v2/mix/market/account-long-short?symbol={1}&productType=USDT-FUTURES&period={2}": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:404",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:537",
     "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   },
   "{0}/api/v2/mix/market/current-fund-rate?symbol={1}&productType=USDT-FUTURES": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:334",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:464",
     "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   },
   "{0}/api/v2/mix/market/history-fund-rate?symbol={1}&productType=USDT-FUTURES&pageSize=100&pageNo={2}": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:173",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:296",
     "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   },
   "{0}/api/v2/mix/market/open-interest?symbol={1}&productType=USDT-FUTURES": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:250",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:374",
     "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   },
   "{0}/api/v2/mix/market/ticker?symbol={1}&productType=USDT-FUTURES": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:333",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:463",
     "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   },
   "{0}/api/v5/public/funding-rate-history?instId={1}&limit=400": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:159",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:282",
     "reason": "OKX public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   },
   "{0}/api/v5/public/funding-rate-history?instId={1}&limit=400{2}": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:159",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:282",
     "reason": "OKX public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   },
   "{0}/api/v5/rubik/stat/contracts/long-short-account-ratio-contract?instId={1}&period={2}&begin={3}&end={4}&limit=100": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:396",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:529",
     "reason": "OKX public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   },
   "{0}/api/v5/rubik/stat/contracts/open-interest-history?instId={1}&period={2}&begin={3}&end={4}&limit=100": {
-    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:241",
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:365",
     "reason": "OKX public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
   }
 }

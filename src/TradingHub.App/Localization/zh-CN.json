@@ -9968,6 +9968,8 @@
   "{0} isn't in your cTrader account.": "{0} 不在你的 cTrader 账户中。",
   "{0} laboratory: runs tests and saves reports. Financial changes remain proposals for review.": "{0} 实验室：运行测试并保存报告。财务更改仍为待审查提案。",
   "{0} less than {1}": "{0} 小于 {1}",
+  "{0} lists no perpetual for {1}.": "{0} 未上线 {1} 的永续合约。",
+  "{0} lists {1} as {2}; its open interest and prices are converted to {3}.": "{0} 将 {1} 列为 {2}；其持仓量和价格已换算为 {3}。",
   "{0} live strategy(ies)": "{0} 个实时策略",
   "{0} live strategy/strategies": "{0} 个实时策略",
   "{0} long/short ratio failed: {1}": "{0} 多空比加载失败：{1}",

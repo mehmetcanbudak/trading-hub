@@ -22,6 +22,32 @@ public sealed record FundingSnapshot(string VenueId, string Symbol, decimal Rate
 /// </summary>
 public sealed record DerivativesVenueCoverage(bool FundingHistory, bool OpenInterestHistory, bool LongShortRatio, bool LiquidationStream);
 
+/// <summary>
+/// A perpetual's base name split into the coin and the number of coins per unit: 1000PEPE → (PEPE, 1000), 1MBABYDOGE →
+/// (BABYDOGE, 1 000 000), Hyperliquid's kPEPE → (PEPE, 1000), BTC and 1INCH → themselves with 1.
+/// </summary>
+public readonly record struct ContractUnit(string Coin, decimal Multiplier)
+{
+    public static ContractUnit Of(string baseName)
+    {
+        if (baseName.Length > 1 && baseName[0] == 'k' && char.IsUpper(baseName[1])) return new(baseName[1..], 1000);
+        if (baseName.Length > 2 && baseName.StartsWith("1M", StringComparison.Ordinal) && char.IsLetter(baseName[2])) return new(baseName[2..], 1_000_000);
+        int zeros = 0;
+        if (baseName.StartsWith('1'))
+            while (1 + zeros < baseName.Length && baseName[1 + zeros] == '0') zeros++;
+        if (zeros < 3 || 1 + zeros >= baseName.Length || !char.IsLetter(baseName[1 + zeros])) return new(baseName, 1);
+        decimal multiplier = 1;
+        for (int i = 0; i < zeros; i++) multiplier *= 10;
+        return new(baseName[(1 + zeros)..], multiplier);
+    }
+}
+
+/// <summary>
+/// A venue's contract for a requested derivatives symbol. Venue quantities × <see cref="Scale"/> are in the requested
+/// symbol's unit and venue prices ÷ <see cref="Scale"/> are per that unit (Scale 1 when both units match).
+/// </summary>
+public sealed record VenueContract(string Native, decimal Scale);
+
 public sealed partial class DerivativesData
 {
     /// <summary>OKX USDT-margined perpetual swaps (BTC-USDT-SWAP); the same id as the OKX swap feed.</summary>
@@ -68,28 +94,125 @@ public sealed partial class DerivativesData
     private string HyperliquidOrigin => (_transport.HyperliquidRest ?? new Uri("https://api.hyperliquid.xyz")).GetLeftPart(UriPartial.Authority);
 
     /// <summary>
-    /// The venue's own name for a USDT-perpetual derivatives symbol (BTCUSDT): OKX BTC-USDT-SWAP, Bitget BTCUSDT,
-    /// Hyperliquid BTC. Thousand-unit bases (1000PEPE) are PEPE on OKX and kPEPE on Hyperliquid.
+    /// The OKX swap for a USDT-perpetual derivatives symbol (BTCUSDT → BTC-USDT-SWAP). OKX lists coins without unit
+    /// prefixes (1000PEPE and 1MBABYDOGE are PEPE and BABYDOGE) and publishes open interest in the coin itself.
     /// </summary>
-    public static string NativeSymbol(string venue, string symbol)
+    public static string OkxNativeSymbol(string symbol) => ContractUnit.Of(RequestedBase(symbol)).Coin + "-USDT-SWAP";
+
+    /// <summary>The base of a requested derivatives symbol: 1000PEPEUSDT → 1000PEPE.</summary>
+    private static string RequestedBase(string symbol)
     {
         symbol = symbol.ToUpperInvariant();
-        string baseAsset = symbol.EndsWith("USDT", StringComparison.Ordinal) && symbol.Length > 4 ? symbol[..^4] : symbol;
-        return venue switch
-        {
-            Okx => WithoutThousands(baseAsset) + "-USDT-SWAP",
-            Hyperliquid => baseAsset.Length > 4 && baseAsset.StartsWith("1000", StringComparison.Ordinal) && char.IsLetter(baseAsset[4]) ? "k" + baseAsset[4..] : baseAsset,
-            _ => symbol,
-        };
+        return symbol.EndsWith("USDT", StringComparison.Ordinal) && symbol.Length > 4 ? symbol[..^4] : symbol;
     }
 
-    /// <summary>Removes a 1000 or 1000000 multiplier prefix (1000PEPE → PEPE); other names are unchanged.</summary>
-    private static string WithoutThousands(string baseAsset)
+    /// <summary>
+    /// The listed contract for a requested symbol: the one quoted in the same unit, otherwise the only listing of the same
+    /// coin in another unit (PEPEUSDT for 1000PEPEUSDT, 1000BONKUSDT or kBONK for BONKUSDT). Null when the venue does not
+    /// list the coin, or lists it only in several other units (which one is meant is unknown).
+    /// </summary>
+    /// <param name="listed">The venue's listed contracts: its own symbol and the base name it quotes (1000BONK, kPEPE).</param>
+    public static VenueContract? ResolveContract(IEnumerable<(string Native, string Base)> listed, string symbol)
     {
-        foreach (var prefix in new[] { "1000000", "1000" })
-            if (baseAsset.Length > prefix.Length && baseAsset.StartsWith(prefix, StringComparison.Ordinal) && char.IsLetter(baseAsset[prefix.Length]))
-                return baseAsset[prefix.Length..];
-        return baseAsset;
+        var wanted = ContractUnit.Of(RequestedBase(symbol));
+        VenueContract? other = null;
+        int others = 0;
+        foreach (var (native, baseName) in listed)
+        {
+            var unit = ContractUnit.Of(baseName);
+            if (!string.Equals(unit.Coin, wanted.Coin, StringComparison.OrdinalIgnoreCase)) continue;
+            var contract = new VenueContract(native, unit.Multiplier / wanted.Multiplier);
+            if (unit.Multiplier == wanted.Multiplier) return contract;
+            other = contract;
+            others++;
+        }
+        return others == 1 ? other : null;
+    }
+
+    private static VenueContract OkxContract(string symbol) => new(OkxNativeSymbol(symbol), 1 / ContractUnit.Of(RequestedBase(symbol)).Multiplier);
+
+    /// <summary>OKX from its naming rule; Bitget and Hyperliquid from their published instrument lists (cached for an hour).</summary>
+    private async Task<VenueContract> ContractAsync(string venue, string symbol, CancellationToken ct) => venue switch
+    {
+        Okx => OkxContract(symbol),
+        Bitget => ResolveContract(await ListedAsync(_bitgetContracts, LoadBitgetContractsAsync, ct).ConfigureAwait(false), symbol),
+        _ => ResolveContract(await ListedAsync(_hyperliquidUniverse, LoadHyperliquidUniverseAsync, ct).ConfigureAwait(false), symbol),
+    } ?? throw NotListed(venue, symbol);
+
+    private static InvalidDataException NotListed(string venue, string symbol) => new($"{VenueName(venue)} lists no perpetual for {symbol}.");
+
+    /// <summary>The note shown when a venue's contract is quoted in another unit than the requested symbol; null when the unit matches.</summary>
+    private static string? UnitNote(string venue, string symbol, VenueContract contract) => contract.Scale == 1 ? null
+        : $"{VenueName(venue)} lists {symbol.ToUpperInvariant()} as {contract.Native}; its open interest and prices are converted to {RequestedBase(symbol)}.";
+
+    // ================================================================ instrument lists
+
+    private static readonly TimeSpan ListLifetime = TimeSpan.FromHours(1);
+
+    /// <summary>One venue's listed contracts, loaded at most once per <see cref="ListLifetime"/> by one caller at a time.</summary>
+    private sealed class ListedContracts
+    {
+        public readonly SemaphoreSlim Gate = new(1, 1);
+        public IReadOnlyList<(string Native, string Base)>? Items;
+        public DateTime LoadedAt;
+    }
+
+    private readonly ListedContracts _bitgetContracts = new(), _hyperliquidUniverse = new();
+
+    private async Task<IReadOnlyList<(string Native, string Base)>> ListedAsync(ListedContracts list,
+        Func<CancellationToken, Task<IReadOnlyList<(string Native, string Base)>>> load, CancellationToken ct)
+    {
+        await list.Gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var now = _utcNow();
+            if (list.Items == null || now - list.LoadedAt >= ListLifetime || now < list.LoadedAt)
+            {
+                list.Items = await load(ct).ConfigureAwait(false);
+                list.LoadedAt = now;
+            }
+            return list.Items;
+        }
+        finally { list.Gate.Release(); }
+    }
+
+    private async Task<IReadOnlyList<(string Native, string Base)>> LoadBitgetContractsAsync(CancellationToken ct)
+    {
+        using var doc = await GetVenueJsonAsync(Bitget, $"{BitgetOrigin}/api/v2/mix/market/contracts?productType=USDT-FUTURES", null, ct).ConfigureAwait(false);
+        return ParseBitgetContracts(doc.RootElement);
+    }
+
+    private async Task<IReadOnlyList<(string Native, string Base)>> LoadHyperliquidUniverseAsync(CancellationToken ct)
+    {
+        using var doc = await HyperliquidInfoAsync(new { type = "metaAndAssetCtxs" }, ct).ConfigureAwait(false);
+        return ParseHyperliquidUniverse(doc.RootElement);
+    }
+
+    /// <summary>
+    /// Bitget contracts data rows {symbol, baseCoin, quoteCoin, symbolType, symbolStatus}: its USDT perpetuals by symbol and
+    /// base coin. The base carries the unit (1000BONK); sizeMultiplier is the order step, not a unit. Delisted ("off") rows are skipped.
+    /// </summary>
+    public static IReadOnlyList<(string Native, string Base)> ParseBitgetContracts(JsonElement root)
+    {
+        var result = new List<(string, string)>();
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return result;
+        foreach (var e in data.EnumerateArray())
+            if (Text(e, "symbol") is { Length: > 0 } native && Text(e, "baseCoin") is { Length: > 0 } baseCoin && Text(e, "quoteCoin") == "USDT"
+                && Text(e, "symbolType") is null or "perpetual" && Text(e, "symbolStatus") != "off")
+                result.Add((native, baseCoin));
+        return result;
+    }
+
+    /// <summary>Hyperliquid metaAndAssetCtxs universe names (BTC, kPEPE), each its own native symbol and base; delisted coins are skipped.</summary>
+    public static IReadOnlyList<(string Native, string Base)> ParseHyperliquidUniverse(JsonElement root)
+    {
+        var result = new List<(string, string)>();
+        if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 1 || !root[0].TryGetProperty("universe", out var universe)
+            || universe.ValueKind != JsonValueKind.Array) return result;
+        foreach (var u in universe.EnumerateArray())
+            if (Text(u, "name") is { Length: > 0 } name && !(u.TryGetProperty("isDelisted", out var d) && d.ValueKind == JsonValueKind.True))
+                result.Add((name, name));
+        return result;
     }
 
     /// <summary>The shortest venue period whose <paramref name="rows"/> periods cover the span.</summary>
@@ -149,7 +272,7 @@ public sealed partial class DerivativesData
         using var linked = Linked(ct);
         ct = linked.Token;
         var samples = new SortedDictionary<DateTime, FundingSample>();
-        string native = NativeSymbol(venue, symbol);
+        string native = (await ContractAsync(venue, symbol, ct).ConfigureAwait(false)).Native;
         if (venue == Okx)
         {
             // Newest first; "after" pages to settlements strictly older than the cursor. OKX keeps about three months.
@@ -230,7 +353,8 @@ public sealed partial class DerivativesData
     {
         using var linked = Linked(ct);
         ct = linked.Token;
-        string native = NativeSymbol(venue, symbol);
+        VenueContract? contract = venue == Hyperliquid ? null : await ContractAsync(venue, symbol, ct).ConfigureAwait(false);
+        string native = contract?.Native ?? "";
         var samples = new SortedDictionary<DateTime, OpenInterestSample>();
         TimeSpan period;
         if (venue == Okx)
@@ -254,18 +378,23 @@ public sealed partial class DerivativesData
         {
             period = TimeSpan.Zero;
             using var doc = await HyperliquidInfoAsync(new { type = "metaAndAssetCtxs" }, ct).ConfigureAwait(false);
-            if (ParseHyperliquidContext(doc.RootElement, native) is { } context && Optional(context, "openInterest") is { } oi && oi >= 0)
+            // The listing comes from the same answer: an unlisted coin has no open interest rather than an error.
+            contract = ResolveContract(ParseHyperliquidUniverse(doc.RootElement), symbol);
+            if (contract != null && ParseHyperliquidContext(doc.RootElement, contract.Native) is { } context && Optional(context, "openInterest") is { } oi && oi >= 0)
             {
                 var fetched = _utcNow();
                 samples[fetched] = new OpenInterestSample(fetched, oi);
             }
         }
-        var values = samples.Values.Where(s => s.Time >= from && s.Time <= to.AddMinutes(5)).ToArray();
+        // Quantities in the requested symbol's unit: 1000PEPE requested from a venue quoting PEPE divides by 1000.
+        decimal scale = contract?.Scale ?? 1;
+        var values = samples.Values.Where(s => s.Time >= from && s.Time <= to.AddMinutes(5)).Select(s => s with { Quantity = s.Quantity * scale }).ToArray();
         if (values.Length == 0)
             return new(values, null, null, OpenInterestAvailability.Unavailable, $"{VenueName(venue)} reports no open interest for {symbol} in this range.");
         // Bitget and Hyperliquid publish only the current value: one sample is partial coverage of any range.
         bool complete = period > TimeSpan.Zero && values[0].Time <= from + period * 2;
-        return new(values, values[0].Time, values[^1].Time, complete ? OpenInterestAvailability.Available : OpenInterestAvailability.Partial);
+        return new(values, values[0].Time, values[^1].Time, complete ? OpenInterestAvailability.Available : OpenInterestAvailability.Partial,
+            contract == null ? null : UnitNote(venue, symbol, contract));
     }
 
     /// <summary>OKX rubik open-interest-history rows [ts, oi (contracts), oiCcy (base), oiUsd], newest first; the base-asset column is used.</summary>
@@ -317,7 +446,8 @@ public sealed partial class DerivativesData
     {
         using var linked = Linked(ct);
         ct = linked.Token;
-        string native = NativeSymbol(venue, symbol);
+        VenueContract? contract = venue == Hyperliquid ? null : await ContractAsync(venue, symbol, ct).ConfigureAwait(false);
+        string native = contract?.Native ?? "";
         string escaped = Uri.EscapeDataString(native);
         VenueMarketStats? stats;
         if (venue == Okx)
@@ -337,9 +467,12 @@ public sealed partial class DerivativesData
         else
         {
             using var doc = await HyperliquidInfoAsync(new { type = "metaAndAssetCtxs" }, ct).ConfigureAwait(false);
-            stats = ParseHyperliquidMarketStats(doc.RootElement, native, _utcNow());
+            contract = ResolveContract(ParseHyperliquidUniverse(doc.RootElement), symbol);
+            stats = contract == null ? null : ParseHyperliquidMarketStats(doc.RootElement, contract.Native, _utcNow());
         }
-        return stats ?? throw new InvalidDataException($"{VenueName(venue)} published no ticker for {symbol}.");
+        if (stats == null || contract == null) throw new InvalidDataException($"{VenueName(venue)} published no ticker for {symbol}.");
+        // Prices per the requested symbol's unit, so they match its open interest; the premium is a ratio and unchanged.
+        return contract.Scale == 1 ? stats : stats with { MarkPrice = stats.MarkPrice / contract.Scale, IndexPrice = stats.IndexPrice / contract.Scale };
     }
 
     /// <summary>
@@ -388,7 +521,7 @@ public sealed partial class DerivativesData
             return new(Array.Empty<LongShortSample>(), OpenInterestAvailability.Unsupported, $"{VenueName(venue)} does not publish a long/short account ratio.");
         using var linked = Linked(ct);
         ct = linked.Token;
-        string escaped = Uri.EscapeDataString(NativeSymbol(venue, symbol));
+        string escaped = Uri.EscapeDataString((await ContractAsync(venue, symbol, ct).ConfigureAwait(false)).Native);
         IReadOnlyList<LongShortSample> rows;
         if (venue == Okx)
         {
@@ -438,18 +571,25 @@ public sealed partial class DerivativesData
     /// <c>/fapi/v1/fundingInfo</c> (symbols absent there settle every 8 hours), Bybit <c>/v5/market/tickers</c>, OKX
     /// <c>/api/v5/public/funding-rate?instId=ANY</c>, Bitget <c>/api/v2/mix/market/current-fund-rate</c> and Hyperliquid
     /// <c>metaAndAssetCtxs</c> (hourly). Keyed by the requested derivatives symbol; symbols the venue does not list are absent.
+    /// Bitget and Hyperliquid symbols are resolved through their listings, so a coin quoted in another unit (PEPEUSDT or
+    /// kPEPE for 1000PEPEUSDT) is found; funding is a rate and does not depend on the unit.
     /// </summary>
     public async Task<IReadOnlyDictionary<string, FundingSnapshot>> LoadFundingBoardAsync(string venue, IReadOnlyCollection<string> symbols, CancellationToken ct)
     {
         using var linked = Linked(ct);
         ct = linked.Token;
         var wanted = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var s in symbols) wanted.TryAdd(NativeSymbol(venue, s), s.ToUpperInvariant());
-        // Bitget lists some thousand-unit coins without the prefix (PEPEUSDT, but 1000BONKUSDT); funding does not depend on the unit.
-        if (venue == Bitget)
+        void Want(IReadOnlyList<(string Native, string Base)> listed)
+        {
             foreach (var s in symbols)
-                if (s.ToUpperInvariant() is var upper && upper.EndsWith("USDT", StringComparison.Ordinal) && WithoutThousands(upper[..^4]) is var stripped && stripped != upper[..^4])
-                    wanted.TryAdd(stripped + "USDT", upper);
+                if (ResolveContract(listed, s) is { } contract) wanted.TryAdd(contract.Native, s.ToUpperInvariant());
+        }
+        if (venue is Binance or Bybit)
+            foreach (var s in symbols) wanted.TryAdd(s.ToUpperInvariant(), s.ToUpperInvariant());
+        else if (venue == Okx)
+            foreach (var s in symbols) wanted.TryAdd(OkxNativeSymbol(s), s.ToUpperInvariant());
+        else if (venue == Bitget)
+            Want(await ListedAsync(_bitgetContracts, LoadBitgetContractsAsync, ct).ConfigureAwait(false));
         switch (venue)
         {
             case Binance:
@@ -476,6 +616,7 @@ public sealed partial class DerivativesData
             case Hyperliquid:
             {
                 using var doc = await HyperliquidInfoAsync(new { type = "metaAndAssetCtxs" }, ct).ConfigureAwait(false);
+                Want(ParseHyperliquidUniverse(doc.RootElement));
                 return ParseHyperliquidFundingBoard(doc.RootElement, wanted);
             }
             default:
