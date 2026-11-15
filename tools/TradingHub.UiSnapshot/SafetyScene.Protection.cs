@@ -165,6 +165,7 @@ internal sealed class FixtureLinkedAccount(SimBroker inner) : ITradingAccount, I
         inner.Cancel(order);
     }
     public bool CancelRequested(Order order) => _cancelRequested.Contains(order);
+    public bool PositionReflects(Order order) => true; // the simulator reports fills and position together
     public void CancelAt(decimal price) => inner.CancelAt(price);
     public void CancelAll() => inner.CancelAll();
 

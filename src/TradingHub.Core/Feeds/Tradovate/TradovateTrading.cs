@@ -52,6 +52,8 @@ public sealed class TradovatePositionState
     public decimal Sold { get; set; }
     public decimal BoughtValue { get; set; }
     public decimal SoldValue { get; set; }
+    /// <summary>The venue's timestamp of this position report; null when the report carried none.</summary>
+    public DateTime? Time { get; set; }
 }
 
 public sealed class TradovateCashState
@@ -361,6 +363,8 @@ public sealed class TradovateTradingSession : IDisposable
                     p.Sold = Dec(e, "sold") ?? 0;
                     p.BoughtValue = Dec(e, "boughtValue") ?? 0;
                     p.SoldValue = Dec(e, "soldValue") ?? 0;
+                    p.Time = DateTime.TryParse(Str(e, "timestamp"), CultureInfo.InvariantCulture,
+                        DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var reported) ? reported : null;
                     break;
                 }
 
@@ -492,6 +496,19 @@ public sealed class TradovateTradingSession : IDisposable
     public TradovateOrderState? OrderState(long id)
     {
         lock (_gate) return _orders.TryGetValue(id, out var o) ? o : null;
+    }
+
+    /// <summary>The venue timestamp of the order's latest reported fill; null when it has none.</summary>
+    public DateTime? LastFillTime(long orderId)
+    {
+        lock (_gate)
+        {
+            if (!_fillsByOrder.TryGetValue(orderId, out var ids)) return null;
+            DateTime? last = null;
+            foreach (long id in ids)
+                if (_fills.TryGetValue(id, out var fill) && (last == null || fill.Time > last)) last = fill.Time;
+            return last;
+        }
     }
 
     public TradovatePositionState? PositionFor(long accountId, long contractId)
@@ -1417,6 +1434,14 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
     public bool CancelRequested(Order order)
     {
         lock (_gate) return _cancelRequested.ContainsKey(order);
+    }
+
+    // Tradovate fill and position entities both carry the venue's timestamp; a report without one proves nothing.
+    public bool PositionReflects(Order order)
+    {
+        long id = IdOf(order);
+        if (id == 0 || _session.LastFillTime(id) is not { } fill) return true;
+        return _contract is { } c && _session.PositionFor(_account.Id, c.Id)?.Time is { } reported && reported >= fill;
     }
 
     // Called under the broker gate at the end of a sync. An ended order whose OCO partner has also ended (or that has none)

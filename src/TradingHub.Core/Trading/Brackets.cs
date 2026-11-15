@@ -103,9 +103,11 @@ public sealed class BracketManager : IDisposable
         // The partner's cumulative execution while this leg was working and already sized to the remaining position:
         // only executions beyond it can explain a later venue cancellation of this leg.
         public decimal PartnerBaseline;
-        // The reported |position| when that baseline was taken: a replacement waits until the reported position has
-        // fallen by the partner's later executions, so a stale report can never size it.
+        // The reported |position| when that baseline was taken: a replacement waits until the reported position has fallen
+        // by the partner's later executions and the venue dates that report no earlier than the partner's last fill.
         public decimal VolumeAtBaseline;
+        // This app asked the venue to cancel this leg (from any path), recorded while the broker still remembers it.
+        public bool CancelSeen;
     }
 
     private readonly List<ExitIntent> _exits = new();
@@ -467,9 +469,11 @@ public sealed class BracketManager : IDisposable
     });
 
     /// <summary>Lleva el stop al precio de entrada (más el margen de la plantilla).</summary>
-    public string MoveStopToBreakeven() => Run(MoveStopToBreakevenCore);
+    public string MoveStopToBreakeven() => Run(() => MoveStopToBreakevenCore(automatic: false));
 
-    private string MoveStopToBreakevenCore()
+    // The automatic move after the first target keeps a dissolved stop waiting for its position check (it only updates the
+    // price to place); an explicit move ends the wait.
+    private string MoveStopToBreakevenCore(bool automatic)
     {
         if (NotReady is { } pending) return pending;
         decimal v = Volume;
@@ -478,7 +482,8 @@ public sealed class BracketManager : IDisposable
         if (Validate(BracketRole.StopLoss, be, Math.Sign(v), Account.LastPrice) != null)
             return "Not enough profit yet to move the stop to breakeven.";
         var stop = Desired(BracketRole.StopLoss).FirstOrDefault();
-        if (stop != null) ChangeExit(stop, be, ExitQuantity);
+        if (stop is { Phase: ExitPhase.Dissolving } && automatic) stop.Price = be;
+        else if (stop != null) ChangeExit(stop, be, ExitQuantity);
         else QueueExit(BracketRole.StopLoss, Math.Sign(v), ExitQuantity, be);
         return $"Stop at breakeven ({Inst.FormatPrice(be)})";
     }
@@ -773,7 +778,7 @@ public sealed class BracketManager : IDisposable
                 bool first = _targetHits++ == 0;
                 if (first && Template.BreakevenAfterFirstTarget && Desired(BracketRole.StopLoss).Any())
                 {
-                    string message = MoveStopToBreakevenCore();
+                    string message = MoveStopToBreakevenCore(automatic: true);
                     Message?.Invoke($"Target filled · {message}");
                 }
                 else Message?.Invoke("Target filled: stop adjusted to the remaining position.");
@@ -789,6 +794,7 @@ public sealed class BracketManager : IDisposable
         foreach (var owned in _owned)
         {
             var order = Current(owned);
+            if (owned.Linked && !owned.CancelSeen && CancelRequested(owned)) owned.CancelSeen = true;
             decimal filled = Executed(order);
             decimal delta = Math.Max(0, filled - owned.Booked);
             if (delta > 0)
@@ -877,16 +883,18 @@ public sealed class BracketManager : IDisposable
             decimal partnerExecuted = Executed(other) - leg.PartnerBaseline;
             bool partnerDone = Terminal(other) && Executed(other) <= partner.Booked;
             bool cause;
-            if (partner.RemovalRequested || CancelRequested(partner))
+            if (partner.RemovalRequested || partner.CancelSeen || CancelRequested(partner))
                 // This app removed the partner (brackets, DOM, order list): await its outcome, then this leg is needed.
                 cause = partnerDone && (other.Status == OrderStatus.Canceled || partnerExecuted > 0);
             else if (partnerExecuted > 0) cause = true; // the partner executed (even completely) after this leg was sized
             else if (Terminal(other)) { Settle(intent, gap: null); continue; } // both cancelled, nobody here asked: respected
             else cause = false;
 
-            // Confirmed once the fills are booked and the reported position has fallen by them; sized from that position.
+            // Confirmed once the fills are booked, the reported position has fallen by them, and that report is at least as
+            // recent as the partner's last fill: an older report can neither confirm nor size the replacement.
             bool confirmed = NotReady == null && Executed(other) <= partner.Booked &&
-                Math.Abs(Volume) <= leg.VolumeAtBaseline - Math.Max(0, partnerExecuted);
+                Math.Abs(Volume) <= leg.VolumeAtBaseline - Math.Max(0, partnerExecuted) &&
+                (partnerExecuted <= 0 || Account is not INativeProtection native || native.PositionReflects(other));
             if (cause && confirmed)
             {
                 intent.Dissolved = null;
@@ -899,6 +907,18 @@ public sealed class BracketManager : IDisposable
             }
             if (Clock() - intent.DissolvedAt > LinkDissolutionWait)
             {
+                if (cause && Executed(other) <= partner.Booked)
+                {
+                    // The cause is established but the position rule did not confirm (for example a position report that
+                    // already included the fill): place it, sized from the booked fills and the reported position.
+                    intent.Dissolved = null;
+                    intent.Phase = ExitPhase.Waiting;
+                    intent.Quantity = ExitQuantity;
+                    _linkFallback = true;
+                    _protectionNote = "The venue cancelled one linked leg while the position remains open: app-managed protection replaces it.";
+                    Message?.Invoke(_protectionNote);
+                    continue;
+                }
                 Settle(intent, stopping
                     ? "Protection gap: the venue cancelled the linked stop without a confirmed cause; no stop is working for this position."
                     : "Protection gap: the venue cancelled the linked target without a confirmed cause; no target is working for this position.");
@@ -1163,7 +1183,7 @@ public sealed class BracketManager : IDisposable
     // A linked leg the venue cancelled although this app (including Cancel all and Close position) never asked it to:
     // its cause is confirmed before anything is sent (ResolveDissolutions).
     private bool LinkCancelledByVenue(ExitIntent intent, OwnedExit owned, Order order) =>
-        order.Status == OrderStatus.Canceled && StillProtecting(intent, owned) && !CancelRequested(owned);
+        order.Status == OrderStatus.Canceled && StillProtecting(intent, owned) && !owned.CancelSeen && !CancelRequested(owned);
 
     /// <summary>
     /// Adopts a venue-linked stop/target pair this account's manual protection placed earlier and that is still working

@@ -40,6 +40,10 @@ public interface INativeProtection
     /// <summary>True once this application asked the venue to cancel the order, through any path (a bracket change,
     /// Cancel all or Close position). A venue cancellation of such an order is never a dissolved link.</summary>
     bool CancelRequested(Order order);
+
+    /// <summary>True when the account's latest position report is at least as recent as every execution reported for the
+    /// order (by the venue's own timestamps); false when the position may not include them yet.</summary>
+    bool PositionReflects(Order order);
 }
 
 /// <summary>Display state of a position's protection.</summary>

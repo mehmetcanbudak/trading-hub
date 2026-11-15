@@ -446,6 +446,95 @@ public class NativeProtectionTests
     }
 
     [Fact]
+    public void A_partner_cancelled_from_the_dom_still_restores_the_stop_after_the_broker_forgets_the_request()
+    {
+        var venue = new OcoVenue { DeferCancels = true };
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+
+        venue.Cancel(target); // DOM cancel; a new order's reply is still pending, so the account is not ready
+        venue.OrdersReady = false;
+        venue.ReportCancel(stop);
+        venue.ReportCancel(target);
+        venue.ForgetCancelRequests(); // one sync after both legs ended
+        Assert.Equal(2, venue.Submitted.Count);
+
+        venue.OrdersReady = true;
+        venue.Publish();
+        var restored = brackets.StopLoss!;
+        Assert.NotSame(stop, restored);
+        Assert.Equal(4m, restored.Unfilled);
+    }
+
+    [Fact]
+    public void An_established_cause_whose_position_rule_never_confirms_is_replaced_at_the_wait_bound()
+    {
+        var venue = new OcoVenue();
+        var now = new DateTime(2026, 11, 15, 12, 0, 0, DateTimeKind.Utc);
+        using var brackets = Brackets(venue);
+        brackets.Clock = () => now;
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var linkedTarget = Assert.Single(brackets.Targets);
+        brackets.AddTarget(130); // S(4) linked with T(2); a separate target closes 2
+
+        venue.ReportPosition(2); // early: already includes the linked target's fill of 2
+        venue.ReportCancel(stop);
+        venue.ReportExecution(linkedTarget, 2);
+        Assert.Null(brackets.StopLoss);
+
+        now = now.AddMinutes(1);
+        venue.Publish();
+        var restored = brackets.StopLoss!;
+        Assert.NotSame(stop, restored);
+        Assert.Equal(2m, restored.Unfilled);
+        Assert.DoesNotContain("Protection gap", brackets.ProtectionNote ?? "");
+    }
+
+    [Fact]
+    public void A_position_report_older_than_the_partner_fill_never_confirms_a_replacement()
+    {
+        var venue = new OcoVenue { DeferReplaces = true };
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+
+        venue.ReportPosition(3); // a fill outside the brackets; the resize to 3 stays unacknowledged
+        venue.ReportCancel(stop);
+        venue.ReportExecution(target, 1); // its effect on the position is not reported yet: the true position is 2
+        Assert.Equal(2, venue.Submitted.Count);
+
+        venue.ReportPosition(2);
+        var restored = brackets.StopLoss!;
+        Assert.NotSame(stop, restored);
+        Assert.Equal(2m, restored.Unfilled);
+    }
+
+    [Fact]
+    public void Automatic_breakeven_after_the_first_target_keeps_waiting_for_the_position()
+    {
+        var venue = new OcoVenue();
+        using var brackets = Brackets(venue);
+        brackets.Template.BreakevenAfterFirstTarget = true;
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+
+        venue.ReportCancel(stop);
+        venue.ReportExecution(target, 1); // first target fill: automatic breakeven
+        Assert.Equal(2, venue.Submitted.Count);
+
+        venue.ReportPosition(3);
+        var restored = brackets.StopLoss!;
+        Assert.NotSame(stop, restored);
+        Assert.Equal(3m, restored.Unfilled);
+        Assert.Equal(100m, restored.TriggerPrice); // the breakeven price, placed only once the position confirmed
+    }
+
+    [Fact]
     public void An_explicit_stop_during_the_wait_is_placed_at_once()
     {
         var venue = new OcoVenue();
@@ -576,6 +665,7 @@ public class NativeProtectionTests
         {
             Position.Volume = volume;
             Position.AveragePrice = price;
+            _positionSequence = ++_sequence;
             Publish();
         }
 
@@ -598,6 +688,7 @@ public class NativeProtectionTests
             order.State = OrderStates.Done;
             order.Status = OrderStatus.Canceled;
             Working.Remove(order);
+            _pendingReplaces.Remove(order);
         }
 
         private Order? Sibling(Order order) => _groups.TryGetValue(order, out var group)
@@ -611,6 +702,7 @@ public class NativeProtectionTests
             order.State = full ? OrderStates.Done : OrderStates.Active;
             if (full) Working.Remove(order);
             Position.Volume += order.Direction == OrderDirections.Buy ? quantity : -quantity;
+            _fillSequence[order] = _positionSequence = ++_sequence;
             LastPrice = BracketManager.PriceOf(order);
             if ((full || PartialFillCancelsSibling) && Sibling(order) is { } sibling) VenueCancel(sibling);
             Publish();
@@ -638,12 +730,18 @@ public class NativeProtectionTests
             return order;
         }
 
-        public bool IsReplacementPending(Order order) => false; // amendments are acknowledged synchronously
+        public bool IsReplacementPending(Order order) => _pendingReplaces.Contains(order);
 
         public Order Replace(Order order, PreparedOrderIntent intent)
         {
             Assert.Null(OrderContext.BindOrder(order, intent));
             ReplaceRequests.Add(order);
+            if (DeferReplaces)
+            {
+                _pendingReplaces.Add(order); // sent; the venue has not acknowledged it yet
+                Publish();
+                return order;
+            }
             order.QuantityToFill = order.Filled + intent.Request.Quantity;
             order.Unfilled = intent.Request.Quantity;
             if (order.Type == OrderTypes.Stop) order.TriggerPrice = intent.Request.Price;
@@ -681,6 +779,19 @@ public class NativeProtectionTests
         public bool DeferCancels { get; set; }
         public HashSet<Order> CancelRequestedOrders { get; } = new();
         public bool CancelRequested(Order order) => CancelRequestedOrders.Contains(order);
+        public bool DeferReplaces { get; set; }
+        private readonly HashSet<Order> _pendingReplaces = new();
+        // Report order: a position report reflects an order's fills only when it was published after them.
+        private long _sequence, _positionSequence;
+        private readonly Dictionary<Order, long> _fillSequence = new();
+        public bool PositionReflects(Order order) => !_fillSequence.TryGetValue(order, out long fill) || _positionSequence >= fill;
+
+        /// <summary>The broker forgets ended cancel requests (as Tradovate does one sync after both OCO legs end).</summary>
+        public void ForgetCancelRequests()
+        {
+            CancelRequestedOrders.Clear();
+            Publish();
+        }
 
         public void ReportCancel(Order order)
         {
@@ -695,6 +806,7 @@ public class NativeProtectionTests
             order.Status = full ? OrderStatus.Filled : OrderStatus.PartlyFilled;
             order.State = full ? OrderStates.Done : OrderStates.Active;
             if (full) Working.Remove(order);
+            _fillSequence[order] = ++_sequence;
             LastPrice = BracketManager.PriceOf(order);
             Publish();
         }
@@ -702,6 +814,7 @@ public class NativeProtectionTests
         public void ReportPosition(decimal volume)
         {
             Position.Volume = volume;
+            _positionSequence = ++_sequence;
             Publish();
         }
 

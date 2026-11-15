@@ -107,11 +107,11 @@ A Tradovate connection can opt in to **Exchange-side protection (Tradovate OCO)*
     - the other leg executed, partly or completely, after the cancelled leg was last sized; or
     - Trading Hub cancelled the other leg (bracket removal, the DOM or the order list) and that cancellation has ended.
 
-    The replacement is sent only once those fills are booked and the reported position has fallen by them, so a stale position report never sizes it. It is sized from the reported position, including reductions made outside the brackets.
+    The replacement is sent only once those fills are booked, the reported position has fallen by them, and Tradovate's timestamp on that position report is no earlier than the other leg's last fill. Until then, an older position report can neither confirm nor size it. It is sized from the reported position, including reductions made outside the brackets.
   - The wait ends without sending anything when the position is flat.
   - Legs that Trading Hub itself asked to cancel (including **Cancel all** and **Close position**) are never replaced. When both legs were cancelled and nobody here requested either, the cancellation is respected as for app-managed orders.
-  - Setting a stop or moving it to breakeven during the wait ends it: that stop is placed at once as app-managed protection.
-  - When no cause is confirmed within 30 seconds, Chart Trader keeps showing the **Protection gap** and that no stop (or target) is working. Nothing is sent automatically, so place a new stop yourself.
+  - Setting a stop or moving it to breakeven yourself ends the wait: that stop is placed at once as app-managed protection. The automatic breakeven after the first target only changes the price the waiting stop will use.
+  - After 30 seconds, a leg whose cause was confirmed but whose position check never passed is placed anyway, sized from the booked fills and the reported position. Without a confirmed cause, Chart Trader keeps showing the **Protection gap** and that no stop (or target) is working. Nothing is sent automatically, so place a new stop yourself.
 - A strategy's linked pair and the chart's are separate: one owner's order is never paired with another's.
 - After a restart, chart protection that is still working at Tradovate is re-owned from the saved client IDs and adopted. It is never placed a second time. A strategy re-adopts its own kept stop and target as before.
 

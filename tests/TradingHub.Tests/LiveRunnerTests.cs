@@ -641,6 +641,7 @@ public class LiveRunnerTests : IDisposable
             _inner.Cancel(order);
         }
         public bool CancelRequested(Order order) => _cancelRequested.Contains(order);
+        public bool PositionReflects(Order order) => true; // the simulator reports fills and position together
         public void CancelAt(decimal price) => _inner.CancelAt(price);
         public void CancelAll() => _inner.CancelAll();
         private sealed class Scope(Action close) : IDisposable
