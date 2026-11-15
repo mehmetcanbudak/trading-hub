@@ -20542,5 +20542,1937 @@
   "Notional is price × size × the instrument's contract multiplier (point value), in the quote currency; 1 for spot and linear crypto.": {
     "es": "El nocional es precio × tamaño × el multiplicador del contrato del instrumento (valor del punto), en la moneda de cotización; 1 para spot y cripto lineal.",
     "zh-CN": "名义金额 = 价格 × 数量 × 品种的合约乘数（点值），以计价货币计；现货和线性加密货币为 1。"
+  },
+  " · Binance Futures": {
+    "es": " · Binance Futuros",
+    "zh-CN": " · Binance 合约"
+  },
+  " · Binance Spot": {
+    "es": " · Binance Spot",
+    "zh-CN": " · Binance 现货"
+  },
+  "\"Authorization\" sends the key as a Bearer token.": {
+    "es": "\"Authorization\" envía la clave como token Bearer.",
+    "zh-CN": "\"Authorization\" 以 Bearer 令牌形式发送密钥。"
+  },
+  "(High + Low + Close) / 3": {
+    "es": "(Máximo + Mínimo + Cierre) / 3",
+    "zh-CN": "(最高 + 最低 + 收盘) / 3"
+  },
+  "(High + Low) / 2": {
+    "es": "(Máximo + Mínimo) / 2",
+    "zh-CN": "(最高 + 最低) / 2"
+  },
+  "(Open + High + Low + Close) / 4": {
+    "es": "(Apertura + Máximo + Mínimo + Cierre) / 4",
+    "zh-CN": "(开盘 + 最高 + 最低 + 收盘) / 4"
+  },
+  "1-day expected move": {
+    "es": "Movimiento esperado a 1 día",
+    "zh-CN": "1 日预期波动幅度"
+  },
+  "20-day average": {
+    "es": "Promedio de 20 días",
+    "zh-CN": "20 日均值"
+  },
+  "25Δ risk reversal": {
+    "es": "Risk reversal 25Δ",
+    "zh-CN": "25Δ 风险逆转"
+  },
+  "25Δ skew": {
+    "es": "Sesgo 25Δ",
+    "zh-CN": "25Δ 偏斜"
+  },
+  "25Δ skew (call − put)": {
+    "es": "Sesgo 25Δ (call − put)",
+    "zh-CN": "25Δ 偏斜(看涨 − 看跌)"
+  },
+  "30-day IV": {
+    "es": "IV a 30 días",
+    "zh-CN": "30 日 IV"
+  },
+  "30-day IV · IV rank": {
+    "es": "IV a 30 días · rango de IV",
+    "zh-CN": "30 日 IV · IV 排名"
+  },
+  "30-day realized": {
+    "es": "Realizada a 30 días",
+    "zh-CN": "30 日已实现"
+  },
+  "A 0–100 fear and greed gauge comparing six daily signals with the previous year: IV, skew, put/call by volume and by open interest, dealer gamma and price momentum (close against its 50-day average). Daily line in the pane and a gauge with the latest reading.": {
+    "es": "Indicador de miedo y codicia de 0 a 100 que compara seis señales diarias con el año anterior: IV, sesgo, put/call por volumen y por interés abierto, gamma de creadores de mercado y momentum del precio (cierre frente a su promedio de 50 días). Línea diaria en el panel y un medidor con la última lectura.",
+    "zh-CN": "0–100 恐惧与贪婪指数,将六个每日信号与过去一年对比:IV、偏斜、按成交量和持仓量计的看跌/看涨比、做市商伽马及价格动量(收盘价相对 50 日均线)。窗格中显示每日曲线,并以仪表显示最新读数。"
+  },
+  "A card for the session open: whether options are rich or cheap against realized volatility (30-day IV ÷ 30-day realized), whether traders fear a drop (25-delta skew) and whether the short term is stressed (7-day IV ÷ 30-day IV).": {
+    "es": "Cuadro para la apertura de la sesión: si las opciones están caras o baratas frente a la volatilidad realizada (IV a 30 días ÷ realizada a 30 días), si los traders temen una caída (sesgo 25-delta) y si el corto plazo está tensionado (IV a 7 días ÷ IV a 30 días).",
+    "zh-CN": "开盘信息卡:期权相对已实现波动率是贵还是便宜(30 日 IV ÷ 30 日已实现)、交易者是否担心下跌(25-delta 偏斜)以及短期是否承压(7 日 IV ÷ 30 日 IV)。"
+  },
+  "A card in a corner of the price pane reading the market at a glance: the trend (up with the close above the EMA and RSI above its midline, down below both, mixed otherwise), three rings (RSI, the aggressor-buy share of the flow window where the feed reports sides, and this bar's volume against its average), ATR as % of price and the open-interest change over the window as a line where the chart has open interest. The EMA is drawn on price.": {
+    "es": "Cuadro en una esquina del panel de precio para leer el mercado de un vistazo: la tendencia (alcista con el cierre sobre la EMA y el RSI sobre su línea media, bajista por debajo de ambos, mixta en otro caso), tres anillos (RSI, la proporción de compras agresoras en la ventana de flujo cuando el feed informa el lado, y el volumen de esta vela frente a su promedio), ATR como % del precio y el cambio del interés abierto en la ventana como línea cuando el gráfico tiene interés abierto. La EMA se dibuja sobre el precio.",
+    "zh-CN": "位于价格窗格角落的信息卡,一眼读懂市场:趋势(收盘价高于 EMA 且 RSI 高于中线为上涨,两者均低于为下跌,否则为混合)、三个圆环(RSI、数据源提供方向时资金流窗口内主动买入占比、本根 K 线成交量相对均值)、ATR 占价格的 %,以及图表有持仓量时以曲线显示窗口内持仓量变化。EMA 绘制在价格上。"
+  },
+  "A card showing whether calls or puts lead today: premium on each side, how much was bought and sold, the put/call premium ratio and the net bullish flow.": {
+    "es": "Cuadro que muestra si hoy lideran las calls o las puts: prima de cada lado, cuánto se compró y vendió, el ratio de prima put/call y el flujo alcista neto.",
+    "zh-CN": "显示今日看涨期权还是看跌期权占优的信息卡:各方权利金、买入与卖出量、看跌/看涨权利金比率及净看涨资金流。"
+  },
+  "A card with the contracts carrying the most 24-hour volume or open interest in the snapshot (type, strike, expiry, IV and quantity) and a dotted line at each strike.": {
+    "es": "Cuadro con los contratos de mayor volumen en 24 horas o interés abierto en la foto (tipo, ejercicio, vencimiento, IV y cantidad) y una línea punteada en cada ejercicio.",
+    "zh-CN": "列出快照中 24 小时成交量或持仓量最大的合约(类型、行权价、到期日、IV 和数量)的信息卡,并在每个行权价处画虚线。"
+  },
+  "A card with the option contracts that gathered the most premium in the last closed bar, sorted by premium, with the side that dominated.": {
+    "es": "Cuadro con los contratos de opciones que acumularon más prima en la última vela cerrada, ordenados por prima, con el lado dominante.",
+    "zh-CN": "列出上一根已收盘 K 线中权利金最多的期权合约的信息卡,按权利金排序,并显示占优方向。"
+  },
+  "A column per day with dealer gamma (USD per 1 %; green positive, red negative) and a card placing the latest against the previous year: whether it is unusual.": {
+    "es": "Una columna por día con la gamma de creadores de mercado (USD por 1 %; verde positiva, roja negativa) y un cuadro que compara el último valor con el año anterior: si es inusual.",
+    "zh-CN": "每日一列显示做市商伽马(每 1 % 的 USD;绿色为正,红色为负),并以信息卡将最新值与过去一年对比,判断是否异常。"
+  },
+  "A custom API is usually a paid or self-hosted service. It is called only while this connection is enabled; check your provider's rate limits and terms.": {
+    "es": "Una API personalizada suele ser un servicio de pago o autoalojado. Solo se consulta mientras esta conexión está activada; revisa los límites de uso y condiciones de tu proveedor.",
+    "zh-CN": "自定义 API 通常是付费或自托管服务。仅在此连接启用时调用；请查看提供商的频率限制和条款。"
+  },
+  "A daily average of the underlying price weighted by option premium (not volume): where option buyers came in. Optionally one line for bullish and one for bearish flow. Resets each trading day; each point uses only trades up to that bar.": {
+    "es": "Promedio diario del precio del subyacente ponderado por prima de opciones (no por volumen): dónde entraron los compradores de opciones. Opcionalmente, una línea para flujo alcista y otra para bajista. Se reinicia cada día de negociación; cada punto usa solo operaciones hasta esa vela.",
+    "zh-CN": "按期权权利金(而非成交量)加权的标的价格日均值:期权买方的入场位置。可选分别显示看涨与看跌资金流曲线。每个交易日重置；每个点仅使用截至该 K 线的成交。"
+  },
+  "A heatmap of the option premium at every strike near the price, bar by bar: green where the flow was bullish, red where bearish. Shows the prices traders defend or target.": {
+    "es": "Mapa de calor de la prima de opciones en cada ejercicio cercano al precio, vela por vela: verde donde el flujo fue alcista, rojo donde fue bajista. Muestra los precios que los traders defienden o apuntan.",
+    "zh-CN": "逐根 K 线显示价格附近各行权价期权权利金的热力图:绿色为看涨资金流,红色为看跌。显示交易者防守或瞄准的价位。"
+  },
+  "A horizontal lane per strike near the price whose thickness and brightness follow today's option volume at that strike (from trades, or from the chain's 24-hour volume when trades are not loaded), with each strike's gamma, the call and put walls and the gamma flip.": {
+    "es": "Una franja horizontal por ejercicio cercano al precio cuyo grosor y brillo siguen el volumen de opciones de hoy en ese ejercicio (de las operaciones, o del volumen de 24 horas de la cadena si no hay operaciones cargadas), con la gamma de cada ejercicio, los muros de calls y puts y el cambio de gamma.",
+    "zh-CN": "价格附近每个行权价一条水平带,其粗细和亮度随该行权价今日期权成交量变化(来自成交,未加载成交时使用期权链 24 小时成交量),并显示各行权价伽马、看涨墙、看跌墙及伽马翻转点。"
+  },
+  "A profile of option premium stacked at the underlying price when each trade executed (1 to 30 days): where traders bet hardest. Green is the bullish part, red the bearish part; a line marks the price with the most premium.": {
+    "es": "Perfil de la prima de opciones acumulada al precio del subyacente en que se ejecutó cada operación (1 a 30 días): dónde apuestan más fuerte los traders. Verde es la parte alcista, rojo la bajista; una línea marca el precio con más prima.",
+    "zh-CN": "按每笔成交时标的价格堆叠的期权权利金分布(1 至 30 天):交易者押注最重的位置。绿色为看涨部分,红色为看跌部分；一条线标出权利金最多的价格。"
+  },
+  "A strip docked to the price axis with total dealer gamma recomputed as if the underlying traded at each price (±15 %): green where dealers dampen, red where they push. Dashed lines at the gamma flip, the walls and the strike with the most gamma.": {
+    "es": "Franja junto al eje de precios con la gamma total de creadores de mercado recalculada como si el subyacente cotizara a cada precio (±15 %): verde donde amortiguan, rojo donde empujan. Líneas discontinuas en el cambio de gamma, los muros y el ejercicio con más gamma.",
+    "zh-CN": "停靠在价格轴旁的条带,按标的在各价格(±15 %)交易重新计算做市商总伽马:绿色为做市商抑制波动,红色为推动波动。虚线标出伽马翻转点、看涨/看跌墙及伽马最大的行权价。"
+  },
+  "API base URL": {
+    "es": "URL base de la API",
+    "zh-CN": "API 基础 URL"
+  },
+  "API key (optional)": {
+    "es": "Clave de API (opcional)",
+    "zh-CN": "API 密钥(可选)"
+  },
+  "ATR length (bars)": {
+    "es": "Longitud ATR (velas)",
+    "zh-CN": "ATR 长度(K 线)"
+  },
+  "Aggressor buys": {
+    "es": "Compras agresoras",
+    "zh-CN": "主动买入"
+  },
+  "All expiries": {
+    "es": "Todos los vencimientos",
+    "zh-CN": "所有到期日"
+  },
+  "As a heatmap": {
+    "es": "Como mapa de calor",
+    "zh-CN": "以热力图显示"
+  },
+  "Assets": {
+    "es": "Activos",
+    "zh-CN": "资产"
+  },
+  "At expiry {0}": {
+    "es": "Al vencimiento {0}",
+    "zh-CN": "到期日 {0}"
+  },
+  "At most per bar": {
+    "es": "Máximo por vela",
+    "zh-CN": "每根 K 线最多"
+  },
+  "At-the-money IV": {
+    "es": "IV ATM",
+    "zh-CN": "ATM IV"
+  },
+  "BTC, ETH": {
+    "es": "BTC, ETH",
+    "zh-CN": "BTC, ETH"
+  },
+  "BTC, ETH (blank = all)": {
+    "es": "BTC, ETH (vacío = todos)",
+    "zh-CN": "BTC, ETH(留空 = 全部)"
+  },
+  "BTC, ETH, SPY (blank = all)": {
+    "es": "BTC, ETH, SPY (vacío = todos)",
+    "zh-CN": "BTC, ETH, SPY(留空 = 全部)"
+  },
+  "Bar by bar, the option premium traded at each strike, drawn at the strike's price: green when the flow was bullish (bought calls or sold puts), red when bearish, stronger with more premium. Shows the strikes traders keep returning to.": {
+    "es": "Vela a vela, la prima de opciones negociada en cada ejercicio, dibujada al precio del ejercicio: verde si el flujo fue alcista (calls compradas o puts vendidas), rojo si fue bajista, más intenso con más prima. Muestra los ejercicios a los que los traders vuelven una y otra vez.",
+    "zh-CN": "逐根 K 线显示各行权价成交的期权权利金，绘制在行权价对应的价格处：资金流看涨（买入看涨期权或卖出看跌期权）为绿色，看跌为红色，权利金越多颜色越深。显示交易者反复关注的行权价。"
+  },
+  "Bar total": {
+    "es": "Total de la vela",
+    "zh-CN": "K 线合计"
+  },
+  "Bar width (px)": {
+    "es": "Ancho de vela (px)",
+    "zh-CN": "K 线宽度 (px)"
+  },
+  "Bars drawn": {
+    "es": "Velas dibujadas",
+    "zh-CN": "已绘制 K 线"
+  },
+  "Bars examined": {
+    "es": "Velas examinadas",
+    "zh-CN": "已检查 K 线"
+  },
+  "Bars per candle with the option premium bought at the ask (up, green) and sold at the bid (down, red), and a card with today's totals: whether option buyers or sellers lead.": {
+    "es": "Barras por vela con la prima de opciones comprada al ask (arriba, verde) y vendida al bid (abajo, rojo), y un cuadro con los totales de hoy: si dominan los compradores o los vendedores de opciones.",
+    "zh-CN": "每根 K 线显示以卖价买入（向上，绿色）和以买价卖出（向下，红色）的期权权利金柱，并附今日合计信息卡：显示期权买方还是卖方占优。"
+  },
+  "Bars since the last change": {
+    "es": "Velas desde el último cambio",
+    "zh-CN": "自上次变化以来的 K 线数"
+  },
+  "Bearish or unknown-side premium": {
+    "es": "Prima bajista o de lado desconocido",
+    "zh-CN": "看跌或方向未知的权利金"
+  },
+  "Bearish premium": {
+    "es": "Prima bajista",
+    "zh-CN": "看跌权利金"
+  },
+  "Before trading an option: the chosen contract (type, strike, expiry), its premium, break-even, risk-neutral probability of profit and of finishing in the money at expiry, and how many contracts fit the risk you set. Draws the strike and the break-even.": {
+    "es": "Antes de operar una opción: el contrato elegido (tipo, ejercicio, vencimiento), su prima, punto de equilibrio, probabilidad neutral al riesgo de ganancia y de terminar dentro del dinero al vencimiento, y cuántos contratos caben en el riesgo que definas. Dibuja el ejercicio y el punto de equilibrio.",
+    "zh-CN": "交易期权前：所选合约（类型、行权价、到期日）、权利金、盈亏平衡点、风险中性下的盈利概率及到期时实值概率，以及在你设定的风险下可交易的合约数。绘制行权价和盈亏平衡点。"
+  },
+  "Behind each bar, a heatmap of where dealers hedge most (each strike's gamma in the latest snapshot recorded before the bar closed): green where they dampen, red where they push. Uses the snapshots recorded every 30 minutes while an options study requests the chain; nothing is drawn where no snapshot existed.": {
+    "es": "Detrás de cada vela, un mapa de calor de dónde más cubren los creadores de mercado (la gamma de cada ejercicio en la última foto registrada antes del cierre de la vela): verde donde amortiguan, rojo donde empujan. Usa las fotos registradas cada 30 minutos mientras un indicador de opciones solicita la cadena; no se dibuja nada donde no hubo foto.",
+    "zh-CN": "在每根 K 线背后显示做市商对冲最集中区域的热力图（K 线收盘前最近一次快照中各行权价的伽马）：绿色表示抑制波动，红色表示推动波动。使用期权指标请求期权链期间每 30 分钟记录的快照；无快照处不绘制。"
+  },
+  "Betting on": {
+    "es": "Apuesta a",
+    "zh-CN": "押注方向"
+  },
+  "Binance has no candles for {0}.": {
+    "es": "Binance no tiene velas para {0}.",
+    "zh-CN": "Binance 没有 {0} 的 K 线。"
+  },
+  "Bought": {
+    "es": "Comprado",
+    "zh-CN": "买入"
+  },
+  "Bought / sold": {
+    "es": "Comprado / vendido",
+    "zh-CN": "买入 / 卖出"
+  },
+  "Break-even": {
+    "es": "Punto de equilibrio",
+    "zh-CN": "盈亏平衡点"
+  },
+  "Break-even {0}": {
+    "es": "Punto de equilibrio {0}",
+    "zh-CN": "盈亏平衡点 {0}"
+  },
+  "Bullish and bearish flow separately": {
+    "es": "Flujo alcista y bajista por separado",
+    "zh-CN": "分别显示看涨和看跌资金流"
+  },
+  "Bullish premium": {
+    "es": "Prima alcista",
+    "zh-CN": "看涨权利金"
+  },
+  "Buy call": {
+    "es": "Comprar call",
+    "zh-CN": "买入看涨期权"
+  },
+  "Buy put": {
+    "es": "Comprar put",
+    "zh-CN": "买入看跌期权"
+  },
+  "Buy straddle": {
+    "es": "Comprar straddle",
+    "zh-CN": "买入跨式组合"
+  },
+  "By open interest (otherwise volume)": {
+    "es": "Por interés abierto (si no, volumen)",
+    "zh-CN": "按持仓量（否则按成交量）"
+  },
+  "By premium (otherwise contracts)": {
+    "es": "Por prima (si no, contratos)",
+    "zh-CN": "按权利金（否则按合约数）"
+  },
+  "Call (up) and put (down) contracts traded in each bar, with a card of today's and the window's put/call ratio.": {
+    "es": "Contratos de calls (arriba) y puts (abajo) negociados en cada vela, con un cuadro del ratio put/call de hoy y de la ventana.",
+    "zh-CN": "每根 K 线成交的看涨（向上）和看跌（向下）合约数，并附今日及窗口期看跌/看涨比率信息卡。"
+  },
+  "Call premium": {
+    "es": "Prima de calls",
+    "zh-CN": "看涨期权权利金"
+  },
+  "Call wall": {
+    "es": "Muro de calls",
+    "zh-CN": "看涨墙"
+  },
+  "Call wall {0}": {
+    "es": "Muro de calls {0}",
+    "zh-CN": "看涨墙 {0}"
+  },
+  "Calls": {
+    "es": "Calls",
+    "zh-CN": "看涨期权"
+  },
+  "Calls (bought − sold)": {
+    "es": "Calls (compradas − vendidas)",
+    "zh-CN": "看涨期权（买入 − 卖出）"
+  },
+  "Calls / puts": {
+    "es": "Calls / puts",
+    "zh-CN": "看涨 / 看跌期权"
+  },
+  "Calls / puts today": {
+    "es": "Calls / puts hoy",
+    "zh-CN": "今日看涨 / 看跌期权"
+  },
+  "Calls − puts (25Δ)": {
+    "es": "Calls − puts (25Δ)",
+    "zh-CN": "看涨 − 看跌 (25Δ)"
+  },
+  "Card": {
+    "es": "Cuadro",
+    "zh-CN": "信息卡"
+  },
+  "Card position": {
+    "es": "Posición del cuadro",
+    "zh-CN": "信息卡位置"
+  },
+  "Card rows": {
+    "es": "Filas del cuadro",
+    "zh-CN": "信息卡行"
+  },
+  "Change point marker": {
+    "es": "Marcador de punto de cambio",
+    "zh-CN": "变点标记"
+  },
+  "Change-point detection (CUSUM)": {
+    "es": "Detección de cambios de régimen (CUSUM)",
+    "zh-CN": "变点检测 (CUSUM)"
+  },
+  "Cloud width (px)": {
+    "es": "Ancho de la nube (px)",
+    "zh-CN": "云带宽度 (px)"
+  },
+  "Compare with the snapshot from (hours ago)": {
+    "es": "Comparar con la foto de hace (horas)",
+    "zh-CN": "与此前快照比较（小时前）"
+  },
+  "Compares a Polymarket market's probability (the chosen outcome, 0–100 %) with this chart's price: the rolling correlation of probability changes with returns, a divergence histogram (probability z-score minus price z-score, highlighted past the threshold) and a card with the reading. Each bar uses the last probability published before it closed. Public data; requests start only after you enter a market.": {
+    "es": "Compara la probabilidad de un mercado de Polymarket (el resultado elegido, 0–100 %) con el precio de este gráfico: la correlación móvil entre cambios de probabilidad y rendimientos, un histograma de divergencia (z-score de la probabilidad menos z-score del precio, resaltado al superar el umbral) y un cuadro con la lectura. Cada vela usa la última probabilidad publicada antes de su cierre. Datos públicos; las solicitudes empiezan solo después de ingresar un mercado.",
+    "zh-CN": "将 Polymarket 市场的概率（所选结果，0–100 %）与本图表价格进行比较：概率变化与收益率的滚动相关性、背离柱状图（概率 z 分数减价格 z 分数，超过阈值时高亮）以及显示读数的信息卡。每根 K 线使用收盘前最后发布的概率。公开数据；输入市场后才开始请求。"
+  },
+  "Comparison data is unavailable in this session.": {
+    "es": "Los datos de comparación no están disponibles en esta sesión.",
+    "zh-CN": "本次会话中无法获取比较数据。"
+  },
+  "Cone bars": {
+    "es": "Velas del cono",
+    "zh-CN": "锥形 K 线数"
+  },
+  "Contracts": {
+    "es": "Contratos",
+    "zh-CN": "合约"
+  },
+  "Contracts for the risk": {
+    "es": "Contratos según el riesgo",
+    "zh-CN": "按风险计算的合约数"
+  },
+  "Correlation": {
+    "es": "Correlación",
+    "zh-CN": "相关性"
+  },
+  "Correlation coefficient": {
+    "es": "Coeficiente de correlación",
+    "zh-CN": "相关系数"
+  },
+  "Correlation window (bars)": {
+    "es": "Ventana de correlación (velas)",
+    "zh-CN": "相关性窗口（K 线）"
+  },
+  "Covered call": {
+    "es": "Call cubierta",
+    "zh-CN": "备兑看涨期权"
+  },
+  "Cumulative": {
+    "es": "Acumulado",
+    "zh-CN": "累计"
+  },
+  "Cumulative {0}M": {
+    "es": "Acumulado {0}M",
+    "zh-CN": "累计 {0}M"
+  },
+  "Custom JSON API (your provider, key optional)": {
+    "es": "API JSON personalizada (tu proveedor, clave opcional)",
+    "zh-CN": "自定义 JSON API（您的提供商，密钥可选）"
+  },
+  "Custom options API": {
+    "es": "API de opciones personalizada",
+    "zh-CN": "自定义期权 API"
+  },
+  "Daily history: {0} days (completed by one recorded snapshot per day while a study is open)": {
+    "es": "Historial diario: {0} días (se completa con una foto registrada por día mientras un indicador está abierto)",
+    "zh-CN": "每日历史：{0} 天（指标打开期间每天记录一个快照补全）"
+  },
+  "Daily net flow of the chart coin's spot ETFs (USD millions): inflows green, outflows red, the cumulative sum as a line and a card with the latest day, the sum, the streak and the largest day. Issuers publish a day's flow after the US close, so by default each day appears on the next UTC day (when it is known); days without a published value are gaps. Needs an ETF flows connection.": {
+    "es": "Flujo neto diario de los ETF al contado de la moneda del gráfico (millones de USD): entradas en verde, salidas en rojo, la suma acumulada como línea y un cuadro con el último día, la suma, la racha y el día más grande. Los emisores publican el flujo de un día tras el cierre de EE. UU., así que por defecto cada día aparece en el siguiente día UTC (cuando se conoce); los días sin valor publicado quedan vacíos. Requiere una conexión de flujos de ETF.",
+    "zh-CN": "图表币种现货 ETF 的每日净资金流（百万 USD）：流入为绿色，流出为红色，累计值以线条显示，并有信息卡显示最新一天、累计、连续天数和最大单日。发行方在美股收盘后发布当日资金流，因此默认每天显示在下一个 UTC 日（已知时）；无发布数值的日期留空。需要 ETF 资金流连接。"
+  },
+  "Daily option volume or open interest (calls up, puts down), with a card of the latest day, the 20-day average and the last three days.": {
+    "es": "Volumen diario de opciones o interés abierto (calls arriba, puts abajo), con un cuadro del último día, el promedio de 20 días y los últimos tres días.",
+    "zh-CN": "每日期权成交量或持仓量（看涨期权向上，看跌期权向下），信息卡显示最新一天、20 日均值和最近三天。"
+  },
+  "Daily row {0} (known from the next day)": {
+    "es": "Fila diaria {0} (conocida desde el día siguiente)",
+    "zh-CN": "每日行 {0}（次日可知）"
+  },
+  "Day type": {
+    "es": "Tipo de día",
+    "zh-CN": "日类型"
+  },
+  "Day type: {0}": {
+    "es": "Tipo de día: {0}",
+    "zh-CN": "日类型：{0}"
+  },
+  "Days back": {
+    "es": "Días atrás",
+    "zh-CN": "回溯天数"
+  },
+  "Days drawn": {
+    "es": "Días dibujados",
+    "zh-CN": "绘制天数"
+  },
+  "Days to expiry": {
+    "es": "Días al vencimiento",
+    "zh-CN": "距到期日天数"
+  },
+  "Dealer positioning (estimated)": {
+    "es": "Posicionamiento de creadores de mercado (estimado)",
+    "zh-CN": "做市商持仓（估算）"
+  },
+  "Dealers · {0}": {
+    "es": "Creadores de mercado · {0}",
+    "zh-CN": "做市商 · {0}"
+  },
+  "Delta (DEX)": {
+    "es": "Delta (DEX)",
+    "zh-CN": "Delta (DEX)"
+  },
+  "Deribit (public, BTC and ETH)": {
+    "es": "Deribit (público, BTC y ETH)",
+    "zh-CN": "Deribit（公开，BTC 和 ETH）"
+  },
+  "Deribit index (estimated delivery price)": {
+    "es": "Índice Deribit (precio de entrega estimado)",
+    "zh-CN": "Deribit 指数（预估交割价）"
+  },
+  "Deribit is public: no account or key; it covers BTC and ETH options. A custom API key is stored in {0}, never in files. Daily history is completed by one snapshot per day that Trading Hub records while an options study is open.": {
+    "es": "Deribit es público: sin cuenta ni clave; cubre opciones de BTC y ETH. Una clave de API personalizada se guarda en {0}, nunca en archivos. El historial diario se completa con una foto por día que Trading Hub registra mientras un indicador de opciones está abierto.",
+    "zh-CN": "Deribit 为公开数据：无需账户或密钥；涵盖 BTC 和 ETH 期权。自定义 API 密钥存储在 {0} 中，绝不写入文件。期权指标打开期间，Trading Hub 每天记录一个快照以补全每日历史。"
+  },
+  "Deribit · BTC and ETH · public data": {
+    "es": "Deribit · BTC y ETH · datos públicos",
+    "zh-CN": "Deribit · BTC 和 ETH · 公开数据"
+  },
+  "Deviations from normal": {
+    "es": "Desviaciones de lo normal",
+    "zh-CN": "偏离常态"
+  },
+  "Difference": {
+    "es": "Diferencia",
+    "zh-CN": "差值"
+  },
+  "Distance from price (%)": {
+    "es": "Distancia al precio (%)",
+    "zh-CN": "距价格距离 (%)"
+  },
+  "Divergence (z)": {
+    "es": "Divergencia (z)",
+    "zh-CN": "背离 (z)"
+  },
+  "Downside fear": {
+    "es": "Miedo a la baja",
+    "zh-CN": "下行恐慌"
+  },
+  "Draw the EMA": {
+    "es": "Dibujar la EMA",
+    "zh-CN": "绘制 EMA"
+  },
+  "Draw the cumulative line": {
+    "es": "Dibujar la línea acumulada",
+    "zh-CN": "绘制累计线"
+  },
+  "Drift (deviations subtracted per bar)": {
+    "es": "Deriva (desviaciones restadas por vela)",
+    "zh-CN": "漂移（每根 K 线扣除的偏差数）"
+  },
+  "EMA length (bars)": {
+    "es": "Longitud de EMA (velas)",
+    "zh-CN": "EMA 长度（K 线数）"
+  },
+  "ETF flows": {
+    "es": "Flujos de ETF",
+    "zh-CN": "ETF 资金流"
+  },
+  "ETF flows API": {
+    "es": "API de flujos de ETF",
+    "zh-CN": "ETF 资金流 API"
+  },
+  "ETF flows: ": {
+    "es": "Flujos de ETF: ",
+    "zh-CN": "ETF 资金流："
+  },
+  "ETF flows: {0}": {
+    "es": "Flujos de ETF: {0}",
+    "zh-CN": "ETF 资金流：{0}"
+  },
+  "Enter a Polymarket market (its URL or slug).": {
+    "es": "Introduce un mercado de Polymarket (su URL o slug).",
+    "zh-CN": "输入 Polymarket 市场（URL 或 slug）。"
+  },
+  "Enter the API base URL.": {
+    "es": "Introduce la URL base de la API.",
+    "zh-CN": "输入 API 基础 URL。"
+  },
+  "Enter the symbol to compare.": {
+    "es": "Introduce el símbolo a comparar.",
+    "zh-CN": "输入要比较的代码。"
+  },
+  "Estimates dealer gamma from the option chain every 10 minutes (assuming customers buy puts and sell calls). Positive gamma means dealer hedging dampens moves (they sell rallies and buy dips); negative gamma amplifies them. The card shows how much dealers would trade per 1 % move; lines mark the gamma flip and the call and put walls, with their history since snapshots were recorded.": {
+    "es": "Estima la gamma de los creadores de mercado a partir de la cadena de opciones cada 10 minutos (suponiendo que los clientes compran puts y venden calls). Gamma positiva significa que la cobertura de los creadores de mercado amortigua los movimientos (venden en subidas y compran en caídas); gamma negativa los amplifica. El cuadro muestra cuánto operarían los creadores de mercado por cada movimiento del 1 %; las líneas marcan el cambio de gamma y los muros de calls y de puts, con su historial desde que se registran fotos.",
+    "zh-CN": "每 10 分钟根据期权链估算做市商伽马（假设客户买入看跌期权、卖出看涨期权）。正伽马表示做市商对冲会抑制波动（逢涨卖出、逢跌买入）；负伽马则会放大波动。信息卡显示每 1 % 波动时做市商的交易量；线条标出伽马翻转点、看涨墙和看跌墙，以及自开始记录快照以来的历史。"
+  },
+  "Expected move · {0}": {
+    "es": "Movimiento esperado · {0}",
+    "zh-CN": "预期波动幅度 · {0}"
+  },
+  "Expiries": {
+    "es": "Vencimientos",
+    "zh-CN": "到期日"
+  },
+  "Expiries up to (days)": {
+    "es": "Vencimientos hasta (días)",
+    "zh-CN": "到期日上限（天）"
+  },
+  "Exposure history": {
+    "es": "Historial de exposición",
+    "zh-CN": "敞口历史"
+  },
+  "Extreme fear": {
+    "es": "Miedo extremo",
+    "zh-CN": "极度恐惧"
+  },
+  "Extreme greed": {
+    "es": "Codicia extrema",
+    "zh-CN": "极度贪婪"
+  },
+  "Fear": {
+    "es": "Miedo",
+    "zh-CN": "恐惧"
+  },
+  "Fear and greed": {
+    "es": "Miedo y codicia",
+    "zh-CN": "恐惧与贪婪"
+  },
+  "Firmness (1 h)": {
+    "es": "Firmeza (1 h)",
+    "zh-CN": "坚挺度（1 小时）"
+  },
+  "Flow of the bar at {0} UTC": {
+    "es": "Flujo de la vela de las {0} UTC",
+    "zh-CN": "{0} UTC K 线的资金流"
+  },
+  "Flow window (bars)": {
+    "es": "Ventana de flujo (velas)",
+    "zh-CN": "资金流窗口（K 线数）"
+  },
+  "For option sellers": {
+    "es": "Para vendedores de opciones",
+    "zh-CN": "适用于期权卖方"
+  },
+  "For option sellers: implied volatility minus realized volatility of the last 30 daily closes (points; realized = annualized sample deviation of log returns). When options price more movement than happens, selling them pays; the card reads sell, neutral or wait.": {
+    "es": "Para vendedores de opciones: volatilidad implícita menos volatilidad realizada de los últimos 30 cierres diarios (puntos; realizada = desviación muestral anualizada de los retornos logarítmicos). Cuando las opciones descuentan más movimiento del que ocurre, venderlas compensa; el cuadro indica vender, neutral o esperar.",
+    "zh-CN": "适用于期权卖方：隐含波动率减去最近 30 个日收盘价的已实现波动率（点数；已实现 = 对数收益率的年化样本标准差）。当期权定价的波动大于实际波动时，卖出期权有利；信息卡显示卖出、中性或等待。"
+  },
+  "Format: GET /chain?underlying=BTC → {{\"time\",\"spot\",\"contracts\":[{{\"symbol\",\"expiry\",\"strike\",\"right\":\"C|P\",\"bid\",\"ask\",\"mark\",\"iv\",\"delta\",\"gamma\",\"oi\",\"volume\",\"contractSize\"}}]}}; GET /trades?underlying=BTC&from=…&to=… → [{{\"time\",\"symbol\",\"expiry\",\"strike\",\"right\",\"price\",\"size\",\"side\":\"buy|sell\",\"iv\",\"spot\",\"contractSize\",\"venue\"}}]; GET /daily → [{{\"date\",\"atmIv\",\"rr25\",\"pcVolume\",\"pcOi\",\"gex\",\"callWall\",\"putWall\",\"gammaFlip\",\"expectedMove\"}}]. IV as a fraction (0.55 = 55 %), prices in USD per unit of the underlying, contractSize = multiplier (default 1). Missing greeks are computed; other missing values stay unknown.": {
+    "es": "Formato: GET /chain?underlying=BTC → {{\"time\",\"spot\",\"contracts\":[{{\"symbol\",\"expiry\",\"strike\",\"right\":\"C|P\",\"bid\",\"ask\",\"mark\",\"iv\",\"delta\",\"gamma\",\"oi\",\"volume\",\"contractSize\"}}]}}; GET /trades?underlying=BTC&from=…&to=… → [{{\"time\",\"symbol\",\"expiry\",\"strike\",\"right\",\"price\",\"size\",\"side\":\"buy|sell\",\"iv\",\"spot\",\"contractSize\",\"venue\"}}]; GET /daily → [{{\"date\",\"atmIv\",\"rr25\",\"pcVolume\",\"pcOi\",\"gex\",\"callWall\",\"putWall\",\"gammaFlip\",\"expectedMove\"}}]. IV como fracción (0.55 = 55 %), precios en USD por unidad del subyacente, contractSize = multiplicador (por defecto 1). Las griegas faltantes se calculan; los demás valores faltantes quedan como desconocidos.",
+    "zh-CN": "格式：GET /chain?underlying=BTC → {{\"time\",\"spot\",\"contracts\":[{{\"symbol\",\"expiry\",\"strike\",\"right\":\"C|P\",\"bid\",\"ask\",\"mark\",\"iv\",\"delta\",\"gamma\",\"oi\",\"volume\",\"contractSize\"}}]}}; GET /trades?underlying=BTC&from=…&to=… → [{{\"time\",\"symbol\",\"expiry\",\"strike\",\"right\",\"price\",\"size\",\"side\":\"buy|sell\",\"iv\",\"spot\",\"contractSize\",\"venue\"}}]; GET /daily → [{{\"date\",\"atmIv\",\"rr25\",\"pcVolume\",\"pcOi\",\"gex\",\"callWall\",\"putWall\",\"gammaFlip\",\"expectedMove\"}}]。IV 以小数表示（0.55 = 55 %），价格以每单位标的的 USD 计，contractSize = 乘数（默认 1）。缺失的希腊值会自动计算；其他缺失值保持未知。"
+  },
+  "Format: [{{\"date\":\"2026-11-03\",\"net\":-123400000,\"funds\":{{\"IBIT\":-80000000}}}}] in USD (or \"netMillions\" in millions). {{\"data\":[…]}} is also accepted.": {
+    "es": "Formato: [{{\"date\":\"2026-11-03\",\"net\":-123400000,\"funds\":{{\"IBIT\":-80000000}}}}] en USD (o \"netMillions\" en millones). También se acepta {{\"data\":[…]}}.",
+    "zh-CN": "格式：[{{\"date\":\"2026-11-03\",\"net\":-123400000,\"funds\":{{\"IBIT\":-80000000}}}}]，单位 USD（或以百万计的 \"netMillions\"）。也接受 {{\"data\":[…]}}。"
+  },
+  "From Binance Futures (otherwise Spot)": {
+    "es": "Desde Binance Futures (si no, Spot)",
+    "zh-CN": "来自 Binance 合约（否则为现货）"
+  },
+  "Gamma": {
+    "es": "Gamma",
+    "zh-CN": "伽马"
+  },
+  "Gamma (GEX)": {
+    "es": "Gamma (GEX)",
+    "zh-CN": "伽马 (GEX)"
+  },
+  "Gamma (USD per 1 %)": {
+    "es": "Gamma (USD por 1 %)",
+    "zh-CN": "伽马（每 1 % 的 USD）"
+  },
+  "Gamma flip": {
+    "es": "Cambio de gamma",
+    "zh-CN": "伽马翻转点"
+  },
+  "Gamma flip {0}": {
+    "es": "Cambio de gamma {0}",
+    "zh-CN": "伽马翻转点 {0}"
+  },
+  "Gamma map by bar": {
+    "es": "Mapa de gamma por vela",
+    "zh-CN": "按 K 线的伽马图"
+  },
+  "Greed": {
+    "es": "Codicia",
+    "zh-CN": "贪婪"
+  },
+  "Greek": {
+    "es": "Griega",
+    "zh-CN": "希腊值"
+  },
+  "Greek exposure by strike": {
+    "es": "Exposición a griegas por ejercicio",
+    "zh-CN": "按行权价的希腊值敞口"
+  },
+  "Greek flow": {
+    "es": "Flujo de griegas",
+    "zh-CN": "希腊值资金流"
+  },
+  "Greek flow today · {0}": {
+    "es": "Flujo de griegas hoy · {0}",
+    "zh-CN": "今日希腊值资金流 · {0}"
+  },
+  "HTTP {0} from {1}": {
+    "es": "HTTP {0} de {1}",
+    "zh-CN": "来自 {1} 的 HTTP {0}"
+  },
+  "Holds after {0}": {
+    "es": "Se mantiene después de {0}",
+    "zh-CN": "{0} 后保持"
+  },
+  "How far implied volatility is from the previous year's normal, in standard deviations: red bars on stressed days, blue on calm ones, and a card with the number of stressed days in the last month.": {
+    "es": "Cuánto se aleja la volatilidad implícita de lo normal del año anterior, en desviaciones estándar: velas rojas en días de tensión, azules en días tranquilos y un cuadro con el número de días de tensión del último mes.",
+    "zh-CN": "隐含波动率偏离上一年常态的程度（以标准差计）：紧张日为红色 K 线，平静日为蓝色，信息卡显示近一个月的紧张天数。"
+  },
+  "How much option open interest opened (+) or closed (−) at each strike since the recorded snapshot from a set number of hours ago (24 by default): bars docked at the right, calls right and puts left, to see where new positions build.": {
+    "es": "Cuánto interés abierto de opciones se abrió (+) o cerró (−) en cada ejercicio desde la foto registrada hace un número fijo de horas (24 por defecto): barras ancladas a la derecha, calls a la derecha y puts a la izquierda, para ver dónde se forman nuevas posiciones.",
+    "zh-CN": "自设定小时数前（默认 24 小时）记录的快照以来，各行权价的期权持仓量新增（+）或减少（−）了多少：柱条停靠在右侧，看涨期权在右、看跌期权在左，用于观察新仓位在何处建立。"
+  },
+  "How much richer puts are than calls (25-delta put IV minus call IV, in points), day by day, with the previous year's range and its percentile: fear rises as the line rises.": {
+    "es": "Cuánto más caras están las puts que las calls (IV de put 25-delta menos IV de call, en puntos), día a día, con el rango del año anterior y su percentil: el miedo sube cuando sube la línea.",
+    "zh-CN": "看跌期权相对看涨期权的溢价程度（25-delta 看跌 IV 减看涨 IV，单位为点），逐日显示，并附上一年的区间及百分位：线越高，恐慌越强。"
+  },
+  "IV deviations": {
+    "es": "Desviaciones de IV",
+    "zh-CN": "IV 偏离"
+  },
+  "IV percentile": {
+    "es": "Percentil de IV",
+    "zh-CN": "IV 百分位"
+  },
+  "IV rank": {
+    "es": "Rango de IV",
+    "zh-CN": "IV 排名"
+  },
+  "IV rank · {0}": {
+    "es": "Rango de IV · {0}",
+    "zh-CN": "IV 排名 · {0}"
+  },
+  "IV used": {
+    "es": "IV utilizada",
+    "zh-CN": "所用 IV"
+  },
+  "If price falls 1 %": {
+    "es": "Si el precio baja 1 %",
+    "zh-CN": "若价格下跌 1 %"
+  },
+  "If price rises 1 %": {
+    "es": "Si el precio sube 1 %",
+    "zh-CN": "若价格上涨 1 %"
+  },
+  "Implied volatility of each expiry (rows) at each distance from spot (columns, −20 % to +20 %), tinted against that expiry's at-the-money IV: richer in orange, cheaper in blue. Helps spot cheap or expensive options before trading.": {
+    "es": "Volatilidad implícita de cada vencimiento (filas) a cada distancia del spot (columnas, −20 % a +20 %), coloreada frente a la IV ATM de ese vencimiento: más cara en naranja, más barata en azul. Ayuda a detectar opciones baratas o caras antes de operar.",
+    "zh-CN": "各到期日（行）在距现价不同距离（列，−20 % 至 +20 %）处的隐含波动率，按该到期日平值 IV 着色：偏贵为橙色，偏便宜为蓝色。帮助在交易前发现便宜或昂贵的期权。"
+  },
+  "Implied volatility · {0}": {
+    "es": "Volatilidad implícita · {0}",
+    "zh-CN": "隐含波动率 · {0}"
+  },
+  "Inflows": {
+    "es": "Entradas",
+    "zh-CN": "流入"
+  },
+  "Key header": {
+    "es": "Encabezado de clave",
+    "zh-CN": "密钥请求头"
+  },
+  "Lanes · {0}": {
+    "es": "Carriles · {0}",
+    "zh-CN": "通道 · {0}"
+  },
+  "Large day (× the average day)": {
+    "es": "Día grande (× el día promedio)",
+    "zh-CN": "大额日（× 日均值）"
+  },
+  "Large option trade marks": {
+    "es": "Marcas de operaciones grandes de opciones",
+    "zh-CN": "大额期权交易标记"
+  },
+  "Large option trades": {
+    "es": "Operaciones grandes de opciones",
+    "zh-CN": "大额期权交易"
+  },
+  "Large option trades of the underlying marked on the chart (like Large option trade marks) with a card of the latest ones: time, contract, side and premium. Shows where big money is betting.": {
+    "es": "Operaciones grandes de opciones del subyacente marcadas en el gráfico (como Marcas de operaciones grandes de opciones) con un cuadro de las más recientes: hora, contrato, lado y prima. Muestra dónde apuesta el dinero grande.",
+    "zh-CN": "在图表上标记标的的大额期权交易（同大额期权交易标记），并以信息卡显示最新几笔：时间、合约、方向和权利金。展示大资金的押注方向。"
+  },
+  "Large trades · {0}": {
+    "es": "Operaciones grandes · {0}",
+    "zh-CN": "大额交易 · {0}"
+  },
+  "Largest day": {
+    "es": "Mayor día",
+    "zh-CN": "最大单日"
+  },
+  "Largest exposure {0}": {
+    "es": "Mayor exposición {0}",
+    "zh-CN": "最大敞口 {0}"
+  },
+  "Last change": {
+    "es": "Último cambio",
+    "zh-CN": "最近变化"
+  },
+  "Latest day": {
+    "es": "Último día",
+    "zh-CN": "最新一日"
+  },
+  "Latest exposure · {0}": {
+    "es": "Exposición más reciente · {0}",
+    "zh-CN": "最新敞口 · {0}"
+  },
+  "Leading": {
+    "es": "Adelantado",
+    "zh-CN": "领先"
+  },
+  "Length (bars)": {
+    "es": "Longitud (velas)",
+    "zh-CN": "长度（K 线）"
+  },
+  "Live tenor (days)": {
+    "es": "Plazo en vivo (días)",
+    "zh-CN": "实时期限（天）"
+  },
+  "Loading ETF flows…": {
+    "es": "Cargando flujos de ETF…",
+    "zh-CN": "正在加载 ETF 资金流…"
+  },
+  "Loading Polymarket odds…": {
+    "es": "Cargando probabilidades de Polymarket…",
+    "zh-CN": "正在加载 Polymarket 赔率…"
+  },
+  "Loading option trades…": {
+    "es": "Cargando operaciones de opciones…",
+    "zh-CN": "正在加载期权交易…"
+  },
+  "Loading the {0} option chain…": {
+    "es": "Cargando la cadena de opciones de {0}…",
+    "zh-CN": "正在加载 {0} 期权链…"
+  },
+  "Loading trades…": {
+    "es": "Cargando operaciones…",
+    "zh-CN": "正在加载交易…"
+  },
+  "Loading {0} implied volatility…": {
+    "es": "Cargando volatilidad implícita de {0}…",
+    "zh-CN": "正在加载 {0} 隐含波动率…"
+  },
+  "Loading {0}…": {
+    "es": "Cargando {0}…",
+    "zh-CN": "正在加载 {0}…"
+  },
+  "Loss at 2σ per contract": {
+    "es": "Pérdida a 2σ por contrato",
+    "zh-CN": "每份合约 2σ 亏损"
+  },
+  "Mark change points": {
+    "es": "Marcar puntos de cambio",
+    "zh-CN": "标记变点"
+  },
+  "Mark zero crossings": {
+    "es": "Marcar cruces por cero",
+    "zh-CN": "标记零轴穿越"
+  },
+  "Market HUD": {
+    "es": "HUD de mercado",
+    "zh-CN": "市场 HUD"
+  },
+  "Marks on the bars where large option trades executed (from the premium you set), at the underlying price of the trade: circle size follows premium and color the side (green bullish, red bearish, gray unknown).": {
+    "es": "Marcas en las velas donde se ejecutaron operaciones grandes de opciones (desde la prima que definas), al precio del subyacente de la operación: el tamaño del círculo sigue la prima y el color el lado (verde alcista, rojo bajista, gris desconocido).",
+    "zh-CN": "在执行大额期权交易（达到你设定的权利金）的 K 线上，于成交时的标的价格处标记：圆圈大小对应权利金，颜色对应方向（绿色看涨、红色看跌、灰色未知）。"
+  },
+  "Max pain": {
+    "es": "Máximo dolor",
+    "zh-CN": "最大痛点"
+  },
+  "Max pain {0}": {
+    "es": "Máximo dolor {0}",
+    "zh-CN": "最大痛点 {0}"
+  },
+  "Maximum distance from price (%)": {
+    "es": "Distancia máxima al precio (%)",
+    "zh-CN": "距价格最大距离 (%)"
+  },
+  "Maximum loss per contract": {
+    "es": "Pérdida máxima por contrato",
+    "zh-CN": "每张合约最大亏损"
+  },
+  "Measure": {
+    "es": "Medida",
+    "zh-CN": "度量"
+  },
+  "Median {0}": {
+    "es": "Mediana {0}",
+    "zh-CN": "中位数 {0}"
+  },
+  "Minimum cases": {
+    "es": "Casos mínimos",
+    "zh-CN": "最少样本数"
+  },
+  "Minimum premium (USD)": {
+    "es": "Prima mínima (USD)",
+    "zh-CN": "最低权利金 (USD)"
+  },
+  "Mixed trend": {
+    "es": "Tendencia mixta",
+    "zh-CN": "趋势分化"
+  },
+  "Monthly (≈ 30 days)": {
+    "es": "Mensual (≈ 30 días)",
+    "zh-CN": "月度 (≈ 30 天)"
+  },
+  "Most active option contracts": {
+    "es": "Contratos de opciones más activos",
+    "zh-CN": "最活跃的期权合约"
+  },
+  "Most calls at": {
+    "es": "Más calls en",
+    "zh-CN": "看涨期权最多于"
+  },
+  "Most gamma": {
+    "es": "Mayor gamma",
+    "zh-CN": "伽马最大"
+  },
+  "Most open interest": {
+    "es": "Mayor interés abierto",
+    "zh-CN": "持仓量最大"
+  },
+  "Most opened at": {
+    "es": "Más aperturas en",
+    "zh-CN": "开仓最多于"
+  },
+  "Most premium at": {
+    "es": "Mayor prima en",
+    "zh-CN": "权利金最多于"
+  },
+  "Most premium {0}": {
+    "es": "Mayor prima {0}",
+    "zh-CN": "权利金最多 {0}"
+  },
+  "Most puts at": {
+    "es": "Más puts en",
+    "zh-CN": "看跌期权最多于"
+  },
+  "Most volume": {
+    "es": "Mayor volumen",
+    "zh-CN": "成交量最大"
+  },
+  "Moves tend to extend: negative gamma and flow agrees": {
+    "es": "Los movimientos tienden a extenderse: gamma negativa y el flujo coincide",
+    "zh-CN": "波动倾向延续：负伽马且资金流一致"
+  },
+  "Moves tend to stall: dealers dampen": {
+    "es": "Los movimientos tienden a frenarse: los creadores de mercado amortiguan",
+    "zh-CN": "波动倾向停滞：做市商抑制波动"
+  },
+  "NOPE (net options pricing effect)": {
+    "es": "NOPE (efecto neto de precios de opciones)",
+    "zh-CN": "NOPE（期权净定价效应）"
+  },
+  "NOPE unsmoothed": {
+    "es": "NOPE sin suavizar",
+    "zh-CN": "NOPE 未平滑"
+  },
+  "Nearest": {
+    "es": "Más cercano",
+    "zh-CN": "最近"
+  },
+  "Needs a snapshot from {0} h ago: one is recorded every 30 minutes while an options study is open.": {
+    "es": "Requiere una foto de hace {0} h: se registra una cada 30 minutos mientras haya un indicador de opciones abierto.",
+    "zh-CN": "需要 {0} 小时前的快照：期权指标打开期间每 30 分钟记录一次。"
+  },
+  "Net Options Pricing Effect: the net delta of the options traded in each bar (Σ Δ × contracts × multiplier, calls positive and puts negative) as a percentage of the underlying's volume in the same bar, with an EMA. Shows how much dealer hedging could push the price.": {
+    "es": "Efecto neto de precios de opciones: el delta neto de las opciones negociadas en cada vela (Σ Δ × contratos × multiplicador, calls positivas y puts negativas) como porcentaje del volumen del subyacente en la misma vela, con una EMA. Muestra cuánto podría mover el precio la cobertura de los creadores de mercado.",
+    "zh-CN": "期权净定价效应：每根 K 线内成交期权的净 Delta（Σ Δ × 合约数 × 乘数，看涨期权为正、看跌期权为负）占同一 K 线标的成交量的百分比，并附 EMA。显示做市商对冲可能对价格产生的推动程度。"
+  },
+  "Net delta": {
+    "es": "Delta neto",
+    "zh-CN": "净 Delta"
+  },
+  "Net delta (USD)": {
+    "es": "Delta neto (USD)",
+    "zh-CN": "净 Delta (USD)"
+  },
+  "Net flow (bullish − bearish)": {
+    "es": "Flujo neto (alcista − bajista)",
+    "zh-CN": "净资金流（看涨 − 看跌）"
+  },
+  "Net flow today": {
+    "es": "Flujo neto hoy",
+    "zh-CN": "今日净资金流"
+  },
+  "Net flow today · {0}": {
+    "es": "Flujo neto hoy · {0}",
+    "zh-CN": "今日净资金流 · {0}"
+  },
+  "Net vega": {
+    "es": "Vega neto",
+    "zh-CN": "净 Vega"
+  },
+  "Net vega (USD per point)": {
+    "es": "Vega neto (USD por punto)",
+    "zh-CN": "净 Vega（每点 USD）"
+  },
+  "Next": {
+    "es": "Siguiente",
+    "zh-CN": "下一个"
+  },
+  "Nine tiles summarizing the underlying's options: 30-day IV, IV rank, 25-delta skew, put/call by volume and by open interest, gamma regime, distance to the gamma flip, one-day expected move and today's net premium flow, with a reading of whether moves tend to extend or stall.": {
+    "es": "Nueve recuadros que resumen las opciones del subyacente: IV a 30 días, rango de IV, sesgo 25-delta, put/call por volumen y por interés abierto, régimen de gamma, distancia al cambio de gamma, movimiento esperado a un día y flujo neto de primas de hoy, con una lectura de si los movimientos tienden a extenderse o frenarse.",
+    "zh-CN": "九个磁贴汇总标的期权：30 天 IV、IV 排名、25-delta 偏斜、按成交量和持仓量的看跌/看涨比、伽马状态、距伽马翻转点距离、单日预期波动幅度及今日净权利金资金流，并判断波动倾向延续还是停滞。"
+  },
+  "No chain snapshots yet: one is recorded every 30 minutes while an options study is open.": {
+    "es": "Aún no hay fotos de la cadena: se registra una cada 30 minutos mientras haya un indicador de opciones abierto.",
+    "zh-CN": "暂无期权链快照：期权指标打开期间每 30 分钟记录一次。"
+  },
+  "No clear signal": {
+    "es": "Sin señal clara",
+    "zh-CN": "无明确信号"
+  },
+  "No contracts for that expiry.": {
+    "es": "No hay contratos para ese vencimiento.",
+    "zh-CN": "该到期日没有合约。"
+  },
+  "No open interest on this chart": {
+    "es": "No hay interés abierto en este gráfico",
+    "zh-CN": "此图表无持仓量"
+  },
+  "No option trades": {
+    "es": "No hay operaciones de opciones",
+    "zh-CN": "无期权成交"
+  },
+  "No option trades in the last 12 hours.": {
+    "es": "No hay operaciones de opciones en las últimas 12 horas.",
+    "zh-CN": "过去 12 小时内无期权成交。"
+  },
+  "No option trades in these days.": {
+    "es": "No hay operaciones de opciones en estos días.",
+    "zh-CN": "这些天内无期权成交。"
+  },
+  "No option trades today": {
+    "es": "No hay operaciones de opciones hoy",
+    "zh-CN": "今日无期权成交"
+  },
+  "No option trades today.": {
+    "es": "No hay operaciones de opciones hoy.",
+    "zh-CN": "今日无期权成交。"
+  },
+  "No published ETF flows in this range.": {
+    "es": "No hay flujos de ETF publicados en este rango.",
+    "zh-CN": "此范围内无已发布的 ETF 资金流。"
+  },
+  "No trades today": {
+    "es": "No hay operaciones hoy",
+    "zh-CN": "今日无成交"
+  },
+  "Not enough samples yet: needs a full window today and about 20 earlier samples.": {
+    "es": "Aún no hay suficientes muestras: se necesita una ventana completa hoy y unas 20 muestras anteriores.",
+    "zh-CN": "样本尚不足：需要今日完整窗口及约 20 个更早的样本。"
+  },
+  "On a fall": {
+    "es": "Al bajar",
+    "zh-CN": "下跌时"
+  },
+  "On a rise": {
+    "es": "Al subir",
+    "zh-CN": "上涨时"
+  },
+  "On its trade date (hindsight)": {
+    "es": "En su fecha de operación (retrospectivo)",
+    "zh-CN": "按交易日期（事后）"
+  },
+  "Open interest (calls / puts)": {
+    "es": "Interés abierto (calls / puts)",
+    "zh-CN": "持仓量（看涨期权 / 看跌期权）"
+  },
+  "Open interest by strike": {
+    "es": "Interés abierto por ejercicio",
+    "zh-CN": "按行权价的持仓量"
+  },
+  "Open interest since {0} UTC": {
+    "es": "Interés abierto desde {0} UTC",
+    "zh-CN": "自 {0} UTC 起的持仓量"
+  },
+  "Option aggressor side": {
+    "es": "Lado agresor de opciones",
+    "zh-CN": "期权主动方"
+  },
+  "Option contract odds": {
+    "es": "Probabilidades de contratos de opciones",
+    "zh-CN": "期权合约概率"
+  },
+  "Option flow VWAP": {
+    "es": "VWAP del flujo de opciones",
+    "zh-CN": "期权资金流 VWAP"
+  },
+  "Option flow of the last bar": {
+    "es": "Flujo de opciones de la última vela",
+    "zh-CN": "最后一根 K 线的期权资金流"
+  },
+  "Option market statistics": {
+    "es": "Estadísticas del mercado de opciones",
+    "zh-CN": "期权市场统计"
+  },
+  "Option market today": {
+    "es": "Mercado de opciones hoy",
+    "zh-CN": "今日期权市场"
+  },
+  "Option net flow": {
+    "es": "Flujo neto de opciones",
+    "zh-CN": "期权净资金流"
+  },
+  "Option open-interest changes": {
+    "es": "Cambios en el interés abierto de opciones",
+    "zh-CN": "期权持仓量变化"
+  },
+  "Option premium by expiry": {
+    "es": "Prima de opciones por vencimiento",
+    "zh-CN": "按到期日的期权权利金"
+  },
+  "Option premium by strike heatmap": {
+    "es": "Mapa de calor de prima de opciones por ejercicio",
+    "zh-CN": "按行权价的期权权利金热力图"
+  },
+  "Option premium footprint by strike": {
+    "es": "Huella de prima de opciones por ejercicio",
+    "zh-CN": "按行权价的期权权利金足迹"
+  },
+  "Option sentiment": {
+    "es": "Sentimiento de opciones",
+    "zh-CN": "期权情绪"
+  },
+  "Option statistics": {
+    "es": "Estadísticas de opciones",
+    "zh-CN": "期权统计"
+  },
+  "Option tape": {
+    "es": "Cinta de opciones",
+    "zh-CN": "期权成交明细"
+  },
+  "Option tape · {0}": {
+    "es": "Cinta de opciones · {0}",
+    "zh-CN": "期权成交明细 · {0}"
+  },
+  "Option venue share": {
+    "es": "Cuota por mercado de opciones",
+    "zh-CN": "期权交易场所份额"
+  },
+  "Option volume": {
+    "es": "Volumen de opciones",
+    "zh-CN": "期权成交量"
+  },
+  "Option volume (calls / puts)": {
+    "es": "Volumen de opciones (calls / puts)",
+    "zh-CN": "期权成交量（看涨期权 / 看跌期权）"
+  },
+  "Option volume · {0}": {
+    "es": "Volumen de opciones · {0}",
+    "zh-CN": "期权成交量 · {0}"
+  },
+  "Options at price": {
+    "es": "Opciones por precio",
+    "zh-CN": "按价格的期权"
+  },
+  "Options at price · {0} d": {
+    "es": "Opciones por precio · {0} d",
+    "zh-CN": "按价格的期权 · {0} 天"
+  },
+  "Options dashboard": {
+    "es": "Panel de opciones",
+    "zh-CN": "期权仪表盘"
+  },
+  "Options data": {
+    "es": "Datos de opciones",
+    "zh-CN": "期权数据"
+  },
+  "Options expected move": {
+    "es": "Movimiento esperado de opciones",
+    "zh-CN": "期权预期波动幅度"
+  },
+  "Options history": {
+    "es": "Historial de opciones",
+    "zh-CN": "期权历史"
+  },
+  "Options levels": {
+    "es": "Niveles de opciones",
+    "zh-CN": "期权关键位"
+  },
+  "Options probability cloud": {
+    "es": "Nube de probabilidad de opciones",
+    "zh-CN": "期权概率云"
+  },
+  "Options sentiment gauge": {
+    "es": "Indicador de sentimiento de opciones",
+    "zh-CN": "期权情绪仪表"
+  },
+  "Options stance": {
+    "es": "Postura de opciones",
+    "zh-CN": "期权立场"
+  },
+  "Options today · {0}": {
+    "es": "Opciones hoy · {0}",
+    "zh-CN": "今日期权 · {0}"
+  },
+  "Outcome": {
+    "es": "Resultado",
+    "zh-CN": "结果"
+  },
+  "Outflows": {
+    "es": "Salidas",
+    "zh-CN": "流出"
+  },
+  "Part of today is not loaded": {
+    "es": "Parte del día de hoy no está cargada",
+    "zh-CN": "今日部分数据未加载"
+  },
+  "Percentile": {
+    "es": "Percentil",
+    "zh-CN": "百分位"
+  },
+  "Percentile of the year": {
+    "es": "Percentil del año",
+    "zh-CN": "年内百分位"
+  },
+  "Period (bars)": {
+    "es": "Período (velas)",
+    "zh-CN": "周期（K 线）"
+  },
+  "Pinned": {
+    "es": "Fijado",
+    "zh-CN": "已固定"
+  },
+  "Pinned below (× 1σ)": {
+    "es": "Fijado por debajo (× 1σ)",
+    "zh-CN": "下方固定（× 1σ）"
+  },
+  "Plot each day": {
+    "es": "Trazar cada día",
+    "zh-CN": "逐日绘制"
+  },
+  "Polymarket data is unavailable in this session.": {
+    "es": "Los datos de Polymarket no están disponibles en esta sesión.",
+    "zh-CN": "本会话中 Polymarket 数据不可用。"
+  },
+  "Polymarket has no market with that slug.": {
+    "es": "Polymarket no tiene ningún mercado con ese slug.",
+    "zh-CN": "Polymarket 没有该 slug 对应的市场。"
+  },
+  "Polymarket market (URL or slug)": {
+    "es": "Mercado de Polymarket (URL o slug)",
+    "zh-CN": "Polymarket 市场（URL 或 slug）"
+  },
+  "Polymarket odds vs price": {
+    "es": "Probabilidades de Polymarket vs. precio",
+    "zh-CN": "Polymarket 赔率与价格对比"
+  },
+  "Polymarket · public odds": {
+    "es": "Polymarket · probabilidades públicas",
+    "zh-CN": "Polymarket · 公开赔率"
+  },
+  "Premium": {
+    "es": "Prima",
+    "zh-CN": "权利金"
+  },
+  "Premium tide": {
+    "es": "Marea de primas",
+    "zh-CN": "权利金潮"
+  },
+  "Premium tide today · {0}": {
+    "es": "Marea de primas hoy · {0}",
+    "zh-CN": "今日权利金潮 · {0}"
+  },
+  "Probability": {
+    "es": "Probabilidad",
+    "zh-CN": "概率"
+  },
+  "Probability in the money": {
+    "es": "Probabilidad de quedar dentro del dinero",
+    "zh-CN": "价内概率"
+  },
+  "Probability of NO": {
+    "es": "Probabilidad de NO",
+    "zh-CN": "NO 的概率"
+  },
+  "Probability of YES": {
+    "es": "Probabilidad de SÍ",
+    "zh-CN": "YES 的概率"
+  },
+  "Probability of finishing higher": {
+    "es": "Probabilidad de cerrar más alto",
+    "zh-CN": "收盘走高的概率"
+  },
+  "Probability of profit at expiry": {
+    "es": "Probabilidad de ganancia al vencimiento",
+    "zh-CN": "到期日盈利概率"
+  },
+  "Put premium": {
+    "es": "Prima de puts",
+    "zh-CN": "看跌期权权利金"
+  },
+  "Put skew": {
+    "es": "Sesgo de puts",
+    "zh-CN": "看跌期权偏斜"
+  },
+  "Put skew · {0}": {
+    "es": "Sesgo de puts · {0}",
+    "zh-CN": "看跌期权偏斜 · {0}"
+  },
+  "Put wall": {
+    "es": "Muro de puts",
+    "zh-CN": "看跌墙"
+  },
+  "Put wall {0}": {
+    "es": "Muro de puts {0}",
+    "zh-CN": "看跌墙 {0}"
+  },
+  "Puts": {
+    "es": "Puts",
+    "zh-CN": "看跌期权"
+  },
+  "Puts (bought − sold)": {
+    "es": "Puts (comprados − vendidos)",
+    "zh-CN": "看跌期权（买入 − 卖出）"
+  },
+  "Puts / calls": {
+    "es": "Puts / calls",
+    "zh-CN": "看跌 / 看涨期权"
+  },
+  "Puts / calls (premium)": {
+    "es": "Puts / calls (prima)",
+    "zh-CN": "看跌 / 看涨期权（权利金）"
+  },
+  "Puts − calls (25Δ)": {
+    "es": "Puts − calls (25Δ)",
+    "zh-CN": "看跌 − 看涨期权（25Δ）"
+  },
+  "Puts/calls OI": {
+    "es": "OI puts/calls",
+    "zh-CN": "看跌/看涨期权 OI"
+  },
+  "Puts/calls today": {
+    "es": "Puts/calls hoy",
+    "zh-CN": "今日看跌/看涨期权"
+  },
+  "Puts/calls volume": {
+    "es": "Volumen puts/calls",
+    "zh-CN": "看跌/看涨期权成交量"
+  },
+  "Puts/calls window": {
+    "es": "Ventana puts/calls",
+    "zh-CN": "看跌/看涨期权窗口"
+  },
+  "Quarterly (≈ 90 days)": {
+    "es": "Trimestral (≈ 90 días)",
+    "zh-CN": "季度（≈ 90 天）"
+  },
+  "RSI length (bars)": {
+    "es": "Longitud RSI (velas)",
+    "zh-CN": "RSI 长度（K 线）"
+  },
+  "RSI midline": {
+    "es": "Línea media RSI",
+    "zh-CN": "RSI 中线"
+  },
+  "Range used": {
+    "es": "Rango usado",
+    "zh-CN": "已用区间"
+  },
+  "Rates five common option trades (buy call, buy put, sell put, covered call, buy straddle) as favorable, neutral or unfavorable from the price trend (EMA), how expensive volatility is (IV rank over the last year of daily history) and the 25-delta skew. A rule of thumb, not advice.": {
+    "es": "Califica cinco operaciones comunes con opciones (comprar call, comprar put, vender put, call cubierta, comprar straddle) como favorables, neutrales o desfavorables según la tendencia del precio (EMA), lo cara que está la volatilidad (rango de IV del último año de historial diario) y el sesgo 25-delta. Una regla general, no una recomendación.",
+    "zh-CN": "根据价格趋势（EMA）、波动率贵贱程度（过去一年日线历史的 IV 排名）及 25-delta 偏斜，将五种常见期权交易（买入看涨期权、买入看跌期权、卖出看跌期权、备兑看涨、买入跨式）评为有利、中性或不利。仅为经验法则，非投资建议。"
+  },
+  "Realized": {
+    "es": "Realizada",
+    "zh-CN": "已实现"
+  },
+  "Realized days": {
+    "es": "Días realizada",
+    "zh-CN": "已实现天数"
+  },
+  "Regime": {
+    "es": "Régimen",
+    "zh-CN": "状态"
+  },
+  "Richer": {
+    "es": "Más cara",
+    "zh-CN": "更贵"
+  },
+  "Risk per trade (USD)": {
+    "es": "Riesgo por operación (USD)",
+    "zh-CN": "每笔交易风险（USD）"
+  },
+  "Risk reversal skew": {
+    "es": "Sesgo risk reversal",
+    "zh-CN": "风险逆转偏斜"
+  },
+  "Risk reversal {0} d · {1}": {
+    "es": "Risk reversal {0} d · {1}",
+    "zh-CN": "风险逆转 {0} 天 · {1}"
+  },
+  "Rolling Pearson correlation between this chart and another Binance symbol (ETHUSDT by default), on prices or log returns, with the area shaded, the +1, 0 and −1 levels and marks where it crosses zero. Bars where the other symbol has no candle are gaps. Each bar uses only itself and earlier bars.": {
+    "es": "Correlación de Pearson móvil entre este gráfico y otro símbolo de Binance (ETHUSDT por defecto), sobre precios o retornos logarítmicos, con el área sombreada, los niveles +1, 0 y −1 y marcas donde cruza cero. Las velas sin dato del otro símbolo quedan como huecos. Cada vela usa solo ella misma y las anteriores.",
+    "zh-CN": "本图表与另一个 Binance 交易对（默认 ETHUSDT）之间基于价格或对数收益率的滚动 Pearson 相关系数，含阴影区域、+1、0 和 −1 水平线及穿越零轴标记。另一交易对无 K 线的位置显示为空缺。每根 K 线仅使用自身及之前的 K 线。"
+  },
+  "Score": {
+    "es": "Puntuación",
+    "zh-CN": "得分"
+  },
+  "Sell from (points)": {
+    "es": "Vender desde (puntos)",
+    "zh-CN": "卖出起点（分）"
+  },
+  "Sell put": {
+    "es": "Vender put",
+    "zh-CN": "卖出看跌期权"
+  },
+  "Sentiment": {
+    "es": "Sentimiento",
+    "zh-CN": "情绪"
+  },
+  "Sentiment today · {0}": {
+    "es": "Sentimiento hoy · {0}",
+    "zh-CN": "今日情绪 · {0}"
+  },
+  "Shade the area": {
+    "es": "Sombrear el área",
+    "zh-CN": "填充区域"
+  },
+  "Share by venue · {0}": {
+    "es": "Cuota por mercado · {0}",
+    "zh-CN": "各交易场所占比 · {0}"
+  },
+  "Short term (7 d IV / 30 d IV)": {
+    "es": "Corto plazo (IV 7 d / IV 30 d)",
+    "zh-CN": "短期（7 天 IV / 30 天 IV）"
+  },
+  "Show the card": {
+    "es": "Mostrar el cuadro",
+    "zh-CN": "显示信息卡"
+  },
+  "Skew history": {
+    "es": "Historial del sesgo",
+    "zh-CN": "偏斜历史"
+  },
+  "So far each day: which way option traders lean (delta bought minus sold, USD: Σ side × contracts × multiplier × Δ × S) and whether they bet on volatility rising (vega bought minus sold, USD per volatility point; amber line on its own scale).": {
+    "es": "Acumulado de cada día: hacia dónde se inclinan los operadores de opciones (delta comprada menos vendida, USD: Σ lado × contratos × multiplicador × Δ × S) y si apuestan a que suba la volatilidad (vega comprada menos vendida, USD por punto de volatilidad; línea ámbar en su propia escala).",
+    "zh-CN": "每日累计：期权交易者的倾向（买入减卖出的 delta，USD：Σ 方向 × 合约数 × 乘数 × Δ × S），以及是否押注波动率上升（买入减卖出的 vega，每波动率点 USD；琥珀色线使用独立刻度）。"
+  },
+  "So far today: premium bought minus sold for calls (green line) and for puts (red line). Rising calls and falling puts are bullish flow; the reverse is bearish. Resets each trading day; a day starts only once its first bar is loaded.": {
+    "es": "Acumulado de hoy: prima comprada menos vendida en calls (línea verde) y en puts (línea roja). Calls al alza y puts a la baja indican flujo alcista; lo contrario, bajista. Se reinicia cada sesión; un día empieza solo cuando se carga su primera vela.",
+    "zh-CN": "今日累计：看涨期权（绿线）和看跌期权（红线）买入减卖出的权利金。看涨上升、看跌下降为看涨资金流；反之为看跌。每个交易日重置；当日首根 K 线加载后才开始计算。"
+  },
+  "Sold": {
+    "es": "Vendido",
+    "zh-CN": "卖出"
+  },
+  "Spot ETF flows": {
+    "es": "Flujos de ETF al contado",
+    "zh-CN": "现货 ETF 资金流"
+  },
+  "Spot ETFs · {0}": {
+    "es": "ETF al contado · {0}",
+    "zh-CN": "现货 ETF · {0}"
+  },
+  "Stance · {0}": {
+    "es": "Postura · {0}",
+    "zh-CN": "立场 · {0}"
+  },
+  "State ribbon": {
+    "es": "Franja de estado",
+    "zh-CN": "状态带"
+  },
+  "States known at each 10-minute close": {
+    "es": "Estados conocidos en cada cierre de 10 minutos",
+    "zh-CN": "每个 10 分钟收盘时已知的状态"
+  },
+  "States known at each 10-minute close; the last is forming": {
+    "es": "Estados conocidos en cada cierre de 10 minutos; el último está en formación",
+    "zh-CN": "每个 10 分钟收盘时已知的状态；最后一个正在形成"
+  },
+  "Statistic": {
+    "es": "Estadístico",
+    "zh-CN": "统计量"
+  },
+  "Streak": {
+    "es": "Racha",
+    "zh-CN": "连续"
+  },
+  "Stressed days (30 d)": {
+    "es": "Días de estrés (30 d)",
+    "zh-CN": "压力天数（30 天）"
+  },
+  "Stressed from (deviations)": {
+    "es": "Estrés desde (desviaciones)",
+    "zh-CN": "压力起点（标准差）"
+  },
+  "Stretch threshold": {
+    "es": "Umbral de extensión",
+    "zh-CN": "偏离阈值"
+  },
+  "Strike (0 = by distance)": {
+    "es": "Ejercicio (0 = por distancia)",
+    "zh-CN": "行权价（0 = 按距离）"
+  },
+  "Strike distribution and max pain": {
+    "es": "Distribución por ejercicio y máximo dolor",
+    "zh-CN": "行权价分布与最大痛点"
+  },
+  "Strike lanes": {
+    "es": "Franjas de ejercicio",
+    "zh-CN": "行权价通道"
+  },
+  "Strike matrix (dealer gamma by price)": {
+    "es": "Matriz de ejercicios (gamma de creadores de mercado por precio)",
+    "zh-CN": "行权价矩阵（按价格的做市商伽马）"
+  },
+  "Strike {0}": {
+    "es": "Ejercicio {0}",
+    "zh-CN": "行权价 {0}"
+  },
+  "Strikes on each side": {
+    "es": "Ejercicios a cada lado",
+    "zh-CN": "每侧行权价数"
+  },
+  "Strikes per bar (0 = all)": {
+    "es": "Ejercicios por vela (0 = todos)",
+    "zh-CN": "每根 K 线行权价数（0 = 全部）"
+  },
+  "Strip width (px)": {
+    "es": "Ancho de la franja (px)",
+    "zh-CN": "条带宽度（px）"
+  },
+  "Sum of the range": {
+    "es": "Suma del rango",
+    "zh-CN": "区间合计"
+  },
+  "Sweep from (fills within 1 s)": {
+    "es": "Barrido desde (ejecuciones en 1 s)",
+    "zh-CN": "扫单起点（1 秒内成交）"
+  },
+  "Symbol to compare": {
+    "es": "Símbolo a comparar",
+    "zh-CN": "对比品种"
+  },
+  "That market has no price history in this range.": {
+    "es": "Ese mercado no tiene historial de precios en este rango.",
+    "zh-CN": "该市场在此区间内没有价格历史。"
+  },
+  "The API returned no {0} days in the last two weeks.": {
+    "es": "La API no devolvió días de {0} en las últimas dos semanas.",
+    "zh-CN": "API 未返回过去两周内的 {0} 交易日数据。"
+  },
+  "The Spot ETF flows study reads the daily net flow of the chart coin's spot ETFs from here. Without this connection it shows a waiting message and makes no requests.": {
+    "es": "El indicador de flujos de ETF al contado lee desde aquí el flujo neto diario de los ETF al contado de la moneda del gráfico. Sin esta conexión, muestra un mensaje de espera y no hace solicitudes.",
+    "zh-CN": "现货 ETF 资金流指标从此处读取图表币种现货 ETF 的每日净资金流。没有此连接时，它会显示等待提示且不发送请求。"
+  },
+  "The chain has no \"time\".": {
+    "es": "La cadena no tiene \"time\".",
+    "zh-CN": "期权链缺少 \"time\"。"
+  },
+  "The chain has no at-the-money IV for that expiry.": {
+    "es": "La cadena no tiene IV ATM para ese vencimiento.",
+    "zh-CN": "期权链中没有该到期日的 ATM IV。"
+  },
+  "The chain has no positive \"spot\".": {
+    "es": "La cadena no tiene un \"spot\" positivo.",
+    "zh-CN": "期权链缺少正值的 \"spot\"。"
+  },
+  "The latest option orders first, with time, contract, side, size and premium. Fills of the same contract and side within one second are joined into one order; orders with several fills are marked as sweeps.": {
+    "es": "Las órdenes de opciones más recientes primero, con hora, contrato, lado, tamaño y prima. Las ejecuciones del mismo contrato y lado dentro de un segundo se agrupan en una orden; las órdenes con varias ejecuciones se marcan como barridos.",
+    "zh-CN": "最新的期权订单在前，显示时间、合约、方向、数量和权利金。同一合约同一方向在一秒内的成交合并为一笔订单；含多笔成交的订单标记为扫单。"
+  },
+  "The options studies (dealer gamma, walls, max pain, IV rank, skew, premium flow, options dashboard…) read their data from here. Without this connection they show a waiting message and make no requests; once it is saved and enabled, open charts start using it. The chart symbol selects the underlying (BTCUSDT → BTC).": {
+    "es": "Los indicadores de opciones (gamma de creadores de mercado, muros, máximo dolor, rango de IV, sesgo, flujo de primas, panel de opciones…) leen sus datos desde aquí. Sin esta conexión muestran un mensaje de espera y no hacen solicitudes; al guardarla y activarla, los gráficos abiertos empiezan a usarla. El símbolo del gráfico define el subyacente (BTCUSDT → BTC).",
+    "zh-CN": "期权指标（做市商伽马、看涨/看跌墙、最大痛点、IV 排名、偏斜、权利金资金流、期权仪表盘…）从此处读取数据。没有此连接时，它们显示等待提示且不发送请求；保存并启用后，已打开的图表即开始使用。图表品种决定标的（BTCUSDT → BTC）。"
+  },
+  "The range the options market expects. Each day: the previous close ± one standard deviation using the IV known at that day's open (the previous day's close from daily history; today, the live snapshot when the history has no row yet), never revised afterwards. A forward cone shows ±1σ and ±2σ from the latest snapshot. Move = close × IV × √(1 / days per year).": {
+    "es": "El rango que espera el mercado de opciones. Cada día: el cierre anterior ± una desviación estándar con la IV conocida a la apertura de ese día (el cierre del día anterior según el historial diario; hoy, la foto en vivo si el historial aún no tiene fila), sin revisarse después. Un cono hacia adelante muestra ±1σ y ±2σ desde la última foto. Movimiento = cierre × IV × √(1 / días por año).",
+    "zh-CN": "期权市场预期的区间。每天：前收盘价 ± 一个标准差，使用当日开盘时已知的 IV（取自日线历史的前一日收盘；今日若历史尚无数据则用实时快照），之后不再修正。前向锥形显示自最新快照起的 ±1σ 和 ±2σ。波动 = 收盘价 × IV × √(1 / 每年天数)。"
+  },
+  "This connection supplies data to studies (options or ETF flows), not a chart market.": {
+    "es": "Esta conexión aporta datos a indicadores (opciones o flujos de ETF), no a un mercado del gráfico.",
+    "zh-CN": "此连接为指标（期权或 ETF 资金流）提供数据，而非图表市场。"
+  },
+  "Threshold": {
+    "es": "Umbral",
+    "zh-CN": "阈值"
+  },
+  "Times in UTC": {
+    "es": "Horas en UTC",
+    "zh-CN": "时间为 UTC"
+  },
+  "To gamma flip": {
+    "es": "Al cambio de gamma",
+    "zh-CN": "距伽马翻转点"
+  },
+  "Today (±1σ)": {
+    "es": "Hoy (±1σ)",
+    "zh-CN": "今日（±1σ）"
+  },
+  "Today across the options of the underlyings you choose (BTC and ETH by default): for each, whether more calls or puts trade, total premium and net bullish flow, plus the total.": {
+    "es": "Hoy en las opciones de los subyacentes que elijas (BTC y ETH por defecto): para cada uno, si se negocian más calls o puts, la prima total y el flujo alcista neto, además del total.",
+    "zh-CN": "今日所选标的期权（默认 BTC 和 ETH）：分别显示看涨期权与看跌期权哪个成交更多、总权利金和净看涨资金流，以及合计。"
+  },
+  "Today across the options of the underlyings you choose: premium bet on a rise (green) against premium bet on a fall (red), accumulated since the day opened.": {
+    "es": "Hoy en las opciones de los subyacentes que elijas: prima apostada al alza (verde) frente a prima apostada a la baja (rojo), acumulada desde la apertura del día.",
+    "zh-CN": "今日所选标的期权：押注上涨的权利金（绿）对比押注下跌的权利金（红），自当日开盘起累计。"
+  },
+  "Today only: which way option traders lean, from −100 (all bearish) to +100 (all bullish): 100 × (bullish − bearish) ÷ (bullish + bearish) premium accumulated since the day opened.": {
+    "es": "Solo hoy: hacia dónde se inclinan los operadores de opciones, de −100 (todo bajista) a +100 (todo alcista): 100 × (alcista − bajista) ÷ (alcista + bajista) de la prima acumulada desde la apertura del día.",
+    "zh-CN": "仅今日：期权交易者的倾向，从 −100（全部看跌）到 +100（全部看涨）：100 × (看涨 − 看跌) ÷ (看涨 + 看跌)，按自当日开盘起累计的权利金计算。"
+  },
+  "Today's option premium in each expiry (calls and puts), to see when traders expect the move.": {
+    "es": "La prima de opciones de hoy en cada vencimiento (calls y puts), para ver cuándo esperan los operadores el movimiento.",
+    "zh-CN": "今日各到期日的期权权利金（看涨期权和看跌期权），用于判断交易者预期何时出现波动。"
+  },
+  "Today's premium by expiry · {0}": {
+    "es": "Prima de hoy por vencimiento · {0}",
+    "zh-CN": "今日各到期日权利金 · {0}"
+  },
+  "Today's side · {0}": {
+    "es": "Sesgo de hoy · {0}",
+    "zh-CN": "今日方向 · {0}"
+  },
+  "Total gamma": {
+    "es": "Gamma total",
+    "zh-CN": "总伽马"
+  },
+  "Total gamma (per 1 %)": {
+    "es": "Gamma total (por 1 %)",
+    "zh-CN": "总伽马（每 1 %）"
+  },
+  "Total: bullish / bearish": {
+    "es": "Total: alcista / bajista",
+    "zh-CN": "合计：看涨 / 看跌"
+  },
+  "Trades loaded from": {
+    "es": "Operaciones cargadas desde",
+    "zh-CN": "成交加载自"
+  },
+  "Trading Hub requests /chain, /trades and /daily under this URL.": {
+    "es": "Trading Hub solicita /chain, /trades y /daily en esta URL.",
+    "zh-CN": "Trading Hub 会在此 URL 下请求 /chain、/trades 和 /daily。"
+  },
+  "Trading Hub requests /flows?asset=BTC&from=YYYY-MM-DD&to=YYYY-MM-DD under this URL.": {
+    "es": "Trading Hub solicita /flows?asset=BTC&from=YYYY-MM-DD&to=YYYY-MM-DD en esta URL.",
+    "zh-CN": "Trading Hub 会在此 URL 下请求 /flows?asset=BTC&from=YYYY-MM-DD&to=YYYY-MM-DD。"
+  },
+  "Trend efficiency": {
+    "es": "Eficiencia de tendencia",
+    "zh-CN": "趋势效率"
+  },
+  "Trending": {
+    "es": "En tendencia",
+    "zh-CN": "趋势"
+  },
+  "Two-sided cumulative sum (CUSUM) of normalized log returns: S+ accumulates unusual rises and S− unusual falls, each minus a drift. When one passes the threshold the market's character changed (marked, and that sum resets to zero). Each bar uses only itself and earlier bars.": {
+    "es": "Suma acumulada bilateral (CUSUM) de retornos logarítmicos normalizados: S+ acumula subidas inusuales y S− caídas inusuales, cada una menos una deriva. Cuando una supera el umbral, el carácter del mercado cambió (se marca y esa suma vuelve a cero). Cada vela usa solo sí misma y las anteriores.",
+    "zh-CN": "标准化对数收益的双侧累积和（CUSUM）：S+ 累积异常上涨，S− 累积异常下跌，各减去一个漂移项。任一超过阈值即表示市场特征发生变化（予以标记，该累积和归零）。每根 K 线仅使用自身及之前的 K 线。"
+  },
+  "Underlyings": {
+    "es": "Subyacentes",
+    "zh-CN": "标的"
+  },
+  "Unsettled": {
+    "es": "Inestable",
+    "zh-CN": "不稳定"
+  },
+  "Use log returns": {
+    "es": "Usar retornos logarítmicos",
+    "zh-CN": "使用对数收益"
+  },
+  "Use volume (otherwise open interest)": {
+    "es": "Usar volumen (si no, interés abierto)",
+    "zh-CN": "使用成交量（否则使用持仓量）"
+  },
+  "Usually a paid or self-hosted service, called only while this connection is enabled. The key is stored in {0}, never in files.": {
+    "es": "Suele ser un servicio de pago o autoalojado, consultado solo mientras esta conexión está activa. La clave se guarda en {0}, nunca en archivos.",
+    "zh-CN": "通常为付费或自托管服务，仅在此连接启用时调用。密钥保存在 {0} 中，绝不写入文件。"
+  },
+  "VRP · {0}": {
+    "es": "VRP · {0}",
+    "zh-CN": "VRP · {0}"
+  },
+  "Variance risk premium (VRP)": {
+    "es": "Prima de riesgo de varianza (VRP)",
+    "zh-CN": "方差风险溢价（VRP）"
+  },
+  "Vega": {
+    "es": "Vega",
+    "zh-CN": "Vega"
+  },
+  "Volatile": {
+    "es": "Volátil",
+    "zh-CN": "剧烈波动"
+  },
+  "Volatile from (× 1σ)": {
+    "es": "Volátil desde (× 1σ)",
+    "zh-CN": "剧烈波动阈值（× 1σ）"
+  },
+  "Volatility context (options)": {
+    "es": "Contexto de volatilidad (opciones)",
+    "zh-CN": "波动率背景（期权）"
+  },
+  "Volatility context · {0}": {
+    "es": "Contexto de volatilidad · {0}",
+    "zh-CN": "波动率背景 · {0}"
+  },
+  "Volatility regime": {
+    "es": "Régimen de volatilidad",
+    "zh-CN": "波动率状态"
+  },
+  "Volatility regime · {0}": {
+    "es": "Régimen de volatilidad · {0}",
+    "zh-CN": "波动率状态 · {0}"
+  },
+  "Volatility surface": {
+    "es": "Superficie de volatilidad",
+    "zh-CN": "波动率曲面"
+  },
+  "Volume 24 h (chain)": {
+    "es": "Volumen 24 h (cadena)",
+    "zh-CN": "24 小时成交量（期权链）"
+  },
+  "Volume by strike": {
+    "es": "Volumen por ejercicio",
+    "zh-CN": "按行权价成交量"
+  },
+  "Volume today (trades)": {
+    "es": "Volumen de hoy (operaciones)",
+    "zh-CN": "今日成交量（成交）"
+  },
+  "Waiting for an ETF flows connection: add one in Connections → ETF flows.": {
+    "es": "Esperando una conexión de flujos de ETF: agrega una en Conexiones → Flujos de ETF.",
+    "zh-CN": "等待 ETF 资金流连接：请在 连接 → ETF 资金流 中添加。"
+  },
+  "Waiting for an options data connection: add one in Connections → Options data.": {
+    "es": "Esperando una conexión de datos de opciones: agrega una en Conexiones → Datos de opciones.",
+    "zh-CN": "等待期权数据连接：请在 连接 → 期权数据 中添加。"
+  },
+  "Wall history": {
+    "es": "Historial de muros",
+    "zh-CN": "墙位历史"
+  },
+  "Weekly (≈ 7 days)": {
+    "es": "Semanal (≈ 7 días)",
+    "zh-CN": "每周（≈ 7 天）"
+  },
+  "What kind of session this is and how long such states usually last. Every 10 minutes it classifies the last hour of prices as Pinned (narrow range), Trending (moving one way), Volatile (wide range) or Unsettled. Ranges are measured against the move options expect (1σ from the IV known at that time; without an options connection, from realized volatility of the preceding day of samples). Each state is known when its 10-minute sample closes; the last one is still forming. The card counts how often the state persisted 30 minutes to 2 hours later and how far price moved; a box ahead of price shows that range. With options data it also marks the gamma flip and walls.": {
+    "es": "Qué tipo de sesión es y cuánto suelen durar estos estados. Cada 10 minutos clasifica la última hora de precios como Anclado (rango estrecho), En tendencia (en una dirección), Volátil (rango amplio) o Inestable. Los rangos se miden frente al movimiento que esperan las opciones (1σ según la IV conocida en ese momento; sin conexión de opciones, según la volatilidad realizada del día de muestras anterior). Cada estado se conoce al cerrar su muestra de 10 minutos; el último aún se está formando. El cuadro cuenta con qué frecuencia el estado persistió de 30 minutos a 2 horas después y cuánto se movió el precio; un recuadro delante del precio muestra ese rango. Con datos de opciones también marca el cambio de gamma y los muros.",
+    "zh-CN": "判断当前交易时段类型及此类状态通常持续多久。每 10 分钟将最近一小时的价格归类为钉住（窄幅）、趋势（单向运行）、剧烈波动（宽幅）或不稳定。区间以期权预期波动衡量（基于当时已知 IV 的 1σ；无期权连接时，基于前一天样本的已实现波动率）。每个状态在其 10 分钟样本收盘时确定；最后一个仍在形成中。信息卡统计该状态在 30 分钟至 2 小时后仍持续的频率及价格移动幅度；价格前方的方框显示该区间。有期权数据时还会标出伽马翻转点和墙位。"
+  },
+  "When published (next UTC day)": {
+    "es": "Al publicarse (día UTC siguiente)",
+    "zh-CN": "发布时（次一 UTC 日）"
+  },
+  "Where dealer hedging concentrates in the current snapshot: bars per strike docked at the right of the price pane (gamma or delta signed; vega or open interest with calls right and puts left) and a card with the expiries carrying the most exposure. GEX = Γ × OI × multiplier × S² × 1 %; DEX = Δ × OI × multiplier × S.": {
+    "es": "Dónde se concentra la cobertura de los creadores de mercado en la foto actual: barras por ejercicio a la derecha del panel de precio (gamma o delta con signo; vega o interés abierto con calls a la derecha y puts a la izquierda) y un cuadro con los vencimientos de mayor exposición. GEX = Γ × OI × multiplicador × S² × 1 %; DEX = Δ × OI × multiplicador × S.",
+    "zh-CN": "当前快照中做市商对冲集中的位置：价格窗格右侧按行权价显示的柱条（gamma 或 delta 带符号；vega 或持仓量则看涨期权在右、看跌期权在左），以及列出敞口最大到期日的信息卡。GEX = Γ × OI × 乘数 × S² × 1 %；DEX = Δ × OI × 乘数 × S。"
+  },
+  "Where option prices imply the underlying will be at expiry: the risk-neutral distribution derived from the volatility smile (N(d2) at each level), drawn as a cloud ahead of the last bar, with the 68 % and 95 % ranges and the median.": {
+    "es": "Dónde implican los precios de las opciones que estará el subyacente al vencimiento: la distribución neutral al riesgo derivada de la sonrisa de volatilidad (N(d2) en cada nivel), dibujada como una nube delante de la última vela, con los rangos del 68 % y 95 % y la mediana.",
+    "zh-CN": "期权价格隐含的标的到期价格分布：由波动率微笑推导的风险中性分布（各价位的 N(d2)），以云图绘制于最后一根 K 线之前，并显示 68 % 与 95 % 区间及中位数。"
+  },
+  "Where the latest known implied volatility sits between the lowest and highest of the previous year (0–100), with its percentile and a card saying whether options are cheap, fairly priced or rich. IV rank = (IV − min) ÷ (max − min) × 100.": {
+    "es": "Dónde se sitúa la última volatilidad implícita conocida entre el mínimo y el máximo del año anterior (0–100), con su percentil y un cuadro que indica si las opciones están baratas, a precio justo o caras. IV rank = (IV − mín) ÷ (máx − mín) × 100.",
+    "zh-CN": "最新已知隐含波动率在过去一年最低与最高之间的位置（0–100），附百分位及说明期权便宜、合理或昂贵的信息卡。IV rank = (IV − 最小值) ÷ (最大值 − 最小值) × 100。"
+  },
+  "Which share of today's option volume executed on each venue, when the provider reports where each trade executed (for US options, the individual exchanges).": {
+    "es": "Qué parte del volumen de opciones de hoy se ejecutó en cada mercado, cuando el proveedor informa dónde se ejecutó cada operación (en opciones de EE. UU., cada bolsa).",
+    "zh-CN": "今日期权成交量在各交易场所的占比（需数据提供方报告每笔成交的执行地点；美国期权为各交易所）。"
+  },
+  "Which side is richer, puts or calls: the 25-delta risk reversal (call IV minus put IV) per day, plus the live snapshot at the chosen tenor once it is known. Negative (red) means traders fear a drop.": {
+    "es": "Qué lado está más caro, puts o calls: el risk reversal 25-delta (IV de calls menos IV de puts) por día, más la foto en vivo al plazo elegido cuando se conozca. Negativo (rojo) indica temor a una caída.",
+    "zh-CN": "看跌期权与看涨期权哪方更贵：每日 25-delta 风险逆转（看涨 IV 减看跌 IV），以及所选期限的实时快照（可用时）。负值（红色）表示交易者担心下跌。"
+  },
+  "Which strikes are crowded before expiry: bars docked at the right with each strike's open interest or volume (calls right, puts left) and a line at max pain, the strike where option holders' intrinsic value at expiry is lowest.": {
+    "es": "Qué ejercicios están concentrados antes del vencimiento: barras a la derecha con el interés abierto o volumen de cada ejercicio (calls a la derecha, puts a la izquierda) y una línea en el máximo dolor, el ejercicio donde el valor intrínseco de los tenedores al vencimiento es menor.",
+    "zh-CN": "到期前哪些行权价拥挤：右侧柱条显示各行权价的持仓量或成交量（看涨期权在右，看跌期权在左），并在最大痛点处画线，即到期时期权持有者内在价值最低的行权价。"
+  },
+  "Window (10-minute samples)": {
+    "es": "Ventana (muestras de 10 minutos)",
+    "zh-CN": "窗口（10 分钟样本）"
+  },
+  "With text": {
+    "es": "Con texto",
+    "zh-CN": "带文字"
+  },
+  "Year high": {
+    "es": "Máximo anual",
+    "zh-CN": "年内高点"
+  },
+  "Year low": {
+    "es": "Mínimo anual",
+    "zh-CN": "年内低点"
+  },
+  "a fall": {
+    "es": "una caída",
+    "zh-CN": "下跌"
+  },
+  "a rise": {
+    "es": "una subida",
+    "zh-CN": "上涨"
+  },
+  "all expiries": {
+    "es": "todos los vencimientos",
+    "zh-CN": "所有到期日"
+  },
+  "bearish flow": {
+    "es": "flujo bajista",
+    "zh-CN": "看跌资金流"
+  },
+  "bullish flow": {
+    "es": "flujo alcista",
+    "zh-CN": "看涨资金流"
+  },
+  "buy ≈ {0}": {
+    "es": "compra ≈ {0}",
+    "zh-CN": "买入 ≈ {0}"
+  },
+  "chain, trades and history for the options studies": {
+    "es": "cadena, operaciones e historial para los indicadores de opciones",
+    "zh-CN": "用于期权指标的期权链、成交和历史数据"
+  },
+  "currency={0}&kind=option": {
+    "es": "currency={0}&kind=option",
+    "zh-CN": "currency={0}&kind=option"
+  },
+  "currency={0}&kind=option&start_timestamp={1}&end_timestamp={2}&count=1000&sorting=asc": {
+    "es": "currency={0}&kind=option&start_timestamp={1}&end_timestamp={2}&count=1000&sorting=asc",
+    "zh-CN": "currency={0}&kind=option&start_timestamp={1}&end_timestamp={2}&count=1000&sorting=asc"
+  },
+  "currency={0}&start_timestamp={1}&end_timestamp={2}&resolution=1D": {
+    "es": "currency={0}&start_timestamp={1}&end_timestamp={2}&resolution=1D",
+    "zh-CN": "currency={0}&start_timestamp={1}&end_timestamp={2}&resolution=1D"
+  },
+  "custom API · {0}": {
+    "es": "API personalizada · {0}",
+    "zh-CN": "自定义 API · {0}"
+  },
+  "daily close": {
+    "es": "cierre diario",
+    "zh-CN": "日收盘价"
+  },
+  "daily spot ETF flows (BTC, ETH…) from your API": {
+    "es": "flujos diarios de ETF al contado (BTC, ETH…) desde tu API",
+    "zh-CN": "来自你的 API 的每日现货 ETF 资金流（BTC、ETH…）"
+  },
+  "dampen →": {
+    "es": "amortiguan →",
+    "zh-CN": "抑制 →"
+  },
+  "fairly priced": {
+    "es": "precio justo",
+    "zh-CN": "定价合理"
+  },
+  "few cases": {
+    "es": "pocos casos",
+    "zh-CN": "样本较少"
+  },
+  "less volatility": {
+    "es": "menos volatilidad",
+    "zh-CN": "波动较小"
+  },
+  "live snapshot": {
+    "es": "foto en vivo",
+    "zh-CN": "实时快照"
+  },
+  "more calls": {
+    "es": "más calls",
+    "zh-CN": "看涨期权较多"
+  },
+  "more puts": {
+    "es": "más puts",
+    "zh-CN": "看跌期权较多"
+  },
+  "more volatility": {
+    "es": "más volatilidad",
+    "zh-CN": "波动较大"
+  },
+  "moving together": {
+    "es": "se mueven juntos",
+    "zh-CN": "同步变动"
+  },
+  "negative gamma: amplifying": {
+    "es": "gamma negativa: amplifica",
+    "zh-CN": "负伽马：放大波动"
+  },
+  "no API URL configured": {
+    "es": "no hay URL de API configurada",
+    "zh-CN": "未配置 API URL"
+  },
+  "no clear relation": {
+    "es": "sin relación clara",
+    "zh-CN": "无明显关联"
+  },
+  "odds lag price": {
+    "es": "las probabilidades van detrás del precio",
+    "zh-CN": "概率滞后于价格"
+  },
+  "odds ran ahead of price": {
+    "es": "las probabilidades se adelantaron al precio",
+    "zh-CN": "概率领先于价格"
+  },
+  "options IV": {
+    "es": "IV de opciones",
+    "zh-CN": "期权 IV"
+  },
+  "positive gamma: dampening": {
+    "es": "gamma positiva: amortigua",
+    "zh-CN": "正伽马：抑制波动"
+  },
+  "prices-history?market={0}&startTs={1}&endTs={2}&fidelity={3}": {
+    "es": "prices-history?market={0}&startTs={1}&endTs={2}&fidelity={3}",
+    "zh-CN": "prices-history?market={0}&startTs={1}&endTs={2}&fidelity={3}"
+  },
+  "provider spot": {
+    "es": "spot del proveedor",
+    "zh-CN": "数据源现价"
+  },
+  "sell ≈ {0}": {
+    "es": "venta ≈ {0}",
+    "zh-CN": "卖出 ≈ {0}"
+  },
+  "this symbol": {
+    "es": "este símbolo",
+    "zh-CN": "该品种"
+  },
+  "typical range": {
+    "es": "rango típico",
+    "zh-CN": "常规区间"
+  },
+  "unusually high": {
+    "es": "inusualmente alto",
+    "zh-CN": "异常偏高"
+  },
+  "unusually low": {
+    "es": "inusualmente bajo",
+    "zh-CN": "异常偏低"
+  },
+  "venue not reported": {
+    "es": "mercado no informado",
+    "zh-CN": "未报告交易场所"
+  },
+  "vs EMA {0} %": {
+    "es": "vs EMA {0} %",
+    "zh-CN": "相对 EMA {0} %"
+  },
+  "z-score window (bars)": {
+    "es": "Ventana de z-score (velas)",
+    "zh-CN": "z-score 窗口（K 线）"
+  },
+  "{0} days of inflows": {
+    "es": "{0} días de entradas",
+    "zh-CN": "{0} 天流入"
+  },
+  "{0} days of outflows": {
+    "es": "{0} días de salidas",
+    "zh-CN": "{0} 天流出"
+  },
+  "{0} has no options on {1}.": {
+    "es": "{0} no tiene opciones sobre {1}.",
+    "zh-CN": "{0} 没有 {1} 的期权。"
+  },
+  "{0} has no spot ETFs for {1}.": {
+    "es": "{0} no tiene ETF al contado para {1}.",
+    "zh-CN": "{0} 没有 {1} 的现货 ETF。"
+  },
+  "{0} returned no options on {1}.": {
+    "es": "{0} no devolvió opciones sobre {1}.",
+    "zh-CN": "{0} 未返回 {1} 的期权。"
+  },
+  "{0} {1} days; the latest ({2}) {3} M USD.": {
+    "es": "{0} {1} días; el último ({2}) {3} M USD.",
+    "zh-CN": "{0} {1} 天；最近一天（{2}）{3} M USD。"
+  },
+  "{0} · each day shown when published": {
+    "es": "{0} · cada día se muestra al publicarse",
+    "zh-CN": "{0} · 每天数据在发布时显示"
+  },
+  "{0} · on trade dates (hindsight)": {
+    "es": "{0} · en fechas de operación (retrospectivo)",
+    "zh-CN": "{0} · 按交易日期（事后视角）"
+  },
+  "{0} · snapshot {1} UTC": {
+    "es": "{0} · foto {1} UTC",
+    "zh-CN": "{0} · 快照 {1} UTC"
+  },
+  "{0} · {1} · GEX {2}": {
+    "es": "{0} · {1} · GEX {2}",
+    "zh-CN": "{0} · {1} · GEX {2}"
+  },
+  "{0}/6 signals": {
+    "es": "{0}/6 señales",
+    "zh-CN": "{0}/6 个信号"
+  },
+  "{0}/daily?underlying={1}&from={2}&to={3}": {
+    "es": "{0}/daily?underlying={1}&from={2}&to={3}",
+    "zh-CN": "{0}/daily?underlying={1}&from={2}&to={3}"
+  },
+  "{0}/flows?asset={1}&from={2}&to={3}": {
+    "es": "{0}/flows?asset={1}&from={2}&to={3}",
+    "zh-CN": "{0}/flows?asset={1}&from={2}&to={3}"
+  },
+  "{0}/trades?underlying={1}&from={2}&to={3}": {
+    "es": "{0}/trades?underlying={1}&from={2}&to={3}",
+    "zh-CN": "{0}/trades?underlying={1}&from={2}&to={3}"
+  },
+  "{0}: {1} {2} contracts in {3} expiries (spot {4}, snapshot {5} UTC). Options studies use it once saved.": {
+    "es": "{0}: {1} contratos de {2} en {3} vencimientos (spot {4}, foto {5} UTC). Los indicadores de opciones la usarán al guardarse.",
+    "zh-CN": "{0}：{1} 份 {2} 合约，共 {3} 个到期日（现价 {4}，快照 {5} UTC）。保存后期权指标将使用该数据。"
+  },
+  "← push": {
+    "es": "← empuje",
+    "zh-CN": "← 推动"
+  },
+  "Partial: trades capped at {0} per request; {1} UTC not loaded yet": {
+    "es": "Parcial: operaciones limitadas a {0} por solicitud; {1} UTC aún sin cargar",
+    "zh-CN": "部分数据：每次请求最多 {0} 笔成交；{1} UTC 尚未加载"
+  },
+  "a page limit": {
+    "es": "un límite de páginas",
+    "zh-CN": "分页上限"
   }
 }
