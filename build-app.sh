@@ -1,7 +1,9 @@
 #!/bin/zsh
-# Build Trading Hub.app for Apple Silicon. Usage: ./build-app.sh [--install]
+# Build Trading Hub.app for macOS. Usage: ./build-app.sh [--install]
 # Stage/sign outside Desktop: iCloud extended attributes can break code signing.
-# Optional git-ignored build.local.env can supply BUNDLE_ID and SIGN_IDENTITY.
+# Optional git-ignored build.local.env can supply BUNDLE_ID, SIGN_IDENTITY and TH_RID.
+# TH_RID selects the architecture: osx-arm64 (Apple Silicon) or osx-x64 (Intel). A caller-supplied
+# TH_RID wins over build.local.env; otherwise the Mac's hardware decides, even from a Rosetta shell.
 set -e
 cd "$(dirname "$0")"
 export PATH="$HOME/.dotnet:$PATH" DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
@@ -9,7 +11,17 @@ export PATH="$HOME/.dotnet:$PATH" DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 NAME="Trading Hub"
 BUNDLE_ID="app.tradinghub.desktop"
 SIGN_IDENTITY=""
+CALLER_RID="${TH_RID:-}"
 [ -f build.local.env ] && source ./build.local.env
+RID="${CALLER_RID:-${TH_RID:-}}"
+if [ -z "$RID" ]; then
+  if [ "$(sysctl -in hw.optional.arm64)" = "1" ]; then RID=osx-arm64; else RID=osx-x64; fi
+fi
+case "$RID" in
+  osx-arm64|osx-x64) ;;
+  *) echo "Unsupported TH_RID '$RID': use osx-arm64 or osx-x64" >&2; exit 2 ;;
+esac
+echo "Target: $RID"
 VERSION="$(dotnet msbuild src/TradingHub.App/TradingHub.App.csproj -nologo -getProperty:Version)"
 
 # TH_OUT / TH_STAGE override the output/staging directories (defaults: dist and a temporary directory).
@@ -18,7 +30,7 @@ STAGE="${TH_STAGE:-${TMPDIR:-/tmp}tradinghub-app}"
 APP="$STAGE/$NAME.app"
 rm -rf "$OUT/publish" "$STAGE"
 mkdir -p "$STAGE"
-dotnet publish src/TradingHub.App/TradingHub.App.csproj -c Release -r osx-arm64 --self-contained true -o "$OUT/publish" -v q
+dotnet publish src/TradingHub.App/TradingHub.App.csproj -c Release -r "$RID" --self-contained true -o "$OUT/publish" -v q
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 ditto --noextattr --norsrc "$OUT/publish" "$APP/Contents/MacOS"
 cat > "$APP/Contents/Info.plist" <<PLIST
