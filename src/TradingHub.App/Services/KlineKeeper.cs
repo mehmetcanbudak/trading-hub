@@ -25,6 +25,8 @@ public sealed record KlineKeeperStatus(bool IsRunning, string Message, DateTime?
     public long RunRequest { get; init; }
     /// <summary>Every request up to this one was served by a cycle that started after it and completed.</summary>
     public long CompletedRunRequest { get; init; }
+    /// <summary>Cycles started so far: while one runs, its own number.</summary>
+    public long Cycle { get; init; }
 }
 
 /// <summary>
@@ -54,7 +56,9 @@ public sealed class KlineKeeper : IAsyncDisposable
     private Task? _loop;
     private Task? _disposeTask;
     private bool _disposed, _running;
-    private long _requested, _completedThrough, _cancelledThrough;
+    private long _requested, _completedThrough, _cancelledThrough, _cycles;
+    // Completes when the running cycle has drained; null while no cycle runs.
+    private TaskCompletionSource? _cycle;
     private int _instrumentCursor;
     private string _message = "Candle maintenance is disabled.";
     private DateTime? _lastRun;
@@ -77,7 +81,7 @@ public sealed class KlineKeeper : IAsyncDisposable
         {
             lock (_sync) return new(_running, _message, _lastRun, new Dictionary<string, string>(_itemStatus))
             {
-                Failures = _failures.Values.ToArray(), RunRequest = _requested, CompletedRunRequest = _completedThrough,
+                Failures = _failures.Values.ToArray(), RunRequest = _requested, CompletedRunRequest = _completedThrough, Cycle = _cycles,
             };
         }
     }
@@ -93,18 +97,20 @@ public sealed class KlineKeeper : IAsyncDisposable
     public async Task ConfigureAsync(KlineMaintenanceSettings settings)
     {
         Exception? persistenceError = null;
+        Task drain;
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             _settings = Normalize(settings);
             if (!_settings.Enabled) _cancelledThrough = _requested;
-            _active?.Cancel();
+            drain = CancelActiveCycle();
             // Persist on the configuring caller before the first await, with no late save after disposal.
             try { _save?.Invoke(Normalize(_settings)); }
             catch (Exception ex) { persistenceError = ex; }
         }
-        // Also drains a provider that takes time to honor cancellation; no detached write survives disable.
-        await _run.WaitAsync().ConfigureAwait(false);
+        // Also drains a provider that takes time to honor cancellation; no detached write survives disable. Only the
+        // cycle this change cancelled is awaited: a request queued behind it runs a fresh cycle with the new settings.
+        await drain.ConfigureAwait(false);
         lock (_sync)
         {
             var keys = _settings.Instruments.Select(i => i.Key).ToHashSet(StringComparer.Ordinal);
@@ -112,7 +118,6 @@ public sealed class KlineKeeper : IAsyncDisposable
             foreach (var key in _itemStatus.Keys.Where(key => !keys.Contains(key)).ToArray()) _itemStatus.Remove(key);
             foreach (var key in _failures.Keys.Where(key => !keys.Contains(key.InstrumentKey)).ToArray()) _failures.Remove(key);
         }
-        _run.Release();
         if (Settings.Enabled) _wake.Writer.TryWrite(true);
         else lock (_sync) _message = "Candle maintenance is disabled; all owned work has drained.";
         Notify();
@@ -157,6 +162,7 @@ public sealed class KlineKeeper : IAsyncDisposable
         lock (_sync) ticket = ++_requested;
         await _run.WaitAsync(ct).ConfigureAwait(false);
         CancellationTokenSource? active = null;
+        TaskCompletionSource? cycle = null;
         long served;
         try
         {
@@ -166,6 +172,8 @@ public sealed class KlineKeeper : IAsyncDisposable
                 if (_disposed || !_settings.Enabled || ticket <= _completedThrough || ticket <= _cancelledThrough) return;
                 settings = Normalize(_settings);
                 served = _requested;
+                _cycles++;
+                _cycle = cycle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 active = _active = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
                 active.CancelAfter(TimeSpan.FromMinutes(5));
                 _running = true;
@@ -178,7 +186,8 @@ public sealed class KlineKeeper : IAsyncDisposable
             for (int offset = 0; offset < settings.Instruments.Count && loads < MaxMonthlyLoadsPerCycle; offset++)
             {
                 var item = settings.Instruments[(_instrumentCursor + offset) % settings.Instruments.Count];
-                int cursor = _cursors.GetValueOrDefault(item.Key);
+                int cursor;
+                lock (_sync) cursor = _cursors.GetValueOrDefault(item.Key);
                 int months = settings.LookbackYears * 12;
                 visited++;
                 foreach (int minutes in Resolutions)
@@ -214,7 +223,7 @@ public sealed class KlineKeeper : IAsyncDisposable
                     if (error != null) break;
                     cursor = (cursor + 1) % (months * Resolutions.Length);
                 }
-                _cursors[item.Key] = cursor;
+                lock (_sync) _cursors[item.Key] = cursor;
             }
             if (settings.Instruments.Count > 0) _instrumentCursor = (_instrumentCursor + visited) % settings.Instruments.Count;
             lock (_sync)
@@ -232,21 +241,29 @@ public sealed class KlineKeeper : IAsyncDisposable
             {
                 _running = false;
                 if (ReferenceEquals(_active, active)) _active = null;
+                if (ReferenceEquals(_cycle, cycle)) _cycle = null;
             }
             active?.Dispose();
             _run.Release();
+            cycle?.TrySetResult();
             Notify();
         }
     }
     public async Task CancelAsync()
     {
+        Task drain;
         lock (_sync)
         {
             _cancelledThrough = _requested;
-            _active?.Cancel();
+            drain = CancelActiveCycle();
         }
-        await _run.WaitAsync().ConfigureAwait(false);
-        _run.Release();
+        await drain.ConfigureAwait(false);
+    }
+    /// <summary>Cancels the running cycle (under <see cref="_sync"/>) and returns when it has drained.</summary>
+    private Task CancelActiveCycle()
+    {
+        _active?.Cancel();
+        return _cycle?.Task ?? Task.CompletedTask;
     }
     private async Task<string?> UpdateAsync(TrackedCandleInstrument item, DateTime from, DateTime to, int minutes, CancellationToken ct)
     {

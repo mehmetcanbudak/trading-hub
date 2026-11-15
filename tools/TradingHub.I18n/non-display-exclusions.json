@@ -8,7 +8,7 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:654 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:656 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:904 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749 TradingHub.Indicators.Native/DerivativesPane.cs:32",
+    "locations": "TradingHub.App/Services/AppServices.cs:654 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:707 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:955 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749 TradingHub.Indicators.Native/DerivativesPane.cs:32",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Edited": {
@@ -56,12 +56,16 @@
     "reason": "Private per-session fallback native-account admission partition when proven native account identity is unavailable. It is not a display label and must not merge unproven sessions by translation."
   },
   "symbol={0}&fromId={1}&limit=1000": {
-    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:257",
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:258",
     "reason": "Signed Binance trade-history query template. Payload keys and interpolation positions are broker protocol, not display text."
   },
-  "symbol={0}&orderId={1}&limit=1000": {
-    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:264",
-    "reason": "Signed Binance per-order trade-history query template used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
+  "{0}&fromId={1}&limit=1000": {
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:288",
+    "reason": "Signed Binance Spot per-order trade-history page query (symbol and orderId prefix plus fromId) used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
+  },
+  "{0}&startTime={1}&endTime={2}&limit=1000": {
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:300",
+    "reason": "Signed Binance USD-M per-order trade-history window query (symbol and orderId prefix plus a time range) used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
   },
   "unresolved endpoint": {
     "locations": "TradingHub.App/Services/AppServices.cs:702",

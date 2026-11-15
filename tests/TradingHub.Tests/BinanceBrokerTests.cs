@@ -2069,6 +2069,11 @@ internal sealed record FakeBinanceOrder(long Id, string Symbol, string Side, str
     /// <summary>The conditional (algo) order that placed it when it triggered; 0 if it was sent as it is.</summary>
     public long PlacedBy { get; init; }
     public string ClientId { get; init; } = "";
+
+    /// <summary>Creation time (Binance's "time"); its last change, such as a fill, is "updateTime".</summary>
+    public long Time { get; init; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    public long UpdateTime { get => _updateTime ?? Time; set => _updateTime = value; }
+    private long? _updateTime;
 }
 
 /// <summary>
@@ -2199,6 +2204,31 @@ internal sealed class FakeBinance : IDisposable
     }
 
     public bool HoldFuturesTradeHistory { get; set; }
+
+    /// <summary>
+    /// Listings stop changing: the open orders and the account's trade pages (fromId or time range, without orderId)
+    /// answer as they did now, while single-order reads stay current. Models a drag before the next poll shows a fill.
+    /// </summary>
+    public void FreezeListings()
+    {
+        lock (_gate)
+        {
+            _frozenOpenOrders = OpenOrdersBody("BTCUSDT");
+            _frozenTradeId = _nextTradeId;
+        }
+    }
+
+    public void ThawListings()
+    {
+        lock (_gate)
+        {
+            _frozenOpenOrders = null;
+            _frozenTradeId = null;
+        }
+    }
+
+    private string? _frozenOpenOrders;
+    private long? _frozenTradeId;
     public int FuturesTradeReplies
     {
         get { lock (_gate) return _futuresTradeReplies; }
@@ -2374,12 +2404,16 @@ internal sealed class FakeBinance : IDisposable
         lock (_gate) return TryAlgo(exchangeId, out var a) ? ViewOf(a) : ViewOf(_orders[long.Parse(exchangeId, Inv)]);
     }
 
-    /// <summary>An order placed outside Trading Hub (website, another app).</summary>
-    public long AddExternal(string side, string type, decimal qty, decimal price, decimal stopPrice = 0, string clientId = "")
+    /// <summary>An order placed outside Trading Hub (website, another app), optionally long ago.</summary>
+    public long AddExternal(string side, string type, decimal qty, decimal price, decimal stopPrice = 0, string clientId = "",
+        DateTimeOffset? placedAt = null)
     {
         lock (_gate)
         {
-            var o = new FakeBinanceOrder(++_nextId, "BTCUSDT", side, type, qty, price, stopPrice, false, External: true) { ClientId = clientId };
+            var o = new FakeBinanceOrder(++_nextId, "BTCUSDT", side, type, qty, price, stopPrice, false, External: true)
+            {
+                ClientId = clientId, Time = (placedAt ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds(),
+            };
             _orders[o.Id] = o;
             return o.Id;
         }
@@ -2399,6 +2433,12 @@ internal sealed class FakeBinance : IDisposable
     public void Fill(long id, decimal qty)
     {
         lock (_gate) FillLocked(_orders[id], qty);
+    }
+
+    /// <summary>A fill that happened at <paramref name="at"/> (in the past), with its trade time.</summary>
+    public void Fill(long id, decimal qty, DateTimeOffset at)
+    {
+        lock (_gate) FillLocked(_orders[id], qty, at.ToUnixTimeMilliseconds());
     }
 
     /// <summary>Fills an order of either kind; a conditional one that has not triggered triggers first.</summary>
@@ -2463,8 +2503,10 @@ internal sealed class FakeBinance : IDisposable
     private static FakeOrderView ViewOf(FakeBinanceAlgoOrder a) =>
         new(AlgoPrefix + a.AlgoId.ToString(Inv), a.Type, a.Status, a.Qty, a.TriggerPrice, a.ReduceOnly);
 
-    private void FillLocked(FakeBinanceOrder o, decimal qty)
+    private void FillLocked(FakeBinanceOrder o, decimal qty, long? at = null)
     {
+        long time = at ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        o.UpdateTime = time;
         if (!Futures && o.Symbol == SpotSymbol && _spotBalances.TryGetValue(SpotBaseAsset, out var balance))
             _spotBalances[SpotBaseAsset] = (balance.Free + (o.Side == "BUY" ? qty : -qty), balance.Locked);
         if (Futures)
@@ -2478,7 +2520,7 @@ internal sealed class FakeBinance : IDisposable
             decimal realized = previous.Quantity != 0 && Math.Sign(previous.Quantity) != Math.Sign(signed)
                 ? (price - previous.Average) * Math.Min(qty, Math.Abs(previous.Quantity)) * Math.Sign(previous.Quantity) : 0m;
             _futuresTrades.Add(new FakeBinanceFuturesTrade(++_nextTradeId, o.Id, o.Symbol,
-                o.Side == "BUY", qty, price, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), RealizedPnl: realized));
+                o.Side == "BUY", qty, price, time, RealizedPnl: realized));
             decimal average = previous.Average;
             if (previous.Quantity == 0 || Math.Sign(previous.Quantity) == Math.Sign(signed))
                 average = (Math.Abs(previous.Quantity) * average + qty * price) / Math.Abs(next);
@@ -2515,7 +2557,10 @@ internal sealed class FakeBinance : IDisposable
     private static string Num(decimal v) => v.ToString("0.########", Inv);
 
     private static string Json(FakeBinanceOrder o) => string.Create(Inv,
-        $"{{\"orderId\":{o.Id},\"clientOrderId\":\"{o.ClientId}\",\"symbol\":\"{o.Symbol}\",\"status\":\"{o.Status}\",\"side\":\"{o.Side}\",\"type\":\"{o.Type}\",\"price\":\"{Num(o.Price)}\",\"stopPrice\":\"{Num(o.StopPrice)}\",\"origQty\":\"{Num(o.Qty)}\",\"executedQty\":\"{Num(o.Executed)}\",\"reduceOnly\":{(o.ReduceOnly ? "true" : "false")},\"time\":1790000000000,\"updateTime\":1790000000000}}");
+        $"{{\"orderId\":{o.Id},\"clientOrderId\":\"{o.ClientId}\",\"symbol\":\"{o.Symbol}\",\"status\":\"{o.Status}\",\"side\":\"{o.Side}\",\"type\":\"{o.Type}\",\"price\":\"{Num(o.Price)}\",\"stopPrice\":\"{Num(o.StopPrice)}\",\"origQty\":\"{Num(o.Qty)}\",\"executedQty\":\"{Num(o.Executed)}\",\"reduceOnly\":{(o.ReduceOnly ? "true" : "false")},\"time\":{o.Time},\"updateTime\":{o.UpdateTime}}}");
+
+    private string OpenOrdersBody(string symbol) =>
+        "[" + string.Join(",", _orders.Values.Where(o => o.IsOpen && o.Symbol == symbol && (!HideOwnedOrders || o.External)).OrderBy(o => o.Id).Select(Json)) + "]";
 
     private static string Json(FakeBinanceSpotTrade trade)
     {
@@ -2579,8 +2624,11 @@ internal sealed class FakeBinance : IDisposable
         if (hasStart && hasEnd && (end < start || end - start > 604_800_000L))
             return Error(-1127, "userTrades range exceeds seven days.");
         if (HoldFuturesTradeHistory) return (200, "[]");
-        var selected = _futuresTrades.Where(trade => trade.Symbol == symbol && trade.Id >= from &&
-            (!hasOrder || trade.OrderId == order) && trade.Time >= start && trade.Time <= end).OrderBy(trade => trade.Id);
+        // "Only support querying trade in the past 3 months."
+        long queryable = DateTimeOffset.UtcNow.AddMonths(-3).ToUnixTimeMilliseconds();
+        long newest = !hasOrder && _frozenTradeId is { } frozen ? frozen : long.MaxValue;
+        var selected = _futuresTrades.Where(trade => trade.Symbol == symbol && trade.Id >= from && trade.Id <= newest &&
+            (!hasOrder || trade.OrderId == order) && trade.Time >= start && trade.Time <= end && trade.Time >= queryable).OrderBy(trade => trade.Id);
         var page = hasFrom || hasStart ? selected.Take(limit) : selected.TakeLast(limit);
         string rows = string.Join(",", page.Select(trade => System.Text.Json.JsonSerializer.Serialize(new
         {
@@ -2739,7 +2787,7 @@ internal sealed class FakeBinance : IDisposable
                     return SpotTrades(r);
                 case ("GET", "/fapi/v1/openOrders" or "/api/v3/openOrders"):
                     _openOrderPolls++;
-                    return (200, "[" + string.Join(",", _orders.Values.Where(o => o.IsOpen && o.Symbol == r.Query("symbol") && (!HideOwnedOrders || o.External)).OrderBy(o => o.Id).Select(Json)) + "]");
+                    return (200, _frozenOpenOrders ?? OpenOrdersBody(r.Query("symbol")));
                 case ("POST", "/fapi/v1/order" or "/api/v3/order"):
                     return Place(r);
                 case ("DELETE", "/fapi/v1/order" or "/api/v3/order"):
@@ -2755,6 +2803,8 @@ internal sealed class FakeBinance : IDisposable
                     }
 
                     if (!_orders.TryGetValue(id, out var o) || _forgotten.Contains(id.ToString(Inv)) || (HideOwnedOrders && !o.External)) return Error(-2013, "Order does not exist.");
+                    // USD-M Query Order: an order is not found once "order create time + 90 days < current time".
+                    if (Futures && o.Time + 90L * 86_400_000L < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return Error(-2013, "Order does not exist.");
                     return (200, Json(o));
                 }
                 case ("GET", "/fapi/v2/positionRisk"):

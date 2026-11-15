@@ -15682,5 +15682,25 @@
   "Not modified: Binance could not confirm this order's earlier executions ({0}). It was left unowned and unchanged.": {
     "es": "No modificada: Binance no pudo confirmar las ejecuciones anteriores de esta orden ({0}). Quedó sin propietario y sin cambios.",
     "zh-CN": "未修改：Binance 无法确认此订单之前的成交（{0}）。它保持无归属且未更改。"
+  },
+  "Not modified: Binance did not return this order, so its earlier executions cannot be confirmed. It was left unowned and unchanged.": {
+    "es": "No modificada: Binance no devolvió esta orden, así que no se pueden confirmar sus ejecuciones anteriores. Quedó sin propietario y sin cambios.",
+    "zh-CN": "未修改：Binance 未返回此订单，因此无法确认其之前的成交。它保持无归属且未更改。"
+  },
+  "Not modified: Binance keeps USD-M futures executions for only three months, and this order is older. It was left unowned and unchanged.": {
+    "es": "No modificada: Binance solo conserva las ejecuciones de futuros USD-M durante tres meses y esta orden es más antigua. Quedó sin propietario y sin cambios.",
+    "zh-CN": "未修改：Binance 仅保留三个月内的 USD-M 合约成交，而此订单更早。它保持无归属且未更改。"
+  },
+  "Binance did not report when the order was placed.": {
+    "es": "Binance no indicó cuándo se colocó la orden.",
+    "zh-CN": "Binance 未报告该订单的下单时间。"
+  },
+  "Binance returned a full trade page for a single millisecond.": {
+    "es": "Binance devolvió una página completa de operaciones para un solo milisegundo.",
+    "zh-CN": "Binance 在单个毫秒内返回了一整页成交。"
+  },
+  "Binance returned trades before the requested trade ID.": {
+    "es": "Binance devolvió operaciones anteriores al ID de operación solicitado.",
+    "zh-CN": "Binance 返回了早于所请求成交 ID 的成交。"
   }
 }
