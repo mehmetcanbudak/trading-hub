@@ -202,6 +202,9 @@ public sealed class PropertyGrid : UserControl
         try
         {
             p.SetValue(owner, value);
+            // closed-bar library studies bake colors and drawing switches into their scene: rebuild it for their own settings
+            if (owner is TradingHub.Indicators.Native.ClosedBarStudy study && p.DeclaringType?.IsSubclassOf(typeof(TradingHub.Indicators.Native.ClosedBarStudy)) == true)
+                study.RecalculateValues();
             Changed?.Invoke();
             UpdateVisibility();
         }
