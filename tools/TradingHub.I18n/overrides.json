@@ -15726,5 +15726,457 @@
   "Write-through rename to '{0}' failed (OS error {1}).": {
     "es": "Falló el cambio de nombre con escritura directa a '{0}' (error del sistema {1}).",
     "zh-CN": "直写重命名到“{0}”失败（系统错误 {1}）。"
+  },
+  "1 = since the previous bar.": {
+    "es": "1 = desde la vela anterior.",
+    "zh-CN": "1 = 自上一根K线起。"
+  },
+  "A chart keeps at most {0} alerts.": {
+    "es": "Un gráfico guarda como máximo {0} alertas.",
+    "zh-CN": "每个图表最多保留 {0} 个提醒。"
+  },
+  "Add alert on drawing…": {
+    "es": "Agregar alerta sobre el dibujo…",
+    "zh-CN": "为绘图添加提醒…"
+  },
+  "Add alert on {0}…": {
+    "es": "Agregar alerta sobre {0}…",
+    "zh-CN": "为 {0} 添加提醒…"
+  },
+  "Alert levels of {0}: {1}": {
+    "es": "Niveles de alerta de {0}: {1}",
+    "zh-CN": "{0} 的提醒价位：{1}"
+  },
+  "Alerts arm on the bar forming when they are created or loaded: history never fires them.": {
+    "es": "Las alertas se activan en la vela en formación al crearlas o cargarlas: el historial nunca las dispara.",
+    "zh-CN": "提醒在创建或加载时于正在形成的K线上启用：历史数据永远不会触发它们。"
+  },
+  "Alerts on this chart": {
+    "es": "Alertas de este gráfico",
+    "zh-CN": "此图表的提醒"
+  },
+  "Bar high": {
+    "es": "Máximo de la vela",
+    "zh-CN": "K线最高价"
+  },
+  "Bar low": {
+    "es": "Mínimo de la vela",
+    "zh-CN": "K线最低价"
+  },
+  "Breaker high {0}": {
+    "es": "Máximo del breaker {0}",
+    "zh-CN": "破坏块高点 {0}"
+  },
+  "Breaker low {0}": {
+    "es": "Mínimo del breaker {0}",
+    "zh-CN": "破坏块低点 {0}"
+  },
+  "Buyer POC {0}": {
+    "es": "POC comprador {0}",
+    "zh-CN": "买方 POC {0}"
+  },
+  "Buyer refill zone {0}": {
+    "es": "Zona de recarga compradora {0}",
+    "zh-CN": "买方补单区 {0}"
+  },
+  "CISD projection {0}R {1}": {
+    "es": "Proyección CISD {0}R {1}",
+    "zh-CN": "CISD 投射 {0}R {1}"
+  },
+  "Chart alert": {
+    "es": "Alerta del gráfico",
+    "zh-CN": "图表提醒"
+  },
+  "Chart alerts": {
+    "es": "Alertas del gráfico",
+    "zh-CN": "图表提醒"
+  },
+  "Chart alerts ({0})…": {
+    "es": "Alertas del gráfico ({0})…",
+    "zh-CN": "图表提醒（{0}）…"
+  },
+  "Chart alerts…": {
+    "es": "Alertas del gráfico…",
+    "zh-CN": "图表提醒…"
+  },
+  "Choose two different channel edges.": {
+    "es": "Elige dos bordes de canal distintos.",
+    "zh-CN": "请选择两条不同的通道边线。"
+  },
+  "Choose what the alert watches.": {
+    "es": "Elige qué vigila la alerta.",
+    "zh-CN": "请选择提醒要监视的对象。"
+  },
+  "Closing VWAP lower band {0}": {
+    "es": "Banda inferior del VWAP de cierre {0}",
+    "zh-CN": "收盘 VWAP 下轨 {0}"
+  },
+  "Closing VWAP upper band {0}": {
+    "es": "Banda superior del VWAP de cierre {0}",
+    "zh-CN": "收盘 VWAP 上轨 {0}"
+  },
+  "Closing VWAP {0}": {
+    "es": "VWAP de cierre {0}",
+    "zh-CN": "收盘 VWAP {0}"
+  },
+  "Create alert": {
+    "es": "Crear alerta",
+    "zh-CN": "创建提醒"
+  },
+  "Crossing": {
+    "es": "Cruza",
+    "zh-CN": "穿越"
+  },
+  "Crossing down": {
+    "es": "Cruza hacia abajo",
+    "zh-CN": "向下穿越"
+  },
+  "Crossing up": {
+    "es": "Cruza hacia arriba",
+    "zh-CN": "向上穿越"
+  },
+  "Double inside day high {0}": {
+    "es": "Máximo del doble día interior {0}",
+    "zh-CN": "双内包日高点 {0}"
+  },
+  "Double inside day low {0}": {
+    "es": "Mínimo del doble día interior {0}",
+    "zh-CN": "双内包日低点 {0}"
+  },
+  "Entering channel": {
+    "es": "Entra en el canal",
+    "zh-CN": "进入通道"
+  },
+  "Exiting channel": {
+    "es": "Sale del canal",
+    "zh-CN": "离开通道"
+  },
+  "FVG high {0}": {
+    "es": "Máximo del FVG {0}",
+    "zh-CN": "FVG 高点 {0}"
+  },
+  "FVG low {0}": {
+    "es": "Mínimo del FVG {0}",
+    "zh-CN": "FVG 低点 {0}"
+  },
+  "Fixed value": {
+    "es": "Valor fijo",
+    "zh-CN": "固定值"
+  },
+  "HTF FVG high {0}": {
+    "es": "Máximo del FVG HTF {0}",
+    "zh-CN": "HTF FVG 高点 {0}"
+  },
+  "HTF FVG low {0}": {
+    "es": "Mínimo del FVG HTF {0}",
+    "zh-CN": "HTF FVG 低点 {0}"
+  },
+  "Level {0}": {
+    "es": "Nivel {0}",
+    "zh-CN": "水平 {0}"
+  },
+  "Liquidity high {0}": {
+    "es": "Máximo de liquidez {0}",
+    "zh-CN": "流动性高点 {0}"
+  },
+  "Liquidity low {0}": {
+    "es": "Mínimo de liquidez {0}",
+    "zh-CN": "流动性低点 {0}"
+  },
+  "Lower channel edge": {
+    "es": "Borde inferior del canal",
+    "zh-CN": "通道下边线"
+  },
+  "Message": {
+    "es": "Mensaje",
+    "zh-CN": "消息"
+  },
+  "Monthly naked POC {0}": {
+    "es": "POC virgen mensual {0}",
+    "zh-CN": "月度裸 POC {0}"
+  },
+  "Moving down %": {
+    "es": "Baja un %",
+    "zh-CN": "下跌 %"
+  },
+  "Moving up %": {
+    "es": "Sube un %",
+    "zh-CN": "上涨 %"
+  },
+  "Naked POC {0}": {
+    "es": "POC virgen {0}",
+    "zh-CN": "裸 POC {0}"
+  },
+  "Neutral refill zone {0}": {
+    "es": "Zona de recarga neutral {0}",
+    "zh-CN": "中性补单区 {0}"
+  },
+  "No alerts on this chart yet.": {
+    "es": "Todavía no hay alertas en este gráfico.",
+    "zh-CN": "此图表尚无提醒。"
+  },
+  "Once per bar": {
+    "es": "Una vez por vela",
+    "zh-CN": "每根K线一次"
+  },
+  "Once per bar close": {
+    "es": "Una vez por vela, al cierre",
+    "zh-CN": "每根K线收盘时一次"
+  },
+  "Only once": {
+    "es": "Una sola vez",
+    "zh-CN": "仅一次"
+  },
+  "Optional note added to the notification": {
+    "es": "Nota opcional que se agrega a la notificación",
+    "zh-CN": "附加到通知中的可选备注"
+  },
+  "Order block high {0}": {
+    "es": "Máximo del order block {0}",
+    "zh-CN": "订单块高点 {0}"
+  },
+  "Order block low {0}": {
+    "es": "Mínimo del order block {0}",
+    "zh-CN": "订单块低点 {0}"
+  },
+  "Outer VAH {0}": {
+    "es": "VAH exterior {0}",
+    "zh-CN": "外部 VAH {0}"
+  },
+  "Outer VAL {0}": {
+    "es": "VAL exterior {0}",
+    "zh-CN": "外部 VAL {0}"
+  },
+  "Over bars": {
+    "es": "En cuántas velas",
+    "zh-CN": "K线数量"
+  },
+  "PO3 range high {0}": {
+    "es": "Máximo del rango PO3 {0}",
+    "zh-CN": "PO3 区间高点 {0}"
+  },
+  "PO3 range low {0}": {
+    "es": "Mínimo del rango PO3 {0}",
+    "zh-CN": "PO3 区间低点 {0}"
+  },
+  "Parallel channel": {
+    "es": "Canal paralelo",
+    "zh-CN": "平行通道"
+  },
+  "Parallel channel (two clicks for the base line; the third handle sets the width)": {
+    "es": "Canal paralelo (dos clics para la línea base; el tercer manejador fija el ancho)",
+    "zh-CN": "平行通道（点击两次绘制基线；第三个控制点设置宽度）"
+  },
+  "Percent": {
+    "es": "Porcentaje",
+    "zh-CN": "百分比"
+  },
+  "Price (close)": {
+    "es": "Precio (cierre)",
+    "zh-CN": "价格（收盘）"
+  },
+  "Seller POC {0}": {
+    "es": "POC vendedor {0}",
+    "zh-CN": "卖方 POC {0}"
+  },
+  "Seller refill zone {0}": {
+    "es": "Zona de recarga vendedora {0}",
+    "zh-CN": "卖方补单区 {0}"
+  },
+  "Session naked POC {0}": {
+    "es": "POC virgen de sesión {0}",
+    "zh-CN": "时段裸 POC {0}"
+  },
+  "Shown in the app; sent to webhook or Telegram only if you approved that destination for this alert kind (Alerts window).": {
+    "es": "Se muestra en la app; se envía a webhook o Telegram solo si aprobaste ese destino para este tipo de alerta (ventana Alertas).",
+    "zh-CN": "在应用内显示；仅当你已为此类提醒批准该目标（提醒窗口）时，才会发送到 Webhook 或 Telegram。"
+  },
+  "Swing high {0}": {
+    "es": "Máximo de swing {0}",
+    "zh-CN": "摆动高点 {0}"
+  },
+  "Swing low {0}": {
+    "es": "Mínimo de swing {0}",
+    "zh-CN": "摆动低点 {0}"
+  },
+  "T-Spot C3 high {0}": {
+    "es": "Máximo T-Spot C3 {0}",
+    "zh-CN": "T-Spot C3 高点 {0}"
+  },
+  "T-Spot C3 low {0}": {
+    "es": "Mínimo T-Spot C3 {0}",
+    "zh-CN": "T-Spot C3 低点 {0}"
+  },
+  "T-Spot C4 high {0}": {
+    "es": "Máximo T-Spot C4 {0}",
+    "zh-CN": "T-Spot C4 高点 {0}"
+  },
+  "T-Spot C4 low {0}": {
+    "es": "Mínimo T-Spot C4 {0}",
+    "zh-CN": "T-Spot C4 低点 {0}"
+  },
+  "Tested POC {0}": {
+    "es": "POC testeado {0}",
+    "zh-CN": "已测试 POC {0}"
+  },
+  "The alert compares a line with itself.": {
+    "es": "La alerta compara una línea consigo misma.",
+    "zh-CN": "该提醒将一条线与其自身比较。"
+  },
+  "Touching": {
+    "es": "Toca",
+    "zh-CN": "触及"
+  },
+  "Value or line": {
+    "es": "Valor o línea",
+    "zh-CN": "数值或线"
+  },
+  "Weekly naked POC {0}": {
+    "es": "POC virgen semanal {0}",
+    "zh-CN": "周度裸 POC {0}"
+  },
+  "Window {0} high {1}": {
+    "es": "Máximo de la ventana {0} {1}",
+    "zh-CN": "窗口 {0} 高点 {1}"
+  },
+  "Window {0} low {1}": {
+    "es": "Mínimo de la ventana {0} {1}",
+    "zh-CN": "窗口 {0} 低点 {1}"
+  },
+  "Window {0} open {1}": {
+    "es": "Apertura de la ventana {0} {1}",
+    "zh-CN": "窗口 {0} 开盘 {1}"
+  },
+  "Yearly naked POC {0}": {
+    "es": "POC virgen anual {0}",
+    "zh-CN": "年度裸 POC {0}"
+  },
+  "bottom edge": {
+    "es": "borde inferior",
+    "zh-CN": "下边线"
+  },
+  "lower edge": {
+    "es": "borde inferior",
+    "zh-CN": "下边线"
+  },
+  "middle line": {
+    "es": "línea media",
+    "zh-CN": "中线"
+  },
+  "top edge": {
+    "es": "borde superior",
+    "zh-CN": "上边线"
+  },
+  "upper edge": {
+    "es": "borde superior",
+    "zh-CN": "上边线"
+  },
+  "line": {
+    "es": "línea",
+    "zh-CN": "线"
+  },
+  "paused": {
+    "es": "en pausa",
+    "zh-CN": "已暂停"
+  },
+  "{0} crosses {1}": {
+    "es": "{0} cruza {1}",
+    "zh-CN": "{0} 穿越 {1}"
+  },
+  "{0} touches {1}": {
+    "es": "{0} toca {1}",
+    "zh-CN": "{0} 触及 {1}"
+  },
+  "{0} crosses down {1}": {
+    "es": "{0} cruza hacia abajo {1}",
+    "zh-CN": "{0} 向下穿越 {1}"
+  },
+  "{0} crosses up {1}": {
+    "es": "{0} cruza hacia arriba {1}",
+    "zh-CN": "{0} 向上穿越 {1}"
+  },
+  "{0} enters the channel {1} – {2}": {
+    "es": "{0} entra en el canal {1} – {2}",
+    "zh-CN": "{0} 进入通道 {1} – {2}"
+  },
+  "{0} exits the channel {1} – {2}": {
+    "es": "{0} sale del canal {1} – {2}",
+    "zh-CN": "{0} 离开通道 {1} – {2}"
+  },
+  "{0} moves down {1}% in {2} bars": {
+    "es": "{0} baja {1}% en {2} velas",
+    "zh-CN": "{0} 在 {2} 根K线内下跌 {1}%"
+  },
+  "{0} moves up {1}% in {2} bars": {
+    "es": "{0} sube {1}% en {2} velas",
+    "zh-CN": "{0} 在 {2} 根K线内上涨 {1}%"
+  },
+  "Alerts arm on the bar forming when they are created or loaded: history never fires them. Every time fires at most once a minute.": {
+    "es": "Las alertas se activan en la vela en formación al crearlas o cargarlas: el historial nunca las dispara. «Cada vez» se dispara como máximo una vez por minuto.",
+    "zh-CN": "提醒在创建或加载时于正在形成的K线上启用：历史数据永远不会触发它们。“每次”最多每分钟触发一次。"
+  },
+  "Every time (at most once a minute)": {
+    "es": "Cada vez (como máximo una vez por minuto)",
+    "zh-CN": "每次（最多每分钟一次）"
+  },
+  "Expired alerts stay listed but are no longer checked (local time).": {
+    "es": "Las alertas vencidas siguen en la lista pero ya no se revisan (hora local).",
+    "zh-CN": "已过期的提醒仍会列出，但不再检查（本地时间）。"
+  },
+  "Expires": {
+    "es": "Vence",
+    "zh-CN": "到期"
+  },
+  "Greater than": {
+    "es": "Mayor que",
+    "zh-CN": "大于"
+  },
+  "Inside channel": {
+    "es": "Dentro del canal",
+    "zh-CN": "在通道内"
+  },
+  "Less than": {
+    "es": "Menor que",
+    "zh-CN": "小于"
+  },
+  "Never expires": {
+    "es": "Nunca vence",
+    "zh-CN": "永不到期"
+  },
+  "Outside channel": {
+    "es": "Fuera del canal",
+    "zh-CN": "在通道外"
+  },
+  "The expiry is in the past.": {
+    "es": "El vencimiento ya pasó.",
+    "zh-CN": "到期时间已过。"
+  },
+  "Until a date and time": {
+    "es": "Hasta una fecha y hora",
+    "zh-CN": "直到某个日期和时间"
+  },
+  "until {0}": {
+    "es": "hasta {0}",
+    "zh-CN": "至 {0}"
+  },
+  "expired": {
+    "es": "vencida",
+    "zh-CN": "已过期"
+  },
+  "{0} greater than {1}": {
+    "es": "{0} mayor que {1}",
+    "zh-CN": "{0} 大于 {1}"
+  },
+  "{0} inside the channel {1} – {2}": {
+    "es": "{0} dentro del canal {1} – {2}",
+    "zh-CN": "{0} 在通道 {1} – {2} 内"
+  },
+  "{0} less than {1}": {
+    "es": "{0} menor que {1}",
+    "zh-CN": "{0} 小于 {1}"
+  },
+  "{0} outside the channel {1} – {2}": {
+    "es": "{0} fuera del canal {1} – {2}",
+    "zh-CN": "{0} 在通道 {1} – {2} 外"
   }
 }
