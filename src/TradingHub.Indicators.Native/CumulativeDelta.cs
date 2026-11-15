@@ -48,6 +48,7 @@ public class CumulativeDeltaCandles : Indicator
     [Display(Name = "Detect divergences", GroupName = "Divergence")] public bool DetectDivergences { get => _divergence; set { _divergence = value; RecalculateValues(); } }
     [Display(Name = "Closed bars on each side", GroupName = "Divergence"), Range(1, 100)] public int PivotRadius { get => _radius; set { _radius = Math.Clamp(value, 1, 100); RecalculateValues(); } }
     [Display(Name = "Paint at retrospective pivot (series remains causal)", GroupName = "Divergence")] public bool RetrospectiveDrawing { get; set; } = true;
+    [Display(Name = "Connect the two CVD swings of the latest divergences (0 = none)", GroupName = "Divergence"), Range(0, 1000)] public int DivergenceLines { get; set; } = 12;
     [Display(Name = "Positive color", GroupName = "Visualization")] public Color PositiveColor { get; set; } = Color.LimeGreen;
     [Display(Name = "Negative color", GroupName = "Visualization")] public Color NegativeColor { get; set; } = Color.IndianRed;
     [Browsable(false)] public IReadOnlyList<Divergence> Divergences => _divergenceView;
@@ -122,6 +123,16 @@ public class CumulativeDeltaCandles : Indicator
     {
         if (Container == null || ChartInfo == null) return;
         FootprintStudyData.Legend(context, Container.Region, 2, $"CVD: {Status}; divergence values available only at confirmation", Color.LightSkyBlue);
+        int lines = 0;
+        for (int i = _divergences.Count - 1; i >= 0 && lines < DivergenceLines; i--, lines++)
+        {
+            var d = _divergences[i];
+            if (d.PivotBar < FirstVisibleBarNumber && d.PriorPivotBar < FirstVisibleBarNumber || d.PriorPivotBar > LastVisibleBarNumber) continue;
+            // Both swings were closed and confirmed when the divergence was recorded; the line joins their CVD values.
+            int x0 = ChartInfo.GetXByBar(d.PriorPivotBar, false), x1 = ChartInfo.GetXByBar(d.PivotBar, false);
+            context.DrawLine(new RenderPen(d.Bullish ? PositiveColor : NegativeColor, 2, System.Drawing.Drawing2D.DashStyle.Dash),
+                x0, Container.GetYByValue(_rows[d.PriorPivotBar].Close), x1, Container.GetYByValue(d.Value));
+        }
         foreach (var d in _divergences)
         {
             int bar = RetrospectiveDrawing ? d.PivotBar : d.AvailableBar;

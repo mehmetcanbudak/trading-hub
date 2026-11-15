@@ -15682,5 +15682,1309 @@
   "Not modified: Binance could not confirm this order's earlier executions ({0}). It was left unowned and unchanged.": {
     "es": "No modificada: Binance no pudo confirmar las ejecuciones anteriores de esta orden ({0}). Quedó sin propietario y sin cambios.",
     "zh-CN": "未修改：Binance 无法确认此订单之前的成交（{0}）。它保持无归属且未更改。"
+  },
+  "+{0} more exchanges (raise \"Exchange rows\")": {
+    "es": "+{0} exchanges más (aumente «Filas de exchanges»)",
+    "zh-CN": "另有 {0} 个交易所（请调高“交易所行数”）"
+  },
+  "15 min": {
+    "es": "15 min",
+    "zh-CN": "15 分钟"
+  },
+  "15 minutes": {
+    "es": "15 minutos",
+    "zh-CN": "15 分钟"
+  },
+  "24 hours": {
+    "es": "24 horas",
+    "zh-CN": "24 小时"
+  },
+  "A model of where recently opened positions would be liquidated, from open-interest increases split by measured buy/sell volume over a fixed leverage mix. Drawn as bars at the right edge with the largest clusters named. An estimate, not exchange data.": {
+    "es": "Un modelo de dónde se liquidarían las posiciones abiertas recientemente, a partir de los aumentos del interés abierto repartidos según el volumen comprador/vendedor medido y una mezcla fija de apalancamientos. Se dibuja como barras en el borde derecho con los grupos más grandes nombrados. Es una estimación, no datos del exchange.",
+    "zh-CN": "估算近期新开仓位的强平位置模型：将未平仓量的增加按实测买卖量拆分，并按固定杠杆组合分布。以图表右侧的横条显示，并标出最大的几个聚集区。这是估算，并非交易所数据。"
+  },
+  "A table under the chart with one column per bar: volume, delta, CVD, buys/sells, footprint imbalances, trade counts, retail and whale flow by trade size, range, relative volume, VWAP distance and optional derivatives and book rows. Missing data stays an empty cell.": {
+    "es": "Una tabla bajo el gráfico con una columna por vela: volumen, delta, CVD, compras/ventas, desequilibrios del footprint, cantidad de operaciones, flujo minorista y de ballenas por tamaño de operación, rango, volumen relativo, distancia al VWAP y filas opcionales de derivados y del libro. Un dato faltante queda como celda vacía.",
+    "zh-CN": "图表下方的表格，每根 K 线一列：成交量、Delta、CVD、买/卖、足迹失衡、成交笔数、按成交规模划分的散户与巨鲸资金流、区间、相对成交量、VWAP 距离，以及可选的衍生品和订单簿行。缺失的数据保留为空白单元格。"
+  },
+  "ALL MARKETS": {
+    "es": "TODOS LOS MERCADOS",
+    "zh-CN": "全部市场"
+  },
+  "ATR (bars)": {
+    "es": "ATR (velas)",
+    "zh-CN": "ATR（K 线数）"
+  },
+  "ATR multiples the close must reject": {
+    "es": "Múltiplos de ATR que el cierre debe rechazar",
+    "zh-CN": "收盘价须拒绝的 ATR 倍数"
+  },
+  "Absorption": {
+    "es": "Absorción",
+    "zh-CN": "吸收"
+  },
+  "Absorption heuristic: {0} at {1} (the ask absorbed)": {
+    "es": "Heurística de absorción: {0} en {1} (absorbió el ask)",
+    "zh-CN": "吸收启发式：{0} 于 {1}（卖盘吸收）"
+  },
+  "Absorption heuristic: {0} at {1} (the bid absorbed)": {
+    "es": "Heurística de absorción: {0} en {1} (absorbió el bid)",
+    "zh-CN": "吸收启发式：{0} 于 {1}（买盘吸收）"
+  },
+  "Accumulate from the first bar (otherwise from the left edge)": {
+    "es": "Acumular desde la primera vela (si no, desde el borde izquierdo)",
+    "zh-CN": "从第一根 K 线开始累计（否则从左边缘开始）"
+  },
+  "Aggressor delta (who traded at market)": {
+    "es": "Delta agresor (quién operó a mercado)",
+    "zh-CN": "主动方 Delta（谁以市价成交）"
+  },
+  "Aggressor flow": {
+    "es": "Flujo agresor",
+    "zh-CN": "主动资金流"
+  },
+  "All visible bars": {
+    "es": "Todas las velas visibles",
+    "zh-CN": "全部可见 K 线"
+  },
+  "Around each bar's price, bands up to 1 %, 2.5 %, 5 % and 10 %: below painted by bid weight and above by ask weight when a side passes its minimum share, with highlighted extremes. Requires depth recording.": {
+    "es": "Alrededor del precio de cada vela, franjas hasta el 1 %, 2,5 %, 5 % y 10 %: debajo pintadas según el peso de los bids y encima según el de los asks cuando un lado supera su proporción mínima, con los extremos resaltados. Requiere grabar la profundidad.",
+    "zh-CN": "围绕每根 K 线的价格，划出 1 %、2.5 %、5 % 和 10 % 的区带：当某一侧超过其最低占比时，下方按买盘权重着色、上方按卖盘权重着色，并突出极值。需要记录盘口深度。"
+  },
+  "Ask threshold": {
+    "es": "Umbral de asks",
+    "zh-CN": "卖盘阈值"
+  },
+  "Asks": {
+    "es": "Asks",
+    "zh-CN": "卖盘"
+  },
+  "Asks: minimum share (%)": {
+    "es": "Asks: proporción mínima (%)",
+    "zh-CN": "卖盘：最低占比（%）"
+  },
+  "At most per bar (0 = all)": {
+    "es": "Como máximo por vela (0 = todas)",
+    "zh-CN": "每根 K 线最多（0 = 全部）"
+  },
+  "At the bar's center": {
+    "es": "En el centro de la vela",
+    "zh-CN": "K 线中心"
+  },
+  "At the order price": {
+    "es": "En el precio de la orden",
+    "zh-CN": "订单价格处"
+  },
+  "At this distance from the best price a level weighs one half; at twice the distance, one quarter.": {
+    "es": "A esta distancia del mejor precio un nivel pesa la mitad; al doble de distancia, un cuarto.",
+    "zh-CN": "距最优价此距离的价位权重为一半；两倍距离时为四分之一。"
+  },
+  "Automatic: k deviations": {
+    "es": "Automático: k desvíos",
+    "zh-CN": "自动：k 倍标准差"
+  },
+  "Average per level (instead of the sum)": {
+    "es": "Promedio por nivel (en lugar de la suma)",
+    "zh-CN": "按价位平均（而非求和）"
+  },
+  "Average trade": {
+    "es": "Operación promedio",
+    "zh-CN": "平均成交"
+  },
+  "Band lines": {
+    "es": "Líneas de las bandas",
+    "zh-CN": "区带线"
+  },
+  "Band width (px)": {
+    "es": "Ancho de la franja (px)",
+    "zh-CN": "区带宽度（像素）"
+  },
+  "Bar statistics strip": {
+    "es": "Tira de estadísticas por vela",
+    "zh-CN": "K 线统计条"
+  },
+  "Bars by strength": {
+    "es": "Barras por fuerza",
+    "zh-CN": "按强度着色的柱"
+  },
+  "Bars for the deviations": {
+    "es": "Velas para los desvíos",
+    "zh-CN": "标准差所用 K 线数"
+  },
+  "Bars in the regime box": {
+    "es": "Velas en el cuadro de estados",
+    "zh-CN": "状态框中的 K 线数"
+  },
+  "Bars of opened positions": {
+    "es": "Velas de posiciones abiertas",
+    "zh-CN": "开仓 K 线数"
+  },
+  "Base units (contracts / coins)": {
+    "es": "Unidades base (contratos / monedas)",
+    "zh-CN": "基础单位（合约 / 币）"
+  },
+  "Bid and ask lines": {
+    "es": "Líneas de bid y ask",
+    "zh-CN": "买盘与卖盘线"
+  },
+  "Bid threshold": {
+    "es": "Umbral de bids",
+    "zh-CN": "买盘阈值"
+  },
+  "Bid versus ask resting liquidity of the recorded book between two distances from the mid, from −100 to 100, smoothed, with highlighted extremes. Requires depth recording; bars without a recorded book stay gaps.": {
+    "es": "Liquidez en reposo de bids contra asks del libro grabado entre dos distancias del precio medio, de −100 a 100, suavizada y con los extremos resaltados. Requiere grabar la profundidad; las velas sin libro grabado quedan como huecos.",
+    "zh-CN": "已记录订单簿在距中间价两段距离之间的买盘对卖盘挂单流动性，范围 −100 到 100，经平滑并突出极值。需要记录盘口深度；没有已记录订单簿的 K 线保留为空缺。"
+  },
+  "Bids": {
+    "es": "Bids",
+    "zh-CN": "买盘"
+  },
+  "Bids: minimum share (%)": {
+    "es": "Bids: proporción mínima (%)",
+    "zh-CN": "买盘：最低占比（%）"
+  },
+  "Book balance flipped: more asks within 1 %": {
+    "es": "El balance del libro se dio vuelta: más asks dentro del 1 %",
+    "zh-CN": "订单簿平衡反转：1 % 以内卖盘更多"
+  },
+  "Book balance flipped: more bids within 1 %": {
+    "es": "El balance del libro se dio vuelta: más bids dentro del 1 %",
+    "zh-CN": "订单簿平衡反转：1 % 以内买盘更多"
+  },
+  "Book mirror (equal-distance comparison)": {
+    "es": "Espejo del libro (comparación a igual distancia)",
+    "zh-CN": "订单簿镜像（等距比较）"
+  },
+  "Book mirror: no live or recorded book.": {
+    "es": "Espejo del libro: no hay libro en vivo ni grabado.",
+    "zh-CN": "订单簿镜像：没有实时或已记录的订单簿。"
+  },
+  "Bubble unit (notional)": {
+    "es": "Unidad de la burbuja (nocional)",
+    "zh-CN": "气泡单位（名义金额）"
+  },
+  "Bubbles": {
+    "es": "Burbujas",
+    "zh-CN": "气泡"
+  },
+  "Bubbles per bar": {
+    "es": "Burbujas por vela",
+    "zh-CN": "每根 K 线气泡数"
+  },
+  "Burst from (deviations)": {
+    "es": "Estallido desde (desvíos)",
+    "zh-CN": "爆发阈值（标准差）"
+  },
+  "Burst: deviations above the last 30 minutes": {
+    "es": "Estallido: desvíos sobre los últimos 30 minutos",
+    "zh-CN": "爆发：高于最近 30 分钟的标准差倍数"
+  },
+  "Burst: minimum notional": {
+    "es": "Estallido: nocional mínimo",
+    "zh-CN": "爆发：最低名义金额"
+  },
+  "Buy %": {
+    "es": "Compras %",
+    "zh-CN": "买入 %"
+  },
+  "Buy trades": {
+    "es": "Operaciones de compra",
+    "zh-CN": "买入笔数"
+  },
+  "Buyers ahead, {0} to {1}": {
+    "es": "Compradores adelante, {0} a {1}",
+    "zh-CN": "买方领先，{0} 比 {1}"
+  },
+  "Buying stack": {
+    "es": "Escalera compradora",
+    "zh-CN": "买方堆叠"
+  },
+  "Buys": {
+    "es": "Compras",
+    "zh-CN": "买入"
+  },
+  "By share of traded notional": {
+    "es": "Según la parte del nocional operado",
+    "zh-CN": "按成交名义金额占比"
+  },
+  "CVD from": {
+    "es": "CVD desde",
+    "zh-CN": "CVD 起点"
+  },
+  "Cell style": {
+    "es": "Estilo de celda",
+    "zh-CN": "单元格样式"
+  },
+  "Cells shaded by magnitude": {
+    "es": "Celdas sombreadas por magnitud",
+    "zh-CN": "按大小着色的单元格"
+  },
+  "Classify by": {
+    "es": "Clasificar por",
+    "zh-CN": "分类依据"
+  },
+  "Close against the EMA": {
+    "es": "Cierre contra la EMA",
+    "zh-CN": "收盘价相对 EMA"
+  },
+  "Color when the ask absorbed (market buys)": {
+    "es": "Color si absorbió el ask (compras a mercado)",
+    "zh-CN": "卖盘吸收时的颜色（市价买入）"
+  },
+  "Color when the bid absorbed (market sells)": {
+    "es": "Color si absorbió el bid (ventas a mercado)",
+    "zh-CN": "买盘吸收时的颜色（市价卖出）"
+  },
+  "Colored text only": {
+    "es": "Solo texto coloreado",
+    "zh-CN": "仅彩色文字"
+  },
+  "Connect the two CVD swings of the latest divergences (0 = none)": {
+    "es": "Unir los dos swings del CVD de las últimas divergencias (0 = ninguna)",
+    "zh-CN": "连接最近背离的两个 CVD 摆动点（0 = 不连接）"
+  },
+  "Consecutive rows for a stack": {
+    "es": "Filas seguidas para una escalera",
+    "zh-CN": "构成堆叠的连续行数"
+  },
+  "Cumulative net aggressor notional of each exchange of an aggregate instrument, ranked by traded notional, spot and perpetual separately, with an all-markets row and 1/5/15/60-minute and trade-size lamps. Unattributed prints and candle-only history stay out of the exchange rows.": {
+    "es": "Nocional agresor neto acumulado de cada exchange de un instrumento agregado, ordenado por nocional operado, spot y perpetuos por separado, con una fila de todos los mercados y lámparas de 1/5/15/60 minutos y de tamaño de operación. Las operaciones sin mercado conocido y la historia de solo velas quedan fuera de las filas de exchanges.",
+    "zh-CN": "聚合品种中每个交易所的累计主动净名义金额，按成交名义金额排序，现货与永续分开显示，附全部市场行以及 1/5/15/60 分钟和成交规模指示灯。无法归属的成交和仅有 K 线的历史不计入交易所行。"
+  },
+  "Decision board": {
+    "es": "Tablero de decisión",
+    "zh-CN": "决策面板"
+  },
+  "Delta %": {
+    "es": "Delta %",
+    "zh-CN": "Delta %"
+  },
+  "Delta per bar": {
+    "es": "Delta por vela",
+    "zh-CN": "每根 K 线 Delta"
+  },
+  "Delta with deviation bands": {
+    "es": "Delta con bandas de desvío",
+    "zh-CN": "带标准差带的 Delta"
+  },
+  "Deviation bands": {
+    "es": "Bandas de desvío",
+    "zh-CN": "标准差带"
+  },
+  "Diagonal": {
+    "es": "Diagonal",
+    "zh-CN": "对角"
+  },
+  "Distance to session VWAP %": {
+    "es": "Distancia al VWAP de la sesión %",
+    "zh-CN": "距交易时段 VWAP 的距离 %"
+  },
+  "Draw at": {
+    "es": "Dibujar en",
+    "zh-CN": "绘制位置"
+  },
+  "Dynamic (by deviations)": {
+    "es": "Dinámico (por desvíos)",
+    "zh-CN": "动态（按标准差）"
+  },
+  "EMA (bars)": {
+    "es": "EMA (velas)",
+    "zh-CN": "EMA（K 线数）"
+  },
+  "Estimates new longs, new shorts and closes from the open-interest change (Binance + Bybit perpetuals) and each bar's measured delta or price direction. An estimate: bars without open interest or measured delta stay gaps.": {
+    "es": "Estima largos nuevos, cortos nuevos y cierres con el cambio del interés abierto (perpetuos de Binance + Bybit) y el delta medido o la dirección del precio de cada vela. Es una estimación: las velas sin interés abierto o sin delta medido quedan como huecos.",
+    "zh-CN": "根据未平仓量变化（Binance + Bybit 永续）以及每根 K 线的实测 Delta 或价格方向，估算新增多头、新增空头和平仓。这是估算：缺少未平仓量或实测 Delta 的 K 线保留为空缺。"
+  },
+  "Exchange rows (maximum)": {
+    "es": "Filas de exchanges (máximo)",
+    "zh-CN": "交易所行数（最多）"
+  },
+  "Extremes": {
+    "es": "Extremos",
+    "zh-CN": "极值"
+  },
+  "Fill opacity (%)": {
+    "es": "Opacidad del relleno (%)",
+    "zh-CN": "填充不透明度（%）"
+  },
+  "Filled bands": {
+    "es": "Bandas rellenas",
+    "zh-CN": "填充区带"
+  },
+  "Fixed threshold unit": {
+    "es": "Unidad del umbral fijo",
+    "zh-CN": "固定阈值单位"
+  },
+  "Flow": {
+    "es": "Flujo",
+    "zh-CN": "资金流"
+  },
+  "Flow and trade-size lamps on top": {
+    "es": "Lámparas de flujo y de tamaño de operación arriba",
+    "zh-CN": "顶部显示资金流与成交规模指示灯"
+  },
+  "Flow burst: {0} in 10 s": {
+    "es": "Estallido de flujo: {0} en 10 s",
+    "zh-CN": "资金流爆发：10 秒内 {0}"
+  },
+  "Flow by exchange (ranked, spot / perpetual)": {
+    "es": "Flujo por exchange (ranking, spot / perpetuos)",
+    "zh-CN": "按交易所的资金流（排名，现货 / 永续）"
+  },
+  "Flow edge (%)": {
+    "es": "Ventaja del flujo (%)",
+    "zh-CN": "资金流优势（%）"
+  },
+  "Footprint imbalance alerts (stacks and large cell)": {
+    "es": "Alertas de desequilibrio del footprint (escaleras y celda grande)",
+    "zh-CN": "足迹失衡提醒（堆叠与大单元格）"
+  },
+  "Frame width (px from the right)": {
+    "es": "Ancho del marco (px desde la derecha)",
+    "zh-CN": "框宽度（距右侧像素）"
+  },
+  "Frames the wick of a closed bar whose heavy aggressive buying or selling price then rejected by at least one ATR, with the aggressors' estimated average price. A heuristic from the observed footprint.": {
+    "es": "Enmarca la mecha de una vela cerrada cuya compra o venta agresiva fuerte fue luego rechazada por el precio en al menos un ATR, con el precio promedio estimado de esos agresores. Una heurística a partir del footprint observado.",
+    "zh-CN": "框出一根已收盘 K 线的影线：其中大量主动买入或卖出随后被价格以至少一个 ATR 拒绝，并标出这些主动方的估算平均价格。基于观测足迹的启发式。"
+  },
+  "From each bar's price, where a long (below) and a short (above) opened there would be liquidated at five leverages, ignoring maintenance margin and fees. A reference grid, not where positions are.": {
+    "es": "Desde el precio de cada vela, dónde se liquidaría un largo (abajo) y un corto (arriba) abierto ahí con cinco apalancamientos, sin margen de mantenimiento ni comisiones. Una cuadrícula de referencia, no dónde están las posiciones.",
+    "zh-CN": "以每根 K 线的价格为开仓价，在五种杠杆下多头（下方）和空头（上方）的强平价位，不计维持保证金和手续费。这是参考网格，并非实际仓位所在。"
+  },
+  "From the close (otherwise HLC3)": {
+    "es": "Desde el cierre (si no, HLC3)",
+    "zh-CN": "基于收盘价（否则用 HLC3）"
+  },
+  "Funding": {
+    "es": "Financiación",
+    "zh-CN": "资金费率"
+  },
+  "Golden ratio (each row 1/φ of the one above)": {
+    "es": "Proporción áurea (cada fila 1/φ de la de arriba)",
+    "zh-CN": "黄金比例（每行为上一行的 1/φ）"
+  },
+  "Group by (price, 0 = the service's bins)": {
+    "es": "Agrupar de a (precio, 0 = las franjas del servicio)",
+    "zh-CN": "分组间隔（价格，0 = 服务原有分箱）"
+  },
+  "Half-life (basis points)": {
+    "es": "Vida media (puntos básicos)",
+    "zh-CN": "半衰距离（基点）"
+  },
+  "Heavy long liquidations from (%)": {
+    "es": "Muchos largos liquidados desde (%)",
+    "zh-CN": "多头强平偏重阈值（%）"
+  },
+  "Highlight extremes": {
+    "es": "Resaltar los extremos",
+    "zh-CN": "突出极值"
+  },
+  "Highlight measured delta": {
+    "es": "Destacar el delta medido",
+    "zh-CN": "突出实测 Delta"
+  },
+  "Highlight volume": {
+    "es": "Destacar el volumen",
+    "zh-CN": "突出成交量"
+  },
+  "Highlighted": {
+    "es": "Destacado",
+    "zh-CN": "已突出"
+  },
+  "Highlighted bar: {0}": {
+    "es": "Vela destacada: {0}",
+    "zh-CN": "突出 K 线：{0}"
+  },
+  "Highlights": {
+    "es": "Destacados",
+    "zh-CN": "突出显示"
+  },
+  "Highlights and notifications (volume, delta, walls, book balance)": {
+    "es": "Destacados y avisos (volumen, delta, muros, balance del libro)",
+    "zh-CN": "突出显示与通知（成交量、Delta、挂单墙、订单簿平衡）"
+  },
+  "Horizontal": {
+    "es": "Horizontal",
+    "zh-CN": "水平"
+  },
+  "Imbalance": {
+    "es": "Desequilibrio",
+    "zh-CN": "失衡"
+  },
+  "Imbalance: times the opposite side": {
+    "es": "Desequilibrio: veces el lado contrario",
+    "zh-CN": "失衡：相对另一侧的倍数"
+  },
+  "Imbalances (count)": {
+    "es": "Desequilibrios (cantidad)",
+    "zh-CN": "失衡（数量）"
+  },
+  "In notional (quote currency)": {
+    "es": "En nocional (moneda de cotización)",
+    "zh-CN": "以名义金额计（计价货币）"
+  },
+  "Intensity": {
+    "es": "Intensidad",
+    "zh-CN": "强度"
+  },
+  "Keep for (bars)": {
+    "es": "Mantener durante (velas)",
+    "zh-CN": "保留（K 线数）"
+  },
+  "Label width (px)": {
+    "es": "Ancho de las etiquetas (px)",
+    "zh-CN": "标签宽度（像素）"
+  },
+  "Large cell": {
+    "es": "Celda grande",
+    "zh-CN": "大单元格"
+  },
+  "Large cell from (0 = off)": {
+    "es": "Celda grande desde (0 = desactivado)",
+    "zh-CN": "大单元格阈值（0 = 关闭）"
+  },
+  "Leverage 1": {
+    "es": "Apalancamiento 1",
+    "zh-CN": "杠杆 1"
+  },
+  "Leverage 2": {
+    "es": "Apalancamiento 2",
+    "zh-CN": "杠杆 2"
+  },
+  "Leverage 3": {
+    "es": "Apalancamiento 3",
+    "zh-CN": "杠杆 3"
+  },
+  "Leverage 4": {
+    "es": "Apalancamiento 4",
+    "zh-CN": "杠杆 4"
+  },
+  "Leverage 5": {
+    "es": "Apalancamiento 5",
+    "zh-CN": "杠杆 5"
+  },
+  "Leverage liquidation bands (reference)": {
+    "es": "Bandas de liquidación por apalancamiento (referencia)",
+    "zh-CN": "杠杆强平带（参考）"
+  },
+  "Liquidation bursts": {
+    "es": "Estallidos de liquidaciones",
+    "zh-CN": "强平爆发"
+  },
+  "Liquidation levels (third-party estimate)": {
+    "es": "Niveles de liquidación (estimación de terceros)",
+    "zh-CN": "强平价位（第三方估算）"
+  },
+  "Liquidation levels: no snapshot yet.": {
+    "es": "Niveles de liquidación: todavía no hay foto.",
+    "zh-CN": "强平价位：尚无快照。"
+  },
+  "Liquidation levels: the latest snapshot is older than three hours and is not drawn.": {
+    "es": "Niveles de liquidación: la última foto tiene más de tres horas y no se dibuja.",
+    "zh-CN": "强平价位：最新快照已超过三小时，不予绘制。"
+  },
+  "Liquidation levels: the third-party service publishes BTC only.": {
+    "es": "Niveles de liquidación: el servicio de terceros publica solo BTC.",
+    "zh-CN": "强平价位：该第三方服务仅发布 BTC。"
+  },
+  "Liquidation map (estimate from open interest)": {
+    "es": "Mapa de liquidaciones (estimado con el interés abierto)",
+    "zh-CN": "强平地图（基于未平仓量估算）"
+  },
+  "Liquidation map (estimate)": {
+    "es": "Mapa de liquidaciones (estimado)",
+    "zh-CN": "强平地图（估算）"
+  },
+  "Liquidation map (estimate): waiting for open interest.": {
+    "es": "Mapa de liquidaciones (estimado): esperando el interés abierto.",
+    "zh-CN": "强平地图（估算）：正在等待未平仓量。"
+  },
+  "Liquidations are recorded only while the chart listens; earlier bars are unknown.": {
+    "es": "Las liquidaciones se graban solo mientras el gráfico escucha; las velas anteriores son desconocidas.",
+    "zh-CN": "仅在图表监听期间记录强平；更早的 K 线未知。"
+  },
+  "Liquidations shorts − longs": {
+    "es": "Liquidaciones cortos − largos",
+    "zh-CN": "强平 空头 − 多头"
+  },
+  "Liquidity imbalance oscillator": {
+    "es": "Oscilador de desequilibrio de liquidez",
+    "zh-CN": "流动性失衡振荡器"
+  },
+  "Liquidity tracker (distance-weighted book)": {
+    "es": "Rastreador de liquidez (libro pesado por distancia)",
+    "zh-CN": "流动性追踪（按距离加权的订单簿）"
+  },
+  "Loading third-party liquidation levels…": {
+    "es": "Cargando los niveles de liquidación de terceros…",
+    "zh-CN": "正在加载第三方强平价位…"
+  },
+  "Long bands (below)": {
+    "es": "Bandas de largos (abajo)",
+    "zh-CN": "多头区带（下方）"
+  },
+  "Long liquidation level (third-party estimate)": {
+    "es": "Nivel de liquidación de largos (estimación de terceros)",
+    "zh-CN": "多头强平价位（第三方估算）"
+  },
+  "Long liquidations color": {
+    "es": "Color de las liquidaciones de largos",
+    "zh-CN": "多头强平颜色"
+  },
+  "Longs below {0} · shorts above {1}": {
+    "es": "Largos abajo {0} · cortos arriba {1}",
+    "zh-CN": "下方多头 {0} · 上方空头 {1}"
+  },
+  "Longs closing": {
+    "es": "Largos cierran",
+    "zh-CN": "多头平仓"
+  },
+  "Longs within 5 %: {0}": {
+    "es": "Largos a menos del 5 %: {0}",
+    "zh-CN": "5 % 以内的多头：{0}"
+  },
+  "Longs {0}×": {
+    "es": "Largos {0}×",
+    "zh-CN": "多头 {0}×"
+  },
+  "Maintenance margin (%)": {
+    "es": "Margen de mantenimiento (%)",
+    "zh-CN": "维持保证金（%）"
+  },
+  "Map": {
+    "es": "Mapa",
+    "zh-CN": "地图"
+  },
+  "Margin to lean (factors)": {
+    "es": "Margen para inclinarse (factores)",
+    "zh-CN": "倾向所需差距（因子数）"
+  },
+  "Markets": {
+    "es": "Mercados",
+    "zh-CN": "市场"
+  },
+  "Marks bars with unusual volume or measured delta (mean + k deviations of preceding bars) and can notify on live flow bursts, book walls that appear or are pulled, and book-balance flips, through the Alert Center.": {
+    "es": "Marca las velas con volumen o delta medido fuera de lo normal (media + k desvíos de las velas anteriores) y puede avisar, a través del Centro de alertas, de estallidos de flujo en vivo, muros del libro que aparecen o se retiran y cambios del balance del libro.",
+    "zh-CN": "标记成交量或实测 Delta 异常的 K 线（之前 K 线的均值 + k 倍标准差），并可通过提醒中心通知实时资金流爆发、挂单墙出现或撤除以及订单簿平衡反转。"
+  },
+  "Marks high-volume bars (three tiers of deviations above the preceding mean) with bubbles at the prices where most traded inside them, colored by the dominant side, with a count of each tier. Needs a footprint.": {
+    "es": "Marca las velas de volumen alto (tres niveles de desvíos sobre la media anterior) con burbujas en los precios donde más se operó dentro de ellas, del color del lado dominante, con la cantidad de cada nivel. Necesita un footprint.",
+    "zh-CN": "以气泡标记高成交量 K 线（高于之前均值的三档标准差）中成交最集中的价格，按主导方着色，并统计各档数量。需要足迹数据。"
+  },
+  "Marks where resting liquidity absorbed a burst of one-sided market orders at one price within a few milliseconds. A heuristic from observed prints only; optional live notifications through the Alert Center.": {
+    "es": "Marca dónde la liquidez en reposo absorbió una ráfaga de órdenes a mercado de un solo lado en un mismo precio en pocos milisegundos. Una heurística solo a partir de operaciones observadas; avisos en vivo opcionales a través del Centro de alertas.",
+    "zh-CN": "标记挂单流动性在几毫秒内于同一价格吸收一串单边市价单的位置。仅基于观测成交的启发式；可通过提醒中心发送实时通知。"
+  },
+  "Maximum width (px)": {
+    "es": "Ancho máximo (px)",
+    "zh-CN": "最大宽度（像素）"
+  },
+  "Measured delta per bar or as a rolling sum, in base units or notional, with ±1/2/3 standard-deviation bands of recent bars. Bars without measured delta stay gaps.": {
+    "es": "Delta medido por vela o como suma móvil, en unidades base o en nocional, con bandas de ±1/2/3 desvíos estándar de las velas recientes. Las velas sin delta medido quedan como huecos.",
+    "zh-CN": "每根 K 线的实测 Delta 或其滚动和，以基础单位或名义金额计，附最近 K 线的 ±1/2/3 倍标准差带。没有实测 Delta 的 K 线保留为空缺。"
+  },
+  "Method": {
+    "es": "Método",
+    "zh-CN": "方法"
+  },
+  "Minimum open-interest rise (%)": {
+    "es": "Suba mínima del interés abierto (%)",
+    "zh-CN": "未平仓量最小增幅（%）"
+  },
+  "Minimum volume (0 = none)": {
+    "es": "Volumen mínimo (0 = ninguno)",
+    "zh-CN": "最小成交量（0 = 无）"
+  },
+  "Mirror": {
+    "es": "Espejo",
+    "zh-CN": "镜像"
+  },
+  "Most bought at one price": {
+    "es": "Lo máximo comprado en un precio",
+    "zh-CN": "单一价格最大买入量"
+  },
+  "Most sold at one price": {
+    "es": "Lo máximo vendido en un precio",
+    "zh-CN": "单一价格最大卖出量"
+  },
+  "NL/NS: new longs and shorts (open interest + delta, estimate)": {
+    "es": "NL/NS: largos y cortos nuevos (interés abierto + delta, estimación)",
+    "zh-CN": "NL/NS：新增多头与空头（未平仓量 + Delta，估算）"
+  },
+  "Needs an aggregate instrument with both spot and perpetual markets.": {
+    "es": "Necesita un instrumento agregado con mercados spot y perpetuos.",
+    "zh-CN": "需要同时包含现货和永续市场的聚合品种。"
+  },
+  "Negative": {
+    "es": "Negativo",
+    "zh-CN": "负值"
+  },
+  "Net positioning": {
+    "es": "Posicionamiento neto",
+    "zh-CN": "净持仓"
+  },
+  "Net score": {
+    "es": "Puntaje neto",
+    "zh-CN": "净得分"
+  },
+  "New longs": {
+    "es": "Largos nuevos",
+    "zh-CN": "新增多头"
+  },
+  "New longs / shorts": {
+    "es": "Largos / cortos nuevos",
+    "zh-CN": "新增多头 / 空头"
+  },
+  "New shorts": {
+    "es": "Cortos nuevos",
+    "zh-CN": "新增空头"
+  },
+  "No recorded book: enable depth recording in Settings to fill this pane. Gaps are not zero liquidity.": {
+    "es": "No hay libro grabado: active la grabación de profundidad en Ajustes para llenar este panel. Los huecos no son liquidez cero.",
+    "zh-CN": "没有已记录的订单簿：请在设置中启用深度记录以填充此面板。空缺并不代表零流动性。"
+  },
+  "Notifications": {
+    "es": "Avisos",
+    "zh-CN": "通知"
+  },
+  "Notify on a flow burst (10 s)": {
+    "es": "Avisar ante un estallido de flujo (10 s)",
+    "zh-CN": "资金流爆发时通知（10 秒）"
+  },
+  "Notify on a new live absorption": {
+    "es": "Avisar ante una nueva absorción en vivo",
+    "zh-CN": "出现新的实时吸收时通知"
+  },
+  "Notify when a highlighted bar closes": {
+    "es": "Avisar al cerrar una vela destacada",
+    "zh-CN": "突出 K 线收盘时通知"
+  },
+  "Notify when a new one is marked live": {
+    "es": "Avisar cuando se marque una nueva en vivo",
+    "zh-CN": "实时标记新的一个时通知"
+  },
+  "Notify when the book balance (1 %) flips": {
+    "es": "Avisar cuando el balance del libro (1 %) se dé vuelta",
+    "zh-CN": "订单簿平衡（1 %）反转时通知"
+  },
+  "Notify when walls appear or are pulled": {
+    "es": "Avisar cuando aparezcan o se retiren muros",
+    "zh-CN": "挂单墙出现或撤除时通知"
+  },
+  "Notional (price × size, quote currency)": {
+    "es": "Nocional (precio × tamaño, moneda de cotización)",
+    "zh-CN": "名义金额（价格 × 数量，计价货币）"
+  },
+  "Notional (quote currency)": {
+    "es": "Nocional (moneda de cotización)",
+    "zh-CN": "名义金额（计价货币）"
+  },
+  "Notional is price × size in the quote currency; for futures it ignores the contract multiplier.": {
+    "es": "El nocional es precio × tamaño en la moneda de cotización; en futuros ignora el multiplicador del contrato.",
+    "zh-CN": "名义金额 = 价格 × 数量（计价货币）；对期货不考虑合约乘数。"
+  },
+  "Observed long and short liquidation notional per bar (Binance and Bybit live streams), stacked, with bubbles where a bar jumps above the norm. Only periods when the streams were observed are shown; earlier bars are gaps.": {
+    "es": "Nocional observado de liquidaciones de largos y cortos por vela (flujos en vivo de Binance y Bybit), apilado, con burbujas donde una vela salta sobre la norma. Solo se muestran los períodos en que se observaron los flujos; las velas anteriores son huecos.",
+    "zh-CN": "每根 K 线观测到的多头与空头强平名义金额（Binance 与 Bybit 实时数据流），堆叠显示，并在某根 K 线显著高于常态时显示气泡。仅显示数据流被观测到的时段；更早的 K 线为空缺。"
+  },
+  "Off by default. When on, the Liquidation levels study downloads estimated Hyperliquid BTC liquidation levels (HyperTracker position snapshots, binned by levels.hiverust.dev) about once a minute. No account data or credentials are sent; the service sees your IP address. The data is a third-party estimate, not exchange data.": {
+    "es": "Desactivado por defecto. Al activarlo, el estudio Niveles de liquidación descarga aproximadamente una vez por minuto niveles de liquidación estimados de BTC en Hyperliquid (fotos de posiciones de HyperTracker, agrupadas por levels.hiverust.dev). No se envían datos de cuenta ni credenciales; el servicio ve su dirección IP. Los datos son una estimación de terceros, no datos del exchange.",
+    "zh-CN": "默认关闭。开启后，“强平价位”研究约每分钟下载一次 Hyperliquid BTC 的估算强平价位（HyperTracker 仓位快照，由 levels.hiverust.dev 分箱）。不会发送任何账户数据或凭据；该服务可以看到您的 IP 地址。数据为第三方估算，并非交易所数据。"
+  },
+  "On hover, compares resting book notional between the mid price and the mouse with the equally wide band on the other side. Uses the live book, or the latest recorded snapshot.": {
+    "es": "Al pasar el mouse, compara el nocional en reposo del libro entre el precio medio y el mouse con la franja igual de ancha del otro lado. Usa el libro en vivo o la última foto grabada.",
+    "zh-CN": "鼠标悬停时，比较中间价与鼠标之间的挂单名义金额与另一侧等宽区间。使用实时订单簿或最近一次记录的快照。"
+  },
+  "Only levels from (notional, 0 = all)": {
+    "es": "Solo niveles desde (nocional, 0 = todos)",
+    "zh-CN": "仅统计不低于此值的价位（名义金额，0 = 全部）"
+  },
+  "Only levels up to (notional, 0 = no limit)": {
+    "es": "Solo niveles hasta (nocional, 0 = sin límite)",
+    "zh-CN": "仅统计不高于此值的价位（名义金额，0 = 无上限）"
+  },
+  "Only the largest orders of each bar are drawn.": {
+    "es": "Solo se dibujan las órdenes más grandes de cada vela.",
+    "zh-CN": "仅绘制每根 K 线中最大的订单。"
+  },
+  "Open interest change": {
+    "es": "Cambio del interés abierto",
+    "zh-CN": "未平仓量变化"
+  },
+  "Open-interest change": {
+    "es": "Cambio del interés abierto",
+    "zh-CN": "未平仓量变化"
+  },
+  "Order book pressure": {
+    "es": "Presión del libro de órdenes",
+    "zh-CN": "订单簿压力"
+  },
+  "Orders of at least this notional get a ring and always show their size.": {
+    "es": "Las órdenes de al menos este nocional llevan un anillo y siempre muestran su tamaño.",
+    "zh-CN": "名义金额不低于此值的订单会加圆环并始终显示其数量。"
+  },
+  "Per-bar spot and perpetual delta of an aggregate instrument, each as a z-score against its own history, to see whether spot or derivatives drive a move. Needs an aggregate connection with both spot and perpetual markets; unattributed prints are excluded.": {
+    "es": "Delta por vela de los mercados spot y perpetuos de un instrumento agregado, cada uno como puntaje z contra su propia historia, para ver si el movimiento lo empuja el spot o los derivados. Necesita una conexión agregada con mercados spot y perpetuos; las operaciones sin mercado conocido se excluyen.",
+    "zh-CN": "聚合品种中现货与永续市场每根 K 线的 Delta，各自按自身历史计算 z 分数，以判断行情由现货还是衍生品推动。需要同时包含现货和永续市场的聚合连接；无法归属的成交会被排除。"
+  },
+  "Perpetual (z)": {
+    "es": "Perpetuos (z)",
+    "zh-CN": "永续（z）"
+  },
+  "Perpetual leads": {
+    "es": "Lideran los perpetuos",
+    "zh-CN": "永续领先"
+  },
+  "Positive": {
+    "es": "Positivo",
+    "zh-CN": "正值"
+  },
+  "Preceding bars for the mean": {
+    "es": "Velas anteriores para la media",
+    "zh-CN": "计算均值的之前 K 线数"
+  },
+  "Price direction (price / OI quadrants)": {
+    "es": "Dirección del precio (cuadrantes precio / OI)",
+    "zh-CN": "价格方向（价格 / OI 象限）"
+  },
+  "Price: minimum notional": {
+    "es": "Precio: nocional mínimo",
+    "zh-CN": "价格：最低名义金额"
+  },
+  "Price: minimum share of the POC": {
+    "es": "Precio: parte mínima del POC",
+    "zh-CN": "价格：相对 POC 的最低占比"
+  },
+  "Print absorption (heuristic)": {
+    "es": "Absorción de operaciones (heurística)",
+    "zh-CN": "成交吸收（启发式）"
+  },
+  "Print absorption: a heuristic from observed prints, not proof of resting icebergs": {
+    "es": "Absorción de operaciones: una heurística a partir de operaciones observadas, no una prueba de icebergs en reposo",
+    "zh-CN": "成交吸收：基于观测成交的启发式，并不能证明存在冰山挂单"
+  },
+  "Profile range (% each side)": {
+    "es": "Rango del perfil (% a cada lado)",
+    "zh-CN": "分布范围（每侧 %）"
+  },
+  "RSI (bars)": {
+    "es": "RSI (velas)",
+    "zh-CN": "RSI（K 线数）"
+  },
+  "RSI bearish below": {
+    "es": "RSI bajista por debajo de",
+    "zh-CN": "RSI 低于此值看跌"
+  },
+  "RSI bullish above": {
+    "es": "RSI alcista por encima de",
+    "zh-CN": "RSI 高于此值看涨"
+  },
+  "Range %": {
+    "es": "Rango %",
+    "zh-CN": "区间 %"
+  },
+  "Range (high − low)": {
+    "es": "Rango (máximo − mínimo)",
+    "zh-CN": "区间（最高 − 最低）"
+  },
+  "Rank by traded notional over": {
+    "es": "Ordenar por el nocional operado en",
+    "zh-CN": "按此时段的成交名义金额排序"
+  },
+  "Rates six factors (close against an EMA, RSI, volume against its mean, measured aggressor flow, open-interest change and long share of observed liquidations) and writes which side they lean to, with the recent net score. Factors without data do not count. A summary, not a recommendation.": {
+    "es": "Califica seis factores (cierre contra una EMA, RSI, volumen contra su media, flujo agresor medido, cambio del interés abierto y parte de largos en las liquidaciones observadas) y escribe hacia qué lado se inclinan, con el puntaje neto reciente. Los factores sin datos no cuentan. Es un resumen, no una recomendación.",
+    "zh-CN": "评估六个因子（收盘价相对 EMA、RSI、成交量相对均值、实测主动资金流、未平仓量变化以及观测强平中的多头占比），并给出倾向方向及近期净得分。无数据的因子不计入。这是总结，并非建议。"
+  },
+  "Reads each bar's observed footprint and marks the longest buying imbalance stack (at its top), the longest selling stack (at its bottom) and the largest cell above a volume. Each mark is a series with its price for alerts.": {
+    "es": "Lee el footprint observado de cada vela y marca la escalera de desequilibrios compradora más larga (en su borde superior), la vendedora más larga (en su borde inferior) y la celda más grande que supere un volumen. Cada marca es una serie con su precio para las alertas.",
+    "zh-CN": "读取每根 K 线的观测足迹，标记最长的买方失衡堆叠（在其顶部）、最长的卖方堆叠（在其底部）以及超过某成交量的最大单元格。每个标记都是带价格的序列，可用于提醒。"
+  },
+  "Reference bars": {
+    "es": "Velas de referencia",
+    "zh-CN": "参考 K 线数"
+  },
+  "Reference lines": {
+    "es": "Líneas de referencia",
+    "zh-CN": "参考线"
+  },
+  "Rejected aggression (trapped traders heuristic)": {
+    "es": "Agresión rechazada (heurística de traders atrapados)",
+    "zh-CN": "被拒绝的主动成交（被套交易者启发式）"
+  },
+  "Relative volume": {
+    "es": "Volumen relativo",
+    "zh-CN": "相对成交量"
+  },
+  "Relative volume: bars": {
+    "es": "Volumen relativo: velas",
+    "zh-CN": "相对成交量：K 线数"
+  },
+  "Reset the sum each session": {
+    "es": "Reiniciar la suma en cada sesión",
+    "zh-CN": "每个交易时段重置累计"
+  },
+  "Resting bid and ask notional of the recorded book weighted by distance from the best price (half-life in basis points), as two lines or an imbalance. Requires depth recording; bars without a usable recorded book stay gaps.": {
+    "es": "Nocional en reposo de bids y asks del libro grabado pesado por la distancia al mejor precio (vida media en puntos básicos), como dos líneas o como desequilibrio. Requiere grabar la profundidad; las velas sin un libro grabado utilizable quedan como huecos.",
+    "zh-CN": "已记录订单簿的买卖挂单名义金额，按与最优价的距离加权（半衰距离以基点计），显示为两条线或失衡值。需要记录盘口深度；没有可用已记录订单簿的 K 线保留为空缺。"
+  },
+  "Resting book net (0.1 % – 2.5 %)": {
+    "es": "Libro en reposo neto (0,1 % – 2,5 %)",
+    "zh-CN": "挂单净额（0.1 % – 2.5 %）"
+  },
+  "Retail CVD": {
+    "es": "CVD minorista",
+    "zh-CN": "散户 CVD"
+  },
+  "Retail delta": {
+    "es": "Delta minorista",
+    "zh-CN": "散户 Delta"
+  },
+  "Retail: trades up to (notional)": {
+    "es": "Minoristas: operaciones de hasta (nocional)",
+    "zh-CN": "散户：成交不超过（名义金额）"
+  },
+  "Rolling delta": {
+    "es": "Delta móvil",
+    "zh-CN": "滚动 Delta"
+  },
+  "Rolling delta bars": {
+    "es": "Velas del delta móvil",
+    "zh-CN": "滚动 Delta 的 K 线数"
+  },
+  "Row heights": {
+    "es": "Alto de las filas",
+    "zh-CN": "行高"
+  },
+  "Rows": {
+    "es": "Filas",
+    "zh-CN": "行数"
+  },
+  "Rows: derivatives": {
+    "es": "Filas: derivados",
+    "zh-CN": "行：衍生品"
+  },
+  "Rows: footprint": {
+    "es": "Filas: footprint",
+    "zh-CN": "行：足迹"
+  },
+  "Rows: market": {
+    "es": "Filas: mercado",
+    "zh-CN": "行：市场"
+  },
+  "Rows: trades": {
+    "es": "Filas: operaciones",
+    "zh-CN": "行：成交"
+  },
+  "Rows: volume": {
+    "es": "Filas: volumen",
+    "zh-CN": "行：成交量"
+  },
+  "Rule": {
+    "es": "Regla",
+    "zh-CN": "规则"
+  },
+  "Rules": {
+    "es": "Reglas",
+    "zh-CN": "规则"
+  },
+  "Sell trades": {
+    "es": "Operaciones de venta",
+    "zh-CN": "卖出笔数"
+  },
+  "Sellers ahead, {0} to {1}": {
+    "es": "Vendedores adelante, {0} a {1}",
+    "zh-CN": "卖方领先，{0} 比 {1}"
+  },
+  "Selling stack": {
+    "es": "Escalera vendedora",
+    "zh-CN": "卖方堆叠"
+  },
+  "Sells": {
+    "es": "Ventas",
+    "zh-CN": "卖出"
+  },
+  "Short bands (above)": {
+    "es": "Bandas de cortos (arriba)",
+    "zh-CN": "空头区带（上方）"
+  },
+  "Short liquidation level (third-party estimate)": {
+    "es": "Nivel de liquidación de cortos (estimación de terceros)",
+    "zh-CN": "空头强平价位（第三方估算）"
+  },
+  "Short liquidations color": {
+    "es": "Color de las liquidaciones de cortos",
+    "zh-CN": "空头强平颜色"
+  },
+  "Shorts covering": {
+    "es": "Cortos cubren",
+    "zh-CN": "空头回补"
+  },
+  "Shorts within 5 %: {0}": {
+    "es": "Cortos a menos del 5 %: {0}",
+    "zh-CN": "5 % 以内的空头：{0}"
+  },
+  "Shorts {0}×": {
+    "es": "Cortos {0}×",
+    "zh-CN": "空头 {0}×"
+  },
+  "Show both bars (spot and perpetual)": {
+    "es": "Mostrar las dos barras (spot y perpetuos)",
+    "zh-CN": "显示两根柱（现货与永续）"
+  },
+  "Show the board": {
+    "es": "Mostrar el tablero",
+    "zh-CN": "显示面板"
+  },
+  "Show the net positioning line": {
+    "es": "Mostrar la línea del posicionamiento neto",
+    "zh-CN": "显示净持仓线"
+  },
+  "Show totals from the price": {
+    "es": "Mostrar los totales desde el precio",
+    "zh-CN": "显示自当前价格起的合计"
+  },
+  "Signals split, {0} to {1}": {
+    "es": "Señales divididas, {0} a {1}",
+    "zh-CN": "信号分歧，{0} 比 {1}"
+  },
+  "Single-market instrument: use an aggregate connection for one row per exchange.": {
+    "es": "Instrumento de un solo mercado: use una conexión agregada para tener una fila por exchange.",
+    "zh-CN": "单一市场品种：请使用聚合连接以按交易所分行显示。"
+  },
+  "Size shown in": {
+    "es": "Tamaño mostrado en",
+    "zh-CN": "显示数量单位"
+  },
+  "Skip empty opposite cells": {
+    "es": "Omitir celdas contrarias vacías",
+    "zh-CN": "跳过对侧空单元格"
+  },
+  "Smoothing (bars)": {
+    "es": "Suavizado (velas)",
+    "zh-CN": "平滑（K 线数）"
+  },
+  "Smoothing (bars; 0 = off)": {
+    "es": "Suavizado (velas; 0 = desactivado)",
+    "zh-CN": "平滑（K 线数；0 = 关闭）"
+  },
+  "Smoothing (bars; price mode)": {
+    "es": "Suavizado (velas; modo precio)",
+    "zh-CN": "平滑（K 线数；价格模式）"
+  },
+  "Solid: opened · faint: closed (estimate)": {
+    "es": "Lleno: abren · tenue: cierran (estimación)",
+    "zh-CN": "实心：开仓 · 浅色：平仓（估算）"
+  },
+  "Spot (z)": {
+    "es": "Spot (z)",
+    "zh-CN": "现货（z）"
+  },
+  "Spot + perpetual (z)": {
+    "es": "Spot + perpetuos (z)",
+    "zh-CN": "现货 + 永续（z）"
+  },
+  "Spot buying while perpetuals sell: they disagree": {
+    "es": "El spot compra mientras los perpetuos venden: van en contra",
+    "zh-CN": "现货买入而永续卖出：方向相反"
+  },
+  "Spot leads": {
+    "es": "Lidera el spot",
+    "zh-CN": "现货领先"
+  },
+  "Spot selling while perpetuals buy: they disagree": {
+    "es": "El spot vende mientras los perpetuos compran: van en contra",
+    "zh-CN": "现货卖出而永续买入：方向相反"
+  },
+  "Spot versus perpetual flow dominance": {
+    "es": "Dominio del flujo spot contra perpetuos",
+    "zh-CN": "现货与永续资金流主导"
+  },
+  "Stack: consecutive rows": {
+    "es": "Escalera: filas seguidas",
+    "zh-CN": "堆叠：连续行数"
+  },
+  "Stacked imbalances": {
+    "es": "Escaleras de desequilibrios",
+    "zh-CN": "堆叠失衡"
+  },
+  "The liquidation-level service answered HTTP {0}.": {
+    "es": "El servicio de niveles de liquidación respondió HTTP {0}.",
+    "zh-CN": "强平价位服务返回 HTTP {0}。"
+  },
+  "The liquidation-level service is unreachable: {0}": {
+    "es": "No se puede acceder al servicio de niveles de liquidación: {0}",
+    "zh-CN": "无法访问强平价位服务：{0}"
+  },
+  "The liquidation-level service returned an unsupported format.": {
+    "es": "El servicio de niveles de liquidación devolvió un formato no compatible.",
+    "zh-CN": "强平价位服务返回了不支持的格式。"
+  },
+  "Third-party data": {
+    "es": "Datos de terceros",
+    "zh-CN": "第三方数据"
+  },
+  "Third-party estimate": {
+    "es": "Estimación de terceros",
+    "zh-CN": "第三方估算"
+  },
+  "Third-party liquidation levels (estimate)": {
+    "es": "Niveles de liquidación de terceros (estimación)",
+    "zh-CN": "第三方强平价位（估算）"
+  },
+  "Third-party liquidation levels are off. Enable them in Settings → Third-party data.": {
+    "es": "Los niveles de liquidación de terceros están desactivados. Actívelos en Ajustes → Datos de terceros.",
+    "zh-CN": "第三方强平价位已关闭。请在 设置 → 第三方数据 中启用。"
+  },
+  "Third-party liquidation levels were turned off.": {
+    "es": "Se desactivaron los niveles de liquidación de terceros.",
+    "zh-CN": "第三方强平价位已被关闭。"
+  },
+  "Threshold (notional; 0 = automatic)": {
+    "es": "Umbral (nocional; 0 = automático)",
+    "zh-CN": "阈值（名义金额；0 = 自动）"
+  },
+  "Tier 1 from (deviations)": {
+    "es": "Nivel 1 desde (desvíos)",
+    "zh-CN": "第 1 档起点（标准差）"
+  },
+  "Tier 2 from (deviations)": {
+    "es": "Nivel 2 desde (desvíos)",
+    "zh-CN": "第 2 档起点（标准差）"
+  },
+  "Tier 3 from (deviations)": {
+    "es": "Nivel 3 desde (desvíos)",
+    "zh-CN": "第 3 档起点（标准差）"
+  },
+  "Total liquidated": {
+    "es": "Total liquidado",
+    "zh-CN": "强平合计"
+  },
+  "Trapped": {
+    "es": "Atrapados",
+    "zh-CN": "被套"
+  },
+  "Trapped buyers average (heuristic)": {
+    "es": "Promedio de compradores atrapados (heurística)",
+    "zh-CN": "被套买方均价（启发式）"
+  },
+  "Trapped buyers heuristic: wick with {0} net rejected": {
+    "es": "Heurística de compradores atrapados: mecha con {0} neto rechazada",
+    "zh-CN": "被套买方启发式：净额 {0} 的影线被拒绝"
+  },
+  "Trapped sellers average (heuristic)": {
+    "es": "Promedio de vendedores atrapados (heurística)",
+    "zh-CN": "被套卖方均价（启发式）"
+  },
+  "Trapped sellers heuristic: wick with {0} net rejected": {
+    "es": "Heurística de vendedores atrapados: mecha con {0} neto rechazada",
+    "zh-CN": "被套卖方启发式：净额 {0} 的影线被拒绝"
+  },
+  "Unattributed notional (unknown market): {0}": {
+    "es": "Nocional sin atribuir (mercado desconocido): {0}",
+    "zh-CN": "未归属名义金额（未知市场）：{0}"
+  },
+  "Unit": {
+    "es": "Unidad",
+    "zh-CN": "单位"
+  },
+  "Unit (volume, delta, CVD)": {
+    "es": "Unidad (volumen, delta, CVD)",
+    "zh-CN": "单位（成交量、Delta、CVD）"
+  },
+  "Volume against its mean": {
+    "es": "Volumen contra su media",
+    "zh-CN": "成交量相对均值"
+  },
+  "Volume change %": {
+    "es": "Cambio del volumen %",
+    "zh-CN": "成交量变化 %"
+  },
+  "Volume concentration bubbles": {
+    "es": "Burbujas de concentración de volumen",
+    "zh-CN": "成交量集中气泡"
+  },
+  "Volume spike (× mean)": {
+    "es": "Pico de volumen (× media)",
+    "zh-CN": "成交量激增（× 均值）"
+  },
+  "Volume tiers 1 / 2 / 3: {0} / {1} / {2}": {
+    "es": "Niveles de volumen 1 / 2 / 3: {0} / {1} / {2}",
+    "zh-CN": "成交量档位 1 / 2 / 3：{0} / {1} / {2}"
+  },
+  "Wall from (notional, within 1 %)": {
+    "es": "Muro desde (nocional, dentro del 1 %)",
+    "zh-CN": "挂单墙阈值（名义金额，1 % 以内）"
+  },
+  "Wall of {0} at {1}": {
+    "es": "Muro de {0} en {1}",
+    "zh-CN": "{1} 处出现 {0} 的挂单墙"
+  },
+  "Wall pulled at {0} before price reached it": {
+    "es": "Muro retirado en {0} antes de que llegara el precio",
+    "zh-CN": "{0} 处的挂单墙在价格到达前被撤除"
+  },
+  "Warn when spot and perpetual disagree from (notional)": {
+    "es": "Avisar cuando spot y perpetuos vayan en contra desde (nocional)",
+    "zh-CN": "现货与永续方向相反超过此值时提示（名义金额）"
+  },
+  "Weighted ask": {
+    "es": "Ask ponderado",
+    "zh-CN": "加权卖盘"
+  },
+  "Weighted bid": {
+    "es": "Bid ponderado",
+    "zh-CN": "加权买盘"
+  },
+  "Whale CVD": {
+    "es": "CVD de ballenas",
+    "zh-CN": "巨鲸 CVD"
+  },
+  "Whale delta": {
+    "es": "Delta de ballenas",
+    "zh-CN": "巨鲸 Delta"
+  },
+  "Whale from (notional; 0 = off)": {
+    "es": "Ballena desde (nocional; 0 = desactivado)",
+    "zh-CN": "巨鲸阈值（名义金额；0 = 关闭）"
+  },
+  "Whales: trades from (notional)": {
+    "es": "Ballenas: operaciones desde (nocional)",
+    "zh-CN": "巨鲸：成交不低于（名义金额）"
+  },
+  "Where open Hyperliquid BTC positions would be liquidated, from a third-party service's published snapshot (an estimate, not exchange data): longs below, shorts above, to the right of the last bar. Requires opting in under Settings → Third-party data.": {
+    "es": "Dónde se liquidarían las posiciones abiertas de BTC en Hyperliquid, según la foto publicada por un servicio de terceros (una estimación, no datos del exchange): largos abajo, cortos arriba, a la derecha de la última vela. Requiere activarlo en Ajustes → Datos de terceros.",
+    "zh-CN": "根据第三方服务发布的快照（估算，并非交易所数据），显示 Hyperliquid BTC 未平仓位的强平位置：多头在下方、空头在上方，绘制于最后一根 K 线右侧。需在 设置 → 第三方数据 中主动启用。"
+  },
+  "Window (bars)": {
+    "es": "Ventana (velas)",
+    "zh-CN": "窗口（K 线数）"
+  },
+  "Window (ms)": {
+    "es": "Ventana (ms)",
+    "zh-CN": "窗口（毫秒）"
+  },
+  "asks {0} · {1}": {
+    "es": "asks {0} · {1}",
+    "zh-CN": "卖盘 {0} · {1}"
+  },
+  "avg trade": {
+    "es": "op. prom.",
+    "zh-CN": "平均成交"
+  },
+  "bids {0} · {1}": {
+    "es": "bids {0} · {1}",
+    "zh-CN": "买盘 {0} · {1}"
+  },
+  "book net": {
+    "es": "libro neto",
+    "zh-CN": "挂单净额"
+  },
+  "buy %": {
+    "es": "compras %",
+    "zh-CN": "买入 %"
+  },
+  "buy vol": {
+    "es": "vol. compra",
+    "zh-CN": "买入量"
+  },
+  "cvd retail": {
+    "es": "cvd minoristas",
+    "zh-CN": "散户 cvd"
+  },
+  "cvd whales": {
+    "es": "cvd ballenas",
+    "zh-CN": "巨鲸 cvd"
+  },
+  "delta %": {
+    "es": "delta %",
+    "zh-CN": "delta %"
+  },
+  "delta {0} σ": {
+    "es": "delta {0} σ",
+    "zh-CN": "delta {0} σ"
+  },
+  "imb #": {
+    "es": "deseq. #",
+    "zh-CN": "失衡数"
+  },
+  "k (deviations above the mean)": {
+    "es": "k (desvíos sobre la media)",
+    "zh-CN": "k（高于均值的标准差倍数）"
+  },
+  "leans to buying": {
+    "es": "se inclina a comprar",
+    "zh-CN": "倾向买入"
+  },
+  "leans to selling": {
+    "es": "se inclina a vender",
+    "zh-CN": "倾向卖出"
+  },
+  "liq S−L": {
+    "es": "liq C−L",
+    "zh-CN": "强平 空−多"
+  },
+  "max buy": {
+    "es": "máx. compra",
+    "zh-CN": "最大买入"
+  },
+  "max sell": {
+    "es": "máx. venta",
+    "zh-CN": "最大卖出"
+  },
+  "no lean": {
+    "es": "sin inclinación",
+    "zh-CN": "无倾向"
+  },
+  "oi chg": {
+    "es": "cambio OI",
+    "zh-CN": "OI 变化"
+  },
+  "range %": {
+    "es": "rango %",
+    "zh-CN": "区间 %"
+  },
+  "sell vol": {
+    "es": "vol. venta",
+    "zh-CN": "卖出量"
+  },
+  "the other side holds {0}× more": {
+    "es": "el otro lado tiene {0}× más",
+    "zh-CN": "另一侧多 {0} 倍"
+  },
+  "this side holds {0}× more": {
+    "es": "este lado tiene {0}× más",
+    "zh-CN": "这一侧多 {0} 倍"
+  },
+  "vol chg": {
+    "es": "cambio vol.",
+    "zh-CN": "量变化"
+  },
+  "volume {0} σ": {
+    "es": "volumen {0} σ",
+    "zh-CN": "成交量 {0} σ"
+  },
+  "vwap dist": {
+    "es": "dist. vwap",
+    "zh-CN": "vwap 距离"
+  },
+  "{0} % longs": {
+    "es": "{0} % largos",
+    "zh-CN": "多头 {0} %"
+  },
+  "{0} bars modelled, {1} skipped (no open interest or measured delta)": {
+    "es": "{0} velas modeladas, {1} omitidas (sin interés abierto o delta medido)",
+    "zh-CN": "已建模 {0} 根 K 线，跳过 {1} 根（无未平仓量或实测 Delta）"
+  },
+  "{0} · positions {1} min old · {2}": {
+    "es": "{0} · posiciones de hace {1} min · {2}",
+    "zh-CN": "{0} · 仓位数据为 {1} 分钟前 · {2}"
+  },
+  "Δ retail": {
+    "es": "Δ minoristas",
+    "zh-CN": "Δ 散户"
+  },
+  "Δ whales": {
+    "es": "Δ ballenas",
+    "zh-CN": "Δ 巨鲸"
   }
 }
