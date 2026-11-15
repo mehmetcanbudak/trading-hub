@@ -28,6 +28,10 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
     private readonly NumericUpDown _bars = new() { Name = "ChartAlertBars", Minimum = 1, Maximum = 1000, Value = 1, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _trigger = new() { Name = "ChartAlertTrigger", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _message = new() { Name = "ChartAlertMessage", Watermark = "Optional note added to the notification", MaxLength = MaxMessageLength };
+    private readonly ComboBox _expiry = new() { Name = "ChartAlertExpiry", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly CalendarDatePicker _expiryDate = new() { Name = "ChartAlertExpiryDate", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly TimePicker _expiryTime = new() { Name = "ChartAlertExpiryTime", ClockIdentifier = "24HourClock", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Control _expiryCustom;
     private readonly TextBlock _error = new() { Name = "ChartAlertError", TextWrapping = TextWrapping.Wrap, Foreground = Ui.Warn };
     private readonly StackPanel _list = new() { Name = "ChartAlertList", Spacing = 4 };
     private readonly Control _rightRow, _lowerRow, _percentRow;
@@ -53,6 +57,15 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
         foreach (var t in Enum.GetValues<ChartAlertTrigger>()) _trigger.Items.Add(new ComboBoxItem { Content = ChartAlert.TriggerText(t), Tag = t });
         _left.SelectedIndex = 0;
         _trigger.SelectedIndex = (int)ChartAlertTrigger.OncePerBar;
+        foreach (var (text, span) in new (string, TimeSpan?)[] { ("Never expires", null), ("1 hour", TimeSpan.FromHours(1)), ("1 day", TimeSpan.FromDays(1)),
+                     ("1 week", TimeSpan.FromDays(7)), ("30 days", TimeSpan.FromDays(30)), ("Until a date and time", TimeSpan.Zero) })
+            _expiry.Items.Add(new ComboBoxItem { Content = text, Tag = span });
+        _expiry.SelectedIndex = 0;
+        var tomorrow = DateTime.Now.AddDays(1);
+        _expiryDate.SelectedDate = tomorrow.Date;
+        _expiryTime.SelectedTime = new TimeSpan(tomorrow.Hour, 0, 0);
+        _expiryCustom = Ui.Row(8, _expiryDate, _expiryTime);
+        _expiry.SelectionChanged += (_, _) => UpdateVisibility();
         _condition.SelectedIndex = (int)(condition ?? ChartAlertCondition.Crossing);
 
         decimal last = model.Data.LastPrice != 0 ? model.Data.LastPrice : model.Series.Count > 0 ? model.Instrument.FromTicks(model.Series[^1].CloseTicks) : 0;
@@ -86,7 +99,9 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
                 _rightRow,
                 _lowerRow,
                 _percentRow,
-                Ui.Field("Trigger", _trigger, "Alerts arm on the bar forming when they are created or loaded: history never fires them."),
+                Ui.Field("Trigger", _trigger, "Alerts arm on the bar forming when they are created or loaded: history never fires them. Every time fires at most once a minute."),
+                Ui.Field("Expires", _expiry, "Expired alerts stay listed but are no longer checked (local time)."),
+                _expiryCustom,
                 Ui.Field("Message", _message, "Shown in the app; sent to webhook or Telegram only if you approved that destination for this alert kind (Alerts window)."),
                 _error,
                 new Separator { Margin = new Thickness(0, 6) },
@@ -153,8 +168,19 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
         _percentRow.IsVisible = percent;
         _rightRow.IsVisible = !percent;
         _lowerRow.IsVisible = ChartAlert.IsChannel(Condition);
+        _expiryCustom.IsVisible = _expiry.SelectedItem is ComboBoxItem { Tag: TimeSpan custom } && custom == TimeSpan.Zero;
         _rightValue.IsVisible = Target(_right) == null;
         _lowerValue.IsVisible = Target(_lower) == null;
+    }
+
+    /// <summary>The chosen expiry in UTC (presets count from now; the custom date and time are local).</summary>
+    private DateTime? ExpiryUtc()
+    {
+        if (_expiry.SelectedItem is not ComboBoxItem { Tag: TimeSpan span }) return null;
+        if (span > TimeSpan.Zero) return DateTime.UtcNow + span;
+        var date = _expiryDate.SelectedDate?.Date ?? DateTime.Today;
+        var local = DateTime.SpecifyKind(date + (_expiryTime.SelectedTime ?? TimeSpan.Zero), DateTimeKind.Local);
+        return local.ToUniversalTime();
     }
 
     /// <summary>The alert the form describes, or null with the reason shown.</summary>
@@ -167,6 +193,12 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
             return null;
         }
 
+        if (ExpiryUtc() is { } expires && expires <= DateTime.UtcNow)
+        {
+            _error.Text = "The expiry is in the past.";
+            return null;
+        }
+
         var condition = Condition;
         var alert = new ChartAlert
         {
@@ -174,6 +206,7 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
             Condition = condition,
             Trigger = _trigger.SelectedItem is ComboBoxItem { Tag: ChartAlertTrigger t } ? t : ChartAlertTrigger.OncePerBar,
             Message = (_message.Text ?? "").Trim(),
+            ExpiresUtc = ExpiryUtc(),
         };
         if (ChartAlert.IsPercent(condition))
         {
@@ -230,7 +263,9 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
         {
             var text = new TextBlock
             {
-                Text = a.Describe(translate: true) + " · " + UiText(ChartAlert.TriggerText(a.Trigger)) + (a.Active ? "" : " · " + UiText("paused")),
+                Text = a.Describe(translate: true) + " · " + UiText(ChartAlert.TriggerText(a.Trigger)) +
+                    (a.IsExpired(DateTime.UtcNow) ? " · " + UiText("expired") : !a.Active ? " · " + UiText("paused") :
+                        a.ExpiresUtc is { } until ? " · " + UiText($"until {until.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture)}") : ""),
                 TextWrapping = TextWrapping.Wrap,
                 VerticalAlignment = VerticalAlignment.Center,
                 Opacity = a.Active ? 1 : 0.55,

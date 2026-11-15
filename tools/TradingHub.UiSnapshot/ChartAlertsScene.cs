@@ -216,6 +216,33 @@ internal static class ChartAlertsScene
             Until(() => !model.Alerts.Contains(channelAlert), "removing the channel removes its alert");
             Check(model.Alerts.Contains(lineAlert), "the other alert stays");
             Shot("after-removal");
+
+            // ---- level state + every time + expiry through the dialog; an expired alert is listed and never fires
+            var stateDialog = new ChartAlertDialog(model, ChartAlertOperand.Fixed(108), null, ChartAlertCondition.GreaterThan);
+            stateDialog.Show(window);
+            pump(0.3);
+            var triggerBox = stateDialog.GetVisualDescendants().OfType<ComboBox>().First(c => c.Name == "ChartAlertTrigger");
+            triggerBox.SelectedIndex = (int)ChartAlertTrigger.EveryTime;
+            var expiryBox = stateDialog.GetVisualDescendants().OfType<ComboBox>().First(c => c.Name == "ChartAlertExpiry");
+            expiryBox.SelectedIndex = 2; // 1 day
+            stateDialog.Create();
+            var above = model.Alerts.LastOrDefault(a => a.Condition == ChartAlertCondition.GreaterThan);
+            Check(above is { Trigger: ChartAlertTrigger.EveryTime, ExpiresUtc: not null } && above.ExpiresUtc > DateTime.UtcNow.AddHours(23),
+                "the dialog creates a greater-than, every-time alert expiring in a day");
+            var expired = new ChartAlert { Condition = ChartAlertCondition.LessThan, Right = ChartAlertOperand.Fixed(150), ExpiresUtc = DateTime.UtcNow.AddMinutes(-1) };
+            model.Alerts.Add(expired);
+            stateDialog.Close();
+            var listDialog = new ChartAlertDialog(model);
+            listDialog.Show(window);
+            pump(0.3);
+            Shot("dialog-states", listDialog);
+            listDialog.Close();
+            if (above == null) return failures;
+            feed.PushTrades(source, new Trade(++id, next.AddSeconds(70), 110, 1, TradeSide.Buy));
+            Until(() => ChartAlertEvents(above.Id) == 1, "entering above 108 fires the level-state alert");
+            pump(0.5);
+            Check(ChartAlertEvents(expired.Id) == 0, "the expired alert never fires");
+            Check(ChartAlertEvents(above.Id) == 1, "staying above does not fire again");
             return failures;
         }
         catch (Exception error)

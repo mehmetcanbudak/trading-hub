@@ -132,6 +132,10 @@ public sealed partial class ChartDrawing
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsAlert => Alert || Text == "alerta";
 
+    /// <summary>The user label: empty for the legacy price-alert marker text.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayText => Text == "alerta" ? "" : Text;
+
     public int RequiredPoints => Kind switch
     {
         DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.VerticalLine or DrawingKind.Text or DrawingKind.CrossLine => 1,

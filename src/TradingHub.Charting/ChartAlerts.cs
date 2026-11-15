@@ -18,17 +18,23 @@ public enum ChartAlertCondition
     ExitingChannel,
     MovingUpPercent,
     MovingDownPercent,
+    GreaterThan,
+    LessThan,
+    InsideChannel,
+    OutsideChannel,
 }
 
 /// <summary>
 /// When a met condition fires. Once: the first time, then the alert switches off. Once per bar: at most once in each bar,
-/// as soon as it is met on the forming bar. Once per bar close: only on bars that have closed.
+/// as soon as it is met on the forming bar. Once per bar close: only on bars that have closed. Every time: each time the
+/// condition becomes met, but never twice within <see cref="ChartAlert.EveryTimeMinimumInterval"/>.
 /// </summary>
 public enum ChartAlertTrigger
 {
     Once,
     OncePerBar,
     OncePerBarClose,
+    EveryTime,
 }
 
 /// <summary>Where an alert operand takes its value from.</summary>
@@ -123,6 +129,17 @@ public sealed class ChartAlert
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime? LastFiredUtc { get; set; }
 
+    /// <summary>After this instant (UTC) the alert is expired: listed as such and no longer evaluated. Null = never.</summary>
+    public DateTime? ExpiresUtc { get; set; }
+
+    /// <summary>
+    /// "Every time" never fires twice within this interval, so a line flapping around the price cannot flood the external
+    /// destinations; a firing suppressed by it is skipped, not delayed.
+    /// </summary>
+    public static readonly TimeSpan EveryTimeMinimumInterval = TimeSpan.FromMinutes(1);
+
+    public bool IsExpired(DateTime nowUtc) => ExpiresUtc is { } expires && nowUtc >= expires;
+
     // evaluation state (not persisted): an alert arms on the bar forming when it is created or loaded and never fires for
     // what happened before that, so loading history, restarting or editing never replays old signals
     internal long ArmedBar = long.MinValue;
@@ -130,10 +147,16 @@ public sealed class ChartAlert
     internal bool? LastState;
     internal long FiredBar = long.MinValue;
     internal long ClosedBar = long.MinValue;
+    internal bool? ClosedState;
 
-    public static bool IsChannel(ChartAlertCondition c) => c is ChartAlertCondition.EnteringChannel or ChartAlertCondition.ExitingChannel;
+    public static bool IsChannel(ChartAlertCondition c) =>
+        c is ChartAlertCondition.EnteringChannel or ChartAlertCondition.ExitingChannel or ChartAlertCondition.InsideChannel or ChartAlertCondition.OutsideChannel;
 
     public static bool IsPercent(ChartAlertCondition c) => c is ChartAlertCondition.MovingUpPercent or ChartAlertCondition.MovingDownPercent;
+
+    /// <summary>Level-state conditions (greater/less than, inside/outside a channel): they fire on the transition into the state.</summary>
+    public static bool IsState(ChartAlertCondition c) =>
+        c is ChartAlertCondition.GreaterThan or ChartAlertCondition.LessThan or ChartAlertCondition.InsideChannel or ChartAlertCondition.OutsideChannel;
 
     public IEnumerable<ChartAlertOperand> Operands()
     {
@@ -153,7 +176,7 @@ public sealed class ChartAlert
     public void Rearm()
     {
         ArmedBar = StateBar = FiredBar = ClosedBar = long.MinValue;
-        LastState = null;
+        LastState = ClosedState = null;
     }
 
     public static string ConditionText(ChartAlertCondition c) => c switch
@@ -165,14 +188,19 @@ public sealed class ChartAlert
         ChartAlertCondition.EnteringChannel => "Entering channel",
         ChartAlertCondition.ExitingChannel => "Exiting channel",
         ChartAlertCondition.MovingUpPercent => "Moving up %",
-        _ => "Moving down %",
+        ChartAlertCondition.MovingDownPercent => "Moving down %",
+        ChartAlertCondition.GreaterThan => "Greater than",
+        ChartAlertCondition.LessThan => "Less than",
+        ChartAlertCondition.InsideChannel => "Inside channel",
+        _ => "Outside channel",
     };
 
     public static string TriggerText(ChartAlertTrigger t) => t switch
     {
         ChartAlertTrigger.Once => "Only once",
         ChartAlertTrigger.OncePerBar => "Once per bar",
-        _ => "Once per bar close",
+        ChartAlertTrigger.OncePerBarClose => "Once per bar close",
+        _ => "Every time (at most once a minute)",
     };
 
     /// <summary>English description; <paramref name="translate"/> renders it in the UI language.</summary>
@@ -191,7 +219,11 @@ public sealed class ChartAlert
             ChartAlertCondition.EnteringChannel => T($"{L(Left)} enters the channel {L(Lower)} – {L(Right)}"),
             ChartAlertCondition.ExitingChannel => T($"{L(Left)} exits the channel {L(Lower)} – {L(Right)}"),
             ChartAlertCondition.MovingUpPercent => T($"{L(Left)} moves up {pct}% in {bars} bars"),
-            _ => T($"{L(Left)} moves down {pct}% in {bars} bars"),
+            ChartAlertCondition.MovingDownPercent => T($"{L(Left)} moves down {pct}% in {bars} bars"),
+            ChartAlertCondition.GreaterThan => T($"{L(Left)} greater than {L(Right)}"),
+            ChartAlertCondition.LessThan => T($"{L(Left)} less than {L(Right)}"),
+            ChartAlertCondition.InsideChannel => T($"{L(Left)} inside the channel {L(Lower)} – {L(Right)}"),
+            _ => T($"{L(Left)} outside the channel {L(Lower)} – {L(Right)}"),
         };
     }
 }
@@ -331,8 +363,7 @@ public static class ChartAlertEngine
         var parts = d.AlertParts();
         if (parts.Count == 0) return;
         int n = count[d.Kind] = (count.TryGetValue(d.Kind, out var c) ? c : 0) + 1;
-        // a legacy price-alert line carries a marker text instead of a label (IsAlert without the Alert flag)
-        string text = d.IsAlert && !d.Alert ? "" : d.Text;
+        string text = d.DisplayText;
         string name = text.Length > 0 ? text : ChartDrawing.KindName(d.Kind) + (n > 1 ? " " + n.ToString(CultureInfo.InvariantCulture) : "");
         foreach (var (part, partName) in parts)
             res.Add(new ChartAlertOperand { Source = ChartAlertSource.Drawing, Drawing = d.Id.ToString("N"), Field = part, Label = parts.Count > 1 ? $"{name} · {partName}" : name });
@@ -544,7 +575,13 @@ public static class ChartAlertEngine
             if (l0 > r0) (l0, r0) = (r0, l0);
             if (l1 > r1) (l1, r1) = (r1, l1);
             bool inside0 = x0 >= l0 && x0 <= r0, inside1 = x1 >= l1 && x1 <= r1;
-            return a.Condition == ChartAlertCondition.EnteringChannel ? has1 && !inside1 && inside0 : has1 && inside1 && !inside0;
+            return a.Condition switch
+            {
+                ChartAlertCondition.EnteringChannel => has1 && !inside1 && inside0,
+                ChartAlertCondition.ExitingChannel => has1 && inside1 && !inside0,
+                ChartAlertCondition.InsideChannel => inside0,
+                _ => !inside0,
+            };
         }
 
         return a.Condition switch
@@ -552,6 +589,8 @@ public static class ChartAlertEngine
             ChartAlertCondition.Crossing => has1 && ((x1 <= r1 && x0 > r0) || (x1 >= r1 && x0 < r0)),
             ChartAlertCondition.CrossingUp => has1 && x1 <= r1 && x0 > r0,
             ChartAlertCondition.CrossingDown => has1 && x1 >= r1 && x0 < r0,
+            ChartAlertCondition.GreaterThan => x0 > r0,
+            ChartAlertCondition.LessThan => x0 < r0,
             _ => Touches(model, a, bar, x0, r0, has1, x1, r1),
         };
     }
@@ -643,7 +682,8 @@ public static class ChartAlertEngine
     /// <summary>
     /// Checks the active alerts on the latest bars and returns those that fire now. Nothing is evaluated while history is
     /// still loading or being aggregated; an alert arms on the bar forming when first evaluated and only fires on a change
-    /// observed after arming, so history and restarts never fire. Once-alerts switch off when they fire.
+    /// observed after arming, so history and restarts never fire. Level-state conditions fire on the transition into the
+    /// state. Once-alerts switch off when they fire; expired alerts are skipped.
     /// </summary>
     public static List<ChartAlertFire> Evaluate(ChartModel model, DateTime nowUtc)
     {
@@ -653,9 +693,16 @@ public static class ChartAlertEngine
         long forming = model.Series[n - 1].Time.Ticks;
         foreach (var a in model.Alerts)
         {
-            if (!a.Active) continue;
-            if (a.ArmedBar == long.MinValue) a.ArmedBar = forming;
+            if (!a.Active || a.IsExpired(nowUtc)) continue;
+            bool level = ChartAlert.IsState(a.Condition);
             bool onClose = a.Trigger == ChartAlertTrigger.OncePerBarClose;
+            if (a.ArmedBar == long.MinValue)
+            {
+                a.ArmedBar = forming;
+                // a level-state alert closing on the bar: its state when armed is the reference for the first close
+                if (level && onClose) a.ClosedState = Check(model, a, n - 1);
+            }
+
             int bar = onClose ? n - 2 : n - 1;
             long barKey = model.Series[bar].Time.Ticks;
             if (barKey < a.ArmedBar) continue; // closed before the alert existed
@@ -666,19 +713,29 @@ public static class ChartAlertEngine
                 var closed = Check(model, a, bar);
                 if (closed == null) continue;
                 a.ClosedBar = barKey;
-                fire = closed == true;
+                bool? before = a.ClosedState;
+                a.ClosedState = closed;
+                fire = closed == true && (!level || before == false);
             }
             else
             {
                 var state = Check(model, a, bar);
                 if (state == null) continue;
-                bool first = a.StateBar != barKey;
-                bool was = !first && a.LastState == true;
+                bool never = a.StateBar == long.MinValue;
+                bool sameBar = a.StateBar == barKey;
+                // a level state carries over between bars; an event (a cross, a touch) belongs to its bar
+                bool was = (level ? !never : sameBar) && a.LastState == true;
                 a.StateBar = barKey;
                 a.LastState = state;
-                // on the arming bar the first look only records the state: a crossing that happened before arming is history
-                if (barKey == a.ArmedBar && first) continue;
-                fire = state == true && a.FiredBar != barKey && (barKey != a.ArmedBar || !was);
+                // the first look only records the state: what held before arming is history
+                if (level ? never : barKey == a.ArmedBar && !sameBar) continue;
+                bool entered = state == true && !was;
+                fire = a.Trigger switch
+                {
+                    ChartAlertTrigger.EveryTime => entered && (a.LastFiredUtc is not { } last || nowUtc - last >= ChartAlert.EveryTimeMinimumInterval),
+                    _ when level => entered && a.FiredBar != barKey,
+                    _ => state == true && a.FiredBar != barKey && (barKey != a.ArmedBar || !was),
+                };
             }
 
             if (!fire) continue;
@@ -686,7 +743,10 @@ public static class ChartAlertEngine
             a.LastFiredUtc = nowUtc;
             if (a.Trigger == ChartAlertTrigger.Once) a.Active = false;
             var time = model.Series[bar].Time;
-            fired.Add(new ChartAlertFire(a, time, string.Concat("chart:", a.Id, ":", time.Ticks.ToString(CultureInfo.InvariantCulture))));
+            string id = string.Concat("chart:", a.Id, ":", time.Ticks.ToString(CultureInfo.InvariantCulture));
+            // every-time firings can repeat within a bar: each gets its own stable id
+            if (a.Trigger == ChartAlertTrigger.EveryTime) id = string.Concat(id, ":", nowUtc.Ticks.ToString(CultureInfo.InvariantCulture));
+            fired.Add(new ChartAlertFire(a, time, id));
         }
 
         return fired;

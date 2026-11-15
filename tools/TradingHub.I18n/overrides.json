@@ -16066,5 +16066,73 @@
   "{0} moves up {1}% in {2} bars": {
     "es": "{0} sube {1}% en {2} velas",
     "zh-CN": "{0} 在 {2} 根K线内上涨 {1}%"
+  },
+  "Alerts arm on the bar forming when they are created or loaded: history never fires them. Every time fires at most once a minute.": {
+    "es": "Las alertas se activan en la vela en formación al crearlas o cargarlas: el historial nunca las dispara. «Cada vez» se dispara como máximo una vez por minuto.",
+    "zh-CN": "提醒在创建或加载时于正在形成的K线上启用：历史数据永远不会触发它们。“每次”最多每分钟触发一次。"
+  },
+  "Every time (at most once a minute)": {
+    "es": "Cada vez (como máximo una vez por minuto)",
+    "zh-CN": "每次（最多每分钟一次）"
+  },
+  "Expired alerts stay listed but are no longer checked (local time).": {
+    "es": "Las alertas vencidas siguen en la lista pero ya no se revisan (hora local).",
+    "zh-CN": "已过期的提醒仍会列出，但不再检查（本地时间）。"
+  },
+  "Expires": {
+    "es": "Vence",
+    "zh-CN": "到期"
+  },
+  "Greater than": {
+    "es": "Mayor que",
+    "zh-CN": "大于"
+  },
+  "Inside channel": {
+    "es": "Dentro del canal",
+    "zh-CN": "在通道内"
+  },
+  "Less than": {
+    "es": "Menor que",
+    "zh-CN": "小于"
+  },
+  "Never expires": {
+    "es": "Nunca vence",
+    "zh-CN": "永不到期"
+  },
+  "Outside channel": {
+    "es": "Fuera del canal",
+    "zh-CN": "在通道外"
+  },
+  "The expiry is in the past.": {
+    "es": "El vencimiento ya pasó.",
+    "zh-CN": "到期时间已过。"
+  },
+  "Until a date and time": {
+    "es": "Hasta una fecha y hora",
+    "zh-CN": "直到某个日期和时间"
+  },
+  "until {0}": {
+    "es": "hasta {0}",
+    "zh-CN": "至 {0}"
+  },
+  "expired": {
+    "es": "vencida",
+    "zh-CN": "已过期"
+  },
+  "{0} greater than {1}": {
+    "es": "{0} mayor que {1}",
+    "zh-CN": "{0} 大于 {1}"
+  },
+  "{0} inside the channel {1} – {2}": {
+    "es": "{0} dentro del canal {1} – {2}",
+    "zh-CN": "{0} 在通道 {1} – {2} 内"
+  },
+  "{0} less than {1}": {
+    "es": "{0} menor que {1}",
+    "zh-CN": "{0} 小于 {1}"
+  },
+  "{0} outside the channel {1} – {2}": {
+    "es": "{0} fuera del canal {1} – {2}",
+    "zh-CN": "{0} 在通道 {1} – {2} 外"
   }
 }
