@@ -24,7 +24,7 @@ public enum DrawingKind
     FixedRangeProfile = 13,
 
     // Drawings persist this enum as its number: new kinds take explicit values at the end and never renumber.
-    // 14 is reserved for the parallel channel.
+    ParallelChannel = 14,
     Ellipse = 15,
     Arrow = 16,
     Path = 17,
@@ -132,6 +132,10 @@ public sealed partial class ChartDrawing
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsAlert => Alert || Text == "alerta";
 
+    /// <summary>The user label: empty for the legacy price-alert marker text.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayText => Text == "alerta" ? "" : Text;
+
     public int RequiredPoints => Kind switch
     {
         DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.VerticalLine or DrawingKind.Text or DrawingKind.CrossLine => 1,
@@ -159,6 +163,7 @@ public sealed partial class ChartDrawing
         DrawingKind.LongPosition => "Long position",
         DrawingKind.ShortPosition => "Short position",
         DrawingKind.AnchoredVwap => "Anchored VWAP",
+        DrawingKind.ParallelChannel => "Parallel channel",
         DrawingKind.FixedRangeProfile => "Fixed-range volume / delta profile",
         DrawingKind.Ellipse => "Ellipse",
         DrawingKind.Arrow => "Arrow",
@@ -231,6 +236,7 @@ public sealed partial class ChartDrawing
     /// </summary>
     public void MoveHandle(int handle, ChartPoint p)
     {
+        if (MoveChannelHandle(handle, p)) return;
         if (IsPosition && Points.Count >= 3)
         {
             switch (handle)
@@ -276,29 +282,8 @@ public sealed partial class ChartDrawing
     // ------------------------------------------------------------------ coordenadas
 
     /// <summary>X de un instante (interpola entre velas y extrapola al futuro).</summary>
-    public static float XOf(ChartLayout layout, CandleSeries series, DateTime time)
-    {
-        if (series.Count == 0) return layout.Plot.Right;
-        var lastTime = series[^1].Time;
-        if (time > lastTime)
-        {
-            var dur = series.Period.ApproxDuration;
-            double bars = dur > TimeSpan.Zero ? (time - lastTime).Ticks / (double)dur.Ticks : 1;
-            return layout.CenterX(series.Count - 1 + bars);
-        }
-
-        int bar = series.FindBar(time);
-        if (bar < 0) return layout.CenterX(0);
-        double frac = 0;
-        if (bar + 1 < series.Count)
-        {
-            var t0 = series[bar].Time;
-            var t1 = series[bar + 1].Time;
-            if (t1 > t0) frac = Math.Clamp((time - t0).Ticks / (double)(t1 - t0).Ticks, 0, 0.999);
-        }
-
-        return layout.CenterX(bar + frac);
-    }
+    public static float XOf(ChartLayout layout, CandleSeries series, DateTime time) =>
+        series.Count == 0 ? layout.Plot.Right : layout.CenterX(BarPos(series, time));
 
     /// <summary>Instante en una coordenada X.</summary>
     public static DateTime TimeAt(ChartLayout layout, CandleSeries series, float x)
@@ -402,6 +387,9 @@ public sealed partial class ChartDrawing
 
                 break;
             }
+            case DrawingKind.ParallelChannel:
+                RenderChannel(canvas, layout, series, stroke, fill, text, labelFont, label);
+                break;
             case DrawingKind.Rectangle:
             {
                 var r = new SKRect(Math.Min(x0, x1), Math.Min(y0, y1), Math.Max(x0, x1), Math.Max(y0, y1));
@@ -698,6 +686,8 @@ public sealed partial class ChartDrawing
             case DrawingKind.Brush:
             case DrawingKind.Highlighter:
                 return HitTestShape(layout, series, x, y, tol, x0, y0, x1, y1);
+            case DrawingKind.ParallelChannel:
+                return HitTestChannel(layout, series, x, y, tol);
             case DrawingKind.Rectangle:
             case DrawingKind.Ruler:
             case DrawingKind.FibRetracement:

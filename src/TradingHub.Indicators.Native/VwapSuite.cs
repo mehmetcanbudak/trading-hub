@@ -16,7 +16,7 @@ namespace TradingHub.Indicators.Native;
 [DisplayName("VWAP suite")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 [Description("One VWAP with selectable parts: anchored VWAP with up to three bands, bar-based Claire rolling/anchored VWAPs, simultaneous session/week/month/quarter/year VWAPs, prior and closing levels, rolling window and local-time session window. Each part keeps its own coverage labels and settings.")]
-public class VwapSuite : Indicator
+public partial class VwapSuite : Indicator
 {
     private readonly (Indicator Part, Func<bool> Enabled)[] _parts;
     private readonly Dictionary<IDataSeries, bool> _originallyHidden = new();

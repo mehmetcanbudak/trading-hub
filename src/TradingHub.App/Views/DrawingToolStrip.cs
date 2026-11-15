@@ -36,6 +36,7 @@ internal sealed class DrawingToolStrip : UserControl
         [DrawingKind.CrossLine] = (MaterialIconKind.Plus, "Cross line"),
         [DrawingKind.Rectangle] = (MaterialIconKind.RectangleOutline, "Rectangle / zone"),
         [DrawingKind.Ellipse] = (MaterialIconKind.EllipseOutline, "Ellipse"),
+        [DrawingKind.ParallelChannel] = (MaterialIconKind.VectorLine, "Parallel channel (two clicks for the base line; the third handle sets the width)"),
         [DrawingKind.FibRetracement] = (MaterialIconKind.FormatLineSpacing, "Fibonacci retracement"),
         [DrawingKind.Brush] = (MaterialIconKind.Brush, "Brush (freehand)"),
         [DrawingKind.Highlighter] = (MaterialIconKind.FormatColorHighlight, "Highlighter"),
@@ -93,7 +94,7 @@ internal sealed class DrawingToolStrip : UserControl
             new[]
             {
                 new DrawingKind?[] { DrawingKind.TrendLine, DrawingKind.Ray, DrawingKind.ExtendedLine, DrawingKind.HorizontalLine, DrawingKind.HorizontalRay, DrawingKind.VerticalLine, DrawingKind.CrossLine },
-                new DrawingKind?[] { DrawingKind.Rectangle, DrawingKind.Ellipse },
+                new DrawingKind?[] { DrawingKind.Rectangle, DrawingKind.ParallelChannel, DrawingKind.Ellipse },
                 new DrawingKind?[] { DrawingKind.FibRetracement },
             },
             new[] { new DrawingKind?[] { DrawingKind.Brush, DrawingKind.Highlighter, DrawingKind.Path }, new DrawingKind?[] { DrawingKind.Arrow } },

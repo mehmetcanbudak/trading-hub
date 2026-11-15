@@ -11,7 +11,7 @@ namespace TradingHub.Indicators.Native;
 [DisplayName("Refill Zones (heuristic)")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 [Description("Heuristic absorption/refill zones from observed footprint or optional estimated OHLC; not proof of book replenishment or icebergs.")]
-public class RefillZones : Indicator
+public partial class RefillZones : Indicator
 {
     public enum ZoneDirection { Buyer, Seller, Neutral }
     public sealed class Zone

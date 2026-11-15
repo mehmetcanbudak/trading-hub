@@ -60,6 +60,9 @@ internal static partial class Workspace
         public bool TraderVisible { get; set; } = true;
         public List<IndicatorDto> Indicators { get; set; } = new();
         public List<StrategyDto> Strategies { get; set; } = new();
+
+        /// <summary>Chart alerts (absent in workspaces saved before they existed).</summary>
+        public List<ChartAlert>? ChartAlerts { get; set; }
     }
 
     /// <summary>Una estrategia puesta en un gráfico.</summary>
@@ -223,6 +226,7 @@ internal static partial class Workspace
             CrossSymbol = t.CrossSymbol,
             TraderVisible = t.TraderVisible,
             Settings = JObject.FromObject(t.Model.Settings, Serializer),
+            ChartAlerts = t.Model.Alerts.Count > 0 ? t.Model.Alerts.ToList() : null,
         };
         foreach (var slot in t.Model.Indicators) td.Indicators.Add(ToIndicatorDto(slot));
         foreach (var cs in t.Strategies)
@@ -346,6 +350,7 @@ internal static partial class Workspace
         if (tab.Model == null) return;
         if (td.BarWidth > 0) tab.Model.Viewport.BarWidth = td.BarWidth;
         AddIndicators(w, tab.Model, td.Indicators);
+        RestoreChartAlerts(tab.Model, td.ChartAlerts);
 
         // estrategias: las visuales vuelven a correr; las que ejecutaban quedan pausadas hasta que las reanudes
         foreach (var sd in td.Strategies)

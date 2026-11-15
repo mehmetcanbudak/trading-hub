@@ -1154,6 +1154,7 @@ public sealed partial class TradingView
             items.Add(new Separator());
         }
 
+        items.AddRange(ChartAlertMenuItems(tab, sel, x, y));
         items.AddRange(IndicatorMenuItems(tab, x, y));
         items.Add(Item("Indicators…", MaterialIconKind.FunctionVariant, () => OpenIndicators(tab)));
         items.Add(Item("Edit footprint…", MaterialIconKind.ViewColumnOutline, () => OpenFootprintEditor(tab)));
@@ -1201,7 +1202,9 @@ public sealed partial class TradingView
             items.Add(Item("Move this chart to a new tab", MaterialIconKind.TabPlus, () => _ = MoveToNewPageAsync(tab)));
         }
         else if (tab.Window is { } window) items.Add(Item("Return to main window", MaterialIconKind.DockWindow, () => DockBack(window)));
-        OpenChartMenu(new ContextMenu { ItemsSource = items }, tab.View);
+        var menu = new ContextMenu { ItemsSource = items };
+        menu.Closed += (_, _) => ChartAlertMenuClosed(tab);
+        OpenChartMenu(menu, tab.View);
     }
 
     private static MenuItem Item(string header, MaterialIconKind? icon, Action onClick)

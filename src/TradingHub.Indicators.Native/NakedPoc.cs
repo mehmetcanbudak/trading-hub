@@ -11,7 +11,7 @@ namespace TradingHub.Indicators.Native;
 [DisplayName("Multi-horizon naked POCs")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 [Description("Session/week/month/year completed-profile POCs until a later closed bar touches them. Strategy levels appear only after the source period completes; touch painting and confirmation availability are separate. Retention is bounded.")]
-public class NakedPoc : Indicator
+public partial class NakedPoc : Indicator
 {
     public readonly record struct Level(StudyTimeFrame Period, decimal Price, int SourceStartBar, int SourceEndBar, int AvailableBar, int TouchBar, int TouchAvailableBar, StudyCoverage Coverage, bool CanPublish = true)
     {

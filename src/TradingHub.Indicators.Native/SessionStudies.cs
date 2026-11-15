@@ -12,7 +12,7 @@ namespace TradingHub.Indicators.Native;
 [DisplayName("Session backgrounds and ranges")]
 [Category(IndicatorCategories.Levels)]
 [Description("Three configurable local-time windows with DST/overnight membership, background, range and opening levels. Source bars are assigned by opening time; no invented intrabar session split.")]
-public class SessionBackgrounds : Indicator
+public partial class SessionBackgrounds : Indicator
 {
     private readonly ValueDataSeries _membership = new("Session.Membership", "Session membership bitmask") { VisualType = VisualMode.Hide };
     public readonly record struct WindowRange(int SourceStartBar, DateOnly Date, decimal Open, decimal High, decimal Low, bool Partial);

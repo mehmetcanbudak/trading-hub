@@ -74,7 +74,7 @@ public class MultiPeriodVwap : Indicator
 [DisplayName("Prior and closing VWAP levels")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 [Description("Last completed period VWAP and weighted bands, plus a bounded history of closing levels. A close becomes available at the next observed period, never backfilled into a strategy series.")]
-public class PriorClosingVwap : Indicator
+public partial class PriorClosingVwap : Indicator
 {
     public readonly record struct ClosingLevel(int SourceEndBar, int AvailableBar, decimal Value, decimal Deviation, StudyCoverage Coverage);
     private readonly List<PeriodVwapState> _states = new();

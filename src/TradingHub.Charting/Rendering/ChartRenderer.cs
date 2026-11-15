@@ -149,6 +149,7 @@ public sealed partial class ChartRenderer
         var t = model.Theme;
         var layout = ComputeLayout(model, width, height);
         model.LastLayout = layout;
+        BeginLineCapture(model);
         model.ChartInfo.Region = new Rectangle(0, 0, (int)width, (int)height);
 
         // fondo
@@ -173,6 +174,7 @@ public sealed partial class ChartRenderer
             // renders personalizados de indicadores (pueden pintar sobre el eje)
             DrawCustomRenders(canvas, model, layout, panel, width, height, above: true);
         }
+        EndLineCapture(model, layout);
         state.EndDrawingFrame();
 
         // separadores de paneles
@@ -189,6 +191,7 @@ public sealed partial class ChartRenderer
         DrawTimeAxis(canvas, model, layout, timeTicks);
         DrawPanelTitles(canvas, model, layout, state);
         if (model.Settings.ShowInfoPanel) DrawInfo(canvas, model, layout, state);
+        if (model.HighlightedLine != null) DrawHighlightedLine(canvas, model, layout);
         if (state.Crosshair) DrawCrosshair(canvas, model, layout, state);
         DrawOverlay(canvas, model, layout, state);
         DrawGoLatest(canvas, model, layout, state);
@@ -438,6 +441,10 @@ public sealed partial class ChartRenderer
             canvas.Save();
             canvas.ClipRect(new SKRect(panel.Rect.Left, panel.Rect.Top, layout.PriceAxis.Right, panel.Rect.Bottom));
             var ctx = new RenderContext(canvas, new Rectangle(0, 0, (int)layout.Bounds.Width, (int)layout.Bounds.Height));
+            // on the price chart every line it draws is recorded: any line of any indicator can carry an alert
+            var capture = panel.IsPrice ? slot.LineCapture : null;
+            ctx.Capture = capture;
+            panel.Capture = capture;
             try
             {
                 foreach (var l in new[] { DrawingLayouts.Historical, DrawingLayouts.LatestBar, DrawingLayouts.Final })
@@ -451,6 +458,10 @@ public sealed partial class ChartRenderer
             {
                 if (slot.Error == null) this.LogError($"Error drawing {ind.Name}: {ex.Message}", ex);
                 slot.Error = ex.Message;
+            }
+            finally
+            {
+                panel.Capture = null;
             }
 
             canvas.Restore();

@@ -124,10 +124,10 @@ public sealed class InkGestureTests
     [Fact]
     public void New_kinds_take_explicit_numbers_and_saved_drawings_stay_readable()
     {
-        // drawings persist the kind as a number: existing values never move, 14 stays reserved
+        // drawings persist the kind as a number: existing values never move; 14 is the parallel channel
         Assert.Equal(12, (int)DrawingKind.AnchoredVwap);
         Assert.Equal(13, (int)DrawingKind.FixedRangeProfile);
-        Assert.False(Enum.IsDefined(typeof(DrawingKind), 14));
+        Assert.Equal(14, (int)DrawingKind.ParallelChannel);
         Assert.Equal(15, (int)DrawingKind.Ellipse);
         Assert.Equal(16, (int)DrawingKind.Arrow);
         Assert.Equal(17, (int)DrawingKind.Path);

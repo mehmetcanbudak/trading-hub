@@ -11,7 +11,7 @@ namespace TradingHub.Indicators.Native;
 [DisplayName("Higher-timeframe candles / FVG / PO3 / projections")]
 [Category(IndicatorCategories.Levels)]
 [Description("Two real calendar/mapped higher periods, completed-candle FVG, closed sweep-and-return PO3, C3/C4 T-Spot zones and CISD range-multiple projections. Optional current aggregate is visibly preview-only. Breaker/FVG overlaps are labelled heuristics, not institutional observations.")]
-public class HtfStructure : Indicator
+public partial class HtfStructure : Indicator
 {
     public readonly record struct Gap(StudyTimeFrame Period, int Direction, int SourceBar, int AvailableBar, decimal Low, decimal High, int FillBar, int FillAvailableBar, int CoverageGapAvailableBar = -1)
     {
