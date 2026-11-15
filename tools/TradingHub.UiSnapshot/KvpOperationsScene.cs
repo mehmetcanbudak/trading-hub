@@ -34,10 +34,12 @@ internal static class KvpOperationsScene
         }
         void Until(Func<bool> condition, string description)
         {
+            // One evaluation decides: a re-read could observe a later background cycle and contradict the loop's exit.
             var until = DateTime.UtcNow.AddSeconds(30);
-            while (!condition() && DateTime.UtcNow < until) pump(.02);
-            Check(condition(), description);
-            if (!condition()) throw new TimeoutException(description);
+            bool met;
+            while (!(met = condition()) && DateTime.UtcNow < until) pump(.02);
+            Check(met, description);
+            if (!met) throw new TimeoutException(description);
         }
         static T Named<T>(Control root, string name) where T : Control => root.GetVisualDescendants().OfType<T>().Single(item => item.Name == name);
         static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -96,7 +98,10 @@ internal static class KvpOperationsScene
             keeper.Track(maintenanceProfile.Id, InstrumentCatalog.IdentityFor(maintenanceProfile), maintenanceInstrument, explicitlySelected: true);
             RefreshMaintenance();
             Click(runMaintenance);
-            Until(() => maintenanceFeed.CandleRequests.Count > 0 && !keeper.Status.IsRunning,
+            // Enabling and Track also wake background cycles. The click's own request is served only by a whole cycle
+            // that starts after it, so wait for that request rather than for a momentarily idle keeper.
+            long failingRequest = keeper.Status.RunRequest;
+            Until(() => keeper.Status.CompletedRunRequest >= failingRequest && maintenanceFeed.CandleRequests.Count > 0,
                 "actual Update now consumer completes the bounded cache-persistence failure cycle");
             var failed = keeper.Status;
             Check(failed.Failures.Any(f => f.InstrumentKey == maintenanceProfile.Id + "|" + maintenanceInstrument.Symbol && f.MonthUtc == month),
@@ -113,7 +118,8 @@ internal static class KvpOperationsScene
             int failedRequests = maintenanceFeed.CandleRequests.Count;
             File.Delete(cacheBlocker);
             Click(runMaintenance);
-            Until(() => maintenanceFeed.CandleRequests.Count > failedRequests && !keeper.Status.IsRunning,
+            long retryRequest = keeper.Status.RunRequest;
+            Until(() => keeper.Status.CompletedRunRequest >= retryRequest && maintenanceFeed.CandleRequests.Count > failedRequests,
                 "actual Update now retries the same source after the owned cache blocker is removed");
             var retryRequests = maintenanceFeed.CandleRequests.Skip(failedRequests).ToArray();
             Check(!keeper.Status.Failures.Any(f => f.InstrumentKey == maintenanceProfile.Id + "|" + maintenanceInstrument.Symbol),
