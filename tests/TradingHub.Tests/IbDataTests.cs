@@ -160,8 +160,8 @@ public sealed class IbDataTests : IDisposable
         using var feed = new IbFeed(new("unreachable.invalid", 1, 17, true), _root);
         var rows = await feed.LoadBarHistoryAsync(instrument, Start, Start.AddMinutes(1), default);
         Assert.Equal(4, rows.Count); Assert.All(rows, t => Assert.True(t.Id < 0));
-        Assert.Equal(new DateTime(2026, 7, 1, 22, 0, 0, DateTimeKind.Utc), IbFeed.Session.SessionStartUtc(new(2026, 7, 1)));
-        Assert.Equal(new DateTime(2026, 12, 1, 23, 0, 0, DateTimeKind.Utc), IbFeed.Session.SessionStartUtc(new(2026, 12, 1)));
+        Assert.Equal(new DateTime(2026, 6, 30, 22, 0, 0, DateTimeKind.Utc), IbFeed.Session.SessionStartUtc(new(2026, 7, 1)));
+        Assert.Equal(new DateTime(2026, 11, 30, 23, 0, 0, DateTimeKind.Utc), IbFeed.Session.SessionStartUtc(new(2026, 12, 1)));
         Assert.Equal((2026, 12), FuturesRolls.ContractMonth(new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc)));
         var sink = new Sink(); using var subscription = feed.Subscribe(instrument, sink);
         await UntilAsync(() => sink.Messages.Any(m => m.Contains("offline")));
