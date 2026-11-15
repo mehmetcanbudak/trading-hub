@@ -32,7 +32,7 @@ public class BigTrades : Indicator
     public enum SizeUnit
     {
         [Display(Name = "Base units (contracts / coins)")] Base,
-        [Display(Name = "Notional (price × size, quote currency)")] Notional,
+        [Display(Name = "Notional (price × size × contract multiplier)")] Notional,
     }
 
     public enum Placement
@@ -122,7 +122,7 @@ public class BigTrades : Indicator
     private SizeUnit _unit = SizeUnit.Base;
 
     [Display(Name = "Fixed threshold unit", GroupName = "Filter", Order = 21,
-        Description = "Notional is price × size in the quote currency; for futures it ignores the contract multiplier.")]
+        Description = "Notional is price × size × the instrument's contract multiplier (point value), in the quote currency; 1 for spot and linear crypto.")]
     public SizeUnit Unit
     {
         get => _unit;
@@ -228,9 +228,12 @@ public class BigTrades : Indicator
         _liveTrade = trade; _liveBubble = null;
     }
 
-    /// <summary>Whether an order passes the threshold; a fixed threshold may be notional (price × size).</summary>
+    /// <summary>Whether an order passes the threshold; a fixed threshold may be notional (price × size × multiplier).</summary>
     private bool Passes(CumulativeTrade trade) => trade.Volume > 0 &&
-        (_mode == ThresholdMode.Fixed && _unit == SizeUnit.Notional ? trade.Volume * AveragePrice(trade) >= _minVolume : trade.Volume >= CurrentThreshold);
+        (_mode == ThresholdMode.Fixed && _unit == SizeUnit.Notional ? trade.Volume * AveragePrice(trade) * PointValue >= _minVolume : trade.Volume >= CurrentThreshold);
+
+    /// <summary>The instrument's contract multiplier, so futures notional is price × size × multiplier.</summary>
+    private decimal PointValue => InstrumentInfo is { PointValue: > 0 } info ? info.PointValue : 1;
 
     private void UpdateOpenTrade(CumulativeTrade trade, int bar)
     {
@@ -367,7 +370,7 @@ public class BigTrades : Indicator
             int y = Position == Placement.BarCenter && b.Bar < CurrentBar
                 ? ChartInfo.GetYByPrice((GetCandle(b.Bar).High + GetCandle(b.Bar).Low) / 2, false)
                 : ChartInfo.GetYByPrice(b.Price, false);
-            decimal notional = b.Volume * b.Price;
+            decimal notional = b.Volume * b.Price * PointValue;
             bool whale = WhaleNotional > 0 && notional >= WhaleNotional;
             double ratio = Math.Sqrt((double)((notionalThreshold ? notional : b.Volume) / thr));
             int size = (int)Math.Clamp(MinSize * ratio, MinSize, Math.Max(MinSize, MaxSize));

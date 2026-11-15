@@ -16986,5 +16986,17 @@
   "Δ whales": {
     "es": "Δ ballenas",
     "zh-CN": "Δ 巨鲸"
+  },
+  "Deferred action error: {0}": {
+    "es": "Error en una acción diferida: {0}",
+    "zh-CN": "延迟操作出错：{0}"
+  },
+  "Notional (price × size × contract multiplier)": {
+    "es": "Nocional (precio × tamaño × multiplicador del contrato)",
+    "zh-CN": "名义金额（价格 × 数量 × 合约乘数）"
+  },
+  "Notional is price × size × the instrument's contract multiplier (point value), in the quote currency; 1 for spot and linear crypto.": {
+    "es": "El nocional es precio × tamaño × el multiplicador del contrato del instrumento (valor del punto), en la moneda de cotización; 1 para spot y cripto lineal.",
+    "zh-CN": "名义金额 = 价格 × 数量 × 品种的合约乘数（点值），以计价货币计；现货和线性加密货币为 1。"
   }
 }

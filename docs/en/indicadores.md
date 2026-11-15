@@ -289,7 +289,9 @@ These studies sit in the **Order flow**, **Order book** and **Derivatives** libr
 | **Liquidation map (estimate from open interest)** | Derivatives | A model: OI increases split by measured buy/sell volume over a fixed leverage mix, minus levels price already traversed; reports how many bars were modelled and skipped. |
 | **Liquidation bursts** | Derivatives | Observed long/short liquidation notional per bar with bubbles above the norm; only observed stream windows are drawn. |
 
-Existing studies cover the rest of the reference behavior: **Cumulative delta (CVD)** now joins the two CVD swings of its latest confirmed divergences with a dashed line (**Connect the two CVD swings…**, 0 turns it off); per-candle absorption is the low-impact heuristic of **Delta bubbles**; **Big Trades** adds a notional fixed threshold (price × size; futures ignore the contract multiplier), **At most per bar**, a **Whale** ring, drawing at the bar center and size shown as notional.
+Existing studies cover the rest of the reference behavior: **Cumulative delta (CVD)** now joins the two CVD swings of its latest confirmed divergences with a dashed line (**Connect the two CVD swings…**, 0 turns it off); per-candle absorption is the low-impact heuristic of **Delta bubbles**; **Big Trades** adds a notional fixed threshold, **At most per bar**, a **Whale** ring, drawing at the bar center and size shown as notional.
+
+Notional throughout these studies is price × size × the instrument's contract multiplier (its point value: 50 for an ES contract, 1 for spot and linear crypto), in the quote currency, so trade-size bands, thresholds and book notional are comparable between futures and crypto.
 
 Notifications of these studies go through the chart's alert path into the Alert Center (sound and external destinations follow your alert settings). They fire only for live events less than 30 seconds old, never for loaded history, recalculation or replay, and at most four per ten seconds.
 

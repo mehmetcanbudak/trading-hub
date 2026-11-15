@@ -77,7 +77,7 @@ public sealed class PrintAbsorption : Indicator
     /// than the window to each other) counts when its best window reaches <paramref name="threshold"/>. Prints without an
     /// observed side are ignored. Every group's best window sum is appended to <paramref name="sums"/> when supplied.
     /// </summary>
-    public static List<Mark> Find(IReadOnlyList<BarTrade> trades, int windowMilliseconds, decimal threshold, List<decimal>? sums = null)
+    public static List<Mark> Find(IReadOnlyList<BarTrade> trades, int windowMilliseconds, decimal threshold, List<decimal>? sums = null, decimal pointValue = 1)
     {
         var result = new List<Mark>();
         var window = TimeSpan.FromMilliseconds(Math.Max(1, windowMilliseconds));
@@ -93,7 +93,7 @@ public sealed class PrintAbsorption : Indicator
                 g = null;
             }
             if (g == null) groups[key] = g = new Group();
-            decimal notional = t.Price * t.Volume;
+            decimal notional = t.Price * t.Volume * pointValue;
             g.Window.Enqueue((t.Time, notional));
             g.Sum += notional;
             while (g.Window.Count > 0 && t.Time - g.Window.Peek().Time > window) g.Sum -= g.Window.Dequeue().Notional;
@@ -136,7 +136,7 @@ public sealed class PrintAbsorption : Indicator
         GetBarTrades(bar, _trades);
         _trades.Sort((a, b) => a.Time.CompareTo(b.Time));
         var sums = new List<decimal>();
-        var marks = Find(_trades, WindowMilliseconds, Threshold(), sums);
+        var marks = Find(_trades, WindowMilliseconds, Threshold(), sums, FlowFormat.PointValue(this));
         if (c.IsCandleFinished && _learned.Add(bar))
         {
             _recentSums.AddRange(sums);
@@ -499,7 +499,7 @@ public sealed class HighlightsAndNotifications : Indicator
                 _slotDelta = 0;
                 _slotNotified = false;
             }
-            _slotDelta += trade.Volume * trade.Price * (trade.Direction == TradeDirection.Buy ? 1 : -1);
+            _slotDelta += trade.Volume * trade.Price * FlowFormat.PointValue(this) * (trade.Direction == TradeDirection.Buy ? 1 : -1);
             if (_slotNotified || _flowHistory.Count < 30) continue;
             decimal mean = _flowHistory.Average();
             double deviation = Math.Sqrt(_flowHistory.Sum(x => (double)((x - mean) * (x - mean))) / _flowHistory.Count);
@@ -530,7 +530,7 @@ public sealed class HighlightsAndNotifications : Indicator
                 decimal price = level.PriceTicks * tick;
                 if (Math.Abs(price - mid) > mid * 0.01m) continue;
                 long key = (long)Math.Floor(price / bin);
-                sizes[key] = sizes.GetValueOrDefault(key) + level.Size * price;
+                sizes[key] = sizes.GetValueOrDefault(key) + level.Size * price * FlowFormat.PointValue(this);
             }
             foreach (var (key, notional) in sizes)
                 if (notional >= WallNotional && _walls.TryAdd(key, notional))

@@ -76,7 +76,7 @@ public sealed class SpotPerpetualDominance : Indicator
     protected override void OnRecalculate()
     {
         var sources = InstrumentInfo?.Sources ?? Array.Empty<InstrumentSource>();
-        _cache.Reset(sources);
+        _cache.Reset(sources, FlowFormat.PointValue(this));
         _prefix.Clear();
         _sum.VisualType = _breakdown ? VisualMode.Hide : VisualMode.Histogram;
         _spot.VisualType = _perpetual.VisualType = _breakdown ? VisualMode.Histogram : VisualMode.Hide;
@@ -360,7 +360,7 @@ public sealed class DeltaDeviationBands : Indicator
     {
         var c = GetCandle(bar);
         while (_raw.Count <= bar) _raw.Add(null);
-        _raw[bar] = StudyMath.TryDelta(c, false, out var delta, out _) ? delta * (_notional ? c.Close : 1) : null;
+        _raw[bar] = StudyMath.TryDelta(c, false, out var delta, out _) ? delta * (_notional ? c.Close * FlowFormat.PointValue(this) : 1) : null;
         decimal? v = _raw[bar];
         if (_mode == DeltaMode.Rolling && v.HasValue)
         {
@@ -487,8 +487,9 @@ public sealed class VolumeConcentrationBubbles : Indicator
         var levels = c.GetProfilePriceLevels().ToList();
         decimal poc = levels.Count > 0 ? levels.Max(l => l.Volume) : 0;
         if (poc <= 0) return;
-        foreach (var level in levels.Where(l => l.Volume / poc >= _share && l.Volume * l.Price >= _minimum).OrderByDescending(l => l.Volume).ThenBy(l => l.Price).Take(_maxPerBar))
-            _bubbles.Add(new Bubble(bar, tier, level.Price, level.Volume * level.Price, level.Volume / poc, level.Ask >= level.Bid));
+        decimal pointValue = FlowFormat.PointValue(this);
+        foreach (var level in levels.Where(l => l.Volume / poc >= _share && l.Volume * l.Price * pointValue >= _minimum).OrderByDescending(l => l.Volume).ThenBy(l => l.Price).Take(_maxPerBar))
+            _bubbles.Add(new Bubble(bar, tier, level.Price, level.Volume * level.Price * pointValue, level.Volume / poc, level.Ask >= level.Bid));
     }
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)

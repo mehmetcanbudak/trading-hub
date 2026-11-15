@@ -65,7 +65,7 @@ public sealed class LiquidityTracker : Indicator
     public bool PerLevelAverage { get => _perLevel; set { _perLevel = value; RecalculateValues(); } }
 
     /// <summary>Distance-weighted (bid, ask) notional of one snapshot; unavailable without a two-sided book.</summary>
-    public static (decimal Bid, decimal Ask, bool Available) Measure(DepthSnapshot book, decimal tick, decimal halfLifeBasisPoints, decimal minimumNotional, decimal maximumNotional, bool perLevel)
+    public static (decimal Bid, decimal Ask, bool Available) Measure(DepthSnapshot book, decimal tick, decimal halfLifeBasisPoints, decimal minimumNotional, decimal maximumNotional, bool perLevel, decimal pointValue = 1)
     {
         if (!book.HasBid || !book.HasAsk || tick <= 0 || halfLifeBasisPoints <= 0) return (0, 0, false);
         decimal bestBid = book.BestBidTicks * tick, bestAsk = book.BestAskTicks * tick;
@@ -73,7 +73,7 @@ public sealed class LiquidityTracker : Indicator
         double bid = 0, ask = 0, bidWeight = 0, askWeight = 0;
         foreach (var level in book.Bids)
         {
-            decimal price = level.PriceTicks * tick, notional = level.Size * price;
+            decimal price = level.PriceTicks * tick, notional = level.Size * price * pointValue;
             if (notional < minimumNotional || maximumNotional > 0 && notional > maximumNotional) continue;
             double w = Math.Pow(2, -(double)((bestBid - price) / bestBid * 10_000 / halfLifeBasisPoints));
             bid += (double)notional * w;
@@ -81,7 +81,7 @@ public sealed class LiquidityTracker : Indicator
         }
         foreach (var level in book.Asks)
         {
-            decimal price = level.PriceTicks * tick, notional = level.Size * price;
+            decimal price = level.PriceTicks * tick, notional = level.Size * price * pointValue;
             if (notional < minimumNotional || maximumNotional > 0 && notional > maximumNotional) continue;
             double w = Math.Pow(2, -(double)((price - bestAsk) / bestAsk * 10_000 / halfLifeBasisPoints));
             ask += (double)notional * w;
@@ -110,7 +110,7 @@ public sealed class LiquidityTracker : Indicator
         foreach (var sample in GetDepthSamples(bar))
         {
             if (!sample.IsUsable) continue;
-            var m = Measure(sample.Snapshot, tick, _halfLife, _min, _max, _perLevel);
+            var m = Measure(sample.Snapshot, tick, _halfLife, _min, _max, _perLevel, FlowFormat.PointValue(this));
             if (!m.Available) continue;
             bid += m.Bid;
             ask += m.Ask;
@@ -166,14 +166,14 @@ public sealed class BookMirror : Indicator
     }
 
     /// <summary>Size and notional of the levels between two prices (inclusive).</summary>
-    public static (decimal Size, decimal Notional) Sum(IEnumerable<(decimal Price, decimal Size)> levels, decimal low, decimal high)
+    public static (decimal Size, decimal Notional) Sum(IEnumerable<(decimal Price, decimal Size)> levels, decimal low, decimal high, decimal pointValue = 1)
     {
         decimal size = 0, notional = 0;
         foreach (var (price, s) in levels)
         {
             if (price < low || price > high) continue;
             size += s;
-            notional += s * price;
+            notional += s * price * pointValue;
         }
         return (size, notional);
     }
@@ -206,8 +206,8 @@ public sealed class BookMirror : Indicator
         decimal distance = Math.Abs(mouse.PriceBelowMouse - mid);
         if (distance <= 0 || mid <= 0) return;
         bool mouseAbove = mouse.PriceBelowMouse > mid;
-        var (askSize, askNotional) = Sum(book.Asks.Select(l => (l.PriceTicks * tick, l.Size)), mid, mid + distance);
-        var (bidSize, bidNotional) = Sum(book.Bids.Select(l => (l.PriceTicks * tick, l.Size)), mid - distance, mid);
+        var (askSize, askNotional) = Sum(book.Asks.Select(l => (l.PriceTicks * tick, l.Size)), mid, mid + distance, FlowFormat.PointValue(this));
+        var (bidSize, bidNotional) = Sum(book.Bids.Select(l => (l.PriceTicks * tick, l.Size)), mid - distance, mid, FlowFormat.PointValue(this));
         int x1 = region.Right - 2, x0 = Math.Max(region.Left, x1 - Math.Clamp(FrameWidth, 60, 800));
         int yMid = ChartInfo.GetYByPrice(mid, false), yUp = ChartInfo.GetYByPrice(mid + distance, false), yDown = ChartInfo.GetYByPrice(mid - distance, false);
         var up = new Rectangle(x0, Math.Min(yUp, yMid), x1 - x0, Math.Abs(yMid - yUp));

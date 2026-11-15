@@ -97,7 +97,7 @@ public sealed class FlowByExchange : Indicator
     [Browsable(false)]
     public IReadOnlyList<string> RankedExchanges { get; private set; } = Array.Empty<string>();
 
-    protected override void OnRecalculate() => _cache.Reset(InstrumentInfo?.Sources ?? Array.Empty<InstrumentSource>());
+    protected override void OnRecalculate() => _cache.Reset(InstrumentInfo?.Sources ?? Array.Empty<InstrumentSource>(), FlowFormat.PointValue(this));
 
     protected override void OnCalculate(int bar, decimal value)
     {
@@ -313,7 +313,7 @@ public sealed class FlowByExchange : Indicator
                 int index = -1;
                 for (int i = 0; i < sources.Count; i++) if (sources[i].Identity == t.Provenance.SourceIdentity) { index = i; break; }
                 if (index >= 0 && !Includes(sources[index].IsSpot)) continue;
-                decimal notional = t.Price * t.Volume;
+                decimal notional = t.Price * t.Volume * FlowFormat.PointValue(this);
                 double age = (now - t.Time).TotalMinutes;
                 for (int k = 0; k < 4; k++)
                     if (age <= minutes[k]) { if (t.Side == TradeSide.Buy) buy[k] += notional; else sell[k] += notional; }
@@ -454,7 +454,7 @@ public sealed class BarStatsStrip : Indicator
 
     internal DerivativesContext Derivatives => _derivatives;
 
-    protected override void OnRecalculate() => _cache.Reset(InstrumentInfo?.Sources ?? Array.Empty<InstrumentSource>());
+    protected override void OnRecalculate() => _cache.Reset(InstrumentInfo?.Sources ?? Array.Empty<InstrumentSource>(), FlowFormat.PointValue(this));
 
     protected override void OnDispose() => _derivatives.Dispose();
 
@@ -485,7 +485,7 @@ public sealed class BarStatsStrip : Indicator
 
     private decimal? MeasuredDelta(int bar) => StudyMath.TryDelta(GetCandle(bar), false, out var delta, out _) ? delta : null;
 
-    private decimal Unit(int bar) => Units == StatUnit.Notional ? GetCandle(bar).Close : 1;
+    private decimal Unit(int bar) => Units == StatUnit.Notional ? GetCandle(bar).Close * FlowFormat.PointValue(this) : 1;
 
     private bool HasFootprint(int bar) => GetCandle(bar).HasObservedFootprint || GetCandle(bar).HasAggregatedFootprint;
 

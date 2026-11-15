@@ -486,6 +486,75 @@ public sealed class FlowLibraryTests : IDisposable
         Assert.Equal(3m, Assert.Single(byNotional.VisibleBubbles(0, 0)).Volume);
     }
 
+    [Fact]
+    public void Background_posts_to_the_chart_while_it_drains_run_exactly_once_and_never_as_a_null_action()
+    {
+        // Studies post DoActionInGuiThread work from Task.Run threads while Update drains the queue on the UI thread.
+        var instrument = new Instrument { Symbol = "POSTS", FeedId = "sim", TickSize = 1, VolumeStep = 1 };
+        using var feed = new SimulatedFeed();
+        using var data = new InstrumentData(instrument, feed) { RecordLive = false };
+        data.Trades.Add(new Trade(1, Start, 100, 1, TradeSide.Buy));
+        using var model = new ChartModel(data, ChartPeriod.M1, new ChartSettings());
+        var errors = new List<string>();
+        void Capture(TradingHub.Common.Logging.LogEntry e) { if (e.Message?.StartsWith("Deferred action error", StringComparison.Ordinal) == true) lock (errors) errors.Add(e.Message); }
+        TradingHub.Common.Logging.Log.Entry += Capture;
+        try
+        {
+            const int producers = 4, each = 20_000;
+            int executed = 0;
+            var posting = Enumerable.Range(0, producers).Select(_ => Task.Run(() =>
+            {
+                for (int i = 0; i < each; i++) model.BeginInvoke(() => Interlocked.Increment(ref executed));
+            })).ToArray();
+            while (!Task.WhenAll(posting).IsCompleted) model.Update();
+            model.Update();
+            Assert.Equal(producers * each, executed);
+            Assert.Empty(errors);
+        }
+        finally { TradingHub.Common.Logging.Log.Entry -= Capture; }
+    }
+
+    [Fact]
+    public void Notional_uses_the_contract_multiplier_for_futures()
+    {
+        var index = new Dictionary<string, int>();
+        var flow = MarketFlowBar.Build([new BarTrade(Start, 5000, 2, TradeSide.Buy, From("es"))], index, 0, pointValue: 50);
+        Assert.Equal(500_000m, flow.UnattributedBuy); // 2 contracts × 5,000 × $50
+        Assert.Equal(5, MarketFlowBar.Band(500_000m)); // the 500K–1M band, not the under-25K band of price × size
+        var raw = new TradeProvenance(DataQuality.Raw);
+        var prints = Enumerable.Range(0, 3).Select(i => new BarTrade(Start.AddTicks(i * 1000), 5000m, 1m, TradeSide.Sell, raw)).ToList();
+        Assert.Empty(PrintAbsorption.Find(prints, 10, 100_000));
+        Assert.Equal(750_000m, Assert.Single(PrintAbsorption.Find(prints, 10, 100_000, pointValue: 50)).Notional);
+        Assert.Equal(10_000m * 50, BookMirror.Sum([(5000m, 2m)], 4999, 5001, 50).Notional);
+
+        var futures = new Instrument { Symbol = "ESZ6", FeedId = "sim", TickSize = 0.25m, VolumeStep = 1, PointValue = 50 };
+        using var feed = new SimulatedFeed();
+        using var data = new InstrumentData(futures, feed) { RecordLive = false };
+        data.Trades.Add(new Trade(1, Start, 5000, 2, TradeSide.Buy));               // 500,000 notional with the multiplier
+        data.Trades.Add(new Trade(2, Start.AddSeconds(1), 5000, 1, TradeSide.Sell)); // 250,000
+        using var model = new ChartModel(data, ChartPeriod.M1, new ChartSettings());
+        var big = new BigTrades { Mode = BigTrades.ThresholdMode.Fixed, Unit = BigTrades.SizeUnit.Notional, MinVolume = 300_000 };
+        Assert.Null(model.AddIndicator(big, applyDefaultColors: false).Error);
+        model.Update();
+        Assert.Equal(50m, model.InstrumentInfo.PointValue);
+        Assert.Equal(1, big.BubbleCount); // price × size alone (10,000) would pass nothing
+    }
+
+    [Fact]
+    public void Third_party_levels_parse_the_live_service_shape_with_its_extra_fields()
+    {
+        // Shape observed from levels.hiverust.dev on 2026-11-15 (HTTP 200, v2, 2,836 bins), truncated to three bins.
+        const string live = """{"v":2,"coin":"BTC","venue":"hyperliquid","attribution":"Powered by HyperTracker","snapshot":{"id":"f12ed372","asOf":1794749320441,"createdAt":1794751420441,"completedAt":1794751552827,"fetchedAt":1794752236940},"mark":65419.5,"positions":36863,"withLiquidation":32499,"longSize":19635.1485,"shortSize":19635.1485,"step":10.0,"bins":[[4906,2435,276,0,0,3,0,2253,0],[4907,71,20892,0,0,3,0,20892,0],[6600,0,0,5000,1500,0,2,0,4000]],"beyond":{"longUsd":242258515,"shortUsd":1839556359}}""";
+        var snapshot = LiquidationLevelsService.Parse(live, Start)!;
+        Assert.Equal(3, snapshot.Bins.Count);
+        Assert.Equal((49060m, 2711m), (snapshot.Bins[0].Price, snapshot.Bins[0].LongNotional));
+        Assert.Equal(20892m, snapshot.Bins[1].LargestLong);
+        Assert.Equal((66000m, 6500m), (snapshot.Bins[2].Price, snapshot.Bins[2].ShortNotional));
+        Assert.Equal(65419.5m, snapshot.Mark);
+        Assert.Equal(36863, snapshot.Positions);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1794749320441).UtcDateTime, snapshot.AsOfUtc);
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     private sealed class FakeVenue(string id, string name, string venue, bool spot) : IMarketDataFeed, ICryptoVenue

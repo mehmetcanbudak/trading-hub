@@ -62,14 +62,14 @@ internal sealed class MarketFlowBar
     }
 
     /// <summary>Builds the bar from its prints; <paramref name="sourceIndex"/> maps a provenance identity to a market index.</summary>
-    public static MarketFlowBar Build(IReadOnlyList<BarTrade> trades, IReadOnlyDictionary<string, int> sourceIndex, int sources)
+    public static MarketFlowBar Build(IReadOnlyList<BarTrade> trades, IReadOnlyDictionary<string, int> sourceIndex, int sources, decimal pointValue = 1)
     {
         var bar = new MarketFlowBar(sources);
         foreach (var trade in trades)
         {
             if (trade.Side is not (TradeSide.Buy or TradeSide.Sell) || !trade.Provenance.IsMeasured || trade.Provenance.IsSideInferred) continue;
             bool buy = trade.Side == TradeSide.Buy;
-            decimal notional = trade.Price * trade.Volume;
+            decimal notional = trade.Price * trade.Volume * pointValue; // the contract multiplier makes futures notional real
             bar.HasFlow = true;
             if (trade.Provenance.SourceIdentity is { } identity && sourceIndex.TryGetValue(identity, out int index))
             {
@@ -115,15 +115,17 @@ internal sealed class MarketFlowCache
     private readonly List<BarTrade> _buffer = new();
     private Dictionary<string, int> _sourceIndex = new(StringComparer.Ordinal);
     private int _sources;
+    private decimal _pointValue = 1;
 
     public IReadOnlyList<InstrumentSource> Sources { get; private set; } = Array.Empty<InstrumentSource>();
 
     /// <summary>Resets the cache for the indicator's current market list.</summary>
-    public void Reset(IReadOnlyList<InstrumentSource> sources)
+    public void Reset(IReadOnlyList<InstrumentSource> sources, decimal pointValue = 1)
     {
         _closed.Clear();
         Sources = sources;
         _sources = sources.Count;
+        _pointValue = pointValue > 0 ? pointValue : 1;
         _sourceIndex = new Dictionary<string, int>(StringComparer.Ordinal);
         for (int i = 0; i < sources.Count; i++) _sourceIndex.TryAdd(sources[i].Identity, i);
     }
@@ -135,7 +137,7 @@ internal sealed class MarketFlowCache
         bool closed = candle.IsCandleFinished;
         if (closed && _closed.TryGetValue(bar, out var hit) && hit.Time == candle.Time && hit.Revision == candle.Revision && hit.Trades == candle.Ticks) return hit.Bar;
         copyTrades(bar, _buffer);
-        var flow = MarketFlowBar.Build(_buffer, _sourceIndex, _sources);
+        var flow = MarketFlowBar.Build(_buffer, _sourceIndex, _sources, _pointValue);
         if (closed) _closed[bar] = (candle.Time, candle.Revision, candle.Ticks, flow);
         return flow;
     }
@@ -156,6 +158,9 @@ internal static class FlowFormat
     }
 
     public static string Signed(decimal value) => (value > 0 ? "+" : "") + Compact(value);
+
+    /// <summary>The chart instrument's contract multiplier (quote value of one point per unit), 1 when unknown.</summary>
+    public static decimal PointValue(Indicator indicator) => indicator.InstrumentInfo is { PointValue: > 0 } info ? info.PointValue : 1;
 
     public static Color Alpha(Color color, int alpha) => Color.FromArgb(Math.Clamp(alpha, 0, 255), color.R, color.G, color.B);
 
