@@ -8,7 +8,7 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:653 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:644 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:892 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749",
+    "locations": "TradingHub.App/Services/AppServices.cs:654 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:644 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:892 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749 TradingHub.Indicators.Native/DerivativesPane.cs:32",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Fee": {
@@ -52,7 +52,7 @@
     "reason": "Signed Binance trade-history query template. Payload keys and interpolation positions are broker protocol, not display text."
   },
   "unresolved endpoint": {
-    "locations": "TradingHub.App/Services/AppServices.cs:701",
+    "locations": "TradingHub.App/Services/AppServices.cs:702",
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
   }
 }

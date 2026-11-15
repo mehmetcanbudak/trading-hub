@@ -134,7 +134,7 @@ public sealed record TradeFocus(DateTime EntryTime, decimal EntryPrice, DateTime
 /// Implementa <see cref="IIndicatorHost"/> para que los indicadores accedan a las velas y al gráfico.
 /// Todo se usa desde el hilo de UI.
 /// </summary>
-public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDisposable
+public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDisposable
 {
     private readonly List<IndicatorCandle> _wrappers = new();
     private readonly List<(Indicator Ind, TimeSpan Interval, Action Action, DateTime Next)> _timers = new();
@@ -358,6 +358,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         _instrumentInfo.LotSize = Instrument.VolumeStep;
         _instrumentInfo.Description = Instrument.Description;
         _instrumentInfo.TimeZoneOffset = Settings.TimeZone.GetUtcOffset(DateTime.UtcNow);
+        UpdateSourceInfo();
 
         _chartInfo.TimeFrame = Period.Code;
         _chartInfo.ChartType = Period.Type switch

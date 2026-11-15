@@ -13594,5 +13594,605 @@
   "Kept ownership context {0}: {1}": {
     "es": "Se conservó el contexto de propiedad {0}: {1}",
     "zh-CN": "已保留所有权上下文 {0}：{1}"
+  },
+  " (inverse, USD contracts converted to ": {
+    "es": " (inverso, contratos en USD convertidos a ",
+    "zh-CN": " (反向合约，以美元计的合约已换算为 "
+  },
+  " (inverse, USD contracts converted to {0})": {
+    "es": " (inverso, contratos en USD convertidos a {0})",
+    "zh-CN": " (反向合约，以美元计的合约已换算为 {0})"
+  },
+  " Venue books cross; the composite bid and ask are not a tradable spread.": {
+    "es": " Los libros de los mercados se cruzan; la compra y venta compuestas no son un diferencial operable.",
+    "zh-CN": " 各市场订单簿出现交叉；合成买卖价不是可交易价差。"
+  },
+  " quotes combined without conversion": {
+    "es": " cotizaciones combinadas sin conversión",
+    "zh-CN": " 报价未经换算直接合并"
+  },
+  " · public data · no account": {
+    "es": " · datos públicos · sin cuenta",
+    "zh-CN": " · 公开数据 · 无需账户"
+  },
+  "/api/v1/contract/kline/{0}?interval=Min{1}&start={2}&end={3}": {
+    "es": "/api/v1/contract/kline/{0}?interval=Min{1}&start={2}&end={3}",
+    "zh-CN": "/api/v1/contract/kline/{0}?interval=Min{1}&start={2}&end={3}"
+  },
+  "/api/v2/mix/market/history-candles?symbol={0}&productType=USDT-FUTURES&granularity={1}&endTime={2}&limit=200": {
+    "es": "/api/v2/mix/market/history-candles?symbol={0}&productType=USDT-FUTURES&granularity={1}&endTime={2}&limit=200",
+    "zh-CN": "/api/v2/mix/market/history-candles?symbol={0}&productType=USDT-FUTURES&granularity={1}&endTime={2}&limit=200"
+  },
+  "/api/v2/public/get_tradingview_chart_data?instrument_name={0}&start_timestamp={1}&end_timestamp={2}&resolution={3}": {
+    "es": "/api/v2/public/get_tradingview_chart_data?instrument_name={0}&start_timestamp={1}&end_timestamp={2}&resolution={3}",
+    "zh-CN": "/api/v2/public/get_tradingview_chart_data?instrument_name={0}&start_timestamp={1}&end_timestamp={2}&resolution={3}"
+  },
+  "/api/v2/spot/market/history-candles?symbol={0}&granularity={1}&endTime={2}&limit=200": {
+    "es": "/api/v2/spot/market/history-candles?symbol={0}&granularity={1}&endTime={2}&limit=200",
+    "zh-CN": "/api/v2/spot/market/history-candles?symbol={0}&granularity={1}&endTime={2}&limit=200"
+  },
+  "/api/v5/market/history-candles?instId={0}&bar={1}m&after={2}&limit=100": {
+    "es": "/api/v5/market/history-candles?instId={0}&bar={1}m&after={2}&limit=100",
+    "zh-CN": "/api/v5/market/history-candles?instId={0}&bar={1}m&after={2}&limit=100"
+  },
+  "/products/{0}/candles?granularity={1}&start={2}&end={3}": {
+    "es": "/products/{0}/candles?granularity={1}&start={2}&end={3}",
+    "zh-CN": "/products/{0}/candles?granularity={1}&start={2}&end={3}"
+  },
+  "/ws/{0}@forceOrder": {
+    "es": "/ws/{0}@forceOrder",
+    "zh-CN": "/ws/{0}@forceOrder"
+  },
+  "; missing: ": {
+    "es": "; faltan: ",
+    "zh-CN": "；缺少："
+  },
+  "; missing: {0}": {
+    "es": "; faltan: {0}",
+    "zh-CN": "；缺少：{0}"
+  },
+  "; {0} quotes combined without conversion": {
+    "es": "; cotizaciones {0} combinadas sin conversión",
+    "zh-CN": "；{0} 报价未经换算直接合并"
+  },
+  "A composite book sums the sizes of every connected market at each price. It can cross and is never an executable quote.": {
+    "es": "Un libro compuesto suma los tamaños de cada mercado conectado en cada precio. Puede cruzarse y nunca es una cotización ejecutable.",
+    "zh-CN": "合成订单簿按价格汇总每个已连接市场的挂单量。它可能出现交叉，且绝不是可执行报价。"
+  },
+  "A venue number is missing.": {
+    "es": "Falta un número del mercado.",
+    "zh-CN": "缺少交易所数值。"
+  },
+  "A venue number is out of range.": {
+    "es": "Un número del mercado está fuera de rango.",
+    "zh-CN": "交易所数值超出范围。"
+  },
+  "Aggregate CVD": {
+    "es": "CVD agregado",
+    "zh-CN": "聚合 CVD"
+  },
+  "Aggregate as sign-colored histogram (otherwise line)": {
+    "es": "Agregado como histograma coloreado por signo (si no, línea)",
+    "zh-CN": "聚合以按正负着色的柱状图显示（否则为线）"
+  },
+  "Aggregate crypto (data only)": {
+    "es": "Cripto agregado (solo datos)",
+    "zh-CN": "聚合加密货币（仅数据）"
+  },
+  "Binance (USD-M futures)": {
+    "es": "Binance (futuros USD-M)",
+    "zh-CN": "Binance（USD-M 期货）"
+  },
+  "Binance + Bybit": {
+    "es": "Binance + Bybit",
+    "zh-CN": "Binance + Bybit"
+  },
+  "Bitget": {
+    "es": "Bitget",
+    "zh-CN": "Bitget"
+  },
+  "Bitget Spot": {
+    "es": "Bitget Spot",
+    "zh-CN": "Bitget Spot"
+  },
+  "Bybit (linear perpetuals)": {
+    "es": "Bybit (perpetuos lineales)",
+    "zh-CN": "Bybit（线性永续合约）"
+  },
+  "Bybit Spot": {
+    "es": "Bybit Spot",
+    "zh-CN": "Bybit Spot"
+  },
+  "Bybit returned negative open interest.": {
+    "es": "Bybit devolvió un interés abierto negativo.",
+    "zh-CN": "Bybit 返回了负的持仓量。"
+  },
+  "CVD by market": {
+    "es": "CVD por mercado",
+    "zh-CN": "分市场 CVD"
+  },
+  "Coinbase": {
+    "es": "Coinbase",
+    "zh-CN": "Coinbase"
+  },
+  "Combined": {
+    "es": "Combinado",
+    "zh-CN": "合计"
+  },
+  "Composite": {
+    "es": "Compuesto",
+    "zh-CN": "合成"
+  },
+  "Composite book unavailable: no venue currently has a valid book.": {
+    "es": "Libro compuesto no disponible: ningún mercado tiene ahora un libro válido.",
+    "zh-CN": "合成订单簿不可用：目前没有任何市场拥有有效订单簿。"
+  },
+  "Composite non-executable book: sizes of {0} of {1} venue books summed at each price": {
+    "es": "Libro compuesto no ejecutable: tamaños de {0} de {1} libros de mercados sumados en cada precio",
+    "zh-CN": "不可执行的合成订单簿：按价格汇总了 {1} 个市场订单簿中 {0} 个的挂单量"
+  },
+  "Composite non-executable book: sizes of {0} of {1} venue books summed at each price{2}.": {
+    "es": "Libro compuesto no ejecutable: tamaños de {0} de {1} libros de mercados sumados en cada precio{2}.",
+    "zh-CN": "不可执行的合成订单簿：按价格汇总了 {1} 个市场订单簿中 {0} 个的挂单量{2}。"
+  },
+  "Composite of all market books (not executable)": {
+    "es": "Compuesto de todos los libros de los mercados (no ejecutable)",
+    "zh-CN": "所有市场订单簿的合成（不可执行）"
+  },
+  "Composite trades and candles of the selected markets. Prices are not executable. Missing or deviating constituents remain marked as partial coverage.": {
+    "es": "Operaciones y velas compuestas de los mercados elegidos. Los precios no son ejecutables. Los componentes que faltan o se desvían quedan marcados como cobertura parcial.",
+    "zh-CN": "所选市场的合成成交与K线。价格不可执行。缺失或偏离的成分市场会标记为部分覆盖。"
+  },
+  "DOM is a composite of venue books, not executable": {
+    "es": "el DOM es un compuesto de libros de mercados, no ejecutable",
+    "zh-CN": "DOM 为各市场订单簿的合成，不可执行"
+  },
+  "DOM is {0} only": {
+    "es": "el DOM es solo de {0}",
+    "zh-CN": "DOM 仅来自 {0}"
+  },
+  "DOM: composite of available venue books, not executable": {
+    "es": "DOM: compuesto de los libros de mercados disponibles, no ejecutable",
+    "zh-CN": "DOM：可用市场订单簿的合成，不可执行"
+  },
+  "DOM: composite of available venue books, not executable. ": {
+    "es": "DOM: compuesto de los libros de mercados disponibles, no ejecutable. ",
+    "zh-CN": "DOM：可用市场订单簿的合成，不可执行。"
+  },
+  "DOM: {0} only, not consolidated": {
+    "es": "DOM: solo {0}, no consolidado",
+    "zh-CN": "DOM：仅 {0}，未合并"
+  },
+  "DOM: {0} only, not consolidated. ": {
+    "es": "DOM: solo {0}, no consolidado. ",
+    "zh-CN": "DOM：仅 {0}，未合并。"
+  },
+  "Data only; non-executable. ": {
+    "es": "Solo datos; no ejecutable. ",
+    "zh-CN": "仅数据；不可执行。"
+  },
+  "Deribit": {
+    "es": "Deribit",
+    "zh-CN": "Deribit"
+  },
+  "Derivatives": {
+    "es": "Derivados",
+    "zh-CN": "衍生品"
+  },
+  "Derivatives data is unavailable in this session.": {
+    "es": "Los datos de derivados no están disponibles en esta sesión.",
+    "zh-CN": "本次会话无法获取衍生品数据。"
+  },
+  "Derivatives: funding, open interest, liquidations": {
+    "es": "Derivados: financiación, interés abierto, liquidaciones",
+    "zh-CN": "衍生品：资金费率、持仓量、强平"
+  },
+  "Each exchange (spot and perpetual together)": {
+    "es": "Cada exchange (spot y perpetuo juntos)",
+    "zh-CN": "每个交易所（现货与永续合并）"
+  },
+  "Each market": {
+    "es": "Cada mercado",
+    "zh-CN": "每个市场"
+  },
+  "Each month": {
+    "es": "Cada mes",
+    "zh-CN": "每月"
+  },
+  "Each session": {
+    "es": "Cada sesión",
+    "zh-CN": "每个交易时段"
+  },
+  "Each week": {
+    "es": "Cada semana",
+    "zh-CN": "每周"
+  },
+  "Exchanges": {
+    "es": "Exchanges",
+    "zh-CN": "交易所"
+  },
+  "First market's book only": {
+    "es": "Solo el libro del primer mercado",
+    "zh-CN": "仅第一个市场的订单簿"
+  },
+  "Funding rate (%)": {
+    "es": "Tasa de financiación (%)",
+    "zh-CN": "资金费率（%）"
+  },
+  "Funding rate, open interest (level or change) and observed liquidations from Binance and Bybit perpetuals, per exchange and combined. For USD-margined crypto symbols (BTCUSDT, ETHUSDT…). Unobserved periods are gaps, not zero.": {
+    "es": "Tasa de financiación, interés abierto (nivel o cambio) y liquidaciones observadas de los perpetuos de Binance y Bybit, por exchange y combinados. Para símbolos cripto con margen en USD (BTCUSDT, ETHUSDT…). Los periodos no observados son huecos, no cero.",
+    "zh-CN": "来自 Binance 与 Bybit 永续合约的资金费率、持仓量（水平或变化）和观测到的强平，按交易所分别及合计显示。适用于 USD 保证金加密货币品种（BTCUSDT、ETHUSDT…）。未观测期间为空缺，而非零。"
+  },
+  "Hyperliquid": {
+    "es": "Hyperliquid",
+    "zh-CN": "Hyperliquid"
+  },
+  "Leaves out spot or perpetual markets without unticking them.": {
+    "es": "Deja afuera los mercados spot o perpetuos sin destildarlos.",
+    "zh-CN": "在不取消勾选的情况下排除现货或永续市场。"
+  },
+  "Liquidation recording failed; observations stay in memory only: ": {
+    "es": "Falló la grabación de liquidaciones; las observaciones quedan solo en memoria: ",
+    "zh-CN": "强平记录失败；观测数据仅保留在内存中："
+  },
+  "Liquidation recording failed; observations stay in memory only: {0}": {
+    "es": "Falló la grabación de liquidaciones; las observaciones quedan solo en memoria: {0}",
+    "zh-CN": "强平记录失败；观测数据仅保留在内存中：{0}"
+  },
+  "Liquidations": {
+    "es": "Liquidaciones",
+    "zh-CN": "强平"
+  },
+  "Liquidations (longs − / shorts +, notional)": {
+    "es": "Liquidaciones (largos − / cortos +, nocional)",
+    "zh-CN": "强平（多头 − / 空头 +，名义价值）"
+  },
+  "Liquidations observed while streams were connected; Binance publishes at most one per second (sampled).": {
+    "es": "Liquidaciones observadas mientras los flujos estaban conectados; Binance publica como mucho una por segundo (muestreo).",
+    "zh-CN": "仅包含数据流连接期间观测到的强平；Binance 每秒最多发布一条（抽样）。"
+  },
+  "Liquidations: listening live; nothing is known before the stream connected.": {
+    "es": "Liquidaciones: escuchando en vivo; no se sabe nada de antes de conectar el flujo.",
+    "zh-CN": "强平：正在实时监听；数据流连接之前的情况未知。"
+  },
+  "Loading derivatives data…": {
+    "es": "Cargando datos de derivados…",
+    "zh-CN": "正在加载衍生品数据…"
+  },
+  "Longs liquidated": {
+    "es": "Largos liquidados",
+    "zh-CN": "多头强平"
+  },
+  "Market ": {
+    "es": "Mercado ",
+    "zh-CN": "市场 "
+  },
+  "Market {0}": {
+    "es": "Mercado {0}",
+    "zh-CN": "市场 {0}"
+  },
+  "Markets to combine": {
+    "es": "Mercados que se combinan",
+    "zh-CN": "要合并的市场"
+  },
+  "Never": {
+    "es": "Nunca",
+    "zh-CN": "从不"
+  },
+  "No Bybit open-interest observations are available in this range.": {
+    "es": "No hay observaciones de interés abierto de Bybit en este rango.",
+    "zh-CN": "此范围内没有 Bybit 持仓量观测数据。"
+  },
+  "No selected aggregate market matches the spot/perpetual filter.": {
+    "es": "Ningún mercado elegido del agregado coincide con el filtro spot/perpetuo.",
+    "zh-CN": "所选聚合市场均不符合现货/永续筛选条件。"
+  },
+  "OKX Spot": {
+    "es": "OKX Spot",
+    "zh-CN": "OKX Spot"
+  },
+  "OKX, Bitget, Hyperliquid, Deribit, MEXC, Coinbase: public data, no account": {
+    "es": "OKX, Bitget, Hyperliquid, Deribit, MEXC, Coinbase: datos públicos, sin cuenta",
+    "zh-CN": "OKX、Bitget、Hyperliquid、Deribit、MEXC、Coinbase：公开数据，无需账户"
+  },
+  "One cumulative delta line per market (Binance Futures, Bybit, OKX…), per exchange, or spot versus perpetual, plus the aggregate CVD colored by sign. Use with an aggregate crypto connection; candle-derived delta stays unattributed.": {
+    "es": "Una línea de delta acumulado por mercado (Binance Futures, Bybit, OKX…), por exchange o spot contra perpetuo, más el CVD agregado coloreado por signo. Úsalo con una conexión de cripto agregado; el delta derivado de velas queda sin atribuir.",
+    "zh-CN": "每个市场（Binance Futures、Bybit、OKX…）、每个交易所或现货对永续各一条累计 Delta 线，外加按正负着色的聚合 CVD。请配合聚合加密货币连接使用；由K线推导的 Delta 保持未归属。"
+  },
+  "One line per": {
+    "es": "Una línea por",
+    "zh-CN": "每条线对应"
+  },
+  "Open interest change (bar to bar)": {
+    "es": "Cambio del interés abierto (vela a vela)",
+    "zh-CN": "持仓量变化（逐根K线）"
+  },
+  "Order book (DOM and heatmap)": {
+    "es": "Libro de órdenes (DOM y mapa de calor)",
+    "zh-CN": "订单簿（DOM 与热力图）"
+  },
+  "Other markets": {
+    "es": "Otros mercados",
+    "zh-CN": "其他市场"
+  },
+  "Partial Bybit open-interest coverage at five-minute resolution.": {
+    "es": "Cobertura parcial del interés abierto de Bybit con resolución de cinco minutos.",
+    "zh-CN": "Bybit 持仓量为部分覆盖，分辨率为五分钟。"
+  },
+  "Perpetual": {
+    "es": "Perpetuo",
+    "zh-CN": "永续"
+  },
+  "Perpetual only": {
+    "es": "Solo perpetuos",
+    "zh-CN": "仅永续"
+  },
+  "Perpetual sizes are converted to coins (contracts × contract value; Deribit inverse USD contracts ÷ price).": {
+    "es": "Los tamaños de los perpetuos se convierten a monedas (contratos × valor del contrato; contratos inversos de Deribit en USD ÷ precio).",
+    "zh-CN": "永续合约数量会换算为币数（合约数 × 合约面值；Deribit 反向美元合约 ÷ 价格）。"
+  },
+  "Perpetual symbol (blank = derived from the chart)": {
+    "es": "Símbolo del perpetuo (vacío = el del gráfico)",
+    "zh-CN": "永续合约代码（留空 = 由图表推导）"
+  },
+  "Perpetuals": {
+    "es": "Perpetuos",
+    "zh-CN": "永续合约"
+  },
+  "Price deviates more than 3% from {0}; omitted as a probable different asset.": {
+    "es": "El precio se aleja más de un 3 % de {0}; se omite por ser probablemente otro activo.",
+    "zh-CN": "价格与 {0} 偏离超过 3%；疑似不同资产，已排除。"
+  },
+  "Prints are omitted while the price deviates from the reference venue.": {
+    "es": "Las operaciones se omiten mientras el precio se aleje del mercado de referencia.",
+    "zh-CN": "价格偏离参考市场期间，成交将被排除。"
+  },
+  "Public crypto market": {
+    "es": "Mercado cripto público",
+    "zh-CN": "公开加密货币市场"
+  },
+  "Public crypto market (data only)": {
+    "es": "Mercado cripto público (solo datos)",
+    "zh-CN": "公开加密货币市场（仅数据）"
+  },
+  "Public data: no account or keys, and no orders. Hyperliquid and MEXC publish only the best 20 book levels; MEXC trades have no exchange identifier.": {
+    "es": "Datos públicos: sin cuenta ni claves, y sin órdenes. Hyperliquid y MEXC publican solo los 20 mejores niveles del libro; las operaciones de MEXC no tienen identificador del exchange.",
+    "zh-CN": "公开数据：无需账户或密钥，也不下单。Hyperliquid 与 MEXC 仅发布最优 20 档订单簿；MEXC 成交没有交易所标识。"
+  },
+  "Public data: no account or keys. The aggregate never routes orders; trade on each market's own connection.": {
+    "es": "Datos públicos: sin cuenta ni claves. El agregado nunca envía órdenes; opera en la conexión propia de cada mercado.",
+    "zh-CN": "公开数据：无需账户或密钥。聚合连接从不路由订单；请在各市场自己的连接上交易。"
+  },
+  "Public market data: trades, order book and candles without an account. Trade history before a chart opened comes from candles; Trading Hub records the live tape.": {
+    "es": "Datos públicos del mercado: operaciones, libro de órdenes y velas sin cuenta. La historia de operaciones anterior a abrir un gráfico viene de las velas; Trading Hub graba la cinta en vivo.",
+    "zh-CN": "公开市场数据：无需账户即可获取成交、订单簿和K线。打开图表之前的成交历史来自K线；Trading Hub 会记录实时成交。"
+  },
+  "Recommended": {
+    "es": "Recomendados",
+    "zh-CN": "推荐"
+  },
+  "Shorts liquidated": {
+    "es": "Cortos liquidados",
+    "zh-CN": "空头强平"
+  },
+  "Show each exchange as well as the combined line": {
+    "es": "Mostrar cada exchange además de la línea combinada",
+    "zh-CN": "除合计线外还显示各交易所"
+  },
+  "Show the aggregate": {
+    "es": "Mostrar el agregado",
+    "zh-CN": "显示聚合"
+  },
+  "Single-market instrument: per-market lines need an aggregate connection.": {
+    "es": "Instrumento de un solo mercado: las líneas por mercado necesitan una conexión agregada.",
+    "zh-CN": "单一市场品种：分市场线条需要聚合连接。"
+  },
+  "Spot": {
+    "es": "Spot",
+    "zh-CN": "现货"
+  },
+  "Spot / perpetual": {
+    "es": "Spot / perpetuo",
+    "zh-CN": "现货 / 永续"
+  },
+  "Spot and perpetual": {
+    "es": "Spot y perpetuos",
+    "zh-CN": "现货与永续"
+  },
+  "Spot only": {
+    "es": "Solo spot",
+    "zh-CN": "仅现货"
+  },
+  "Spot versus perpetual": {
+    "es": "Spot contra perpetuo",
+    "zh-CN": "现货对永续"
+  },
+  "The requested open-interest range is empty.": {
+    "es": "El rango de interés abierto pedido está vacío.",
+    "zh-CN": "请求的持仓量范围为空。"
+  },
+  "Trades and candles of every selected market are combined into one instrument per coin: BTC-USDT-SWAP (OKX), BTC-USD (Coinbase) and BTC (Hyperliquid) join BTCUSDT. USDT, USD and USDC prices are combined without conversion. A market whose price is more than 3% away from the first market is left out and reported as partial coverage.": {
+    "es": "Las operaciones y velas de cada mercado elegido se combinan en un instrumento por moneda: BTC-USDT-SWAP (OKX), BTC-USD (Coinbase) y BTC (Hyperliquid) se unen a BTCUSDT. Los precios en USDT, USD y USDC se combinan sin conversión. Un mercado cuyo precio se aleja más de un 3 % del primero queda afuera y se informa como cobertura parcial.",
+    "zh-CN": "每个所选市场的成交与K线按币种合并为一个品种：BTC-USDT-SWAP（OKX）、BTC-USD（Coinbase）和 BTC（Hyperliquid）都并入 BTCUSDT。USDT、USD 与 USDC 价格未经换算直接合并。价格与第一个市场偏离超过 3% 的市场会被排除，并报告为部分覆盖。"
+  },
+  "USDT-FUTURES": {
+    "es": "USDT-FUTURES",
+    "zh-CN": "USDT-FUTURES"
+  },
+  "Unattributed CVD": {
+    "es": "CVD sin atribuir",
+    "zh-CN": "未归属 CVD"
+  },
+  "Unattributed delta (candle history or unknown venue): {0}": {
+    "es": "Delta sin atribuir (historia de velas o mercado desconocido): {0}",
+    "zh-CN": "未归属 Delta（K线历史或未知市场）：{0}"
+  },
+  "Unknown derivatives venue.": {
+    "es": "Mercado de derivados desconocido.",
+    "zh-CN": "未知的衍生品交易所。"
+  },
+  "Unknown public crypto market: {0}.": {
+    "es": "Mercado cripto público desconocido: {0}.",
+    "zh-CN": "未知的公开加密货币市场：{0}。"
+  },
+  "User-Agent": {
+    "es": "User-Agent",
+    "zh-CN": "User-Agent"
+  },
+  "aggregate-provenance-v2:{0}:{1}": {
+    "es": "aggregate-provenance-v2:{0}:{1}",
+    "zh-CN": "aggregate-provenance-v2:{0}:{1}"
+  },
+  "book sequence gap (": {
+    "es": "hueco en la secuencia del libro (",
+    "zh-CN": "订单簿序列缺口（"
+  },
+  "book sequence gap ({0})": {
+    "es": "hueco en la secuencia del libro ({0})",
+    "zh-CN": "订单簿序列缺口（{0}）"
+  },
+  "non-executable composite of selected crypto markets": {
+    "es": "compuesto no ejecutable de los mercados cripto elegidos",
+    "zh-CN": "所选加密货币市场的不可执行合成"
+  },
+  "{0} aggregate — DATA ONLY, non-executable; ": {
+    "es": "{0} agregado — SOLO DATOS, no ejecutable; ",
+    "zh-CN": "{0} 聚合 — 仅数据，不可执行；"
+  },
+  "{0} aggregate — DATA ONLY, non-executable; {1}{2}": {
+    "es": "{0} agregado — SOLO DATOS, no ejecutable; {1}{2}",
+    "zh-CN": "{0} 聚合 — 仅数据，不可执行；{1}{2}"
+  },
+  "{0} book unavailable until the next full snapshot ({1}).": {
+    "es": "Libro de {0} no disponible hasta la próxima foto completa ({1}).",
+    "zh-CN": "{0} 订单簿在下一个完整快照前不可用（{1}）。"
+  },
+  "{0} composite instruments from {1} markets. Non-executable prices; {2}. Constituent failures remain visible in coverage.": {
+    "es": "{0} instrumentos compuestos de {1} mercados. Precios no ejecutables; {2}. Las fallas de los componentes siguen visibles en la cobertura.",
+    "zh-CN": "来自 {1} 个市场的 {0} 个合成品种。价格不可执行；{2}。成分市场的故障仍会在覆盖情况中显示。"
+  },
+  "{0} instruments available. Public data only; no account or orders.": {
+    "es": "{0} instrumentos disponibles. Solo datos públicos; sin cuenta ni órdenes.",
+    "zh-CN": "{0} 个品种可用。仅公开数据；无账户、无订单。"
+  },
+  "{0} is not listed by {1}.": {
+    "es": "{1} no lista {0}.",
+    "zh-CN": "{1} 未列出 {0}。"
+  },
+  "{0} markets · composite data · not executable": {
+    "es": "{0} mercados · datos compuestos · no ejecutable",
+    "zh-CN": "{0} 个市场 · 合成数据 · 不可执行"
+  },
+  "{0} reports no funding for {1} in this range.": {
+    "es": "{0} no informa financiación de {1} en este rango.",
+    "zh-CN": "{0} 在此范围内没有 {1} 的资金费率。"
+  },
+  "{0} · public data · no account": {
+    "es": "{0} · datos públicos · sin cuenta",
+    "zh-CN": "{0} · 公开数据 · 无需账户"
+  },
+  "{0}/USD perpetual": {
+    "es": "{0}/USD perpetuo",
+    "zh-CN": "{0}/USD 永续"
+  },
+  "{0}/fapi/v1/fundingRate?symbol={1}&startTime={2}&endTime={3}&limit=1000": {
+    "es": "{0}/fapi/v1/fundingRate?symbol={1}&startTime={2}&endTime={3}&limit=1000",
+    "zh-CN": "{0}/fapi/v1/fundingRate?symbol={1}&startTime={2}&endTime={3}&limit=1000"
+  },
+  "{0}/instruments-info?category={1}&limit=1000": {
+    "es": "{0}/instruments-info?category={1}&limit=1000",
+    "zh-CN": "{0}/instruments-info?category={1}&limit=1000"
+  },
+  "{0}/instruments-info?category={1}&limit=1000{2}": {
+    "es": "{0}/instruments-info?category={1}&limit=1000{2}",
+    "zh-CN": "{0}/instruments-info?category={1}&limit=1000{2}"
+  },
+  "{0}/instruments-info?category={1}&symbol={2}": {
+    "es": "{0}/instruments-info?category={1}&symbol={2}",
+    "zh-CN": "{0}/instruments-info?category={1}&symbol={2}"
+  },
+  "{0}/kline?category={1}&symbol={2}&interval={3}&start={4}&end={5}&limit=1000": {
+    "es": "{0}/kline?category={1}&symbol={2}&interval={3}&start={4}&end={5}&limit=1000",
+    "zh-CN": "{0}/kline?category={1}&symbol={2}&interval={3}&start={4}&end={5}&limit=1000"
+  },
+  "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&limit=1": {
+    "es": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&limit=1",
+    "zh-CN": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&limit=1"
+  },
+  "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200": {
+    "es": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200",
+    "zh-CN": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200"
+  },
+  "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200{4}": {
+    "es": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200{4}",
+    "zh-CN": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200{4}"
+  },
+  "{0}/recent-trade?category={1}&symbol={2}&limit={3}": {
+    "es": "{0}/recent-trade?category={1}&symbol={2}&limit={3}",
+    "zh-CN": "{0}/recent-trade?category={1}&symbol={2}&limit={3}"
+  },
+  "{0}/v5/market/funding/history?category=linear&symbol={1}&startTime={2}&endTime={3}&limit=200": {
+    "es": "{0}/v5/market/funding/history?category=linear&symbol={1}&startTime={2}&endTime={3}&limit=200",
+    "zh-CN": "{0}/v5/market/funding/history?category=linear&symbol={1}&startTime={2}&endTime={3}&limit=200"
+  },
+  "{0}/ws/{1}@forceOrder": {
+    "es": "{0}/ws/{1}@forceOrder",
+    "zh-CN": "{0}/ws/{1}@forceOrder"
+  },
+  "{0}/{1} perpetual{2}": {
+    "es": "{0}/{1} perpetuo{2}",
+    "zh-CN": "{0}/{1} 永续{2}"
+  },
+  "{0}/{1} spot": {
+    "es": "{0}/{1} spot",
+    "zh-CN": "{0}/{1} 现货"
+  },
+  "{0}Data only; non-executable. {1}{2}": {
+    "es": "{0}Solo datos; no ejecutable. {1}{2}",
+    "zh-CN": "{0}仅数据；不可执行。{1}{2}"
+  },
+  "{0}Prints are omitted while the price deviates from the reference venue.": {
+    "es": "{0}Las operaciones se omiten mientras el precio se aleje del mercado de referencia.",
+    "zh-CN": "{0}价格偏离参考市场期间，成交将被排除。"
+  },
+  "{{{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"public/subscribe\",\"params\":{{{{\"channels\":[\"book.{0}.100ms\",\"trades.{1}.100ms\"]}}}}}}}}": {
+    "es": "{{{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"public/subscribe\",\"params\":{{{{\"channels\":[\"book.{0}.100ms\",\"trades.{1}.100ms\"]}}}}}}}}",
+    "zh-CN": "{{{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"public/subscribe\",\"params\":{{{{\"channels\":[\"book.{0}.100ms\",\"trades.{1}.100ms\"]}}}}}}}}"
+  },
+  "{{{{\"method\":\"sub.deal\",\"param\":{{{{\"symbol\":\"{0}\"}}}}}}}}": {
+    "es": "{{{{\"method\":\"sub.deal\",\"param\":{{{{\"symbol\":\"{0}\"}}}}}}}}",
+    "zh-CN": "{{{{\"method\":\"sub.deal\",\"param\":{{{{\"symbol\":\"{0}\"}}}}}}}}"
+  },
+  "{{{{\"method\":\"sub.depth.full\",\"param\":{{{{\"symbol\":\"{0}\",\"limit\":20}}}}}}}}": {
+    "es": "{{{{\"method\":\"sub.depth.full\",\"param\":{{{{\"symbol\":\"{0}\",\"limit\":20}}}}}}}}",
+    "zh-CN": "{{{{\"method\":\"sub.depth.full\",\"param\":{{{{\"symbol\":\"{0}\",\"limit\":20}}}}}}}}"
+  },
+  "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"l2Book\",\"coin\":\"{0}\"}}}}}}}}": {
+    "es": "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"l2Book\",\"coin\":\"{0}\"}}}}}}}}",
+    "zh-CN": "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"l2Book\",\"coin\":\"{0}\"}}}}}}}}"
+  },
+  "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"trades\",\"coin\":\"{0}\"}}}}}}}}": {
+    "es": "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"trades\",\"coin\":\"{0}\"}}}}}}}}",
+    "zh-CN": "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"trades\",\"coin\":\"{0}\"}}}}}}}}"
+  },
+  "{{{{\"op\":\"subscribe\",\"args\":[\"allLiquidation.{0}\"]}}}}": {
+    "es": "{{{{\"op\":\"subscribe\",\"args\":[\"allLiquidation.{0}\"]}}}}",
+    "zh-CN": "{{{{\"op\":\"subscribe\",\"args\":[\"allLiquidation.{0}\"]}}}}"
+  },
+  "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"channel\":\"books\",\"instId\":\"{0}\"}}}},{{{{\"channel\":\"trades\",\"instId\":\"{1}\"}}}}]}}}}": {
+    "es": "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"channel\":\"books\",\"instId\":\"{0}\"}}}},{{{{\"channel\":\"trades\",\"instId\":\"{1}\"}}}}]}}}}",
+    "zh-CN": "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"channel\":\"books\",\"instId\":\"{0}\"}}}},{{{{\"channel\":\"trades\",\"instId\":\"{1}\"}}}}]}}}}"
+  },
+  "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"instType\":\"{0}\",\"channel\":\"books\",\"instId\":\"{1}\"}}}},{{{{\"instType\":\"{2}\",\"channel\":\"trade\",\"instId\":\"{3}\"}}}}]}}}}": {
+    "es": "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"instType\":\"{0}\",\"channel\":\"books\",\"instId\":\"{1}\"}}}},{{{{\"instType\":\"{2}\",\"channel\":\"trade\",\"instId\":\"{3}\"}}}}]}}}}",
+    "zh-CN": "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"instType\":\"{0}\",\"channel\":\"books\",\"instId\":\"{1}\"}}}},{{{{\"instType\":\"{2}\",\"channel\":\"trade\",\"instId\":\"{3}\"}}}}]}}}}"
+  },
+  "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}m\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}": {
+    "es": "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}m\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}",
+    "zh-CN": "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}m\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}"
+  },
+  "{{{{\"type\":\"subscribe\",\"product_ids\":[\"{0}\"],\"channels\":[\"level2_batch\",\"matches\",\"heartbeat\"]}}}}": {
+    "es": "{{{{\"type\":\"subscribe\",\"product_ids\":[\"{0}\"],\"channels\":[\"level2_batch\",\"matches\",\"heartbeat\"]}}}}",
+    "zh-CN": "{{{{\"type\":\"subscribe\",\"product_ids\":[\"{0}\"],\"channels\":[\"level2_batch\",\"matches\",\"heartbeat\"]}}}}"
   }
 }

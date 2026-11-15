@@ -11,10 +11,13 @@ namespace TradingHub.Feeds.Bybit;
 /// La API REST solo da las últimas 1000 operaciones, así que la historia se completa con lo que
 /// Trading Hub va grabando en disco.
 /// </summary>
-public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHistory, IRecentTradeHistoryFeed
+public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHistory, IRecentTradeHistoryFeed, Venues.ICryptoVenue
 {
     public const string LinearId = "bybit-linear";
     public const string TestnetId = "bybit-linear-testnet";
+    /// <summary>Public spot market data only; spot is never a trading route here.</summary>
+    public const string SpotId = "bybit-spot";
+    private readonly string _category;
     private readonly string _feedId;
     private readonly string _rest;
     private readonly Uri _webSocketEndpoint;
@@ -31,16 +34,19 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
     {
         _feedId = feedId ?? LinearId;
         bool testnet = _feedId == TestnetId;
+        _category = _feedId == SpotId ? "spot" : "linear";
         _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         _ownsHttpClient = httpClient == null || ownsHttpClient;
         _rest = (restOrigin?.GetLeftPart(UriPartial.Authority) ?? (testnet ? "https://api-testnet.bybit.com" : "https://api.bybit.com")) + "/v5/market";
-        _webSocketEndpoint = webSocketEndpoint ?? new Uri(testnet ? "wss://stream-testnet.bybit.com/v5/public/linear" : "wss://stream.bybit.com/v5/public/linear");
+        _webSocketEndpoint = webSocketEndpoint ?? new Uri(testnet ? "wss://stream-testnet.bybit.com/v5/public/linear" : "wss://stream.bybit.com/v5/public/" + _category);
         _configureSocket = configureSocket;
         _connectWebSocket = connectWebSocket;
     }
 
     public string Id => _feedId;
-    public string DisplayName => "Bybit";
+    public string DisplayName => IsSpot ? "Bybit Spot" : "Bybit";
+    public string Venue => "Bybit";
+    public bool IsSpot => _category == "spot";
     public bool SupportsHistory => true;
     public bool IsLive => true;
     public bool RecentTradesOnly => true;
@@ -53,23 +59,24 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
         string? cursor = null;
         do
         {
-            var url = $"{_rest}/instruments-info?category=linear&limit=1000" + (cursor != null ? "&cursor=" + Uri.EscapeDataString(cursor) : "");
+            var url = $"{_rest}/instruments-info?category={_category}&limit=1000" + (cursor != null ? "&cursor=" + Uri.EscapeDataString(cursor) : "");
             using var doc = JsonDocument.Parse(await _http.GetStringAsync(url, ct).ConfigureAwait(false));
             var result = doc.RootElement.GetProperty("result");
             foreach (var s in result.GetProperty("list").EnumerateArray())
             {
                 if (s.GetProperty("status").GetString() != "Trading") continue;
-                if (s.TryGetProperty("contractType", out var ctp) && ctp.GetString() != "LinearPerpetual") continue;
+                if (!IsSpot && s.TryGetProperty("contractType", out var ctp) && ctp.GetString() != "LinearPerpetual") continue;
+                var lot = s.GetProperty("lotSizeFilter");
                 list.Add(new Instrument
                 {
                     Symbol = s.GetProperty("symbol").GetString()!,
                     FeedId = Id,
                     Exchange = DisplayName,
                     TickSize = Dec(s.GetProperty("priceFilter").GetProperty("tickSize")) / 1.0000000000000000000000000000m,
-                    VolumeStep = Dec(s.GetProperty("lotSizeFilter").GetProperty("qtyStep")) / 1.0000000000000000000000000000m,
+                    VolumeStep = Dec(lot.TryGetProperty("qtyStep", out var qtyStep) ? qtyStep : lot.GetProperty("basePrecision")) / 1.0000000000000000000000000000m,
                     BaseAsset = s.GetProperty("baseCoin").GetString() ?? "",
                     QuoteAsset = s.GetProperty("quoteCoin").GetString() ?? "",
-                    Description = $"{s.GetProperty("baseCoin").GetString()}/{s.GetProperty("quoteCoin").GetString()} perpetual",
+                    Description = $"{s.GetProperty("baseCoin").GetString()}/{s.GetProperty("quoteCoin").GetString()} {(IsSpot ? "spot" : "perpetual")}",
                 });
             }
 
@@ -82,7 +89,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
 
     public async Task<IReadOnlyDictionary<string, TickerStats>> GetTickerStatsAsync(CancellationToken ct)
     {
-        using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_rest}/tickers?category=linear", ct).ConfigureAwait(false));
+        using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_rest}/tickers?category={_category}", ct).ConfigureAwait(false));
         var res = new Dictionary<string, TickerStats>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in doc.RootElement.GetProperty("result").GetProperty("list").EnumerateArray())
         {
@@ -98,7 +105,8 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
     public async Task LoadTradesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, long? fromId,
         Func<IReadOnlyList<Trade>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
     {
-        using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_rest}/recent-trade?category=linear&symbol={instrument.Symbol}&limit=1000", ct).ConfigureAwait(false));
+        // Spot serves at most the latest 60 prints; linear the latest 1000.
+        using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_rest}/recent-trade?category={_category}&symbol={instrument.Symbol}&limit={(IsSpot ? 60 : 1000)}", ct).ConfigureAwait(false));
         var list = new List<Trade>();
         foreach (var t in doc.RootElement.GetProperty("result").GetProperty("list").EnumerateArray())
         {
@@ -117,7 +125,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
 
     public async Task<DateTime?> FirstAvailableAsync(Instrument instrument, CancellationToken ct)
     {
-        using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_rest}/instruments-info?category=linear&symbol={instrument.Symbol}", ct).ConfigureAwait(false));
+        using var doc = JsonDocument.Parse(await _http.GetStringAsync($"{_rest}/instruments-info?category={_category}&symbol={instrument.Symbol}", ct).ConfigureAwait(false));
         var list = doc.RootElement.GetProperty("result").GetProperty("list");
         if (list.GetArrayLength() == 0 || !list[0].TryGetProperty("launchTime", out var lt)) return null;
         return long.TryParse(lt.GetString(), out var ms) ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime : null;
@@ -135,7 +143,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
         {
             long pageEnd = Math.Min(end, cur + 1000 * step) - 1;
             using var doc = JsonDocument.Parse(await _http.GetStringAsync(
-                $"{_rest}/kline?category=linear&symbol={instrument.Symbol}&interval={minutes}&start={cur}&end={pageEnd}&limit=1000", ct).ConfigureAwait(false));
+                $"{_rest}/kline?category={_category}&symbol={instrument.Symbol}&interval={minutes}&start={cur}&end={pageEnd}&limit=1000", ct).ConfigureAwait(false));
             var list = doc.RootElement.GetProperty("result").GetProperty("list");
             var batch = new List<Kline>(list.GetArrayLength());
             foreach (var k in list.EnumerateArray())
@@ -176,7 +184,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
 
     public IDisposable Subscribe(Instrument instrument, IMarketDataSink sink)
     {
-        var sub = new LiveSubscription("Bybit", (st, msg) => sink.OnStatus(instrument, st, msg));
+        var sub = new LiveSubscription(DisplayName, (st, msg) => sink.OnStatus(instrument, st, msg));
         _ = Task.Run(() => RunAsync(instrument, sink, sub));
         return sub;
     }
@@ -198,7 +206,7 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
             string reason = "connection lost";
             try
             {
-                if (!everConnected) liveSub.SetChannel("data", FeedStatus.Connecting, "Connecting to Bybit…");
+                if (!everConnected) liveSub.SetChannel("data", FeedStatus.Connecting, $"Connecting to {DisplayName}…");
                 WebSocket ws;
                 using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(conn.Token))
                 {
