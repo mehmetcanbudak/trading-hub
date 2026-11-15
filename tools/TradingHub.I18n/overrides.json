@@ -24234,5 +24234,69 @@
   "{0} lists {1} as {2}; its open interest and prices are converted to {3}.": {
     "es": "{0} lista {1} como {2}; su interés abierto y sus precios se convierten a {3}.",
     "zh-CN": "{0} 将 {1} 列为 {2}；其持仓量和价格已换算为 {3}。"
+  },
+  "Cancel orders at {0}": {
+    "es": "Cancelar órdenes en {0}",
+    "zh-CN": "撤销 {0} 处的订单"
+  },
+  "Error draining order actions": {
+    "es": "Error al completar las acciones de órdenes entregadas",
+    "zh-CN": "完成已提交的订单操作时出错"
+  },
+  "Trading Hub is quitting: the order action was not sent.": {
+    "es": "Trading Hub se está cerrando: la acción de orden no se envió.",
+    "zh-CN": "Trading Hub 正在退出：该订单操作未发送。"
+  },
+  "{0} · {1} order action(s) pending": {
+    "es": "{0} · {1} acción(es) de orden pendiente(s)",
+    "zh-CN": "{0} · {1} 个订单操作待处理"
+  },
+  "{0}: pending…": {
+    "es": "{0}: pendiente…",
+    "zh-CN": "{0}：待处理…"
+  },
+  "{0}: error after submission; check orders and position: {1}": {
+    "es": "{0}: error después del envío; revisá las órdenes y la posición: {1}",
+    "zh-CN": "{0}：提交后出错；请检查订单和持仓：{1}"
+  },
+  "An earlier order's outcome was still unsettled after 10 seconds; this reducing request was sent anyway. Check orders and position.": {
+    "es": "El resultado de una orden anterior seguía sin resolverse después de 10 segundos; esta solicitud de reducción se envió de todos modos. Revisá las órdenes y la posición.",
+    "zh-CN": "先前订单的结果在 10 秒后仍未确定；此减仓请求仍已发送。请检查订单和持仓。"
+  },
+  "Tradovate did not liquidate the position: ": {
+    "es": "Tradovate no liquidó la posición: ",
+    "zh-CN": "Tradovate 未平掉该持仓： "
+  },
+  "Tradovate did not liquidate the position: {0}": {
+    "es": "Tradovate no liquidó la posición: {0}",
+    "zh-CN": "Tradovate 未平掉该持仓：{0}"
+  },
+  "An earlier order's outcome was still unsettled after 10 seconds; nothing was sent. Check orders and position.": {
+    "es": "El resultado de una orden anterior seguía sin resolverse después de 10 segundos; no se envió nada. Revisá las órdenes y la posición.",
+    "zh-CN": "先前订单的结果在 10 秒后仍未确定；未发送任何请求。请检查订单和持仓。"
+  },
+  "The position changed side before the close was sent; the close was sized from the position it found. Check the position.": {
+    "es": "La posición cambió de lado antes de enviar el cierre; el cierre se dimensionó según la posición encontrada. Revisá la posición.",
+    "zh-CN": "平仓发送前持仓方向已改变；平仓按当时的实际持仓确定数量。请检查持仓。"
+  },
+  "The position changed side before the reverse was sent; nothing was sent. Check the position.": {
+    "es": "La posición cambió de lado antes de enviar la reversión; no se envió nada. Revisá la posición.",
+    "zh-CN": "反手发送前持仓方向已改变；未发送任何请求。请检查持仓。"
+  },
+  "Order requests were still waiting to be sent or answered when Trading Hub quit; check orders and positions at the broker.": {
+    "es": "Al salir de Trading Hub todavía había solicitudes de órdenes esperando envío o respuesta; revisá las órdenes y posiciones en el bróker.",
+    "zh-CN": "退出 Trading Hub 时仍有订单请求等待发送或答复；请在经纪商处检查订单和持仓。"
+  },
+  "Error draining native order requests": {
+    "es": "Error al completar las solicitudes de órdenes nativas",
+    "zh-CN": "完成原生订单请求时出错"
+  },
+  "{0} · waiting for an earlier reply ({1} queued)": {
+    "es": "{0} · esperando la respuesta de una solicitud anterior ({1} en cola)",
+    "zh-CN": "{0} · 正在等待先前请求的回复（{1} 个排队中）"
+  },
+  "Sending queued order requests before quitting…": {
+    "es": "Enviando las solicitudes de órdenes en cola antes de salir…",
+    "zh-CN": "退出前正在发送排队中的订单请求…"
   }
 }
