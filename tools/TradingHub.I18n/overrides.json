@@ -14018,5 +14018,1669 @@
   "{0} stays active after each drawing (Esc releases it)": {
     "es": "{0} queda activa después de cada dibujo (Esc la suelta)",
     "zh-CN": "{0} 在每次绘图后保持激活（Esc 释放）"
+  },
+  " · band is deeper than the recorded levels; only recorded levels are summed": {
+    "es": " · la banda es más profunda que los niveles grabados; solo se suman los niveles grabados",
+    "zh-CN": " · 区间深于已记录的档位；只汇总已记录的档位"
+  },
+  " · unobserved {0} · removed without trade data {1} · heuristics, not intent": {
+    "es": " · no observadas {0} · retiradas sin datos de operaciones {1} · heurísticas, no intención",
+    "zh-CN": " · 未观察到 {0} · 无成交数据的移除 {1} · 启发式判断，并非意图"
+  },
+  " · {0} bars without tick footprint: removals shown as pulled": {
+    "es": " · {0} velas sin footprint por tick: lo retirado se muestra como cancelado",
+    "zh-CN": " · {0} 根 K 线没有逐 tick 足迹：移除量显示为撤单"
+  },
+  "0 – 0.5 % of mid": {
+    "es": "0 – 0,5 % del precio medio",
+    "zh-CN": "中间价的 0 – 0.5 %"
+  },
+  "0 – 1 % of mid": {
+    "es": "0 – 1 % del precio medio",
+    "zh-CN": "中间价的 0 – 1 %"
+  },
+  "0 – 10 % of mid": {
+    "es": "0 – 10 % del precio medio",
+    "zh-CN": "中间价的 0 – 10 %"
+  },
+  "0 – 2.5 % of mid": {
+    "es": "0 – 2,5 % del precio medio",
+    "zh-CN": "中间价的 0 – 2.5 %"
+  },
+  "0 – 25 % of mid": {
+    "es": "0 – 25 % del precio medio",
+    "zh-CN": "中间价的 0 – 25 %"
+  },
+  "0 – 5 % of mid": {
+    "es": "0 – 5 % del precio medio",
+    "zh-CN": "中间价的 0 – 5 %"
+  },
+  "0–{0}% of mid": {
+    "es": "0–{0} % del precio medio",
+    "zh-CN": "中间价的 0–{0}%"
+  },
+  "4 hours": {
+    "es": "4 horas",
+    "zh-CN": "4 小时"
+  },
+  "Added and removed (two columns)": {
+    "es": "Agregado y retirado (dos columnas)",
+    "zh-CN": "新增与移除（两列）"
+  },
+  "Added color": {
+    "es": "Color de lo agregado",
+    "zh-CN": "新增颜色"
+  },
+  "All trades": {
+    "es": "Todas las operaciones",
+    "zh-CN": "全部成交"
+  },
+  "Approximate rows (automatic grouping)": {
+    "es": "Filas aproximadas (agrupación automática)",
+    "zh-CN": "大约行数（自动合并）"
+  },
+  "Ask color": {
+    "es": "Color del ask",
+    "zh-CN": "卖盘颜色"
+  },
+  "Ask side background": {
+    "es": "Fondo del lado ask",
+    "zh-CN": "卖盘一侧背景"
+  },
+  "Auto tick: range on each side of the price (%)": {
+    "es": "Tick automático: rango a cada lado del precio (%)",
+    "zh-CN": "自动 tick：价格两侧的范围（%）"
+  },
+  "Automatic": {
+    "es": "Automático",
+    "zh-CN": "自动"
+  },
+  "Automatic row grouping (auto tick)": {
+    "es": "Agrupación automática de filas (tick automático)",
+    "zh-CN": "自动合并行（自动 tick）"
+  },
+  "Automatic: multiple of the median level size": {
+    "es": "Automático: múltiplo del tamaño mediano de los niveles",
+    "zh-CN": "自动：档位挂单量中位数的倍数"
+  },
+  "Bid color": {
+    "es": "Color del bid",
+    "zh-CN": "买盘颜色"
+  },
+  "Bid side background": {
+    "es": "Fondo del lado bid",
+    "zh-CN": "买盘一侧背景"
+  },
+  "Book changes (recorded window)": {
+    "es": "Cambios del libro (ventana grabada)",
+    "zh-CN": "订单簿变化（已记录的时间窗）"
+  },
+  "Book changes and recent trades window (seconds)": {
+    "es": "Ventana de cambios del libro y operaciones recientes (segundos)",
+    "zh-CN": "订单簿变化和近期成交的时间窗（秒）"
+  },
+  "Book changes compare recorded received snapshots in this window (depth recording must be on); recent trades sum observed prints.": {
+    "es": "Los cambios del libro comparan las instantáneas recibidas y grabadas en esta ventana (la grabación de profundidad debe estar activada); las operaciones recientes suman las ejecuciones observadas.",
+    "zh-CN": "订单簿变化比较此时间窗内已记录的收到快照（必须开启深度记录）；近期成交汇总观察到的成交。"
+  },
+  "Book changes · {0}": {
+    "es": "Cambios del libro · {0}",
+    "zh-CN": "订单簿变化 · {0}"
+  },
+  "Book range": {
+    "es": "Rango del libro",
+    "zh-CN": "订单簿范围"
+  },
+  "Book reading": {
+    "es": "Lectura del libro",
+    "zh-CN": "读盘"
+  },
+  "Changes": {
+    "es": "Cambios",
+    "zh-CN": "变化"
+  },
+  "Chasing color": {
+    "es": "Color de persecución",
+    "zh-CN": "追价颜色"
+  },
+  "Chasing: maximum distance (ticks)": {
+    "es": "Persecución: distancia máxima (ticks)",
+    "zh-CN": "追价：最大距离（tick）"
+  },
+  "Chooses the ticks per row so the visible rows span the range below, never wider than the received book.": {
+    "es": "Elige los ticks por fila para que las filas visibles abarquen el rango de abajo, nunca más que el libro recibido.",
+    "zh-CN": "自动选择每行的 tick 数，让可见行覆盖下面的范围，但绝不超过收到的订单簿。"
+  },
+  "Comma-separated percentages marked on both sides of the mid price (empty = none).": {
+    "es": "Porcentajes separados por comas, marcados a ambos lados del precio medio (vacío = ninguno).",
+    "zh-CN": "用逗号分隔的百分比，在中间价两侧标出（留空 = 不标）。"
+  },
+  "Compare with the other side on hover (mirror)": {
+    "es": "Comparar con el otro lado al pasar el puntero (espejo)",
+    "zh-CN": "悬停时与另一侧对比（镜像）"
+  },
+  "Consecutive snapshots further apart are not compared; the book between them was not observed.": {
+    "es": "Las instantáneas consecutivas más separadas no se comparan: el libro entre ellas no se observó.",
+    "zh-CN": "间隔更长的相邻快照不做比较：两者之间的订单簿没有被观察到。"
+  },
+  "Cumulative total from best price": {
+    "es": "Total acumulado desde el mejor precio",
+    "zh-CN": "从最优价起的累计"
+  },
+  "Current session": {
+    "es": "Sesión actual",
+    "zh-CN": "当前交易时段"
+  },
+  "Custom hours": {
+    "es": "Horas personalizadas",
+    "zh-CN": "自定义小时数"
+  },
+  "DOM settings control columns, sizing, colors, optional double-click trading and book reading (auto tick, notional, changes, stats, mirror).": {
+    "es": "La configuración del DOM controla columnas, tamaños, colores, la operación opcional con doble clic y la lectura del libro (tick automático, nocional, cambios, estadísticas, espejo).",
+    "zh-CN": "DOM 设置控制列、尺寸、颜色、可选的双击交易以及读盘功能（自动 tick、名义金额、变化、统计、镜像）。"
+  },
+  "DOM trading is off: the DOM is read-only. Use the lock in the DOM header to enable it.": {
+    "es": "Operar desde el DOM está desactivado: el DOM es de solo lectura. Usá el candado del encabezado del DOM para activarlo.",
+    "zh-CN": "DOM 交易已关闭：DOM 为只读。使用 DOM 标题栏的锁来开启。"
+  },
+  "DOM trading off": {
+    "es": "Operar desde el DOM: desactivado",
+    "zh-CN": "DOM 交易：已关闭"
+  },
+  "DOM trading off: the DOM is read-only": {
+    "es": "Operar desde el DOM desactivado: el DOM es de solo lectura",
+    "zh-CN": "DOM 交易已关闭：DOM 为只读"
+  },
+  "DOM trading off: the DOM is read-only. Click to enable DOM trading.": {
+    "es": "Operar desde el DOM desactivado: el DOM es de solo lectura. Hacé clic para activarlo.",
+    "zh-CN": "DOM 交易已关闭：DOM 为只读。点击以开启 DOM 交易。"
+  },
+  "DOM trading on": {
+    "es": "Operar desde el DOM activado",
+    "zh-CN": "DOM 交易已开启"
+  },
+  "DOM trading on. Click to make the DOM read-only (chart trading is unaffected).": {
+    "es": "Operar desde el DOM activado. Hacé clic para dejar el DOM en solo lectura (operar en el gráfico no cambia).",
+    "zh-CN": "DOM 交易已开启。点击使 DOM 变为只读（不影响图表交易）。"
+  },
+  "Depth recording is off": {
+    "es": "La grabación de profundidad está desactivada",
+    "zh-CN": "深度记录已关闭"
+  },
+  "Distance marks from the price (%)": {
+    "es": "Marcas de distancia al precio (%)",
+    "zh-CN": "距价格的标记（%）"
+  },
+  "Filled color": {
+    "es": "Color de lo ejecutado",
+    "zh-CN": "成交颜色"
+  },
+  "Group DOM price levels (automatic: rows span the range set in DOM settings)": {
+    "es": "Agrupar precios del DOM (automático: las filas abarcan el rango fijado en la configuración del DOM)",
+    "zh-CN": "合并 DOM 价位（自动：行覆盖 DOM 设置中设定的范围）"
+  },
+  "Group rows by ticks (0 = automatic)": {
+    "es": "Agrupar filas por ticks (0 = automático)",
+    "zh-CN": "按 tick 合并行（0 = 自动）"
+  },
+  "Highlight the largest visible sizes automatically": {
+    "es": "Resaltar automáticamente los tamaños visibles más grandes",
+    "zh-CN": "自动高亮可见范围内最大的挂单量"
+  },
+  "Hours (custom window)": {
+    "es": "Horas (ventana personalizada)",
+    "zh-CN": "小时数（自定义时间窗）"
+  },
+  "Ladder of recorded L2 changes per price: size added, size removed without matching trades (pulled) and removed size matched to observed footprint volume (filled). Snapshot differences, not individual orders; gaps and stale intervals are skipped and counted. Needs explicit depth recording.": {
+    "es": "Escalera de cambios L2 grabados por precio: tamaño agregado, tamaño retirado sin operaciones que lo expliquen (cancelado) y tamaño retirado que coincide con el volumen observado del footprint (ejecutado). Diferencias entre instantáneas, no órdenes individuales; los huecos y los intervalos obsoletos se omiten y se cuentan. Requiere activar explícitamente la grabación de profundidad.",
+    "zh-CN": "按价格显示已记录的 L2 变化阶梯：新增量、没有对应成交的移除量（撤单），以及与观察到的足迹成交量相符的移除量（成交）。这是快照之间的差异，不是单个订单；缺口和过期区间会被跳过并计数。需要明确开启深度记录。"
+  },
+  "Ladder width (px)": {
+    "es": "Ancho de la escalera (px)",
+    "zh-CN": "阶梯宽度（像素）"
+  },
+  "Large book orders (pull / chase heuristics)": {
+    "es": "Órdenes grandes del libro (heurísticas de retiro / persecución)",
+    "zh-CN": "订单簿大单（撤单 / 追价启发式）"
+  },
+  "Large levels ≥ {0} · {1} tracked · S quick pulls {2} · C moved {3}": {
+    "es": "Niveles grandes ≥ {0} · {1} seguidos · S retiros rápidos {2} · C movidos {3}",
+    "zh-CN": "大档位 ≥ {0} · 跟踪 {1} 个 · S 快速撤单 {2} · C 移动 {3}"
+  },
+  "Large levels ≥ {0} · {1} tracked · S quick pulls {2} · C moved {3} · unobserved {4} · removed without trade data {5} · heuristics, not intent": {
+    "es": "Niveles grandes ≥ {0} · {1} seguidos · S retiros rápidos {2} · C movidos {3} · no observadas {4} · retiradas sin datos de operaciones {5} · heurísticas, no intención",
+    "zh-CN": "大档位 ≥ {0} · 跟踪 {1} 个 · S 快速撤单 {2} · C 移动 {3} · 未观察到 {4} · 无成交数据的移除 {5} · 启发式判断，并非意图"
+  },
+  "Large recorded resting levels: when they appeared and how long they rested. Marks quick pulls without matching trades (S, spoofing heuristic) and levels moving with the price (C, chasing heuristic); fates crossing gaps, stale intervals or leaving the visible book stay unjudged. Needs explicit depth recording.": {
+    "es": "Niveles grandes en reposo grabados: cuándo aparecieron y cuánto duraron. Marca los retiros rápidos sin operaciones que los expliquen (S, heurística de spoofing) y los niveles que se mueven con el precio (C, heurística de persecución); los destinos que cruzan huecos, intervalos obsoletos o salen del libro visible no se juzgan. Requiere activar explícitamente la grabación de profundidad.",
+    "zh-CN": "已记录的大额挂单档位：何时出现、挂了多久。标出没有对应成交的快速撤单（S，虚假挂单启发式）以及随价格移动的档位（C，追价启发式）；跨越缺口、过期区间或离开可见订单簿的结局不作判断。需要明确开启深度记录。"
+  },
+  "Minimum size (0 = automatic)": {
+    "es": "Tamaño mínimo (0 = automático)",
+    "zh-CN": "最小挂单量（0 = 自动）"
+  },
+  "Net (added minus removed)": {
+    "es": "Neto (agregado menos retirado)",
+    "zh-CN": "净额（新增减移除）"
+  },
+  "No comparable consecutive snapshots (gaps, stale intervals or source changes).": {
+    "es": "No hay instantáneas consecutivas comparables (huecos, intervalos obsoletos o cambios de fuente).",
+    "zh-CN": "没有可比较的相邻快照（缺口、过期区间或数据源变化）。"
+  },
+  "No comparable consecutive snapshots in the window (gaps, stale intervals or source changes).": {
+    "es": "No hay instantáneas consecutivas comparables en la ventana (huecos, intervalos obsoletos o cambios de fuente).",
+    "zh-CN": "时间窗内没有可比较的相邻快照（缺口、过期区间或数据源变化）。"
+  },
+  "No comparable snapshots": {
+    "es": "No hay instantáneas comparables",
+    "zh-CN": "没有可比较的快照"
+  },
+  "No recorded depth in the visible bars. Recording must be explicitly enabled; display does not enable it.": {
+    "es": "No hay profundidad grabada en las velas visibles. La grabación debe activarse explícitamente; mostrarla no la activa.",
+    "zh-CN": "可见 K 线中没有已记录的深度。必须明确开启记录；显示并不会开启记录。"
+  },
+  "No recorded depth in the window": {
+    "es": "No hay profundidad grabada en la ventana",
+    "zh-CN": "时间窗内没有已记录的深度"
+  },
+  "No recorded depth in the window. Recording must be explicitly enabled; display does not enable it.": {
+    "es": "No hay profundidad grabada en la ventana. La grabación debe activarse explícitamente; mostrarla no la activa.",
+    "zh-CN": "时间窗内没有已记录的深度。必须明确开启记录；显示并不会开启记录。"
+  },
+  "No recorded depth snapshots in this interval.": {
+    "es": "No hay instantáneas de profundidad grabadas en este intervalo.",
+    "zh-CN": "此区间内没有已记录的深度快照。"
+  },
+  "No trade data: removed size includes fills.": {
+    "es": "Sin datos de operaciones: lo retirado incluye ejecuciones.",
+    "zh-CN": "没有成交数据：移除量包含成交。"
+  },
+  "No two-sided book": {
+    "es": "No hay libro de dos lados",
+    "zh-CN": "没有双边订单簿"
+  },
+  "No usable book to size the automatic threshold.": {
+    "es": "No hay un libro utilizable para calcular el umbral automático.",
+    "zh-CN": "没有可用的订单簿来计算自动阈值。"
+  },
+  "Notional": {
+    "es": "Nocional",
+    "zh-CN": "名义金额"
+  },
+  "Notional (quantity × price × point value)": {
+    "es": "Nocional (cantidad × precio × valor del punto)",
+    "zh-CN": "名义金额（数量 × 价格 × 点值）"
+  },
+  "Notional multiplies size by price and the instrument point value, in the instrument's quote currency.": {
+    "es": "El nocional multiplica el tamaño por el precio y el valor del punto del instrumento, en la moneda de cotización del instrumento.",
+    "zh-CN": "名义金额 = 数量 × 价格 × 合约点值，以该品种的计价货币表示。"
+  },
+  "Order book changes (added / pulled)": {
+    "es": "Cambios del libro de órdenes (agregado / cancelado)",
+    "zh-CN": "订单簿变化（新增 / 撤单）"
+  },
+  "Partial: gaps or stale intervals skipped": {
+    "es": "Parcial: se omitieron huecos o intervalos obsoletos",
+    "zh-CN": "部分：已跳过缺口或过期区间"
+  },
+  "Percentage bands are measured from the mid price; when the provider book is shallower than the band, only the recorded levels are summed and the status says so.": {
+    "es": "Las bandas porcentuales se miden desde el precio medio; si el libro del proveedor es menos profundo que la banda, solo se suman los niveles grabados y el estado lo indica.",
+    "zh-CN": "百分比区间从中间价起算；当提供商的订单簿浅于该区间时，只汇总已记录的档位，并在状态中注明。"
+  },
+  "Pulled color": {
+    "es": "Color de lo cancelado",
+    "zh-CN": "撤单颜色"
+  },
+  "Quantity (contracts / coins)": {
+    "es": "Cantidad (contratos / monedas)",
+    "zh-CN": "数量（合约 / 币）"
+  },
+  "Quick pull color": {
+    "es": "Color de retiro rápido",
+    "zh-CN": "快速撤单颜色"
+  },
+  "Quick pull: removed within (seconds)": {
+    "es": "Retiro rápido: retirada antes de (segundos)",
+    "zh-CN": "快速撤单：在多少秒内移除"
+  },
+  "Recent": {
+    "es": "Reciente",
+    "zh-CN": "近期"
+  },
+  "Recently traded (window)": {
+    "es": "Operado recientemente (ventana)",
+    "zh-CN": "近期成交（时间窗）"
+  },
+  "Recorded L2 snapshot differences · {0} comparisons · {1} skipped (gaps/stale/source changes) · longest interval {2} s · filled/pulled split is a heuristic": {
+    "es": "Diferencias entre instantáneas L2 grabadas · {0} comparaciones · {1} omitidas (huecos/obsoletas/cambios de fuente) · intervalo más largo {2} s · la separación ejecutado/cancelado es una heurística",
+    "zh-CN": "已记录 L2 快照差异 · {0} 次比较 · 跳过 {1} 次（缺口/过期/数据源变化）· 最长间隔 {2} 秒 · 成交/撤单的划分是启发式判断"
+  },
+  "Recorded L2 snapshot differences · {0} comparisons · {1} skipped (gaps/stale/source changes) · longest interval {2} s · filled/pulled split is a heuristic{3}{4}": {
+    "es": "Diferencias entre instantáneas L2 grabadas · {0} comparaciones · {1} omitidas (huecos/obsoletas/cambios de fuente) · intervalo más largo {2} s · la separación ejecutado/cancelado es una heurística{3}{4}",
+    "zh-CN": "已记录 L2 快照差异 · {0} 次比较 · 跳过 {1} 次（缺口/过期/数据源变化）· 最长间隔 {2} 秒 · 成交/撤单的划分是启发式判断{3}{4}"
+  },
+  "Recording off": {
+    "es": "Grabación desactivada",
+    "zh-CN": "记录已关闭"
+  },
+  "Resting L2 · {0} · {1} · {2} snapshots · {3} covered seconds": {
+    "es": "L2 de órdenes pendientes · {0} · {1} · {2} instantáneas · {3} segundos cubiertos",
+    "zh-CN": "L2 挂单 · {0} · {1} · {2} 个快照 · 覆盖 {3} 秒"
+  },
+  "Show filled (removed by trades)": {
+    "es": "Mostrar lo ejecutado (retirado por operaciones)",
+    "zh-CN": "显示成交（被成交移除的量）"
+  },
+  "Show only trades of at least this notional (quantity × price × point value)": {
+    "es": "Mostrar solo operaciones de al menos este nocional (cantidad × precio × valor del punto)",
+    "zh-CN": "只显示名义金额不低于此值的成交（数量 × 价格 × 点值）"
+  },
+  "Show traded levels": {
+    "es": "Mostrar niveles operados",
+    "zh-CN": "显示已成交的档位"
+  },
+  "Show unobserved fates": {
+    "es": "Mostrar destinos no observados",
+    "zh-CN": "显示未观察到的结局"
+  },
+  "Size (bids below / asks above)": {
+    "es": "Cantidad (bids abajo / asks arriba)",
+    "zh-CN": "挂单量（下方买盘 / 上方卖盘）"
+  },
+  "Size unit": {
+    "es": "Unidad de tamaño",
+    "zh-CN": "数量单位"
+  },
+  "Some bars lack an observed tick footprint; their removed size is shown as pulled.": {
+    "es": "Algunas velas no tienen footprint observado por tick; su tamaño retirado se muestra como cancelado.",
+    "zh-CN": "部分 K 线没有观察到的逐 tick 足迹；其移除量显示为撤单。"
+  },
+  "Some transitions were skipped (gaps, stale intervals or source changes); changes across them are unknown.": {
+    "es": "Se omitieron algunas transiciones (huecos, intervalos obsoletos o cambios de fuente); los cambios a través de ellas son desconocidos.",
+    "zh-CN": "部分相邻快照被跳过（缺口、过期区间或数据源变化）；跨越它们的变化未知。"
+  },
+  "Spread {0} ({1} bp) · ×{2} tick": {
+    "es": "Spread {0} ({1} pb) · ×{2} tick",
+    "zh-CN": "价差 {0}（{1} 基点）· ×{2} tick"
+  },
+  "Stats bar (spread, liquidity within 0.5 / 2 / 10 %)": {
+    "es": "Barra de estadísticas (spread, liquidez dentro del 0,5 / 2 / 10 %)",
+    "zh-CN": "统计栏（价差、0.5 / 2 / 10 % 内的挂单量）"
+  },
+  "The lock in the header switches DOM trading off: the DOM becomes read-only (chart trading is unaffected).": {
+    "es": "El candado del encabezado desactiva operar desde el DOM: el DOM queda en solo lectura (operar en el gráfico no cambia).",
+    "zh-CN": "标题栏中的锁可关闭 DOM 交易：DOM 变为只读（不影响图表交易）。"
+  },
+  "Ticks from each side's best price": {
+    "es": "Ticks desde el mejor precio de cada lado",
+    "zh-CN": "距各侧最优价的 tick 数"
+  },
+  "Values on each row": {
+    "es": "Valores en cada fila",
+    "zh-CN": "每行显示数值"
+  },
+  "Visible bars": {
+    "es": "Velas visibles",
+    "zh-CN": "可见 K 线"
+  },
+  "When the fixed highlight size is 0: sizes ≥ 85 % of the largest visible level and ≥ 3 × the median are outlined.": {
+    "es": "Cuando el tamaño fijo de resaltado es 0: se recuadran los tamaños ≥ 85 % del nivel visible más grande y ≥ 3 × la mediana.",
+    "zh-CN": "当固定高亮阈值为 0 时：挂单量 ≥ 可见最大档位的 85 % 且 ≥ 中位数 3 倍的会被框出。"
+  },
+  "changes: {0} comparisons, {1} skipped": {
+    "es": "cambios: {0} comparaciones, {1} omitidas",
+    "zh-CN": "变化：{0} 次比较，跳过 {1} 次"
+  },
+  "current session": {
+    "es": "sesión actual",
+    "zh-CN": "当前交易时段"
+  },
+  "green added · red pulled · amber filled (heuristic)": {
+    "es": "verde agregado · rojo cancelado · ámbar ejecutado (heurístico)",
+    "zh-CN": "绿色新增 · 红色撤单 · 琥珀色成交（启发式）"
+  },
+  "green: more added · red: more removed": {
+    "es": "verde: más agregado · rojo: más retirado",
+    "zh-CN": "绿色：新增更多 · 红色：移除更多"
+  },
+  "visible bars": {
+    "es": "velas visibles",
+    "zh-CN": "可见 K 线"
+  },
+  "± book": {
+    "es": "± libro",
+    "zh-CN": "± 挂单"
+  },
+  "≥ 100K notional": {
+    "es": "≥ 100K de nocional",
+    "zh-CN": "名义金额 ≥ 100K"
+  },
+  "≥ 10K notional": {
+    "es": "≥ 10K de nocional",
+    "zh-CN": "名义金额 ≥ 10K"
+  },
+  "≥ 1M notional": {
+    "es": "≥ 1M de nocional",
+    "zh-CN": "名义金额 ≥ 1M"
+  },
+  "≥ 500K notional": {
+    "es": "≥ 500K de nocional",
+    "zh-CN": "名义金额 ≥ 500K"
+  },
+  "≥ 50K notional": {
+    "es": "≥ 50K de nocional",
+    "zh-CN": "名义金额 ≥ 50K"
+  },
+  "All loaded history": {
+    "es": "Todo el historial cargado",
+    "zh-CN": "全部已加载历史"
+  },
+  "Anchored": {
+    "es": "Anclado",
+    "zh-CN": "锚定"
+  },
+  "Anchored VWAP settings": {
+    "es": "Ajustes del VWAP anclado",
+    "zh-CN": "锚定 VWAP 设置"
+  },
+  "Anchored VWAP with bands": {
+    "es": "VWAP anclado con desvíos",
+    "zh-CN": "锚定 VWAP（含标准差带）"
+  },
+  "Automatic merge rule": {
+    "es": "Regla de unión automática",
+    "zh-CN": "自动合并规则"
+  },
+  "Background aggregation of {0} {1} failed: {2}": {
+    "es": "Falló la agregación en segundo plano de {0} {1}: {2}",
+    "zh-CN": "{0} {1} 的后台聚合失败：{2}"
+  },
+  "Buyer color (delta / bid-ask)": {
+    "es": "Color comprador (delta / bid-ask)",
+    "zh-CN": "买方颜色（Delta / 买卖价）"
+  },
+  "Chart menu of {0} failed: {1}": {
+    "es": "Falló el menú del gráfico de {0}: {1}",
+    "zh-CN": "{0} 的图表菜单失败：{1}"
+  },
+  "Claire": {
+    "es": "Claire",
+    "zh-CN": "Claire"
+  },
+  "Duplicate VWAP suite series identity {0}.": {
+    "es": "Identidad de serie duplicada en el conjunto VWAP: {0}.",
+    "zh-CN": "VWAP 组合中的序列标识重复：{0}。"
+  },
+  "Full range (low to high)": {
+    "es": "Rango completo (mínimo a máximo)",
+    "zh-CN": "完整区间（最低到最高）"
+  },
+  "Invalid merge range \"{0}\"; expected yyyy-MM-ddTHH:mm:ssZ..yyyy-MM-ddTHH:mm:ssZ.": {
+    "es": "Rango de unión no válido «{0}»; se esperaba yyyy-MM-ddTHH:mm:ssZ..yyyy-MM-ddTHH:mm:ssZ.",
+    "zh-CN": "合并区间无效“{0}”；应为 yyyy-MM-ddTHH:mm:ssZ..yyyy-MM-ddTHH:mm:ssZ。"
+  },
+  "Label merged profiles": {
+    "es": "Rotular los perfiles unidos",
+    "zh-CN": "标注已合并的分布"
+  },
+  "Manual merges (UTC period start..end; separated by ;)": {
+    "es": "Uniones manuales (inicio..fin de período en UTC; separadas por ;)",
+    "zh-CN": "手动合并（UTC 周期开始..结束；以 ; 分隔）"
+  },
+  "Merged automatically · {0} periods": {
+    "es": "Unido automáticamente · {0} períodos",
+    "zh-CN": "自动合并 · {0} 个周期"
+  },
+  "Merged · {0} periods": {
+    "es": "Unido · {0} períodos",
+    "zh-CN": "已合并 · {0} 个周期"
+  },
+  "Merging": {
+    "es": "Unión de perfiles",
+    "zh-CN": "合并"
+  },
+  "Minimum overlap to merge (%)": {
+    "es": "Superposición mínima para unir (%)",
+    "zh-CN": "合并所需最小重叠（%）"
+  },
+  "Multi-period": {
+    "es": "Múltiples períodos",
+    "zh-CN": "多周期"
+  },
+  "Multi-period VWAP settings": {
+    "es": "Ajustes del VWAP de múltiples períodos",
+    "zh-CN": "多周期 VWAP 设置"
+  },
+  "Neighbours overlap by at least the minimum percent": {
+    "es": "Los vecinos se superponen al menos el porcentaje mínimo",
+    "zh-CN": "相邻分布至少按最小百分比重叠"
+  },
+  "Next POC inside the current value area": {
+    "es": "El siguiente POC dentro del área de valor actual",
+    "zh-CN": "下一个 POC 位于当前价值区内"
+  },
+  "One VWAP with selectable parts: anchored VWAP with up to three bands, bar-based Claire rolling/anchored VWAPs, simultaneous session/week/month/quarter/year VWAPs, prior and closing levels, rolling window and local-time session window. Each part keeps its own coverage labels and settings.": {
+    "es": "Un solo VWAP con partes seleccionables: VWAP anclado con hasta tres desvíos, VWAP Claire móviles/anclados basados en velas, VWAP simultáneos de sesión/semana/mes/trimestre/año, niveles anteriores y de cierre, ventana móvil y ventana de sesión en hora local. Cada parte conserva sus propias etiquetas de cobertura y ajustes.",
+    "zh-CN": "一个可选择组成部分的 VWAP：最多三条标准差带的锚定 VWAP、基于K线的 Claire 滚动/锚定 VWAP、同时显示的交易时段/周/月/季/年 VWAP、前期及收盘价位、滚动窗口以及本地时间交易时段窗口。每个部分保留各自的覆盖标签和设置。"
+  },
+  "One volume profile for session, week, month, quarter, year or all history: ticks per row or price grouping, volume/delta/bid-ask view, untested POCs, and head-to-tail merging from the chart's right-click menu or by overlap. Observed and measured rows only unless estimates are enabled.": {
+    "es": "Un solo perfil de volumen por sesión, semana, mes, trimestre, año o todo el historial: ticks por fila o agrupación de precios, vista de volumen/delta/bid-ask, POC no testeados y unión de perfiles consecutivos desde el menú del clic derecho del gráfico o por superposición. Solo filas observadas y medidas salvo que se activen las estimaciones.",
+    "zh-CN": "一个适用于交易时段、周、月、季、年或全部历史的成交量分布：每行最小价位数或价格分组、成交量/Delta/买卖价视图、未测试 POC，以及通过图表右键菜单或按重叠首尾相接合并。除非启用估算，否则仅使用观测和实测行。"
+  },
+  "Overlap measured on": {
+    "es": "Superposición medida sobre",
+    "zh-CN": "重叠的计算依据"
+  },
+  "Part settings": {
+    "es": "Ajustes de cada parte",
+    "zh-CN": "各部分设置"
+  },
+  "Parts": {
+    "es": "Partes",
+    "zh-CN": "组成部分"
+  },
+  "Prior": {
+    "es": "Anterior",
+    "zh-CN": "前期"
+  },
+  "Prior and closing VWAP settings": {
+    "es": "Ajustes del VWAP anterior y de cierre",
+    "zh-CN": "前期及收盘 VWAP 设置"
+  },
+  "Profile view": {
+    "es": "Vista del perfil",
+    "zh-CN": "分布视图"
+  },
+  "Profiles: cancel the marked merge start": {
+    "es": "Perfiles: cancelar el inicio de unión marcado",
+    "zh-CN": "分布：取消已标记的合并起点"
+  },
+  "Profiles: mark this profile as the merge start": {
+    "es": "Perfiles: marcar este perfil como inicio de la unión",
+    "zh-CN": "分布：将此分布标记为合并起点"
+  },
+  "Profiles: merge from the marked start to this profile": {
+    "es": "Perfiles: unir desde el inicio marcado hasta este perfil",
+    "zh-CN": "分布：从已标记的起点合并到此分布"
+  },
+  "Profiles: merge neighbours automatically": {
+    "es": "Perfiles: unir los vecinos automáticamente",
+    "zh-CN": "分布：自动合并相邻分布"
+  },
+  "Profiles: remove all manual merges": {
+    "es": "Perfiles: quitar todas las uniones manuales",
+    "zh-CN": "分布：移除所有手动合并"
+  },
+  "Profiles: split this merged profile": {
+    "es": "Perfiles: separar este perfil unido",
+    "zh-CN": "分布：拆分此合并分布"
+  },
+  "Profiles: stop merging neighbours automatically": {
+    "es": "Perfiles: dejar de unir los vecinos automáticamente",
+    "zh-CN": "分布：停止自动合并相邻分布"
+  },
+  "Rolling": {
+    "es": "Móvil",
+    "zh-CN": "滚动"
+  },
+  "Rolling VWAP settings": {
+    "es": "Ajustes del VWAP móvil",
+    "zh-CN": "滚动 VWAP 设置"
+  },
+  "Seller color (delta / bid-ask)": {
+    "es": "Color vendedor (delta / bid-ask)",
+    "zh-CN": "卖方颜色（Delta / 买卖价）"
+  },
+  "Session window": {
+    "es": "Ventana de sesión",
+    "zh-CN": "交易时段窗口"
+  },
+  "Session-window VWAP settings": {
+    "es": "Ajustes del VWAP de ventana de sesión",
+    "zh-CN": "交易时段窗口 VWAP 设置"
+  },
+  "VWAP Claire (bar-based 30 / 90 / 365 days)": {
+    "es": "VWAP Claire (basado en velas, 30 / 90 / 365 días)",
+    "zh-CN": "VWAP Claire（基于K线，30 / 90 / 365 天）"
+  },
+  "VWAP Claire settings": {
+    "es": "Ajustes del VWAP Claire",
+    "zh-CN": "VWAP Claire 设置"
+  },
+  "VWAP suite": {
+    "es": "Conjunto VWAP",
+    "zh-CN": "VWAP 组合"
+  },
+  "Value area (VAL to VAH)": {
+    "es": "Área de valor (VAL a VAH)",
+    "zh-CN": "价值区（VAL 至 VAH）"
+  },
+  "closed-profile-rows-v1;frame={0};row={1};effective={2};estimate={3};inferred={4};va={5};outer={6};zone={7}": {
+    "es": "closed-profile-rows-v1;frame={0};row={1};effective={2};estimate={3};inferred={4};va={5};outer={6};zone={7}",
+    "zh-CN": "closed-profile-rows-v1;frame={0};row={1};effective={2};estimate={3};inferred={4};va={5};outer={6};zone={7}"
+  },
+  "Candles and patterns": {
+    "es": "Velas y patrones",
+    "zh-CN": "K线与形态"
+  },
+  "Click to open or close the group. Right-click to rename, reorder or create groups. Drag indicators here to move them.": {
+    "es": "Clic para abrir o cerrar el grupo. Clic derecho para renombrar, reordenar o crear grupos. Arrastra indicadores aquí para moverlos.",
+    "zh-CN": "单击展开或收起该组。右键可重命名、调整顺序或新建分组。把指标拖到这里即可移动。"
+  },
+  "Could not check editable indicator copies: ": {
+    "es": "No se pudieron revisar las copias editables de indicadores: ",
+    "zh-CN": "无法检查可编辑的指标副本："
+  },
+  "Could not check editable indicator copies: {0}": {
+    "es": "No se pudieron revisar las copias editables de indicadores: {0}",
+    "zh-CN": "无法检查可编辑的指标副本：{0}"
+  },
+  "Could not check the editable copy in {0}: {1}": {
+    "es": "No se pudo revisar la copia editable en {0}: {1}",
+    "zh-CN": "无法检查 {0} 中的可编辑副本：{1}"
+  },
+  "Could not make an editable copy: ": {
+    "es": "No se pudo crear una copia editable: ",
+    "zh-CN": "无法创建可编辑副本："
+  },
+  "Could not make an editable copy: {0}": {
+    "es": "No se pudo crear una copia editable: {0}",
+    "zh-CN": "无法创建可编辑副本：{0}"
+  },
+  "Could not restore the original: ": {
+    "es": "No se pudo restaurar el original: ",
+    "zh-CN": "无法恢复原版："
+  },
+  "Could not restore the original: {0}": {
+    "es": "No se pudo restaurar el original: {0}",
+    "zh-CN": "无法恢复原版：{0}"
+  },
+  "Could not update the copy record: ": {
+    "es": "No se pudo actualizar el registro de la copia: ",
+    "zh-CN": "无法更新副本记录："
+  },
+  "Could not update the copy record: {0}": {
+    "es": "No se pudo actualizar el registro de la copia: {0}",
+    "zh-CN": "无法更新副本记录：{0}"
+  },
+  "Could not write the indicator example: ": {
+    "es": "No se pudo escribir el indicador de ejemplo: ",
+    "zh-CN": "无法写入示例指标："
+  },
+  "Could not write the indicator example: {0}": {
+    "es": "No se pudo escribir el indicador de ejemplo: {0}",
+    "zh-CN": "无法写入示例指标：{0}"
+  },
+  "Create and move": {
+    "es": "Crear y mover",
+    "zh-CN": "创建并移动"
+  },
+  "Created a separate editable copy. The original stays available.": {
+    "es": "Se creó una copia editable aparte. El original sigue disponible.",
+    "zh-CN": "已创建独立的可编辑副本。原版仍然可用。"
+  },
+  "Default library arrangement": {
+    "es": "Organización predeterminada de la biblioteca",
+    "zh-CN": "默认指标库布局"
+  },
+  "Delete group (its indicators return to their default groups)": {
+    "es": "Eliminar grupo (sus indicadores vuelven a sus grupos predeterminados)",
+    "zh-CN": "删除分组（其中的指标回到各自的默认分组）"
+  },
+  "Derivatives (open interest, liquidations)": {
+    "es": "Derivados (interés abierto, liquidaciones)",
+    "zh-CN": "衍生品（持仓量、爆仓）"
+  },
+  "Edit a copy…": {
+    "es": "Editar una copia…",
+    "zh-CN": "编辑副本…"
+  },
+  "Edit source…": {
+    "es": "Editar código…",
+    "zh-CN": "编辑源代码…"
+  },
+  "Enter a group name.": {
+    "es": "Escribe un nombre de grupo.",
+    "zh-CN": "请输入分组名称。"
+  },
+  "Group name (empty restores the default name)": {
+    "es": "Nombre del grupo (vacío restaura el nombre predeterminado)",
+    "zh-CN": "分组名称（留空则恢复默认名称）"
+  },
+  "Group name (placed below this group)": {
+    "es": "Nombre del grupo (se coloca debajo de este grupo)",
+    "zh-CN": "分组名称（放在此分组下方）"
+  },
+  "Input side «{0}»: use BUY or SELL": {
+    "es": "Lado de la entrada «{0}»: usa BUY o SELL",
+    "zh-CN": "输入方向「{0}」：请使用 BUY 或 SELL"
+  },
+  "Input «{0}»: use ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time, trades.volume/buy/sell/delta/count or book.bid/ask/delta": {
+    "es": "Entrada «{0}»: usa ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time, trades.volume/buy/sell/delta/count o book.bid/ask/delta",
+    "zh-CN": "输入「{0}」：请使用 ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time、trades.volume/buy/sell/delta/count 或 book.bid/ask/delta"
+  },
+  "KVS script: {0}": {
+    "es": "Script KVS: {0}",
+    "zh-CN": "KVS 脚本：{0}"
+  },
+  "KVS scripts": {
+    "es": "Scripts KVS",
+    "zh-CN": "KVS 脚本"
+  },
+  "Keep my edits and stop reminding me": {
+    "es": "Conservar mis cambios y no volver a avisar",
+    "zh-CN": "保留我的修改，不再提醒"
+  },
+  "Keep the file extension; a C# source and a KVS script cannot be converted by renaming.": {
+    "es": "Conserva la extensión del archivo; un código C# y un script KVS no se convierten al renombrar.",
+    "zh-CN": "请保留文件扩展名；C# 源代码和 KVS 脚本不能通过重命名互相转换。"
+  },
+  "Macro and other tools": {
+    "es": "Macro y otras herramientas",
+    "zh-CN": "宏观及其他工具"
+  },
+  "Market structure and key levels": {
+    "es": "Estructura de mercado y niveles clave",
+    "zh-CN": "市场结构与关键价位"
+  },
+  "Missing «)» for «{0}(»": {
+    "es": "Falta «)» para «{0}(»",
+    "zh-CN": "「{0}(」缺少「)」"
+  },
+  "Missing «]» after «{0}[»": {
+    "es": "Falta «]» después de «{0}[»",
+    "zh-CN": "「{0}[」后缺少「]」"
+  },
+  "Move down": {
+    "es": "Bajar",
+    "zh-CN": "下移"
+  },
+  "Move group down": {
+    "es": "Bajar el grupo",
+    "zh-CN": "分组下移"
+  },
+  "Move group up": {
+    "es": "Subir el grupo",
+    "zh-CN": "分组上移"
+  },
+  "Move to group": {
+    "es": "Mover al grupo",
+    "zh-CN": "移到分组"
+  },
+  "Move up": {
+    "es": "Subir",
+    "zh-CN": "上移"
+  },
+  "Moving averages": {
+    "es": "Medias móviles",
+    "zh-CN": "移动平均线"
+  },
+  "Name of the new group": {
+    "es": "Nombre del grupo nuevo",
+    "zh-CN": "新分组名称"
+  },
+  "New KVS script": {
+    "es": "Nuevo script KVS",
+    "zh-CN": "新建 KVS 脚本"
+  },
+  "New KVS script (simple language: param / input / output / onBar)": {
+    "es": "Nuevo script KVS (lenguaje simple: param / input / output / onBar)",
+    "zh-CN": "新建 KVS 脚本（简易语言：param / input / output / onBar）"
+  },
+  "New group": {
+    "es": "Grupo nuevo",
+    "zh-CN": "新建分组"
+  },
+  "New group…": {
+    "es": "Grupo nuevo…",
+    "zh-CN": "新建分组…"
+  },
+  "Nothing may follow the brace that closes onBar / onStart": {
+    "es": "No puede haber nada después de la llave que cierra onBar / onStart",
+    "zh-CN": "结束 onBar / onStart 的大括号后面不能再有内容"
+  },
+  "Options": {
+    "es": "Opciones",
+    "zh-CN": "期权"
+  },
+  "Options go between braces: {{ key: value, … }}": {
+    "es": "Las opciones van entre llaves: {{ clave: valor, … }}",
+    "zh-CN": "选项需写在大括号内：{{ 键: 值, … }}"
+  },
+  "Order flow (delta, CVD, footprint)": {
+    "es": "Order flow (delta, CVD, footprint)",
+    "zh-CN": "订单流（Delta、CVD、足迹图）"
+  },
+  "Original restored. Your previous edits: {0}": {
+    "es": "Original restaurado. Tus cambios anteriores: {0}",
+    "zh-CN": "已恢复原版。你之前的修改：{0}"
+  },
+  "Output type «{0}»: use line, histogram or dots": {
+    "es": "Tipo de salida «{0}»: usa line, histogram o dots",
+    "zh-CN": "输出类型「{0}」：请使用 line、histogram 或 dots"
+  },
+  "Removes your groups, group names and ordering. Indicators on charts, saved charts and templates do not change.": {
+    "es": "Elimina tus grupos, nombres de grupo y orden. Los indicadores de los gráficos, los gráficos guardados y las plantillas no cambian.",
+    "zh-CN": "将移除你的分组、分组名称和排序。图表上的指标、已保存的图表和模板不会改变。"
+  },
+  "Rename": {
+    "es": "Renombrar",
+    "zh-CN": "重命名"
+  },
+  "Rename group": {
+    "es": "Renombrar grupo",
+    "zh-CN": "重命名分组"
+  },
+  "Rename group…": {
+    "es": "Renombrar grupo…",
+    "zh-CN": "重命名分组…"
+  },
+  "Replaces the edited copy {0} with the current original under the same type, so charts using it keep working. Your edited files are moved to the «{1}» folder next to your indicator folder.": {
+    "es": "Reemplaza la copia editada {0} por el original actual con el mismo tipo, así los gráficos que la usan siguen funcionando. Tus archivos editados se mueven a la carpeta «{1}» junto a tu carpeta de indicadores.",
+    "zh-CN": "用当前原版替换已编辑的副本 {0}，类型保持不变，使用它的图表可继续工作。你编辑过的文件会移到指标文件夹旁边的「{1}」文件夹。"
+  },
+  "Restore original": {
+    "es": "Restaurar original",
+    "zh-CN": "恢复原版"
+  },
+  "Restore the default library arrangement…": {
+    "es": "Restaurar la organización predeterminada de la biblioteca…",
+    "zh-CN": "恢复默认指标库布局…"
+  },
+  "Restore the updated original": {
+    "es": "Restaurar el original actualizado",
+    "zh-CN": "恢复更新后的原版"
+  },
+  "Saving recompiles custom C# and KVS scripts with the current Trading Hub compiler. Renaming a file never renames its types, series IDs, saved chart references or templates. Pine imports stay local text until you explicitly send the reviewed source.": {
+    "es": "Al guardar se recompilan el C# personalizado y los scripts KVS con el compilador actual de Trading Hub. Renombrar un archivo nunca cambia sus tipos, los ID de series, las referencias de gráficos guardados ni las plantillas. Las importaciones de Pine quedan como texto local hasta que envíes explícitamente el código revisado.",
+    "zh-CN": "保存时会用当前的 Trading Hub 编译器重新编译自定义 C# 和 KVS 脚本。重命名文件不会改变其类型、序列 ID、已保存图表的引用或模板。导入的 Pine 代码在你明确发送已审阅的源代码之前只作为本地文本保存。"
+  },
+  "Script name": {
+    "es": "Nombre del script",
+    "zh-CN": "脚本名称"
+  },
+  "Select a C# source or KVS script inside the configured indicator directory.": {
+    "es": "Selecciona un código C# o un script KVS dentro de la carpeta de indicadores configurada.",
+    "zh-CN": "请在已配置的指标文件夹中选择 C# 源代码或 KVS 脚本。"
+  },
+  "Sessions": {
+    "es": "Sesiones",
+    "zh-CN": "交易时段"
+  },
+  "Sort by name (A → Z)": {
+    "es": "Ordenar por nombre (A → Z)",
+    "zh-CN": "按名称排序（A → Z）"
+  },
+  "The block opened on line {0} is missing its closing brace": {
+    "es": "Al bloque abierto en la línea {0} le falta la llave de cierre",
+    "zh-CN": "第 {0} 行打开的代码块缺少结束大括号"
+  },
+  "The original of your edited indicator copy was updated: {0}. Your edits were kept. Right-click the copy in the indicator library to keep your edits or restore the new original.": {
+    "es": "Se actualizó el original de tu copia editada del indicador: {0}. Tus cambios se conservaron. Haz clic derecho en la copia en la biblioteca de indicadores para conservar tus cambios o restaurar el original nuevo.",
+    "zh-CN": "你编辑过的指标副本的原版已更新：{0}。你的修改已保留。在指标库中右键该副本，可选择保留修改或恢复新的原版。"
+  },
+  "The original source is not available in this version.": {
+    "es": "El código original no está disponible en esta versión.",
+    "zh-CN": "此版本中没有原版源代码。"
+  },
+  "The original source is not available in this version. Nothing was changed.": {
+    "es": "El código original no está disponible en esta versión. No se cambió nada.",
+    "zh-CN": "此版本中没有原版源代码。未做任何更改。"
+  },
+  "The original was updated: restore it (your edits move to a backup)…": {
+    "es": "El original se actualizó: restaurarlo (tus cambios pasan a una copia de seguridad)…",
+    "zh-CN": "原版已更新：恢复原版（你的修改会移到备份）…"
+  },
+  "The script has no output (output name = line {{ … }})": {
+    "es": "El script no tiene salidas (output nombre = line {{ … }})",
+    "zh-CN": "脚本没有输出（output 名称 = line {{ … }}）"
+  },
+  "There is no output «{0}»": {
+    "es": "No existe la salida «{0}»",
+    "zh-CN": "不存在输出「{0}」"
+  },
+  "This folder is not a tracked editable copy.": {
+    "es": "Esta carpeta no es una copia editable con seguimiento.",
+    "zh-CN": "此文件夹不是受跟踪的可编辑副本。"
+  },
+  "Trend and strength": {
+    "es": "Tendencia y fuerza",
+    "zh-CN": "趋势与强度"
+  },
+  "Unchanged indicator copies now follow their updated originals: {0}": {
+    "es": "Las copias de indicadores sin cambios ahora siguen a sus originales actualizados: {0}",
+    "zh-CN": "未修改的指标副本现已跟随更新后的原版：{0}"
+  },
+  "Unexpected statement «{0}»": {
+    "es": "Instrucción inesperada «{0}»",
+    "zh-CN": "意外的语句「{0}」"
+  },
+  "Unexpected «{0}» (expected name, param, input, output, level, onStart or onBar)": {
+    "es": "«{0}» inesperado (se esperaba name, param, input, output, level, onStart u onBar)",
+    "zh-CN": "意外的「{0}」（应为 name、param、input、output、level、onStart 或 onBar）"
+  },
+  "Unexpected «{0}» in an expression": {
+    "es": "«{0}» inesperado en una expresión",
+    "zh-CN": "表达式中出现意外的「{0}」"
+  },
+  "Unknown function «{0}» (available: {1})": {
+    "es": "Función desconocida «{0}» (disponibles: {1})",
+    "zh-CN": "未知函数「{0}」（可用：{1}）"
+  },
+  "Use letters or digits in the script name.": {
+    "es": "Usa letras o dígitos en el nombre del script.",
+    "zh-CN": "脚本名称请使用字母或数字。"
+  },
+  "View source…": {
+    "es": "Ver código…",
+    "zh-CN": "查看源代码…"
+  },
+  "Volatility and channels": {
+    "es": "Volatilidad y canales",
+    "zh-CN": "波动率与通道"
+  },
+  "original updated": {
+    "es": "original actualizado",
+    "zh-CN": "原版已更新"
+  },
+  "«{0}(…)» has an empty argument": {
+    "es": "«{0}(…)» tiene un argumento vacío",
+    "zh-CN": "「{0}(…)」有空参数"
+  },
+  "«{0}(…)» takes {1} argument(s)": {
+    "es": "«{0}(…)» recibe {1} argumento(s)",
+    "zh-CN": "「{0}(…)」需要 {1} 个参数"
+  },
+  "«{0}» is a parameter, not a series; it has no history": {
+    "es": "«{0}» es un parámetro, no una serie; no tiene historial",
+    "zh-CN": "「{0}」是参数而不是序列，没有历史值"
+  },
+  "«{0}» is a reserved name; choose another one": {
+    "es": "«{0}» es un nombre reservado; elige otro",
+    "zh-CN": "「{0}」是保留名称，请换一个"
+  },
+  "«{0}» is already declared": {
+    "es": "«{0}» ya está declarado",
+    "zh-CN": "「{0}」已声明"
+  },
+  "«{0}» is not a number": {
+    "es": "«{0}» no es un número",
+    "zh-CN": "「{0}」不是数字"
+  },
+  "«{0}» is not declared (param, input, output or var)": {
+    "es": "«{0}» no está declarado (param, input, output o var)",
+    "zh-CN": "「{0}」未声明（param、input、output 或 var）"
+  },
+  "«{0}» is not declared; declare it with output or var first": {
+    "es": "«{0}» no está declarado; decláralo antes con output o var",
+    "zh-CN": "「{0}」未声明，请先用 output 或 var 声明"
+  },
+  "Name shown in the library and on charts (empty restores «{0}»)": {
+    "es": "Nombre que se muestra en la biblioteca y en los gráficos (vacío restaura «{0}»)",
+    "zh-CN": "在指标库和图表中显示的名称（留空则恢复「{0}」）"
+  },
+  "Remove from library": {
+    "es": "Quitar de la biblioteca",
+    "zh-CN": "从指标库移除"
+  },
+  "Remove from library…": {
+    "es": "Quitar de la biblioteca…",
+    "zh-CN": "从指标库移除…"
+  },
+  "Rename indicator": {
+    "es": "Renombrar indicador",
+    "zh-CN": "重命名指标"
+  },
+  "Rename…": {
+    "es": "Renombrar…",
+    "zh-CN": "重命名…"
+  },
+  "Restore all": {
+    "es": "Restaurar todos",
+    "zh-CN": "全部恢复"
+  },
+  "Restore the default name («{0}»)": {
+    "es": "Restaurar el nombre predeterminado («{0}»)",
+    "zh-CN": "恢复默认名称（「{0}」）"
+  },
+  "Restore «{0}»": {
+    "es": "Restaurar «{0}»",
+    "zh-CN": "恢复「{0}」"
+  },
+  "Show hidden indicators ({0})": {
+    "es": "Mostrar indicadores ocultos ({0})",
+    "zh-CN": "显示已隐藏的指标（{0}）"
+  },
+  "«{0}» stops appearing in the library. Charts, saved charts and templates that use it keep loading it, and Show hidden indicators brings it back.": {
+    "es": "«{0}» deja de aparecer en la biblioteca. Los gráficos, gráficos guardados y plantillas que lo usan lo siguen cargando, y Mostrar indicadores ocultos lo trae de vuelta.",
+    "zh-CN": "「{0}」将不再显示在指标库中。使用它的图表、已保存的图表和模板仍会加载它，可通过「显示已隐藏的指标」恢复。"
+  },
+  " (inverse, USD contracts converted to ": {
+    "es": " (inverso, contratos en USD convertidos a ",
+    "zh-CN": " (反向合约，以美元计的合约已换算为 "
+  },
+  " (inverse, USD contracts converted to {0})": {
+    "es": " (inverso, contratos en USD convertidos a {0})",
+    "zh-CN": " (反向合约，以美元计的合约已换算为 {0})"
+  },
+  " Venue books cross; the composite bid and ask are not a tradable spread.": {
+    "es": " Los libros de los mercados se cruzan; la compra y venta compuestas no son un diferencial operable.",
+    "zh-CN": " 各市场订单簿出现交叉；合成买卖价不是可交易价差。"
+  },
+  " quotes combined without conversion": {
+    "es": " cotizaciones combinadas sin conversión",
+    "zh-CN": " 报价未经换算直接合并"
+  },
+  " · public data · no account": {
+    "es": " · datos públicos · sin cuenta",
+    "zh-CN": " · 公开数据 · 无需账户"
+  },
+  "/api/v1/contract/kline/{0}?interval=Min{1}&start={2}&end={3}": {
+    "es": "/api/v1/contract/kline/{0}?interval=Min{1}&start={2}&end={3}",
+    "zh-CN": "/api/v1/contract/kline/{0}?interval=Min{1}&start={2}&end={3}"
+  },
+  "/api/v2/mix/market/history-candles?symbol={0}&productType=USDT-FUTURES&granularity={1}&endTime={2}&limit=200": {
+    "es": "/api/v2/mix/market/history-candles?symbol={0}&productType=USDT-FUTURES&granularity={1}&endTime={2}&limit=200",
+    "zh-CN": "/api/v2/mix/market/history-candles?symbol={0}&productType=USDT-FUTURES&granularity={1}&endTime={2}&limit=200"
+  },
+  "/api/v2/public/get_tradingview_chart_data?instrument_name={0}&start_timestamp={1}&end_timestamp={2}&resolution={3}": {
+    "es": "/api/v2/public/get_tradingview_chart_data?instrument_name={0}&start_timestamp={1}&end_timestamp={2}&resolution={3}",
+    "zh-CN": "/api/v2/public/get_tradingview_chart_data?instrument_name={0}&start_timestamp={1}&end_timestamp={2}&resolution={3}"
+  },
+  "/api/v2/spot/market/history-candles?symbol={0}&granularity={1}&endTime={2}&limit=200": {
+    "es": "/api/v2/spot/market/history-candles?symbol={0}&granularity={1}&endTime={2}&limit=200",
+    "zh-CN": "/api/v2/spot/market/history-candles?symbol={0}&granularity={1}&endTime={2}&limit=200"
+  },
+  "/api/v5/market/history-candles?instId={0}&bar={1}m&after={2}&limit=100": {
+    "es": "/api/v5/market/history-candles?instId={0}&bar={1}m&after={2}&limit=100",
+    "zh-CN": "/api/v5/market/history-candles?instId={0}&bar={1}m&after={2}&limit=100"
+  },
+  "/products/{0}/candles?granularity={1}&start={2}&end={3}": {
+    "es": "/products/{0}/candles?granularity={1}&start={2}&end={3}",
+    "zh-CN": "/products/{0}/candles?granularity={1}&start={2}&end={3}"
+  },
+  "/ws/{0}@forceOrder": {
+    "es": "/ws/{0}@forceOrder",
+    "zh-CN": "/ws/{0}@forceOrder"
+  },
+  "; missing: ": {
+    "es": "; faltan: ",
+    "zh-CN": "；缺少："
+  },
+  "; missing: {0}": {
+    "es": "; faltan: {0}",
+    "zh-CN": "；缺少：{0}"
+  },
+  "; {0} quotes combined without conversion": {
+    "es": "; cotizaciones {0} combinadas sin conversión",
+    "zh-CN": "；{0} 报价未经换算直接合并"
+  },
+  "A composite book sums the sizes of every connected market at each price. It can cross and is never an executable quote.": {
+    "es": "Un libro compuesto suma los tamaños de cada mercado conectado en cada precio. Puede cruzarse y nunca es una cotización ejecutable.",
+    "zh-CN": "合成订单簿按价格汇总每个已连接市场的挂单量。它可能出现交叉，且绝不是可执行报价。"
+  },
+  "A venue number is missing.": {
+    "es": "Falta un número del mercado.",
+    "zh-CN": "缺少交易所数值。"
+  },
+  "A venue number is out of range.": {
+    "es": "Un número del mercado está fuera de rango.",
+    "zh-CN": "交易所数值超出范围。"
+  },
+  "Aggregate CVD": {
+    "es": "CVD agregado",
+    "zh-CN": "聚合 CVD"
+  },
+  "Aggregate as sign-colored histogram (otherwise line)": {
+    "es": "Agregado como histograma coloreado por signo (si no, línea)",
+    "zh-CN": "聚合以按正负着色的柱状图显示（否则为线）"
+  },
+  "Aggregate crypto (data only)": {
+    "es": "Cripto agregado (solo datos)",
+    "zh-CN": "聚合加密货币（仅数据）"
+  },
+  "Binance (USD-M futures)": {
+    "es": "Binance (futuros USD-M)",
+    "zh-CN": "Binance（USD-M 期货）"
+  },
+  "Binance + Bybit": {
+    "es": "Binance + Bybit",
+    "zh-CN": "Binance + Bybit"
+  },
+  "Bitget": {
+    "es": "Bitget",
+    "zh-CN": "Bitget"
+  },
+  "Bitget Spot": {
+    "es": "Bitget Spot",
+    "zh-CN": "Bitget Spot"
+  },
+  "Bybit (linear perpetuals)": {
+    "es": "Bybit (perpetuos lineales)",
+    "zh-CN": "Bybit（线性永续合约）"
+  },
+  "Bybit Spot": {
+    "es": "Bybit Spot",
+    "zh-CN": "Bybit Spot"
+  },
+  "Bybit returned negative open interest.": {
+    "es": "Bybit devolvió un interés abierto negativo.",
+    "zh-CN": "Bybit 返回了负的持仓量。"
+  },
+  "CVD by market": {
+    "es": "CVD por mercado",
+    "zh-CN": "分市场 CVD"
+  },
+  "Coinbase": {
+    "es": "Coinbase",
+    "zh-CN": "Coinbase"
+  },
+  "Combined": {
+    "es": "Combinado",
+    "zh-CN": "合计"
+  },
+  "Composite": {
+    "es": "Compuesto",
+    "zh-CN": "合成"
+  },
+  "Composite book unavailable: no venue currently has a valid book.": {
+    "es": "Libro compuesto no disponible: ningún mercado tiene ahora un libro válido.",
+    "zh-CN": "合成订单簿不可用：目前没有任何市场拥有有效订单簿。"
+  },
+  "Composite non-executable book: sizes of {0} of {1} venue books summed at each price": {
+    "es": "Libro compuesto no ejecutable: tamaños de {0} de {1} libros de mercados sumados en cada precio",
+    "zh-CN": "不可执行的合成订单簿：按价格汇总了 {1} 个市场订单簿中 {0} 个的挂单量"
+  },
+  "Composite non-executable book: sizes of {0} of {1} venue books summed at each price{2}.": {
+    "es": "Libro compuesto no ejecutable: tamaños de {0} de {1} libros de mercados sumados en cada precio{2}.",
+    "zh-CN": "不可执行的合成订单簿：按价格汇总了 {1} 个市场订单簿中 {0} 个的挂单量{2}。"
+  },
+  "Composite of all market books (not executable)": {
+    "es": "Compuesto de todos los libros de los mercados (no ejecutable)",
+    "zh-CN": "所有市场订单簿的合成（不可执行）"
+  },
+  "Composite trades and candles of the selected markets. Prices are not executable. Missing or deviating constituents remain marked as partial coverage.": {
+    "es": "Operaciones y velas compuestas de los mercados elegidos. Los precios no son ejecutables. Los componentes que faltan o se desvían quedan marcados como cobertura parcial.",
+    "zh-CN": "所选市场的合成成交与K线。价格不可执行。缺失或偏离的成分市场会标记为部分覆盖。"
+  },
+  "DOM is a composite of venue books, not executable": {
+    "es": "el DOM es un compuesto de libros de mercados, no ejecutable",
+    "zh-CN": "DOM 为各市场订单簿的合成，不可执行"
+  },
+  "DOM is {0} only": {
+    "es": "el DOM es solo de {0}",
+    "zh-CN": "DOM 仅来自 {0}"
+  },
+  "DOM: composite of available venue books, not executable": {
+    "es": "DOM: compuesto de los libros de mercados disponibles, no ejecutable",
+    "zh-CN": "DOM：可用市场订单簿的合成，不可执行"
+  },
+  "DOM: composite of available venue books, not executable. ": {
+    "es": "DOM: compuesto de los libros de mercados disponibles, no ejecutable. ",
+    "zh-CN": "DOM：可用市场订单簿的合成，不可执行。"
+  },
+  "DOM: {0} only, not consolidated": {
+    "es": "DOM: solo {0}, no consolidado",
+    "zh-CN": "DOM：仅 {0}，未合并"
+  },
+  "DOM: {0} only, not consolidated. ": {
+    "es": "DOM: solo {0}, no consolidado. ",
+    "zh-CN": "DOM：仅 {0}，未合并。"
+  },
+  "Data only; non-executable. ": {
+    "es": "Solo datos; no ejecutable. ",
+    "zh-CN": "仅数据；不可执行。"
+  },
+  "Deribit": {
+    "es": "Deribit",
+    "zh-CN": "Deribit"
+  },
+  "Derivatives": {
+    "es": "Derivados",
+    "zh-CN": "衍生品"
+  },
+  "Derivatives data is unavailable in this session.": {
+    "es": "Los datos de derivados no están disponibles en esta sesión.",
+    "zh-CN": "本次会话无法获取衍生品数据。"
+  },
+  "Derivatives: funding, open interest, liquidations": {
+    "es": "Derivados: financiación, interés abierto, liquidaciones",
+    "zh-CN": "衍生品：资金费率、持仓量、强平"
+  },
+  "Each exchange (spot and perpetual together)": {
+    "es": "Cada exchange (spot y perpetuo juntos)",
+    "zh-CN": "每个交易所（现货与永续合并）"
+  },
+  "Each market": {
+    "es": "Cada mercado",
+    "zh-CN": "每个市场"
+  },
+  "Each month": {
+    "es": "Cada mes",
+    "zh-CN": "每月"
+  },
+  "Each session": {
+    "es": "Cada sesión",
+    "zh-CN": "每个交易时段"
+  },
+  "Each week": {
+    "es": "Cada semana",
+    "zh-CN": "每周"
+  },
+  "Exchanges": {
+    "es": "Exchanges",
+    "zh-CN": "交易所"
+  },
+  "First market's book only": {
+    "es": "Solo el libro del primer mercado",
+    "zh-CN": "仅第一个市场的订单簿"
+  },
+  "Funding rate (%)": {
+    "es": "Tasa de financiación (%)",
+    "zh-CN": "资金费率（%）"
+  },
+  "Funding rate, open interest (level or change) and observed liquidations from Binance and Bybit perpetuals, per exchange and combined. For USD-margined crypto symbols (BTCUSDT, ETHUSDT…). Unobserved periods are gaps, not zero.": {
+    "es": "Tasa de financiación, interés abierto (nivel o cambio) y liquidaciones observadas de los perpetuos de Binance y Bybit, por exchange y combinados. Para símbolos cripto con margen en USD (BTCUSDT, ETHUSDT…). Los periodos no observados son huecos, no cero.",
+    "zh-CN": "来自 Binance 与 Bybit 永续合约的资金费率、持仓量（水平或变化）和观测到的强平，按交易所分别及合计显示。适用于 USD 保证金加密货币品种（BTCUSDT、ETHUSDT…）。未观测期间为空缺，而非零。"
+  },
+  "Hyperliquid": {
+    "es": "Hyperliquid",
+    "zh-CN": "Hyperliquid"
+  },
+  "Leaves out spot or perpetual markets without unticking them.": {
+    "es": "Deja afuera los mercados spot o perpetuos sin destildarlos.",
+    "zh-CN": "在不取消勾选的情况下排除现货或永续市场。"
+  },
+  "Liquidation recording failed; observations stay in memory only: ": {
+    "es": "Falló la grabación de liquidaciones; las observaciones quedan solo en memoria: ",
+    "zh-CN": "强平记录失败；观测数据仅保留在内存中："
+  },
+  "Liquidation recording failed; observations stay in memory only: {0}": {
+    "es": "Falló la grabación de liquidaciones; las observaciones quedan solo en memoria: {0}",
+    "zh-CN": "强平记录失败；观测数据仅保留在内存中：{0}"
+  },
+  "Liquidations": {
+    "es": "Liquidaciones",
+    "zh-CN": "强平"
+  },
+  "Liquidations (longs − / shorts +, notional)": {
+    "es": "Liquidaciones (largos − / cortos +, nocional)",
+    "zh-CN": "强平（多头 − / 空头 +，名义价值）"
+  },
+  "Liquidations observed while streams were connected; Binance publishes at most one per second (sampled).": {
+    "es": "Liquidaciones observadas mientras los flujos estaban conectados; Binance publica como mucho una por segundo (muestreo).",
+    "zh-CN": "仅包含数据流连接期间观测到的强平；Binance 每秒最多发布一条（抽样）。"
+  },
+  "Liquidations: listening live; nothing is known before the stream connected.": {
+    "es": "Liquidaciones: escuchando en vivo; no se sabe nada de antes de conectar el flujo.",
+    "zh-CN": "强平：正在实时监听；数据流连接之前的情况未知。"
+  },
+  "Loading derivatives data…": {
+    "es": "Cargando datos de derivados…",
+    "zh-CN": "正在加载衍生品数据…"
+  },
+  "Longs liquidated": {
+    "es": "Largos liquidados",
+    "zh-CN": "多头强平"
+  },
+  "Market ": {
+    "es": "Mercado ",
+    "zh-CN": "市场 "
+  },
+  "Market {0}": {
+    "es": "Mercado {0}",
+    "zh-CN": "市场 {0}"
+  },
+  "Markets to combine": {
+    "es": "Mercados que se combinan",
+    "zh-CN": "要合并的市场"
+  },
+  "Never": {
+    "es": "Nunca",
+    "zh-CN": "从不"
+  },
+  "No Bybit open-interest observations are available in this range.": {
+    "es": "No hay observaciones de interés abierto de Bybit en este rango.",
+    "zh-CN": "此范围内没有 Bybit 持仓量观测数据。"
+  },
+  "No selected aggregate market matches the spot/perpetual filter.": {
+    "es": "Ningún mercado elegido del agregado coincide con el filtro spot/perpetuo.",
+    "zh-CN": "所选聚合市场均不符合现货/永续筛选条件。"
+  },
+  "OKX Spot": {
+    "es": "OKX Spot",
+    "zh-CN": "OKX Spot"
+  },
+  "OKX, Bitget, Hyperliquid, Deribit, MEXC, Coinbase: public data, no account": {
+    "es": "OKX, Bitget, Hyperliquid, Deribit, MEXC, Coinbase: datos públicos, sin cuenta",
+    "zh-CN": "OKX、Bitget、Hyperliquid、Deribit、MEXC、Coinbase：公开数据，无需账户"
+  },
+  "One cumulative delta line per market (Binance Futures, Bybit, OKX…), per exchange, or spot versus perpetual, plus the aggregate CVD colored by sign. Use with an aggregate crypto connection; candle-derived delta stays unattributed.": {
+    "es": "Una línea de delta acumulado por mercado (Binance Futures, Bybit, OKX…), por exchange o spot contra perpetuo, más el CVD agregado coloreado por signo. Úsalo con una conexión de cripto agregado; el delta derivado de velas queda sin atribuir.",
+    "zh-CN": "每个市场（Binance Futures、Bybit、OKX…）、每个交易所或现货对永续各一条累计 Delta 线，外加按正负着色的聚合 CVD。请配合聚合加密货币连接使用；由K线推导的 Delta 保持未归属。"
+  },
+  "One line per": {
+    "es": "Una línea por",
+    "zh-CN": "每条线对应"
+  },
+  "Open interest change (bar to bar)": {
+    "es": "Cambio del interés abierto (vela a vela)",
+    "zh-CN": "持仓量变化（逐根K线）"
+  },
+  "Order book (DOM and heatmap)": {
+    "es": "Libro de órdenes (DOM y mapa de calor)",
+    "zh-CN": "订单簿（DOM 与热力图）"
+  },
+  "Other markets": {
+    "es": "Otros mercados",
+    "zh-CN": "其他市场"
+  },
+  "Partial Bybit open-interest coverage at five-minute resolution.": {
+    "es": "Cobertura parcial del interés abierto de Bybit con resolución de cinco minutos.",
+    "zh-CN": "Bybit 持仓量为部分覆盖，分辨率为五分钟。"
+  },
+  "Perpetual": {
+    "es": "Perpetuo",
+    "zh-CN": "永续"
+  },
+  "Perpetual only": {
+    "es": "Solo perpetuos",
+    "zh-CN": "仅永续"
+  },
+  "Perpetual sizes are converted to coins (contracts × contract value; Deribit inverse USD contracts ÷ price).": {
+    "es": "Los tamaños de los perpetuos se convierten a monedas (contratos × valor del contrato; contratos inversos de Deribit en USD ÷ precio).",
+    "zh-CN": "永续合约数量会换算为币数（合约数 × 合约面值；Deribit 反向美元合约 ÷ 价格）。"
+  },
+  "Perpetual symbol (blank = derived from the chart)": {
+    "es": "Símbolo del perpetuo (vacío = el del gráfico)",
+    "zh-CN": "永续合约代码（留空 = 由图表推导）"
+  },
+  "Perpetuals": {
+    "es": "Perpetuos",
+    "zh-CN": "永续合约"
+  },
+  "Price deviates more than 3% from {0}; omitted as a probable different asset.": {
+    "es": "El precio se aleja más de un 3 % de {0}; se omite por ser probablemente otro activo.",
+    "zh-CN": "价格与 {0} 偏离超过 3%；疑似不同资产，已排除。"
+  },
+  "Prints are omitted while the price deviates from the reference venue.": {
+    "es": "Las operaciones se omiten mientras el precio se aleje del mercado de referencia.",
+    "zh-CN": "价格偏离参考市场期间，成交将被排除。"
+  },
+  "Public crypto market": {
+    "es": "Mercado cripto público",
+    "zh-CN": "公开加密货币市场"
+  },
+  "Public crypto market (data only)": {
+    "es": "Mercado cripto público (solo datos)",
+    "zh-CN": "公开加密货币市场（仅数据）"
+  },
+  "Public data: no account or keys, and no orders. Hyperliquid and MEXC publish only the best 20 book levels; MEXC trades have no exchange identifier.": {
+    "es": "Datos públicos: sin cuenta ni claves, y sin órdenes. Hyperliquid y MEXC publican solo los 20 mejores niveles del libro; las operaciones de MEXC no tienen identificador del exchange.",
+    "zh-CN": "公开数据：无需账户或密钥，也不下单。Hyperliquid 与 MEXC 仅发布最优 20 档订单簿；MEXC 成交没有交易所标识。"
+  },
+  "Public data: no account or keys. The aggregate never routes orders; trade on each market's own connection.": {
+    "es": "Datos públicos: sin cuenta ni claves. El agregado nunca envía órdenes; opera en la conexión propia de cada mercado.",
+    "zh-CN": "公开数据：无需账户或密钥。聚合连接从不路由订单；请在各市场自己的连接上交易。"
+  },
+  "Public market data: trades, order book and candles without an account. Trade history before a chart opened comes from candles; Trading Hub records the live tape.": {
+    "es": "Datos públicos del mercado: operaciones, libro de órdenes y velas sin cuenta. La historia de operaciones anterior a abrir un gráfico viene de las velas; Trading Hub graba la cinta en vivo.",
+    "zh-CN": "公开市场数据：无需账户即可获取成交、订单簿和K线。打开图表之前的成交历史来自K线；Trading Hub 会记录实时成交。"
+  },
+  "Recommended": {
+    "es": "Recomendados",
+    "zh-CN": "推荐"
+  },
+  "Shorts liquidated": {
+    "es": "Cortos liquidados",
+    "zh-CN": "空头强平"
+  },
+  "Show each exchange as well as the combined line": {
+    "es": "Mostrar cada exchange además de la línea combinada",
+    "zh-CN": "除合计线外还显示各交易所"
+  },
+  "Show the aggregate": {
+    "es": "Mostrar el agregado",
+    "zh-CN": "显示聚合"
+  },
+  "Single-market instrument: per-market lines need an aggregate connection.": {
+    "es": "Instrumento de un solo mercado: las líneas por mercado necesitan una conexión agregada.",
+    "zh-CN": "单一市场品种：分市场线条需要聚合连接。"
+  },
+  "Spot": {
+    "es": "Spot",
+    "zh-CN": "现货"
+  },
+  "Spot / perpetual": {
+    "es": "Spot / perpetuo",
+    "zh-CN": "现货 / 永续"
+  },
+  "Spot and perpetual": {
+    "es": "Spot y perpetuos",
+    "zh-CN": "现货与永续"
+  },
+  "Spot only": {
+    "es": "Solo spot",
+    "zh-CN": "仅现货"
+  },
+  "Spot versus perpetual": {
+    "es": "Spot contra perpetuo",
+    "zh-CN": "现货对永续"
+  },
+  "The requested open-interest range is empty.": {
+    "es": "El rango de interés abierto pedido está vacío.",
+    "zh-CN": "请求的持仓量范围为空。"
+  },
+  "Trades and candles of every selected market are combined into one instrument per coin: BTC-USDT-SWAP (OKX), BTC-USD (Coinbase) and BTC (Hyperliquid) join BTCUSDT. USDT, USD and USDC prices are combined without conversion. A market whose price is more than 3% away from the first market is left out and reported as partial coverage.": {
+    "es": "Las operaciones y velas de cada mercado elegido se combinan en un instrumento por moneda: BTC-USDT-SWAP (OKX), BTC-USD (Coinbase) y BTC (Hyperliquid) se unen a BTCUSDT. Los precios en USDT, USD y USDC se combinan sin conversión. Un mercado cuyo precio se aleja más de un 3 % del primero queda afuera y se informa como cobertura parcial.",
+    "zh-CN": "每个所选市场的成交与K线按币种合并为一个品种：BTC-USDT-SWAP（OKX）、BTC-USD（Coinbase）和 BTC（Hyperliquid）都并入 BTCUSDT。USDT、USD 与 USDC 价格未经换算直接合并。价格与第一个市场偏离超过 3% 的市场会被排除，并报告为部分覆盖。"
+  },
+  "USDT-FUTURES": {
+    "es": "USDT-FUTURES",
+    "zh-CN": "USDT-FUTURES"
+  },
+  "Unattributed CVD": {
+    "es": "CVD sin atribuir",
+    "zh-CN": "未归属 CVD"
+  },
+  "Unattributed delta (candle history or unknown venue): {0}": {
+    "es": "Delta sin atribuir (historia de velas o mercado desconocido): {0}",
+    "zh-CN": "未归属 Delta（K线历史或未知市场）：{0}"
+  },
+  "Unknown derivatives venue.": {
+    "es": "Mercado de derivados desconocido.",
+    "zh-CN": "未知的衍生品交易所。"
+  },
+  "Unknown public crypto market: {0}.": {
+    "es": "Mercado cripto público desconocido: {0}.",
+    "zh-CN": "未知的公开加密货币市场：{0}。"
+  },
+  "User-Agent": {
+    "es": "User-Agent",
+    "zh-CN": "User-Agent"
+  },
+  "aggregate-provenance-v2:{0}:{1}": {
+    "es": "aggregate-provenance-v2:{0}:{1}",
+    "zh-CN": "aggregate-provenance-v2:{0}:{1}"
+  },
+  "book sequence gap (": {
+    "es": "hueco en la secuencia del libro (",
+    "zh-CN": "订单簿序列缺口（"
+  },
+  "book sequence gap ({0})": {
+    "es": "hueco en la secuencia del libro ({0})",
+    "zh-CN": "订单簿序列缺口（{0}）"
+  },
+  "non-executable composite of selected crypto markets": {
+    "es": "compuesto no ejecutable de los mercados cripto elegidos",
+    "zh-CN": "所选加密货币市场的不可执行合成"
+  },
+  "{0} aggregate — DATA ONLY, non-executable; ": {
+    "es": "{0} agregado — SOLO DATOS, no ejecutable; ",
+    "zh-CN": "{0} 聚合 — 仅数据，不可执行；"
+  },
+  "{0} aggregate — DATA ONLY, non-executable; {1}{2}": {
+    "es": "{0} agregado — SOLO DATOS, no ejecutable; {1}{2}",
+    "zh-CN": "{0} 聚合 — 仅数据，不可执行；{1}{2}"
+  },
+  "{0} book unavailable until the next full snapshot ({1}).": {
+    "es": "Libro de {0} no disponible hasta la próxima foto completa ({1}).",
+    "zh-CN": "{0} 订单簿在下一个完整快照前不可用（{1}）。"
+  },
+  "{0} composite instruments from {1} markets. Non-executable prices; {2}. Constituent failures remain visible in coverage.": {
+    "es": "{0} instrumentos compuestos de {1} mercados. Precios no ejecutables; {2}. Las fallas de los componentes siguen visibles en la cobertura.",
+    "zh-CN": "来自 {1} 个市场的 {0} 个合成品种。价格不可执行；{2}。成分市场的故障仍会在覆盖情况中显示。"
+  },
+  "{0} instruments available. Public data only; no account or orders.": {
+    "es": "{0} instrumentos disponibles. Solo datos públicos; sin cuenta ni órdenes.",
+    "zh-CN": "{0} 个品种可用。仅公开数据；无账户、无订单。"
+  },
+  "{0} is not listed by {1}.": {
+    "es": "{1} no lista {0}.",
+    "zh-CN": "{1} 未列出 {0}。"
+  },
+  "{0} markets · composite data · not executable": {
+    "es": "{0} mercados · datos compuestos · no ejecutable",
+    "zh-CN": "{0} 个市场 · 合成数据 · 不可执行"
+  },
+  "{0} reports no funding for {1} in this range.": {
+    "es": "{0} no informa financiación de {1} en este rango.",
+    "zh-CN": "{0} 在此范围内没有 {1} 的资金费率。"
+  },
+  "{0} · public data · no account": {
+    "es": "{0} · datos públicos · sin cuenta",
+    "zh-CN": "{0} · 公开数据 · 无需账户"
+  },
+  "{0}/USD perpetual": {
+    "es": "{0}/USD perpetuo",
+    "zh-CN": "{0}/USD 永续"
+  },
+  "{0}/fapi/v1/fundingRate?symbol={1}&startTime={2}&endTime={3}&limit=1000": {
+    "es": "{0}/fapi/v1/fundingRate?symbol={1}&startTime={2}&endTime={3}&limit=1000",
+    "zh-CN": "{0}/fapi/v1/fundingRate?symbol={1}&startTime={2}&endTime={3}&limit=1000"
+  },
+  "{0}/instruments-info?category={1}&limit=1000": {
+    "es": "{0}/instruments-info?category={1}&limit=1000",
+    "zh-CN": "{0}/instruments-info?category={1}&limit=1000"
+  },
+  "{0}/instruments-info?category={1}&limit=1000{2}": {
+    "es": "{0}/instruments-info?category={1}&limit=1000{2}",
+    "zh-CN": "{0}/instruments-info?category={1}&limit=1000{2}"
+  },
+  "{0}/instruments-info?category={1}&symbol={2}": {
+    "es": "{0}/instruments-info?category={1}&symbol={2}",
+    "zh-CN": "{0}/instruments-info?category={1}&symbol={2}"
+  },
+  "{0}/kline?category={1}&symbol={2}&interval={3}&start={4}&end={5}&limit=1000": {
+    "es": "{0}/kline?category={1}&symbol={2}&interval={3}&start={4}&end={5}&limit=1000",
+    "zh-CN": "{0}/kline?category={1}&symbol={2}&interval={3}&start={4}&end={5}&limit=1000"
+  },
+  "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&limit=1": {
+    "es": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&limit=1",
+    "zh-CN": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&limit=1"
+  },
+  "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200": {
+    "es": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200",
+    "zh-CN": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200"
+  },
+  "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200{4}": {
+    "es": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200{4}",
+    "zh-CN": "{0}/open-interest?category=linear&symbol={1}&intervalTime=5min&startTime={2}&endTime={3}&limit=200{4}"
+  },
+  "{0}/recent-trade?category={1}&symbol={2}&limit={3}": {
+    "es": "{0}/recent-trade?category={1}&symbol={2}&limit={3}",
+    "zh-CN": "{0}/recent-trade?category={1}&symbol={2}&limit={3}"
+  },
+  "{0}/v5/market/funding/history?category=linear&symbol={1}&startTime={2}&endTime={3}&limit=200": {
+    "es": "{0}/v5/market/funding/history?category=linear&symbol={1}&startTime={2}&endTime={3}&limit=200",
+    "zh-CN": "{0}/v5/market/funding/history?category=linear&symbol={1}&startTime={2}&endTime={3}&limit=200"
+  },
+  "{0}/ws/{1}@forceOrder": {
+    "es": "{0}/ws/{1}@forceOrder",
+    "zh-CN": "{0}/ws/{1}@forceOrder"
+  },
+  "{0}/{1} perpetual{2}": {
+    "es": "{0}/{1} perpetuo{2}",
+    "zh-CN": "{0}/{1} 永续{2}"
+  },
+  "{0}/{1} spot": {
+    "es": "{0}/{1} spot",
+    "zh-CN": "{0}/{1} 现货"
+  },
+  "{0}Data only; non-executable. {1}{2}": {
+    "es": "{0}Solo datos; no ejecutable. {1}{2}",
+    "zh-CN": "{0}仅数据；不可执行。{1}{2}"
+  },
+  "{0}Prints are omitted while the price deviates from the reference venue.": {
+    "es": "{0}Las operaciones se omiten mientras el precio se aleje del mercado de referencia.",
+    "zh-CN": "{0}价格偏离参考市场期间，成交将被排除。"
+  },
+  "{{{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"public/subscribe\",\"params\":{{{{\"channels\":[\"book.{0}.100ms\",\"trades.{1}.100ms\"]}}}}}}}}": {
+    "es": "{{{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"public/subscribe\",\"params\":{{{{\"channels\":[\"book.{0}.100ms\",\"trades.{1}.100ms\"]}}}}}}}}",
+    "zh-CN": "{{{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"public/subscribe\",\"params\":{{{{\"channels\":[\"book.{0}.100ms\",\"trades.{1}.100ms\"]}}}}}}}}"
+  },
+  "{{{{\"method\":\"sub.deal\",\"param\":{{{{\"symbol\":\"{0}\"}}}}}}}}": {
+    "es": "{{{{\"method\":\"sub.deal\",\"param\":{{{{\"symbol\":\"{0}\"}}}}}}}}",
+    "zh-CN": "{{{{\"method\":\"sub.deal\",\"param\":{{{{\"symbol\":\"{0}\"}}}}}}}}"
+  },
+  "{{{{\"method\":\"sub.depth.full\",\"param\":{{{{\"symbol\":\"{0}\",\"limit\":20}}}}}}}}": {
+    "es": "{{{{\"method\":\"sub.depth.full\",\"param\":{{{{\"symbol\":\"{0}\",\"limit\":20}}}}}}}}",
+    "zh-CN": "{{{{\"method\":\"sub.depth.full\",\"param\":{{{{\"symbol\":\"{0}\",\"limit\":20}}}}}}}}"
+  },
+  "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"l2Book\",\"coin\":\"{0}\"}}}}}}}}": {
+    "es": "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"l2Book\",\"coin\":\"{0}\"}}}}}}}}",
+    "zh-CN": "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"l2Book\",\"coin\":\"{0}\"}}}}}}}}"
+  },
+  "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"trades\",\"coin\":\"{0}\"}}}}}}}}": {
+    "es": "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"trades\",\"coin\":\"{0}\"}}}}}}}}",
+    "zh-CN": "{{{{\"method\":\"subscribe\",\"subscription\":{{{{\"type\":\"trades\",\"coin\":\"{0}\"}}}}}}}}"
+  },
+  "{{{{\"op\":\"subscribe\",\"args\":[\"allLiquidation.{0}\"]}}}}": {
+    "es": "{{{{\"op\":\"subscribe\",\"args\":[\"allLiquidation.{0}\"]}}}}",
+    "zh-CN": "{{{{\"op\":\"subscribe\",\"args\":[\"allLiquidation.{0}\"]}}}}"
+  },
+  "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"channel\":\"books\",\"instId\":\"{0}\"}}}},{{{{\"channel\":\"trades\",\"instId\":\"{1}\"}}}}]}}}}": {
+    "es": "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"channel\":\"books\",\"instId\":\"{0}\"}}}},{{{{\"channel\":\"trades\",\"instId\":\"{1}\"}}}}]}}}}",
+    "zh-CN": "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"channel\":\"books\",\"instId\":\"{0}\"}}}},{{{{\"channel\":\"trades\",\"instId\":\"{1}\"}}}}]}}}}"
+  },
+  "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"instType\":\"{0}\",\"channel\":\"books\",\"instId\":\"{1}\"}}}},{{{{\"instType\":\"{2}\",\"channel\":\"trade\",\"instId\":\"{3}\"}}}}]}}}}": {
+    "es": "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"instType\":\"{0}\",\"channel\":\"books\",\"instId\":\"{1}\"}}}},{{{{\"instType\":\"{2}\",\"channel\":\"trade\",\"instId\":\"{3}\"}}}}]}}}}",
+    "zh-CN": "{{{{\"op\":\"subscribe\",\"args\":[{{{{\"instType\":\"{0}\",\"channel\":\"books\",\"instId\":\"{1}\"}}}},{{{{\"instType\":\"{2}\",\"channel\":\"trade\",\"instId\":\"{3}\"}}}}]}}}}"
+  },
+  "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}m\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}": {
+    "es": "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}m\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}",
+    "zh-CN": "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}m\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}"
+  },
+  "{{{{\"type\":\"subscribe\",\"product_ids\":[\"{0}\"],\"channels\":[\"level2_batch\",\"matches\",\"heartbeat\"]}}}}": {
+    "es": "{{{{\"type\":\"subscribe\",\"product_ids\":[\"{0}\"],\"channels\":[\"level2_batch\",\"matches\",\"heartbeat\"]}}}}",
+    "zh-CN": "{{{{\"type\":\"subscribe\",\"product_ids\":[\"{0}\"],\"channels\":[\"level2_batch\",\"matches\",\"heartbeat\"]}}}}"
+  },
+  "Not modified: this order's earlier executions are still being read.": {
+    "es": "No modificada: todavía se están leyendo las ejecuciones anteriores de esta orden.",
+    "zh-CN": "未修改：仍在读取此订单之前的成交。"
+  },
+  "Not modified: Binance execution history is still synchronizing. The order was left unowned and unchanged; try again.": {
+    "es": "No modificada: el historial de ejecuciones de Binance aún se está sincronizando. La orden quedó sin propietario y sin cambios; inténtalo de nuevo.",
+    "zh-CN": "未修改：Binance 成交历史仍在同步。该订单保持无归属且未更改；请重试。"
+  },
+  "Not modified: the order already finished at Binance.": {
+    "es": "No modificada: la orden ya terminó en Binance.",
+    "zh-CN": "未修改：该订单已在 Binance 结束。"
+  },
+  "Not modified: the order executed while its earlier executions were being read. It was left unowned and unchanged; try again.": {
+    "es": "No modificada: la orden se ejecutó mientras se leían sus ejecuciones anteriores. Quedó sin propietario y sin cambios; inténtalo de nuevo.",
+    "zh-CN": "未修改：读取该订单之前的成交时订单又有成交。它保持无归属且未更改；请重试。"
+  },
+  "Not modified: Binance's trade history does not account for this order's executed quantity. It was left unowned and unchanged.": {
+    "es": "No modificada: el historial de operaciones de Binance no cubre la cantidad ejecutada de esta orden. Quedó sin propietario y sin cambios.",
+    "zh-CN": "未修改：Binance 的成交历史无法对应此订单的已成交数量。它保持无归属且未更改。"
+  },
+  "Not modified: the order changed while its earlier executions were being read. It was left unowned and unchanged.": {
+    "es": "No modificada: la orden cambió mientras se leían sus ejecuciones anteriores. Quedó sin propietario y sin cambios.",
+    "zh-CN": "未修改：读取该订单之前的成交时订单发生了变化。它保持无归属且未更改。"
+  },
+  "Not modified: Binance could not confirm this order's earlier executions ({0}). It was left unowned and unchanged.": {
+    "es": "No modificada: Binance no pudo confirmar las ejecuciones anteriores de esta orden ({0}). Quedó sin propietario y sin cambios.",
+    "zh-CN": "未修改：Binance 无法确认此订单之前的成交（{0}）。它保持无归属且未更改。"
   }
 }

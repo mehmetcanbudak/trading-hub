@@ -8,12 +8,20 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:653 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:644 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:892 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749",
+    "locations": "TradingHub.App/Services/AppServices.cs:654 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:656 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:904 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749 TradingHub.Indicators.Native/DerivativesPane.cs:32",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
+  },
+  "Edited": {
+    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:327",
+    "reason": "Suffix of the default C# class name for an editable indicator copy. Generated identifiers stay English in every UI language."
   },
   "Fee": {
     "locations": "TradingHub.Strategies/LivePortfolio.cs:1560 TradingHub.Strategies/LivePortfolio.cs:1565",
     "reason": "Existing imported-execution JSON property name, validated and decoded without renaming persisted records."
+  },
+  "Indicator copy backups": {
+    "locations": "TradingHub.App/Services/IndicatorSourceCopies.cs:59",
+    "reason": "Stable on-disk folder name for preserved previous copies, shown verbatim as a path. Translating it would scatter backups across language-specific folders."
   },
   "PORTFOLIO (closed trades; {0} accounting): net {1} · {2} trades · PF {3} · max drawdown {4} · ": {
     "locations": "TradingHub.App/Services/LiveRiskAgent.cs:242",
@@ -48,11 +56,19 @@
     "reason": "Private per-session fallback native-account admission partition when proven native account identity is unavailable. It is not a display label and must not merge unproven sessions by translation."
   },
   "symbol={0}&fromId={1}&limit=1000": {
-    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:256",
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:257",
     "reason": "Signed Binance trade-history query template. Payload keys and interpolation positions are broker protocol, not display text."
   },
+  "symbol={0}&orderId={1}&limit=1000": {
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:264",
+    "reason": "Signed Binance per-order trade-history query template used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
+  },
   "unresolved endpoint": {
-    "locations": "TradingHub.App/Services/AppServices.cs:701",
+    "locations": "TradingHub.App/Services/AppServices.cs:702",
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
+  },
+  "{0}Edited": {
+    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:327",
+    "reason": "Default C# class name of an editable indicator copy (original type name + English suffix), not a display label."
   }
 }
