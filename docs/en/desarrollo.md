@@ -115,6 +115,7 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 | kvp-proxy | Actual settings policy, parsed provider HTTP history and authenticated WebSocket/chart consumers, captured reconnect contexts and failed-proxy no-fallback. |
 | kvp-chart, kvp-chart-accounts | Actual typed text/keyboard/IME/navigation/drawing controls; different-provider/composite account preservation and actual workspace restore without implicit routing. |
 | kvp-studies | Complete approved study groups through real catalog/settings/renderer consumers and independent numerical examples; repeat with `TRADINGHUB_LANG=es` and `zh-CN`. |
+| profiles-vwap | Unified Volume profile and VWAP suite through the real catalog, settings window (row sizing, view, merge options, nested VWAP part settings/toggles), chart frame, right-click head-to-tail merge/split actions and saved settings; repeat with `TRADINGHUB_LANG=es` and `zh-CN`. |
 | kvp-authoring | Built-in source resources/fork/edit/rename/delete/real compilation, recursive content monitoring and explicitly approved fake Pine drafting. |
 | kvp-depth-history | Real archive/cache/provenance and depth sink/writer/selected-reader/heatmap/Orderbook Delta consumers, corrections, gaps, stale/quota/I/O coverage. |
 | kvp-providers | Actual Longbridge/aggregate/Bybit configured consumers against loopback/injected fakes, truthful account fields, owned ACKs and credential retirement. |

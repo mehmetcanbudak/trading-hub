@@ -7,22 +7,8 @@ public sealed partial class CandleSeries
     internal bool CanCaptureAggregation(TradeStore store) => _processed == store.Count &&
         _storeIdentity == store.Identity && _storeCorrectionRevision == store.CorrectionRevision;
 
-    internal AggregationSnapshot? CaptureAggregationSnapshot(TradeStore store, long maxBytes, long keyBytes)
-    {
-        if (!CanCaptureAggregation(store) || keyBytes > maxBytes - 256) return null;
-        long estimatedBytes = keyBytes + 256;
-        foreach (var candle in _candles)
-        {
-            // Count populated rows, never the potentially unbounded distance between prices.
-            // The estimate covers scalar snapshots, array headers/alignment and retained source text.
-            long rows = (long)candle.Levels.StoredRowCount + candle.AggregatedLevels.StoredRowCount;
-            long candleBytes = 640 + 2L * (candle.SourceIdentity?.Length ?? 0) + 96 * rows;
-            if (candleBytes > maxBytes - estimatedBytes) return null;
-            estimatedBytes += candleBytes;
-        }
-
-        return new AggregationSnapshot(this, store.Revision, estimatedBytes);
-    }
+    internal AggregationSnapshot? CaptureAggregationSnapshot(TradeStore store, long maxBytes, long keyBytes) =>
+        CanCaptureAggregation(store) ? CaptureAggregationSnapshot(TradeStoreView.Capture(store), maxBytes, keyBytes) : null;
 
     /// <summary>Only immutable values and private row arrays cross the cache boundary.</summary>
     internal sealed class AggregationSnapshot

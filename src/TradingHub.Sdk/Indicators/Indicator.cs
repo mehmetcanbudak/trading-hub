@@ -77,7 +77,7 @@ namespace TradingHub.Indicators
     /// Clase base de todos los indicadores. API compatible con la de ATAS: OnCalculate(bar, value),
     /// DataSeries, OnRender(RenderContext, DrawingLayouts), GetCandle(bar), etc.
     /// </summary>
-    public abstract class Indicator : INotifyPropertyChanged, IDisposable
+    public abstract partial class Indicator : INotifyPropertyChanged, IDisposable
     {
         private IIndicatorHost _host;
         private Indicator _parent;

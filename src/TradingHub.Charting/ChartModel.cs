@@ -140,6 +140,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     private readonly List<(Indicator Ind, TimeSpan Interval, Action Action, DateTime Next)> _timers = new();
     private readonly Queue<Action> _invokes = new();
     private int? _autoStep;
+    private readonly NeighbourSeriesPrebuilder _neighbours = new(CandleSeriesCache.Shared);
     private CumulativeTrade? _openCumulative;
     private long _lastBestBid = long.MinValue, _lastBestAsk = long.MaxValue;
     private bool _lastBestAvailable;
@@ -317,21 +318,22 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     /// </summary>
     private int BaseStepFor(int userStep)
     {
-        if (_autoStep == null && Data.Trades.Count > 100) _autoStep = CandleSeries.SuggestPriceStep(Data.Trades, Instrument, Period, targetRows: 150);
-        int auto = _autoStep ?? 1;
-        if (userStep <= 0) return auto;
-        if (userStep <= auto) return userStep;
-        for (int d = auto; d >= 1; d--)
-            if (userStep % d == 0) return d;
-        return 1;
+        if (_autoStep == null && Data.Trades.Count > 100) _autoStep = CandleSeries.SuggestPriceStep(Data.Trades, Instrument, Period, targetRows: AutomaticStepRows);
+        return CandleSeries.BaseStep(userStep, _autoStep ?? 1);
     }
+
+    private const int AutomaticStepRows = 150;
+
+    /// <summary>Background aggregation of the neighbouring timeframes (cancelled on every rebuild and on dispose).</summary>
+    public NeighbourSeriesPrebuilder NeighbourBuilds => _neighbours;
 
     /// <summary>Reconstruye las velas desde las operaciones y recalcula los indicadores.</summary>
     public void Rebuild()
     {
         DataGeneration++;
         int step = BaseStepFor(Settings.PriceStep);
-        Series = new CandleSeries(Instrument, Period, step, (Data.Feed as TradingHub.Feeds.ISessionSettingsFeed)?.GetSessionSettings(Instrument));
+        var session = (Data.Feed as TradingHub.Feeds.ISessionSettingsFeed)?.GetSessionSettings(Instrument);
+        Series = new CandleSeries(Instrument, Period, step, session);
         if (!CandleSeriesCache.Shared.TryRestore(Series, Data.Trades, CandleCacheScope))
             Series.BeginRebuild(Data.Trades);
         Series.Append(Data.Trades, CandleSeries.InitialBatchSize);
@@ -347,6 +349,8 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
             EnsureDepthHistory(GetDepthInterval(0).From, GetDepthInterval(Series.Count - 1).To);
         ProcessPending();
         Invalidate();
+        _neighbours.Request(Data.Trades, NeighbourSeriesPrebuilder.NeighboursOf(Period), Settings.PriceStep, AutomaticStepRows, session,
+            CandleCacheScope, AvailabilityClock);
     }
 
     private void UpdateInfos()
@@ -1078,6 +1082,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     {
         if (_disposed) return;
         _disposed = true;
+        _neighbours.Dispose();
         _depthLoadCancellation?.Cancel();
         _depthLoadTask?.GetAwaiter().GetResult();
         _depthLoadCancellation?.Dispose();

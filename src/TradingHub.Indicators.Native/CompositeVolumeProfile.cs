@@ -13,7 +13,7 @@ namespace TradingHub.Indicators.Native;
 [Description("Additional session/week/month profiles with optional chronological composition. Observed rows include Between volume; estimated OHLC is optional. Existing Session volume profile is unchanged.")]
 public partial class CompositeVolumeProfile : Indicator
 {
-    public enum ProfilePeriod { Session, Week, Month, Quarter, Year }
+    public enum ProfilePeriod { Session, Week, Month, Quarter, Year, [Display(Name = "All loaded history")] AllHistory }
     public sealed partial class Profile
     {
         public int StartBar { get; internal set; }
@@ -86,18 +86,20 @@ public partial class CompositeVolumeProfile : Indicator
     [Browsable(false)] public string Status => (_display.Count == 0 ? "Missing footprint" : FootprintStudyData.Label(_display[^1].Coverage)) + $"; effective price row {_effectiveGroup}" +
         (_display.Count > 0 && (_display[^1].Coverage & StudyCoverage.Compact) != 0 ? _display[^1].ResolutionSeconds > 0 ? $"; compact time resolution {_display[^1].ResolutionSeconds}s" : "; exchange-packet aggregation (time window unspecified)" : "");
     protected override void OnRecalculate() { lock (_sync) Reset(); }
-    private void Reset() { _raw.Clear(); _display.Clear(); _pocs.Clear(); _closed.Clear(); _touches.Clear(); _closedRawCount = 0; _latest.Clear(); _latestSides.Clear(); _ranges.Clear(); _last = -1; }
+    private void Reset() { _raw.Clear(); _display.Clear(); _pocs.Clear(); _closed.Clear(); _touches.Clear(); _closedRawCount = 0; _latest.Clear(); _latestSides.Clear(); _ranges.Clear(); _last = -1; ResetReuse(); }
     private bool Boundary(int bar) => bar > 0 && _period switch
     {
         ProfilePeriod.Session => IsNewSession(bar), ProfilePeriod.Week => IsNewWeek(bar), ProfilePeriod.Month => IsNewMonth(bar),
         ProfilePeriod.Quarter => StudyMath.PeriodKey(GetCandle(bar), StudyTimeFrame.Quarter) != StudyMath.PeriodKey(GetCandle(bar - 1), StudyTimeFrame.Quarter),
+        ProfilePeriod.AllHistory => false,
         _ => GetCandle(bar).SessionDate.Year != GetCandle(bar - 1).SessionDate.Year
     };
     protected override void OnCalculate(int bar, decimal value)
     {
         lock (_sync)
         {
-            if (bar < _last) { Reset(); Clear(); }
+            // A restored closed period has no per-bar row contributions to undo: replay from the start instead.
+            if (bar < _last || bar == _last && _reuseEnd >= _last) { Reset(); Clear(); }
             if (bar == _last)
             {
                 var profile = _raw[^1];
@@ -128,16 +130,23 @@ public partial class CompositeVolumeProfile : Indicator
     private void Step(int bar)
     {
         var candle = GetCandle(bar);
-        if (bar == 0) _effectiveGroup = Math.Max(1, decimal.Ceiling(_group / candle.ProfileRowSize)) * candle.ProfileRowSize;
+        if (bar == 0) _effectiveGroup = EffectiveGroupFor(candle);
         if (_raw.Count == 0 || Boundary(bar))
         {
             _raw.Add(new Profile { StartBar = bar, IsPartialPeriod = bar == 0 && !IsCalendarPeriodStart(candle) });
             if (!CalculateDisplayProfiles && _raw.Count > 2) _raw.RemoveAt(0);
+            BeginClosedReuse(_raw[^1], bar);
         }
         var profile = _raw[^1]; profile.EndBar = bar;
         if (CalculateDisplayProfiles) _ranges.Add((candle.Low, candle.High));
         _latest.Clear();
-        _latestCoverage = FootprintStudyData.Read(candle, _estimate, _effectiveGroup, false, _levels);
+        if (IsReusing(profile, bar))
+        {
+            // Rows were restored for the whole closed period; only this timeframe's coverage counters are per bar.
+            _levels.Clear();
+            _latestCoverage = candle.HasObservedFootprint || candle.HasAggregatedFootprint ? StudyMath.Coverage(candle) : StudyCoverage.Missing;
+        }
+        else _latestCoverage = FootprintStudyData.Read(candle, _estimate, _effectiveGroup, false, _levels);
         CountCoverage(profile, _latestCoverage, 1);
         _latestResolution = candle.ResolutionSeconds; CountResolution(profile, _latestResolution, 1);
         _latestCausal = candle.CanCalculateCausally && StudyMath.IsContained(candle, ProfileFrame); if (!_latestCausal) profile.NonCausalBars++;
@@ -157,11 +166,12 @@ public partial class CompositeVolumeProfile : Indicator
     }
     private void Finish(Profile profile, bool completed = false)
     {
+        if (completed && TryFinishReused(profile)) return;
         profile.MaximumVolume = 0; profile.Poc = profile.ValueAreaHigh = profile.ValueAreaLow = 0;
         profile.HasBuyerPoc = profile.HasSellerPoc = false; profile.BuyerPoc = profile.SellerPoc = 0;
         profile.OuterValueAreaHigh = profile.OuterValueAreaLow = profile.DisplayMaximum = profile.MedianVolume = 0; profile.TailRatio = null;
         if (profile.Volumes.Count == 0) return;
-        var prices = profile.Volumes.Keys.ToArray(); Array.Sort(prices);
+        var prices = profile.Volumes.Keys.ToArray(); Array.Sort(prices); SetPriceRange(profile, prices);
         CompletedStudyKey key = completed ? CacheKey(profile, prices) : default;
         if (completed && TryRestoreCompleted(profile, key)) return;
         int poc = 0; var volumes = new decimal[prices.Length];
@@ -183,14 +193,20 @@ public partial class CompositeVolumeProfile : Indicator
             MaximumVolume = source.MaximumVolume, ValueAreaHigh = source.ValueAreaHigh, ValueAreaLow = source.ValueAreaLow,
             ObservedBars = source.ObservedBars, EstimatedBars = source.EstimatedBars, IncompleteBars = source.IncompleteBars, MissingBars = source.MissingBars };
         foreach (var (price, volume) in source.Volumes) copy.Volumes.Add(price, volume);
-        CopyExtras(source, copy);
+        CopyExtras(source, copy); CopyMerge(source, copy);
         return copy;
     }
     private void AppendProfile(List<Profile> destination, Profile raw, bool developing)
     {
         var current = destination.Count > 0 ? destination[^1] : null;
-        if (!_compose || current == null || current.Total == 0 || raw.Total == 0 || raw.Poc < current.ValueAreaLow || raw.Poc > current.ValueAreaHigh)
-        { destination.Add(Copy(raw)); return; }
+        int group = ManualGroupOf(raw);
+        var kind = JoinKind(current, raw, group);
+        if (kind == MergeKind.None)
+        {
+            var copy = Copy(raw); copy.ManualGroup = group; copy.Parts = 1; copy.Merge = group >= 0 ? MergeKind.Manual : MergeKind.None;
+            destination.Add(copy); return;
+        }
+        // Head-to-tail: the next period is appended to the last profile; volumes are conserved and POC/VA recomputed.
         if (developing) { current = Copy(current); destination[^1] = current; }
         else _touches.Remove(current);
         foreach (var (price, volume) in raw.Volumes) { current.Volumes.TryGetValue(price, out var old); current.Volumes[price] = old + volume; }
@@ -198,6 +214,7 @@ public partial class CompositeVolumeProfile : Indicator
         current.ObservedBars += raw.ObservedBars; current.EstimatedBars += raw.EstimatedBars;
         current.IncompleteBars += raw.IncompleteBars; current.MissingBars += raw.MissingBars;
         MergeExtras(raw, current);
+        current.Parts++; current.Merge = kind;
         Finish(current);
     }
     private void BuildDisplay()
@@ -252,13 +269,13 @@ public partial class CompositeVolumeProfile : Indicator
                 foreach (var (price, volume) in profile.Volumes)
                 {
                     int y = ChartInfo.GetYByPrice(price), next = ChartInfo.GetYByPrice(price + _effectiveGroup);
-                    context.FillRectangle(price >= profile.ValueAreaLow && price <= profile.ValueAreaHigh ? ValueAreaColor : ProfileColor,
-                        new Rectangle(x, Math.Min(y, next), Math.Max(1, profile.DisplayMaximum == 0 ? 0 : (int)(DisplayVolume(profile, volume) / profile.DisplayMaximum * maxWidth)), Math.Max(2, Math.Abs(next - y))));
+                    RenderRow(context, profile, price, volume, x, Math.Min(y, next), Math.Max(2, Math.Abs(next - y)), maxWidth);
                 }
                 int pocY = ChartInfo.GetYByPrice(profile.Poc);
                 context.DrawLine(_pocPen, x, pocY, Math.Max(x + 5, end), pocY);
                 if (ShowLabels) context.DrawString(FootprintStudyData.Label(profile.Coverage), FootprintStudyData.SmallFont, Color.LightSkyBlue, x + 3, pocY + 3);
                 RenderExtras(context, profile, x, end);
+                RenderMergeLabel(context, profile, x, ChartInfo.GetYByPrice(profile.HighPrice) - 14);
             }
             foreach (var poc in _pocs)
             {
