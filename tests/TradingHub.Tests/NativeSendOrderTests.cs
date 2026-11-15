@@ -207,6 +207,65 @@ public sealed class NativeSendOrderTests : IDisposable
         Assert.NotEqual(NativeSendTurns.UnsettledMessage, broker.LastError); // sized from a confirmed position
     }
 
+    /// <summary>Reverse issued right after a market buy flips the position that includes that buy: one opposite market
+    /// order of twice the confirmed position, ending at minus that position.</summary>
+    [Theory]
+    [InlineData(1, 4, -2)]
+    [InlineData(0, 2, -1)]
+    public async Task Tradovate_reverse_after_a_queued_market_buy_flips_the_position_including_it(int start, int expectedSell, int expectedNet)
+    {
+        using var fake = new FakeTradovate { TimestampPositions = true };
+        if (start != 0) fake.SeedPosition(start);
+        using var data = new InstrumentData(new Instrument
+        {
+            Symbol = "ES", FeedId = TradovateFeed.FeedId, Exchange = "CME", TickSize = 0.25m, VolumeStep = 1m, PointValue = 50m, QuoteAsset = "USD",
+        }, new SimulatedFeed()) { RecordLive = false };
+        using var feed = new TradovateFeed(() => fake.Settings());
+        using var session = new TradovateTradingSession(feed.Connection);
+        session.Start();
+        await Until(() => session.SnapshotReady, () => session.StatusText);
+        using var broker = _orders.Tradovate(data, session, Assert.Single(session.Accounts), "Tradovate reverse sizing");
+        await Until(() => broker.PositionReady && broker.OrdersReady && broker.Position.Volume == start, () => broker.LastError);
+
+        var buy = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 1);
+        OrderActions.Reverse(broker);
+
+        JsonObject[] Sells() { lock (fake.Orders) return fake.Orders.Where(order => order["action"]?.GetValue<string>() == "Sell").ToArray(); }
+        await Until(() => Sells().Length == 1 && fake.NetPosition == expectedNet && broker.Position.Volume == expectedNet && buy.Filled == 1,
+            () => $"{broker.LastError}; venue net {fake.NetPosition}, local {broker.Position.Volume}, sells {string.Join(", ", Sells().Select(s => s["orderQty"]))}");
+        Assert.Equal(expectedSell, Sells()[0]["orderQty"]!.GetValue<int>());
+        Assert.NotEqual(NativeSendTurns.UnsettledMessage, broker.LastError); // sized from a confirmed position
+    }
+
+    [Theory]
+    [InlineData("0.01", "0.04", "-0.02")]
+    [InlineData("0", "0.02", "-0.01")]
+    public async Task Binance_reverse_after_a_queued_market_buy_flips_the_position_including_it(string startText, string sellText, string netText)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        decimal start = decimal.Parse(startText, inv), expectedSell = decimal.Parse(sellText, inv), expectedNet = decimal.Parse(netText, inv);
+        using var fake = new FakeBinance(futures: true);
+        var instrument = new Instrument { Symbol = "BTCUSDT", FeedId = "binance-futures", TickSize = 0.1m, VolumeStep = 0.001m };
+        using var broker = _orders.Binance(new InstrumentData(instrument, new SimulatedFeed()), fake.Settings, "Binance reverse sizing");
+        await Until(() => broker.PositionReady && broker.OrdersReady, () => broker.LastError);
+        if (start != 0)
+        {
+            var opening = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, start);
+            await Until(() => broker.Position.Volume == start && opening.ExchangeOrderId.Length > 0, () => broker.LastError);
+        }
+
+        var buy = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
+        OrderActions.Reverse(broker);
+
+        FakeBinanceOrder[] Sells() => fake.Placed.Where(order => order.Side == "SELL").ToArray();
+        await Until(() => Sells().Length == 1 && broker.Position.Volume == expectedNet && buy.ExchangeOrderId.Length > 0,
+            () => $"{broker.LastError}; local {broker.Position.Volume}, sells {string.Join(", ", Sells().Select(s => s.Qty))}");
+        var sell = Sells()[0];
+        Assert.Equal(expectedSell, sell.Qty);
+        Assert.False(sell.ReduceOnly);
+        Assert.NotEqual(NativeSendTurns.UnsettledMessage, broker.LastError); // sized from a confirmed position
+    }
+
     private static async Task Until(Func<bool> condition, Func<string?> diagnostics)
     {
         var deadline = DateTime.UtcNow + Deadline;

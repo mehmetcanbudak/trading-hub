@@ -704,7 +704,7 @@ internal sealed class TradovateOrderRejectedException(string message) : Exceptio
 /// Una cuenta de Tradovate operando un futuro (ES → el contrato del mes, ESZ6). Sirve con los gráficos de cualquier
 /// conexión de futuros (Tradovate, Rithmic): el Chart Trader, el DOM, los stops y las estrategias operan igual.
 /// </summary>
-public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, INativeProtection, ICoordinatedPositionClose, IDisposable
+public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, INativeProtection, ICoordinatedPositionOperations, IDisposable
 {
     private readonly InstrumentData _data;
     private readonly TradovateTradingSession _session;
@@ -1349,13 +1349,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
     /// </summary>
     public void Flatten()
     {
-        Order[] earlier;
-        decimal before = Position.Volume, expected;
-        lock (_gate)
-        {
-            earlier = _byClientId.Values.Where(o => o.Type == OrderTypes.Market && o.State == OrderStates.Active).ToArray();
-            expected = before + earlier.Sum(o => (o.Direction == OrderDirections.Buy ? 1 : -1) * o.Unfilled);
-        }
+        var (earlier, before, expected) = ExpectedPosition();
         foreach (var working in _active.Where(o => o.Type != OrderTypes.Market).ToList()) Cancel(working);
         if (expected == 0) return;
         var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
@@ -1365,9 +1359,36 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + CloseConfirmationWait));
     }
 
-    /// <summary>A close sized in its send turn: the side it reduces, the market orders in flight when it was issued, and
-    /// how long it waits for a position that includes them.</summary>
-    private sealed record CloseSizing(OrderDirections Direction, Order[] Earlier, DateTime Until);
+    /// <summary>
+    /// Reverse, as before one opposite market order of twice the position, ending at minus that position. The position
+    /// includes the account's market orders still in flight: the order takes its send turn here and is sized there from
+    /// the confirmed position, like <see cref="Flatten"/> (unconfirmed: best known position and
+    /// <see cref="NativeSendTurns.UnsettledMessage"/>).
+    /// </summary>
+    public void Reverse()
+    {
+        var (earlier, before, expected) = ExpectedPosition();
+        if (expected == 0) return;
+        var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
+        var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, direction, OrderTypes.Market,
+            2 * Math.Abs(expected), 0, Comment: "Reverse", MaximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(expected))));
+        Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + CloseConfirmationWait, Reverse: true));
+    }
+
+    /// <summary>The account's own market orders in flight, the current position and the position including them.</summary>
+    private (Order[] Earlier, decimal Before, decimal Expected) ExpectedPosition()
+    {
+        decimal before = Position.Volume;
+        lock (_gate)
+        {
+            var earlier = _byClientId.Values.Where(o => o.Type == OrderTypes.Market && o.State == OrderStates.Active).ToArray();
+            return (earlier, before, before + earlier.Sum(o => (o.Direction == OrderDirections.Buy ? 1 : -1) * o.Unfilled));
+        }
+    }
+
+    /// <summary>An order sized in its send turn: the side it reduces, the market orders in flight when it was issued, how
+    /// long it waits for a position that includes them, and whether it reverses (twice that position) or closes it.</summary>
+    private sealed record CloseSizing(OrderDirections Direction, Order[] Earlier, DateTime Until, bool Reverse = false);
 
     private Order Submit(PreparedOrderIntent intent, CloseSizing? sizing)
     {
@@ -1429,7 +1450,8 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
             if (settled || DateTime.UtcNow >= sizing.Until)
             {
                 Sync(); // admission checks the position this close is sized from
-                return (sizing.Direction == OrderDirections.Sell ? Math.Max(0, net) : Math.Max(0, -net), settled);
+                decimal side = sizing.Direction == OrderDirections.Sell ? Math.Max(0, net) : Math.Max(0, -net);
+                return (sizing.Reverse ? 2 * side : side, settled);
             }
             await Task.Delay(20, _cts.Token).ConfigureAwait(false);
         }

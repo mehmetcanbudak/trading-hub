@@ -552,7 +552,7 @@ public sealed class BinanceAccountClient : IDisposable
 /// remain unavailable (0); strategy cost accounting continues to come from its own fills.
 /// </para>
 /// </remarks>
-public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, ICoordinatedPositionClose, IDisposable
+public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, ICoordinatedPositionOperations, IDisposable
 {
     /// <summary>Starts the <see cref="Order.ExchangeOrderId"/> of a conditional order: an algo id is not an order id.</summary>
     private const string AlgoPrefix = "algo:";
@@ -2159,13 +2159,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     /// </summary>
     public void Flatten()
     {
-        Tracked[] earlier;
-        decimal before = Position.Volume, expected;
-        lock (_gate)
-        {
-            earlier = _byOrder.Values.Where(t => t.Own && t.Order.Type == OrderTypes.Market && t.Order.State == OrderStates.Active).ToArray();
-            expected = before + earlier.Sum(t => (t.Order.Direction == OrderDirections.Buy ? 1 : -1) * t.Order.Unfilled);
-        }
+        var (earlier, before, expected) = ExpectedPosition();
         CancelAll();
         if (expected == 0) return;
         var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
@@ -2175,9 +2169,36 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + NativeSendTurns.ReducingWait));
     }
 
-    /// <summary>A close sized in its send turn: the side it reduces, the market orders in flight when it was issued, and
-    /// how long it waits for a position that includes them.</summary>
-    private sealed record CloseSizing(OrderDirections Direction, Tracked[] Earlier, DateTime Until);
+    /// <summary>
+    /// Reverse, as before one opposite market order of twice the position, ending at minus that position. The position
+    /// includes this broker's market orders still in flight: the order takes its send turn here and is sized there from
+    /// the venue position, like <see cref="Flatten"/> (unconfirmed: best known position and
+    /// <see cref="NativeSendTurns.UnsettledMessage"/>).
+    /// </summary>
+    public void Reverse()
+    {
+        var (earlier, before, expected) = ExpectedPosition();
+        if (expected == 0) return;
+        var direction = expected > 0 ? OrderDirections.Sell : OrderDirections.Buy;
+        var intent = OrderContext.Prepare(OrderContext.ManualOwner, new OrderRequest(Instrument.Key, direction, OrderTypes.Market,
+            2 * Math.Abs(expected), 0, Comment: "Reverse", MaximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(expected))));
+        Submit(intent, new CloseSizing(direction, earlier, DateTime.UtcNow + NativeSendTurns.ReducingWait, Reverse: true));
+    }
+
+    /// <summary>This broker's own market orders in flight, the current position and the position including them.</summary>
+    private (Tracked[] Earlier, decimal Before, decimal Expected) ExpectedPosition()
+    {
+        decimal before = Position.Volume;
+        lock (_gate)
+        {
+            var earlier = _byOrder.Values.Where(t => t.Own && t.Order.Type == OrderTypes.Market && t.Order.State == OrderStates.Active).ToArray();
+            return (earlier, before, before + earlier.Sum(t => (t.Order.Direction == OrderDirections.Buy ? 1 : -1) * t.Order.Unfilled));
+        }
+    }
+
+    /// <summary>An order sized in its send turn: the side it reduces, the market orders in flight when it was issued, how
+    /// long it waits for a position that includes them, and whether it reverses (twice that position) or closes it.</summary>
+    private sealed record CloseSizing(OrderDirections Direction, Tracked[] Earlier, DateTime Until, bool Reverse = false);
 
     /// <summary>
     /// The quantity a close sends: once every market order in flight when it was issued is known to have ended at Binance,
@@ -2186,7 +2207,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     private async Task<(decimal Size, bool Confirmed)> CloseSizeAsync(CloseSizing sizing)
     {
         static decimal Side(CloseSizing sizing, decimal volume) =>
-            sizing.Direction == OrderDirections.Sell ? Math.Max(0, volume) : Math.Max(0, -volume);
+            (sizing.Reverse ? 2 : 1) * (sizing.Direction == OrderDirections.Sell ? Math.Max(0, volume) : Math.Max(0, -volume));
         while (true)
         {
             bool settled = true;
