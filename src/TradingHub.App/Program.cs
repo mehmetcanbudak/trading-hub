@@ -127,8 +127,7 @@ internal static class Program
             .UsePlatformDetect()
             .WithInterFont()
             .With(new MacOSPlatformOptions { ShowInDock = true })
-            // menús y desplegables dentro de la ventana: como ventanas aparte, a veces se perdía el primer clic
-            .With(new AvaloniaNativePlatformOptions { OverlayPopups = true })
+            .With(Services.RenderingDiagnostics.NativeOptions())
             .LogToTrace();
 }
 

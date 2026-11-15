@@ -60,6 +60,7 @@ public sealed class MainWindow : Window
     {
         _svc = svc;
         Title = TradingHub.Common.Product.Name;
+        FrameProbe.Current?.Watch(this);
         Width = Math.Max(1000, svc.Settings.WindowWidth);
         Height = Math.Max(640, svc.Settings.WindowHeight);
         MinWidth = 1000;
