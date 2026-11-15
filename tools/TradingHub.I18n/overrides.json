@@ -22718,5 +22718,1521 @@
   "Protection gap: the venue cancelled the linked target; waiting for its fills and position to confirm the remaining position.": {
     "es": "Hueco de protección: el exchange canceló el objetivo vinculado; se esperan sus ejecuciones y la posición para confirmar la posición restante.",
     "zh-CN": "保护缺口：交易场所取消了关联目标；正在等待成交和持仓报告以确认剩余持仓。"
+  },
+  " · no contracts in the selected expiries": {
+    "es": " · sin contratos en los vencimientos seleccionados",
+    "zh-CN": " · 所选到期日无合约"
+  },
+  "% of balance": {
+    "es": "% del saldo",
+    "zh-CN": "占余额 %"
+  },
+  ". The heat map shows what was recorded before the failure.": {
+    "es": ". El mapa de calor muestra lo registrado antes del error.",
+    "zh-CN": "。热力图显示故障前已记录的数据。"
+  },
+  "25Δ butterfly": {
+    "es": "Mariposa 25Δ",
+    "zh-CN": "25Δ 蝶式"
+  },
+  "ATM IV": {
+    "es": "ATM IV",
+    "zh-CN": "ATM IV"
+  },
+  "Account balance": {
+    "es": "Saldo de la cuenta",
+    "zh-CN": "账户余额"
+  },
+  "Aggregated trades": {
+    "es": "Operaciones agregadas",
+    "zh-CN": "聚合成交"
+  },
+  "Alert on large trades": {
+    "es": "Alertar operaciones grandes",
+    "zh-CN": "大额成交提醒"
+  },
+  "Alert on liquidations": {
+    "es": "Alertar liquidaciones",
+    "zh-CN": "强平提醒"
+  },
+  "Amount": {
+    "es": "Monto",
+    "zh-CN": "金额"
+  },
+  "Annualized": {
+    "es": "Anualizado",
+    "zh-CN": "年化"
+  },
+  "Approximate: exchanges use tiered maintenance rates and the mark price; trust the exchange's displayed liquidation price.": {
+    "es": "Aproximado: los exchanges usan tasas de mantenimiento escalonadas y el precio de marca; confiá en el precio de liquidación que muestra el exchange.",
+    "zh-CN": "近似值：交易所使用分级维持保证金率和标记价格；请以交易所显示的强平价格为准。"
+  },
+  "Bar seconds": {
+    "es": "Segundos por barra",
+    "zh-CN": "每根K线秒数"
+  },
+  "Book now": {
+    "es": "Libro actual",
+    "zh-CN": "当前订单簿"
+  },
+  "Break-even win rate": {
+    "es": "Tasa de acierto de equilibrio",
+    "zh-CN": "盈亏平衡胜率"
+  },
+  "Buy / sell volume by venue (notional)": {
+    "es": "Volumen de compra / venta por mercado (nocional)",
+    "zh-CN": "各交易所买入/卖出量（名义价值）"
+  },
+  "By expiry": {
+    "es": "Por vencimiento",
+    "zh-CN": "按到期日"
+  },
+  "Calculations run locally from the values entered; nothing is sent and no order is placed. Inputs are remembered.": {
+    "es": "Los cálculos se hacen localmente con los valores ingresados; no se envía nada ni se coloca ninguna orden. Los datos ingresados se recuerdan.",
+    "zh-CN": "计算在本地根据输入值进行；不会发送任何数据，也不会下单。输入内容会被保存。"
+  },
+  "Call OI": {
+    "es": "OI de calls",
+    "zh-CN": "看涨持仓量"
+  },
+  "Charts appear once the venues answer": {
+    "es": "Los gráficos aparecen cuando respondan los mercados",
+    "zh-CN": "交易所响应后将显示图表"
+  },
+  "Connect options data: add an Options data connection (Deribit public data or your own JSON API) in Connections. Until then this panel makes no requests.": {
+    "es": "Conectá datos de opciones: agregá una conexión de Datos de opciones (datos públicos de Deribit o tu propia API JSON) en Conexiones. Hasta entonces este panel no hace solicitudes.",
+    "zh-CN": "连接期权数据：在“连接”中添加期权数据连接（Deribit 公开数据或您自己的 JSON API）。在此之前，此面板不会发出任何请求。"
+  },
+  "Could not open the instrument: ": {
+    "es": "No se pudo abrir el instrumento: ",
+    "zh-CN": "无法打开该品种："
+  },
+  "Could not open the instrument: {0}": {
+    "es": "No se pudo abrir el instrumento: {0}",
+    "zh-CN": "无法打开该品种：{0}"
+  },
+  "Coverage · ": {
+    "es": "Cobertura · ",
+    "zh-CN": "覆盖范围 · "
+  },
+  "Coverage · {0}": {
+    "es": "Cobertura · {0}",
+    "zh-CN": "覆盖范围 · {0}"
+  },
+  "Depth heat map": {
+    "es": "Mapa de calor de profundidad",
+    "zh-CN": "深度热力图"
+  },
+  "Depth recording failed: {0}. The heat map shows what was recorded before the failure.": {
+    "es": "Falló el registro de profundidad: {0}. El mapa de calor muestra lo registrado antes del error.",
+    "zh-CN": "深度记录失败：{0}。热力图显示故障前已记录的数据。"
+  },
+  "Depth recording is off, so there is no depth history: only the current book is shown at the right edge. Turn on Settings → History and depth → Record received depth to build the heat map (an explicit opt-in that stores received depth on this computer).": {
+    "es": "El registro de profundidad está desactivado, así que no hay historial de profundidad: solo se muestra el libro actual en el borde derecho. Activá Configuración → Historial y profundidad → Registrar la profundidad recibida para construir el mapa de calor (una opción explícita que guarda la profundidad recibida en esta computadora).",
+    "zh-CN": "深度记录已关闭，因此没有深度历史：仅在右侧边缘显示当前订单簿。请开启 设置 → 历史与深度 → 记录接收到的深度 以构建热力图（这是一项需明确开启的选项，会在本机保存接收到的深度）。"
+  },
+  "Depth recording is stopped; the heat map shows depth recorded earlier.": {
+    "es": "El registro de profundidad está detenido; el mapa de calor muestra la profundidad registrada antes.",
+    "zh-CN": "深度记录已停止；热力图显示此前记录的深度。"
+  },
+  "Depth recording settings…": {
+    "es": "Configuración del registro de profundidad…",
+    "zh-CN": "深度记录设置…"
+  },
+  "Distance from entry": {
+    "es": "Distancia desde la entrada",
+    "zh-CN": "距入场价"
+  },
+  "Eastern Standard Time": {
+    "es": "Hora estándar del Este",
+    "zh-CN": "美国东部标准时间"
+  },
+  "Enter the account balance.": {
+    "es": "Ingresá el saldo de la cuenta.",
+    "zh-CN": "请输入账户余额。"
+  },
+  "Enter the entry and stop prices.": {
+    "es": "Ingresá los precios de entrada y de stop.",
+    "zh-CN": "请输入入场价和止损价。"
+  },
+  "Enter the entry price.": {
+    "es": "Ingresá el precio de entrada.",
+    "zh-CN": "请输入入场价。"
+  },
+  "Enter the position notional.": {
+    "es": "Ingresá el nocional de la posición.",
+    "zh-CN": "请输入仓位名义价值。"
+  },
+  "Enter the risk.": {
+    "es": "Ingresá el riesgo.",
+    "zh-CN": "请输入风险。"
+  },
+  "Error closing the local market-data API": {
+    "es": "Error al cerrar la API local de datos de mercado",
+    "zh-CN": "关闭本地行情数据 API 时出错"
+  },
+  "Estimates, not exchange data. The local model spreads open-interest increases (Binance + Bybit) over 5×–100× leverage tiers by each bar's measured buy/sell volume and removes levels the price already traded through. The leverage grid shows where positions opened at the current price would be liquidated, ignoring maintenance margin.": {
+    "es": "Estimaciones, no datos del exchange. El modelo local reparte los aumentos de interés abierto (Binance + Bybit) en niveles de apalancamiento de 5× a 100× según el volumen de compra/venta medido en cada barra, y elimina los niveles que el precio ya atravesó. La grilla de apalancamiento muestra dónde se liquidarían las posiciones abiertas al precio actual, sin considerar el margen de mantenimiento.",
+    "zh-CN": "估算值，并非交易所数据。本地模型根据每根K线实测的买入/卖出量，将持仓量增加（Binance + Bybit）分配到 5×–100× 杠杆档位，并移除价格已穿过的价位。杠杆网格显示以当前价格开仓的仓位将在何处被强平，未考虑维持保证金。"
+  },
+  "Expected move": {
+    "es": "Movimiento esperado",
+    "zh-CN": "预期波动"
+  },
+  "Expected move (nearest expiry)": {
+    "es": "Movimiento esperado (vencimiento más próximo)",
+    "zh-CN": "预期波动（最近到期日）"
+  },
+  "Fee per side (%)": {
+    "es": "Comisión por lado (%)",
+    "zh-CN": "单边手续费 (%)"
+  },
+  "Fees cannot be negative.": {
+    "es": "Las comisiones no pueden ser negativas.",
+    "zh-CN": "手续费不能为负数。"
+  },
+  "Fees exceed the move to the target.": {
+    "es": "Las comisiones superan el movimiento hasta el objetivo.",
+    "zh-CN": "手续费超过到目标价的波动。"
+  },
+  "Follow the active chart": {
+    "es": "Seguir el gráfico activo",
+    "zh-CN": "跟随当前图表"
+  },
+  "For a long, the stop must be below the entry.": {
+    "es": "En un largo, el stop debe estar por debajo de la entrada.",
+    "zh-CN": "做多时，止损价必须低于入场价。"
+  },
+  "For a long, the target must be above the entry.": {
+    "es": "En un largo, el objetivo debe estar por encima de la entrada.",
+    "zh-CN": "做多时，目标价必须高于入场价。"
+  },
+  "For a short, the stop must be above the entry.": {
+    "es": "En un corto, el stop debe estar por encima de la entrada.",
+    "zh-CN": "做空时，止损价必须高于入场价。"
+  },
+  "For a short, the target must be below the entry.": {
+    "es": "En un corto, el objetivo debe estar por debajo de la entrada.",
+    "zh-CN": "做空时，目标价必须低于入场价。"
+  },
+  "Funding 8h": {
+    "es": "Financiación 8h",
+    "zh-CN": "资金费率 8h"
+  },
+  "Funding cost": {
+    "es": "Costo de financiación",
+    "zh-CN": "资金费用"
+  },
+  "Funding paid (or received) while holding: notional × rate × settlements. Enter the current or expected rate per settlement.": {
+    "es": "Financiación pagada (o cobrada) durante la tenencia: nocional × tasa × cobros. Ingresá la tasa actual o esperada por cobro.",
+    "zh-CN": "持仓期间支付（或收取）的资金费用：名义价值 × 费率 × 结算次数。请输入当前或预期的每次结算费率。"
+  },
+  "GEX is an estimate from public open interest under the customers-buy-puts / sell-calls convention (USD per 1% move), not dealer books.": {
+    "es": "GEX es una estimación a partir del interés abierto público bajo la convención de que los clientes compran puts / venden calls (USD por movimiento del 1%), no los libros de los dealers.",
+    "zh-CN": "GEX 是基于公开持仓量、按“客户买入看跌/卖出看涨”惯例得出的估算值（每 1% 波动对应的 USD），并非做市商账簿。"
+  },
+  "Gamma exposure by strike (USD per 1%)": {
+    "es": "Exposición gamma por strike (USD por 1%)",
+    "zh-CN": "各行权价 Gamma 敞口（每 1% 的 USD）"
+  },
+  "Group (ticks)": {
+    "es": "Agrupar (ticks)",
+    "zh-CN": "合并 (ticks)"
+  },
+  "Hide below (notional)": {
+    "es": "Ocultar por debajo de (nocional)",
+    "zh-CN": "低于此值隐藏（名义价值）"
+  },
+  "Holding time (hours)": {
+    "es": "Tiempo de tenencia (horas)",
+    "zh-CN": "持仓时间（小时）"
+  },
+  "Huge from": {
+    "es": "Enorme desde",
+    "zh-CN": "超大起点"
+  },
+  "IV smile": {
+    "es": "Sonrisa de IV",
+    "zh-CN": "IV 微笑"
+  },
+  "IV smile · {0}": {
+    "es": "Sonrisa de IV · {0}",
+    "zh-CN": "IV 微笑 · {0}"
+  },
+  "IV term structure (ATM, by days to expiry)": {
+    "es": "Estructura temporal de IV (ATM, por días al vencimiento)",
+    "zh-CN": "IV 期限结构（ATM，按到期天数）"
+  },
+  "Initial margin": {
+    "es": "Margen inicial",
+    "zh-CN": "初始保证金"
+  },
+  "Interval (hours)": {
+    "es": "Intervalo (horas)",
+    "zh-CN": "间隔（小时）"
+  },
+  "Isolated margin on a linear perpetual: long ≈ entry × (1 − 1/leverage) / (1 − maintenance), short ≈ entry × (1 + 1/leverage) / (1 + maintenance). Ignores fees, funding and tiered margin.": {
+    "es": "Margen aislado en un perpetuo lineal: largo ≈ entrada × (1 − 1/apalancamiento) / (1 − mantenimiento), corto ≈ entrada × (1 + 1/apalancamiento) / (1 + mantenimiento). No considera comisiones, financiación ni margen escalonado.",
+    "zh-CN": "线性永续合约逐仓保证金：多 ≈ 入场价 × (1 − 1/杠杆) / (1 − 维持保证金率)，空 ≈ 入场价 × (1 + 1/杠杆) / (1 + 维持保证金率)。未考虑手续费、资金费用和分级保证金。"
+  },
+  "Large buy {0} on {1} at {2}": {
+    "es": "Compra grande {0} en {1} a {2}",
+    "zh-CN": "大额买入 {0}，{1}，价格 {2}"
+  },
+  "Large from": {
+    "es": "Grande desde",
+    "zh-CN": "大额起点"
+  },
+  "Large option trades (24 hours)": {
+    "es": "Operaciones grandes de opciones (24 horas)",
+    "zh-CN": "大额期权成交（24 小时）"
+  },
+  "Large sell {0} on {1} at {2}": {
+    "es": "Venta grande {0} en {1} a {2}",
+    "zh-CN": "大额卖出 {0}，{1}，价格 {2}"
+  },
+  "Large trades from (premium)": {
+    "es": "Operaciones grandes desde (prima)",
+    "zh-CN": "大额成交起点（权利金）"
+  },
+  "Leverage (×)": {
+    "es": "Apalancamiento (×)",
+    "zh-CN": "杠杆 (×)"
+  },
+  "Leverage must be at least 1×.": {
+    "es": "El apalancamiento debe ser al menos 1×.",
+    "zh-CN": "杠杆必须至少为 1×。"
+  },
+  "Leverage needed": {
+    "es": "Apalancamiento necesario",
+    "zh-CN": "所需杠杆"
+  },
+  "Linear estimate; excludes slippage, funding and FX. No orders.": {
+    "es": "Estimación lineal; excluye deslizamiento, financiación y tipo de cambio. Sin órdenes.",
+    "zh-CN": "线性估算；不含滑点、资金费用和汇率。不会下单。"
+  },
+  "Liquidation at about": {
+    "es": "Liquidación en aprox.",
+    "zh-CN": "强平价约为"
+  },
+  "Liquidation map": {
+    "es": "Mapa de liquidaciones",
+    "zh-CN": "强平地图"
+  },
+  "Liquidation maps need a USD-quoted crypto perpetual.": {
+    "es": "Los mapas de liquidaciones necesitan un perpetuo cripto cotizado en USD.",
+    "zh-CN": "强平地图需要以 USD 计价的加密永续合约。"
+  },
+  "Liquidation price (approximate)": {
+    "es": "Precio de liquidación (aproximado)",
+    "zh-CN": "强平价格（近似）"
+  },
+  "Liquidations (longs below, shorts above)": {
+    "es": "Liquidaciones (largos abajo, cortos arriba)",
+    "zh-CN": "强平（多头在下，空头在上）"
+  },
+  "Liquidations ({0}): Binance and Bybit public streams since this panel started listening; hatched bars were not observed. Binance publishes at most one liquidation per second (a sample).": {
+    "es": "Liquidaciones ({0}): flujos públicos de Binance y Bybit desde que este panel empezó a escuchar; las barras rayadas no se observaron. Binance publica como máximo una liquidación por segundo (una muestra).",
+    "zh-CN": "强平（{0}）：自此面板开始监听以来的 Binance 和 Bybit 公开数据流；斜线条表示未观测到。Binance 每秒最多发布一条强平（抽样）。"
+  },
+  "Liquidations from": {
+    "es": "Liquidaciones desde",
+    "zh-CN": "强平起点"
+  },
+  "Liquidations: available only for USD-quoted crypto perpetuals (Binance and Bybit streams).": {
+    "es": "Liquidaciones: disponibles solo para perpetuos cripto cotizados en USD (flujos de Binance y Bybit).",
+    "zh-CN": "强平：仅适用于以 USD 计价的加密永续合约（Binance 和 Bybit 数据流）。"
+  },
+  "Liquidations: derivatives data is unavailable in this session.": {
+    "es": "Liquidaciones: los datos de derivados no están disponibles en esta sesión.",
+    "zh-CN": "强平：本次会话中衍生品数据不可用。"
+  },
+  "Loading candles and open interest…": {
+    "es": "Cargando velas e interés abierto…",
+    "zh-CN": "正在加载K线和持仓量…"
+  },
+  "Loading the {0} options chain…": {
+    "es": "Cargando la cadena de opciones de {0}…",
+    "zh-CN": "正在加载 {0} 期权链…"
+  },
+  "Loading {0} from Binance and Bybit…": {
+    "es": "Cargando {0} desde Binance y Bybit…",
+    "zh-CN": "正在从 Binance 和 Bybit 加载 {0}…"
+  },
+  "Loading…": {
+    "es": "Cargando…",
+    "zh-CN": "加载中…"
+  },
+  "Local": {
+    "es": "Local",
+    "zh-CN": "本地"
+  },
+  "Local estimate from open interest": {
+    "es": "Estimación local a partir del interés abierto",
+    "zh-CN": "基于持仓量的本地估算"
+  },
+  "Local estimate: {0} bars modelled, {1} skipped (no open interest or measured delta).": {
+    "es": "Estimación local: {0} barras modeladas, {1} omitidas (sin interés abierto o delta medido).",
+    "zh-CN": "本地估算：已建模 {0} 根K线，跳过 {1} 根（无持仓量或实测 delta）。"
+  },
+  "Local estimate: {0} bars modelled, {1} skipped (no open interest or measured delta).{2}": {
+    "es": "Estimación local: {0} barras modeladas, {1} omitidas (sin interés abierto o delta medido).{2}",
+    "zh-CN": "本地估算：已建模 {0} 根K线，跳过 {1} 根（无持仓量或实测 delta）。{2}"
+  },
+  "Local market-data API could not start": {
+    "es": "No se pudo iniciar la API local de datos de mercado",
+    "zh-CN": "本地行情数据 API 无法启动"
+  },
+  "Local market-data API listening on 127.0.0.1:{0} ({1} allowed browser origins).": {
+    "es": "API local de datos de mercado escuchando en 127.0.0.1:{0} ({1} orígenes de navegador permitidos).",
+    "zh-CN": "本地行情数据 API 正在监听 127.0.0.1:{0}（允许 {1} 个浏览器来源）。"
+  },
+  "Local market-data API stopped.": {
+    "es": "API local de datos de mercado detenida.",
+    "zh-CN": "本地行情数据 API 已停止。"
+  },
+  "Long liqs 24h": {
+    "es": "Liq. largos 24h",
+    "zh-CN": "多头强平 24h"
+  },
+  "Long liquidation {0} on {1} at {2}": {
+    "es": "Liquidación de largo {0} en {1} a {2}",
+    "zh-CN": "多头强平 {0}，{1}，价格 {2}"
+  },
+  "Longs pay / shorts receive": {
+    "es": "Largos pagan / cortos cobran",
+    "zh-CN": "多头支付 / 空头收取"
+  },
+  "Longs receive / shorts pay": {
+    "es": "Largos cobran / cortos pagan",
+    "zh-CN": "多头收取 / 空头支付"
+  },
+  "Loss at the stop (with fees)": {
+    "es": "Pérdida en el stop (con comisiones)",
+    "zh-CN": "止损亏损（含手续费）"
+  },
+  "Market analysis panels for one instrument. Read-only: nothing here places orders.": {
+    "es": "Paneles de análisis de mercado para un instrumento. Solo lectura: nada acá coloca órdenes.",
+    "zh-CN": "单一品种的市场分析面板。只读：此处不会下任何订单。"
+  },
+  "Max pain (nearest expiry)": {
+    "es": "Dolor máximo (vencimiento más próximo)",
+    "zh-CN": "最大痛点（最近到期日）"
+  },
+  "Max pain = the settlement price where option holders' total intrinsic value is lowest. Expected move = spot × ATM IV × √time (one standard deviation).": {
+    "es": "Dolor máximo = el precio de liquidación al vencimiento donde el valor intrínseco total de los tenedores de opciones es mínimo. Movimiento esperado = spot × ATM IV × √tiempo (una desviación estándar).",
+    "zh-CN": "最大痛点 = 期权持有人总内在价值最低的结算价格。预期波动 = 现货价 × ATM IV × √时间（一个标准差）。"
+  },
+  "Merge same-millisecond prints": {
+    "es": "Unir operaciones del mismo milisegundo",
+    "zh-CN": "合并同一毫秒的成交"
+  },
+  "New York afternoon": {
+    "es": "Tarde de Nueva York",
+    "zh-CN": "纽约下午"
+  },
+  "New York morning": {
+    "es": "Mañana de Nueva York",
+    "zh-CN": "纽约上午"
+  },
+  "Next 8-hour funding settlement at {0} local (in {1}). Some venues settle every 1 or 4 hours.": {
+    "es": "Próximo cobro de financiación de 8 horas a las {0} hora local (en {1}). Algunos mercados liquidan cada 1 o 4 horas.",
+    "zh-CN": "下一次 8 小时资金费结算时间为本地 {0}（{1} 后）。部分交易所每 1 或 4 小时结算一次。"
+  },
+  "Next funding": {
+    "es": "Próxima financiación",
+    "zh-CN": "下次资金费"
+  },
+  "No data for this range": {
+    "es": "Sin datos para este rango",
+    "zh-CN": "此范围内无数据"
+  },
+  "No derivatives data yet": {
+    "es": "Todavía no hay datos de derivados",
+    "zh-CN": "暂无衍生品数据"
+  },
+  "No local estimate": {
+    "es": "Sin estimación local",
+    "zh-CN": "无本地估算"
+  },
+  "No option trades above the threshold in the loaded window.": {
+    "es": "No hay operaciones de opciones por encima del umbral en la ventana cargada.",
+    "zh-CN": "已加载时段内没有超过阈值的期权成交。"
+  },
+  "No recorded depth in this window": {
+    "es": "No hay profundidad registrada en esta ventana",
+    "zh-CN": "此时段内无已记录深度"
+  },
+  "No strikes in range": {
+    "es": "No hay strikes en el rango",
+    "zh-CN": "范围内无行权价"
+  },
+  "No trades above the threshold yet": {
+    "es": "Todavía no hay operaciones por encima del umbral",
+    "zh-CN": "暂无超过阈值的成交"
+  },
+  "No trades or depth for this instrument yet": {
+    "es": "Todavía no hay operaciones ni profundidad para este instrumento",
+    "zh-CN": "此品种暂无成交或深度"
+  },
+  "Not available": {
+    "es": "No disponible",
+    "zh-CN": "不可用"
+  },
+  "Not enough data": {
+    "es": "Datos insuficientes",
+    "zh-CN": "数据不足"
+  },
+  "OI (USD)": {
+    "es": "OI (USD)",
+    "zh-CN": "持仓量 (USD)"
+  },
+  "Open Connections": {
+    "es": "Abrir Conexiones",
+    "zh-CN": "打开连接"
+  },
+  "Open interest is unavailable for these candles; the local estimate needs both venues.": {
+    "es": "El interés abierto no está disponible para estas velas; la estimación local necesita ambos mercados.",
+    "zh-CN": "这些K线没有持仓量数据；本地估算需要两个交易所的数据。"
+  },
+  "Open this panel in a separate window": {
+    "es": "Abrir este panel en una ventana separada",
+    "zh-CN": "在独立窗口中打开此面板"
+  },
+  "Options data: ": {
+    "es": "Datos de opciones: ",
+    "zh-CN": "期权数据："
+  },
+  "Options data: {0}": {
+    "es": "Datos de opciones: {0}",
+    "zh-CN": "期权数据：{0}"
+  },
+  "Per day": {
+    "es": "Por día",
+    "zh-CN": "每日"
+  },
+  "Point value": {
+    "es": "Valor del punto",
+    "zh-CN": "每点价值"
+  },
+  "Point value and quantity step from {0}; change them for another market.": {
+    "es": "Valor del punto y paso de cantidad de {0}; cambialos para otro mercado.",
+    "zh-CN": "每点价值和数量步长取自 {0}；用于其他市场时请修改。"
+  },
+  "Position notional": {
+    "es": "Nocional de la posición",
+    "zh-CN": "仓位名义价值"
+  },
+  "Position size": {
+    "es": "Tamaño de la posición",
+    "zh-CN": "仓位大小"
+  },
+  "Price · large trades · liquidations": {
+    "es": "Precio · operaciones grandes · liquidaciones",
+    "zh-CN": "价格 · 大额成交 · 强平"
+  },
+  "Profit at the target (with fees)": {
+    "es": "Ganancia en el objetivo (con comisiones)",
+    "zh-CN": "目标盈利（含手续费）"
+  },
+  "Public Binance USD-M and Bybit linear data for the coin's USDT perpetual. Funding is shown per settlement and normalized to 8 hours; premium = (mark − index) / index; long/short is the venues' account ratio; liquidations come from the live streams only while observed (Binance publishes a one-per-second sample).": {
+    "es": "Datos públicos de Binance USD-M y Bybit lineal para el perpetuo USDT de la moneda. La financiación se muestra por cobro y normalizada a 8 horas; prima = (marca − índice) / índice; largo/corto es la relación de cuentas de cada mercado; las liquidaciones vienen de los flujos en vivo solo mientras se observan (Binance publica una muestra de una por segundo).",
+    "zh-CN": "该币种 USDT 永续合约的 Binance USD-M 与 Bybit 线性公开数据。资金费率按每次结算显示并折算为 8 小时；溢价 = (标记价 − 指数价) / 指数价；多/空为各交易所的账户比；强平仅来自观测期间的实时数据流（Binance 每秒发布一条抽样）。"
+  },
+  "Put OI": {
+    "es": "OI de puts",
+    "zh-CN": "看跌持仓量"
+  },
+  "Put/call OI": {
+    "es": "OI put/call",
+    "zh-CN": "看跌/看涨持仓量比"
+  },
+  "Quantity step": {
+    "es": "Paso de cantidad",
+    "zh-CN": "数量步长"
+  },
+  "Raises a local alert (sound follows Settings → Sound alerts; never sent to external destinations).": {
+    "es": "Genera una alerta local (el sonido sigue Configuración → Alertas sonoras; nunca se envía a destinos externos).",
+    "zh-CN": "触发本地提醒（声音遵循 设置 → 声音提醒；绝不发送到外部目标）。"
+  },
+  "Range (± %)": {
+    "es": "Rango (± %)",
+    "zh-CN": "范围 (± %)"
+  },
+  "Rate per settlement (%)": {
+    "es": "Tasa por cobro (%)",
+    "zh-CN": "每次结算费率 (%)"
+  },
+  "Resting L2 size (peak per display pixel), not executed volume. Shaded intervals are missing or stale depth; amber underlines mark partial or truncated books.": {
+    "es": "Tamaño L2 en reposo (pico por píxel mostrado), no volumen ejecutado. Los intervalos sombreados son profundidad faltante o desactualizada; los subrayados ámbar marcan libros parciales o truncados.",
+    "zh-CN": "挂单 L2 数量（每显示像素的峰值），并非成交量。阴影区间表示缺失或过期的深度；琥珀色下划线标记不完整或被截断的订单簿。"
+  },
+  "Return it here": {
+    "es": "Devolverlo acá",
+    "zh-CN": "放回此处"
+  },
+  "Risk must be greater than 0% and at most 100%.": {
+    "es": "El riesgo debe ser mayor que 0% y como máximo 100%.",
+    "zh-CN": "风险必须大于 0% 且不超过 100%。"
+  },
+  "Session clock": {
+    "es": "Reloj de sesiones",
+    "zh-CN": "交易时段时钟"
+  },
+  "Sessions in New York time shown with your local times; the next settlement of the common 8-hour funding schedule.": {
+    "es": "Sesiones en hora de Nueva York mostradas con tus horarios locales; la próximo cobro del esquema de financiación habitual de 8 horas.",
+    "zh-CN": "以纽约时间显示的交易时段及对应的本地时间；常见 8 小时资金费结算周期的下一次结算。"
+  },
+  "Settlements": {
+    "es": "Cobros",
+    "zh-CN": "结算次数"
+  },
+  "Short liqs 24h": {
+    "es": "Liq. cortos 24h",
+    "zh-CN": "空头强平 24h"
+  },
+  "Short liquidation {0} on {1} at {2}": {
+    "es": "Liquidación de corto {0} en {1} a {2}",
+    "zh-CN": "空头强平 {0}，{1}，价格 {2}"
+  },
+  "Show or hide this venue's lines in the tape (volume bars always include every venue).": {
+    "es": "Mostrar u ocultar las líneas de este mercado en la cinta (las barras de volumen siempre incluyen todos los mercados).",
+    "zh-CN": "在成交明细中显示或隐藏该交易所的行（成交量柱始终包含所有交易所）。"
+  },
+  "Show trades": {
+    "es": "Mostrar operaciones",
+    "zh-CN": "显示成交"
+  },
+  "Stop distance": {
+    "es": "Distancia del stop",
+    "zh-CN": "止损距离"
+  },
+  "Stop price": {
+    "es": "Precio de stop",
+    "zh-CN": "止损价"
+  },
+  "Target (optional)": {
+    "es": "Objetivo (opcional)",
+    "zh-CN": "目标价（可选）"
+  },
+  "The derivatives dashboard needs a USD-quoted crypto coin (its USDT perpetual is read on each venue).": {
+    "es": "El panel de derivados necesita una moneda cripto cotizada en USD (se lee su perpetuo USDT en cada mercado).",
+    "zh-CN": "衍生品仪表板需要以 USD 计价的加密币种（在各交易所读取其 USDT 永续合约）。"
+  },
+  "The funding interval must be greater than zero.": {
+    "es": "El intervalo de financiación debe ser mayor que cero.",
+    "zh-CN": "资金费间隔必须大于零。"
+  },
+  "The holding time cannot be negative.": {
+    "es": "El tiempo de tenencia no puede ser negativo.",
+    "zh-CN": "持仓时间不能为负数。"
+  },
+  "The maintenance margin is at least the initial margin: the position would be liquidated immediately.": {
+    "es": "El margen de mantenimiento es al menos igual al margen inicial: la posición se liquidaría de inmediato.",
+    "zh-CN": "维持保证金不低于初始保证金：仓位将被立即强平。"
+  },
+  "The maintenance margin rate must be between 0% and 100%.": {
+    "es": "La tasa de margen de mantenimiento debe estar entre 0% y 100%.",
+    "zh-CN": "维持保证金率必须在 0% 到 100% 之间。"
+  },
+  "The point value must be greater than zero.": {
+    "es": "El valor del punto debe ser mayor que cero.",
+    "zh-CN": "每点价值必须大于零。"
+  },
+  "The quantity step cannot be negative.": {
+    "es": "El paso de cantidad no puede ser negativo.",
+    "zh-CN": "数量步长不能为负数。"
+  },
+  "The quantity whose loss at the stop equals the risk you choose, with the same linear rules as the chart's long/short position drawing (quantity rounded down to the step).": {
+    "es": "La cantidad cuya pérdida en el stop es igual al riesgo que elegís, con las mismas reglas lineales que el dibujo de posición larga/corta del gráfico (cantidad redondeada hacia abajo al paso).",
+    "zh-CN": "止损亏损等于您所选风险的数量，采用与图表多/空仓位绘图相同的线性规则（数量向下取整至步长）。"
+  },
+  "The required leverage is above 20×: the liquidation price may be close to the stop. Check it with the liquidation calculator.": {
+    "es": "El apalancamiento necesario supera 20×: el precio de liquidación puede estar cerca del stop. Verificalo con la calculadora de liquidación.",
+    "zh-CN": "所需杠杆超过 20×：强平价格可能接近止损价。请用强平计算器核对。"
+  },
+  "The risk budget is below one quantity step.": {
+    "es": "El presupuesto de riesgo es menor que un paso de cantidad.",
+    "zh-CN": "风险预算低于一个数量步长。"
+  },
+  "The values are too large; reduce them.": {
+    "es": "Los valores son demasiado grandes; reducilos.",
+    "zh-CN": "数值过大，请减小。"
+  },
+  "Third-party estimate (opt-in)": {
+    "es": "Estimación de terceros (opcional)",
+    "zh-CN": "第三方估算（需开启）"
+  },
+  "Third-party estimate · {0} · {1} positions · as of {2}": {
+    "es": "Estimación de terceros · {0} · {1} posiciones · al {2}",
+    "zh-CN": "第三方估算 · {0} · {1} 个仓位 · 截至 {2}"
+  },
+  "Third-party levels: ": {
+    "es": "Niveles de terceros: ",
+    "zh-CN": "第三方价位："
+  },
+  "Third-party levels: loading…": {
+    "es": "Niveles de terceros: cargando…",
+    "zh-CN": "第三方价位：加载中…"
+  },
+  "Third-party levels: off. Enable Settings → Third-party data → Third-party liquidation levels to add the published Hyperliquid BTC estimate.": {
+    "es": "Niveles de terceros: desactivados. Activá Configuración → Datos de terceros → Niveles de liquidación de terceros para agregar la estimación publicada de BTC de Hyperliquid.",
+    "zh-CN": "第三方价位：已关闭。开启 设置 → 第三方数据 → 第三方强平价位 以添加已发布的 Hyperliquid BTC 估算。"
+  },
+  "Third-party levels: the service publishes BTC only.": {
+    "es": "Niveles de terceros: el servicio publica solo BTC.",
+    "zh-CN": "第三方价位：该服务仅发布 BTC。"
+  },
+  "Third-party levels: the snapshot is older than three hours ({0}) and is not drawn.": {
+    "es": "Niveles de terceros: la instantánea tiene más de tres horas ({0}) y no se dibuja.",
+    "zh-CN": "第三方价位：快照已超过三小时（{0}），不予绘制。"
+  },
+  "Third-party levels: {0}": {
+    "es": "Niveles de terceros: {0}",
+    "zh-CN": "第三方价位：{0}"
+  },
+  "This connection has no candle history for the estimate.": {
+    "es": "Esta conexión no tiene historial de velas para la estimación.",
+    "zh-CN": "此连接没有可用于估算的K线历史。"
+  },
+  "Toolbox": {
+    "es": "Herramientas",
+    "zh-CN": "工具箱"
+  },
+  "Total GEX": {
+    "es": "GEX total",
+    "zh-CN": "总 GEX"
+  },
+  "Total GEX versus price": {
+    "es": "GEX total frente al precio",
+    "zh-CN": "总 GEX 与价格"
+  },
+  "Venue": {
+    "es": "Mercado",
+    "zh-CN": "交易所"
+  },
+  "Waiting for a price": {
+    "es": "Esperando un precio",
+    "zh-CN": "等待价格"
+  },
+  "Waiting for the options chain": {
+    "es": "Esperando la cadena de opciones",
+    "zh-CN": "等待期权链"
+  },
+  "Waiting for trades": {
+    "es": "Esperando operaciones",
+    "zh-CN": "等待成交"
+  },
+  "Within 30 days": {
+    "es": "Dentro de 30 días",
+    "zh-CN": "30 天内"
+  },
+  "Within 7 days": {
+    "es": "Dentro de 7 días",
+    "zh-CN": "7 天内"
+  },
+  "Workbench": {
+    "es": "Banco de trabajo",
+    "zh-CN": "工作台"
+  },
+  "Workbench tape": {
+    "es": "Cinta del banco de trabajo",
+    "zh-CN": "工作台成交明细"
+  },
+  "Workbench{0}": {
+    "es": "Banco de trabajo{0}",
+    "zh-CN": "工作台{0}"
+  },
+  "call wall": {
+    "es": "muro de calls",
+    "zh-CN": "看涨墙"
+  },
+  "live, {0} left": {
+    "es": "vivo, faltan {0}",
+    "zh-CN": "进行中，剩余 {0}"
+  },
+  "max pain": {
+    "es": "dolor máximo",
+    "zh-CN": "最大痛点"
+  },
+  "none within ±20%": {
+    "es": "ninguno dentro de ±20%",
+    "zh-CN": "±20% 内无"
+  },
+  "not observed": {
+    "es": "no observado",
+    "zh-CN": "未观测"
+  },
+  "open interest": {
+    "es": "interés abierto",
+    "zh-CN": "持仓量"
+  },
+  "put wall": {
+    "es": "muro de puts",
+    "zh-CN": "看跌墙"
+  },
+  "starts in {0}": {
+    "es": "empieza en {0}",
+    "zh-CN": "{0} 后开始"
+  },
+  "unknown error": {
+    "es": "error desconocido",
+    "zh-CN": "未知错误"
+  },
+  "{0} in a separate window: it follows the Workbench instrument and returns to the page when closed.": {
+    "es": "{0} en una ventana separada: sigue el instrumento del banco de trabajo y vuelve a la página al cerrarse.",
+    "zh-CN": "{0} 位于独立窗口：跟随工作台品种，关闭后返回页面。"
+  },
+  "{0} is open in a separate window.": {
+    "es": "{0} está abierto en una ventana separada.",
+    "zh-CN": "{0} 已在独立窗口中打开。"
+  },
+  "{0} prints arrived faster than the tape could list; volume bars may be incomplete.": {
+    "es": "Llegaron {0} operaciones más rápido de lo que la cinta podía listarlas; las barras de volumen pueden estar incompletas.",
+    "zh-CN": "{0} 笔成交到达速度超过成交明细的列出速度；成交量柱可能不完整。"
+  },
+  "{0} published no ticker for {1}.": {
+    "es": "{0} no publicó ticker para {1}.",
+    "zh-CN": "{0} 未发布 {1} 的行情。"
+  },
+  "{0} reports no long/short ratio for {1} in this range.": {
+    "es": "{0} no informa relación largo/corto para {1} en este rango.",
+    "zh-CN": "{0} 在此范围内未提供 {1} 的多空比。"
+  },
+  "{0} · Workbench": {
+    "es": "{0} · Banco de trabajo",
+    "zh-CN": "{0} · 工作台"
+  },
+  "{0} · depth recording {1} · last book {2} · dropped records {3}": {
+    "es": "{0} · registro de profundidad {1} · último libro {2} · registros descartados {3}",
+    "zh-CN": "{0} · 深度记录 {1} · 最新订单簿 {2} · 丢弃记录 {3}"
+  },
+  "{0} · depth recording {1} · last book {2} · dropped records {3}{4}": {
+    "es": "{0} · registro de profundidad {1} · último libro {2} · registros descartados {3}{4}",
+    "zh-CN": "{0} · 深度记录 {1} · 最新订单簿 {2} · 丢弃记录 {3}{4}"
+  },
+  "{0} · funding (8h %)": {
+    "es": "{0} · financiación (8h %)",
+    "zh-CN": "{0} · 资金费率 (8h %)"
+  },
+  "{0} · liquidations (longs − / shorts +)": {
+    "es": "{0} · liquidaciones (largos − / cortos +)",
+    "zh-CN": "{0} · 强平（多 − / 空 +）"
+  },
+  "{0} · long/short ratio": {
+    "es": "{0} · relación largo/corto",
+    "zh-CN": "{0} · 多空比"
+  },
+  "{0} · open interest": {
+    "es": "{0} · interés abierto",
+    "zh-CN": "{0} · 持仓量"
+  },
+  "{0} · updated {1}": {
+    "es": "{0} · actualizado {1}",
+    "zh-CN": "{0} · 更新于 {1}"
+  },
+  "{0} · {1} · {2} contracts · snapshot {3}": {
+    "es": "{0} · {1} · {2} contratos · instantánea {3}",
+    "zh-CN": "{0} · {1} · {2} 张合约 · 快照 {3}"
+  },
+  "{0} · {1} · {2} contracts · snapshot {3}{4}": {
+    "es": "{0} · {1} · {2} contratos · instantánea {3}{4}",
+    "zh-CN": "{0} · {1} · {2} 张合约 · 快照 {3}{4}"
+  },
+  "{0} · {1} · {2} {3} × {4} {5} {6} · premium {7}": {
+    "es": "{0} · {1} · {2} {3} × {4} {5} {6} · prima {7}",
+    "zh-CN": "{0} · {1} · {2} {3} × {4} {5} {6} · 权利金 {7}"
+  },
+  "{0}/futures/data/globalLongShortAccountRatio?symbol={1}&period={2}&limit=500&startTime={3}&endTime={4}": {
+    "es": "{0}/futures/data/globalLongShortAccountRatio?symbol={1}&period={2}&limit=500&startTime={3}&endTime={4}",
+    "zh-CN": "{0}/futures/data/globalLongShortAccountRatio?symbol={1}&period={2}&limit=500&startTime={3}&endTime={4}"
+  },
+  "{0}/v5/market/account-ratio?category=linear&symbol={1}&period={2}&limit=500&startTime={3}&endTime={4}": {
+    "es": "{0}/v5/market/account-ratio?category=linear&symbol={1}&period={2}&limit=500&startTime={3}&endTime={4}",
+    "zh-CN": "{0}/v5/market/account-ratio?category=linear&symbol={1}&period={2}&limit=500&startTime={3}&endTime={4}"
+  },
+  "{0}: connecting ({1})": {
+    "es": "{0}: conectando ({1})",
+    "zh-CN": "{0}：连接中（{1}）"
+  },
+  "{0}: error ({1})": {
+    "es": "{0}: error ({1})",
+    "zh-CN": "{0}：错误（{1}）"
+  },
+  "{0}: live": {
+    "es": "{0}: en vivo",
+    "zh-CN": "{0}：实时"
+  },
+  "{0}: missing ({1})": {
+    "es": "{0}: faltante ({1})",
+    "zh-CN": "{0}：缺失（{1}）"
+  },
+  "{0}: partial ({1})": {
+    "es": "{0}: parcial ({1})",
+    "zh-CN": "{0}：部分（{1}）"
+  },
+  "{0}: reconnecting ({1})": {
+    "es": "{0}: reconectando ({1})",
+    "zh-CN": "{0}：重新连接中（{1}）"
+  },
+  "Local market-data API": {
+    "es": "API local de datos de mercado",
+    "zh-CN": "本地行情数据 API"
+  },
+  "Serve market data to local tools": {
+    "es": "Servir datos de mercado a herramientas locales",
+    "zh-CN": "向本地工具提供行情数据"
+  },
+  "Off by default. When on, Trading Hub serves read-only market data (candles, trades, order book and recorded depth of instruments you already have open) on 127.0.0.1 only, for your own tools on this computer. It never exposes credentials, accounts or orders and cannot change anything. Web pages on other sites are refused unless their origin is listed below.": {
+    "es": "Desactivado por defecto. Al activarlo, Trading Hub sirve datos de mercado de solo lectura (velas, operaciones, libro de órdenes y profundidad grabada de los instrumentos que ya tenés abiertos) únicamente en 127.0.0.1, para tus propias herramientas en esta computadora. Nunca expone credenciales, cuentas ni órdenes y no puede cambiar nada. Las páginas web de otros sitios se rechazan salvo que su origen figure abajo.",
+    "zh-CN": "默认关闭。开启后，Trading Hub 仅在 127.0.0.1 上提供只读行情数据（已打开品种的K线、成交、订单簿和已记录的深度），供你在本机上的工具使用。它绝不会暴露凭据、账户或订单，也无法更改任何内容。除非其来源列在下方，否则来自其他网站的网页请求会被拒绝。"
+  },
+  "Port": {
+    "es": "Puerto",
+    "zh-CN": "端口"
+  },
+  "Loopback TCP port of the local API (1024–65535).": {
+    "es": "Puerto TCP de loopback de la API local (1024–65535).",
+    "zh-CN": "本地 API 的回环 TCP 端口（1024–65535）。"
+  },
+  "Allowed browser origins": {
+    "es": "Orígenes de navegador permitidos",
+    "zh-CN": "允许的浏览器来源"
+  },
+  "Only needed for browser-based tools. One origin per line or separated by commas, such as http://localhost:3000. Invalid entries are ignored.": {
+    "es": "Solo hace falta para herramientas que corren en el navegador. Un origen por línea o separados por comas, por ejemplo http://localhost:3000. Las entradas no válidas se ignoran.",
+    "zh-CN": "仅基于浏览器的工具需要。每行一个来源或用逗号分隔，例如 http://localhost:3000。无效条目将被忽略。"
+  },
+  "Base URL: http://127.0.0.1:{0}/api/v1": {
+    "es": "URL base: http://127.0.0.1:{0}/api/v1",
+    "zh-CN": "基础 URL：http://127.0.0.1:{0}/api/v1"
+  },
+  "Off": {
+    "es": "Apagado",
+    "zh-CN": "已关闭"
+  },
+  "Listening on http://127.0.0.1:{0}/api/v1": {
+    "es": "Escuchando en http://127.0.0.1:{0}/api/v1",
+    "zh-CN": "正在监听 http://127.0.0.1:{0}/api/v1"
+  },
+  "Port {0} is already in use.": {
+    "es": "El puerto {0} ya está en uso.",
+    "zh-CN": "端口 {0} 已被占用。"
+  },
+  "The local market-data API could not start: {0}": {
+    "es": "No se pudo iniciar la API local de datos de mercado: {0}",
+    "zh-CN": "本地行情数据 API 无法启动：{0}"
+  },
+  "Ignored invalid origins: {0}": {
+    "es": "Orígenes no válidos ignorados: {0}",
+    "zh-CN": "已忽略的无效来源：{0}"
+  },
+  "Coverage:": {
+    "es": "Cobertura:",
+    "zh-CN": "覆盖情况："
+  },
+  "{0}: partial": {
+    "es": "{0}: parcial",
+    "zh-CN": "{0}：部分"
+  },
+  "{0}: connecting": {
+    "es": "{0}: conectando",
+    "zh-CN": "{0}：连接中"
+  },
+  "{0}: reconnecting": {
+    "es": "{0}: reconectando",
+    "zh-CN": "{0}：重新连接中"
+  },
+  "{0}: error": {
+    "es": "{0}: error",
+    "zh-CN": "{0}：错误"
+  },
+  "{0}: missing": {
+    "es": "{0}: faltante",
+    "zh-CN": "{0}：缺失"
+  },
+  "LIQ {0}": {
+    "es": "LIQ {0}",
+    "zh-CN": "强平 {0}"
+  },
+  "Depth recording failed without a reported reason. The heat map shows what was recorded before the failure.": {
+    "es": "Falló el registro de profundidad sin un motivo informado. El mapa de calor muestra lo registrado antes del error.",
+    "zh-CN": "深度记录失败，未报告原因。热力图显示故障前已记录的数据。"
+  },
+  "Depth recording on": {
+    "es": "Registro de profundidad activado",
+    "zh-CN": "深度记录已开启"
+  },
+  "Depth recording off": {
+    "es": "Registro de profundidad desactivado",
+    "zh-CN": "深度记录已关闭"
+  },
+  "Depth recording failed": {
+    "es": "Falló el registro de profundidad",
+    "zh-CN": "深度记录失败"
+  },
+  "Depth recording stopped": {
+    "es": "Registro de profundidad detenido",
+    "zh-CN": "深度记录已停止"
+  },
+  "Last book: {0}": {
+    "es": "Último libro: {0}",
+    "zh-CN": "最新订单簿：{0}"
+  },
+  "No book received yet": {
+    "es": "Todavía no se recibió ningún libro",
+    "zh-CN": "尚未收到订单簿"
+  },
+  "Dropped records: {0}": {
+    "es": "Registros descartados: {0}",
+    "zh-CN": "丢弃的记录：{0}"
+  },
+  "Candles could not be loaded: {0}": {
+    "es": "No se pudieron cargar las velas: {0}",
+    "zh-CN": "无法加载K线：{0}"
+  },
+  "Open interest from {0}: {1}": {
+    "es": "Interés abierto de {0}: {1}",
+    "zh-CN": "{0} 持仓量：{1}"
+  },
+  "This panel is open in a separate window.": {
+    "es": "Este panel está abierto en una ventana aparte.",
+    "zh-CN": "此面板已在独立窗口中打开。"
+  },
+  "Opened in a separate window: it follows the Workbench instrument and returns to the page when closed.": {
+    "es": "Abierto en una ventana aparte: sigue el instrumento del banco de trabajo y vuelve a la página al cerrarla.",
+    "zh-CN": "已在独立窗口中打开：它跟随工作台的品种，关闭后返回页面。"
+  },
+  "{0} reports no open interest for {1} in this range.": {
+    "es": "{0} no informa interés abierto de {1} en este rango.",
+    "zh-CN": "{0} 在此范围内未提供 {1} 的持仓量。"
+  },
+  "{0} does not publish a long/short account ratio.": {
+    "es": "{0} no publica una relación de cuentas largo/corto.",
+    "zh-CN": "{0} 不发布多空账户比。"
+  },
+  "Public USDT-perpetual data from Binance USD-M, Bybit linear, OKX, Bitget USDT-M and Hyperliquid (USD-settled). Funding is shown per settlement and normalized to 8 hours; premium = (mark − index) / index, with Hyperliquid's oracle price as its index; long/short is each venue's account ratio. \"not published\" marks data the venue does not offer; liquidations come from the Binance and Bybit live streams only while observed (Binance publishes a one-per-second sample).": {
+    "es": "Datos públicos de perpetuos USDT de Binance USD-M, Bybit lineal, OKX, Bitget USDT-M y Hyperliquid (liquidado en USD). La financiación se muestra por cobro y normalizada a 8 horas; prima = (marca − índice) / índice, usando el precio del oráculo de Hyperliquid como su índice; largo/corto es la relación de cuentas de cada mercado. \"no publicado\" marca datos que el mercado no ofrece; las liquidaciones vienen de los flujos en vivo de Binance y Bybit solo mientras se observan (Binance publica una muestra de una por segundo).",
+    "zh-CN": "来自 Binance USD-M、Bybit 线性、OKX、Bitget USDT-M 和 Hyperliquid（USD 结算）的 USDT 永续合约公开数据。资金费率按每次结算显示并折算为 8 小时；溢价 = (标记价 − 指数价) / 指数价，Hyperliquid 以其预言机价格作为指数；多空比为各交易所的账户比。“未发布”表示该交易所不提供此数据；强平仅来自观测期间的 Binance 和 Bybit 实时数据流（Binance 每秒最多发布一条样本）。"
+  },
+  "Funding across venues (8-hour basis)": {
+    "es": "Financiación entre mercados (base de 8 horas)",
+    "zh-CN": "各交易所资金费率（8 小时基准）"
+  },
+  "Each venue's current funding normalized to 8 hours. Max spread = (highest − lowest) × 3 × 365, from the venues that list the coin. \"not listed\" means the venue has no USDT perpetual for the coin; \"failed\" means its request failed. Refreshed every 3 minutes while this panel is open.": {
+    "es": "La financiación actual de cada mercado normalizada a 8 horas. Diferencial máximo = (más alta − más baja) × 3 × 365, entre los mercados que listan la moneda. \"no listado\" significa que el mercado no tiene un perpetuo USDT para la moneda; \"falló\" significa que su solicitud falló. Se actualiza cada 3 minutos mientras este panel está abierto.",
+    "zh-CN": "各交易所当前资金费率，折算为 8 小时。最大价差 = (最高 − 最低) × 3 × 365，仅取上架该币种的交易所。“未上架”表示该交易所没有该币种的 USDT 永续合约；“失败”表示其请求失败。此面板打开期间每 3 分钟刷新一次。"
+  },
+  "Charts": {
+    "es": "Gráficos",
+    "zh-CN": "图表"
+  },
+  "Liquidation feed": {
+    "es": "Flujo de liquidaciones",
+    "zh-CN": "强平动态"
+  },
+  "Minimum notional (USD)": {
+    "es": "Nocional mínimo (USD)",
+    "zh-CN": "最小名义价值（USD）"
+  },
+  "OKX, Bitget and Hyperliquid liquidations are not streamed by Trading Hub; their columns say \"not streamed\".": {
+    "es": "Trading Hub no recibe flujos de liquidaciones de OKX, Bitget ni Hyperliquid; sus columnas dicen \"sin flujo\".",
+    "zh-CN": "Trading Hub 不接收 OKX、Bitget 和 Hyperliquid 的强平数据流；其对应列显示“未接入数据流”。"
+  },
+  "Loading {0} from Binance, Bybit, OKX, Bitget and Hyperliquid…": {
+    "es": "Cargando {0} desde Binance, Bybit, OKX, Bitget y Hyperliquid…",
+    "zh-CN": "正在从 Binance、Bybit、OKX、Bitget 和 Hyperliquid 加载 {0}…"
+  },
+  "Updated {0}": {
+    "es": "Actualizado {0}",
+    "zh-CN": "更新于 {0}"
+  },
+  "Updated {0}; failed: {1}": {
+    "es": "Actualizado {0}; fallaron: {1}",
+    "zh-CN": "更新于 {0}；失败：{1}"
+  },
+  "{0} · open interest (current only)": {
+    "es": "{0} · interés abierto (solo actual)",
+    "zh-CN": "{0} · 持仓量（仅当前值）"
+  },
+  "open interest (current only)": {
+    "es": "interés abierto (solo actual)",
+    "zh-CN": "持仓量（仅当前值）"
+  },
+  "{0} · price": {
+    "es": "{0} · precio",
+    "zh-CN": "{0} · 价格"
+  },
+  "{0} · CVD (measured aggressor side)": {
+    "es": "{0} · CVD (lado agresor medido)",
+    "zh-CN": "{0} · CVD（实测主动方向）"
+  },
+  "CVD (measured aggressor side)": {
+    "es": "CVD (lado agresor medido)",
+    "zh-CN": "CVD（实测主动方向）"
+  },
+  "Price and CVD: no trades of {0} are recorded in this range; the panes stay hatched.": {
+    "es": "Precio y CVD: no hay operaciones de {0} registradas en este rango; los paneles quedan rayados.",
+    "zh-CN": "价格与 CVD：此范围内没有记录到 {0} 的成交；面板保持斜线填充。"
+  },
+  "Price and CVD from {0} trades recorded since {1}; hatched steps had no trades. CVD counts measured aggressor sides only and starts at zero at the range start.": {
+    "es": "Precio y CVD a partir de las operaciones de {0} registradas desde {1}; los tramos rayados no tuvieron operaciones. El CVD cuenta solo lados agresores medidos y empieza en cero al inicio del rango.",
+    "zh-CN": "价格与 CVD 来自自 {1} 起记录的 {0} 成交；斜线区间没有成交。CVD 仅统计实测的主动方向，并在范围起点从零开始。"
+  },
+  "{0}% of the volume had an inferred or unknown side and is left out; amber marks show the affected steps.": {
+    "es": "El {0}% del volumen tuvo un lado inferido o desconocido y queda excluido; las marcas ámbar muestran los tramos afectados.",
+    "zh-CN": "{0}% 的成交量方向为推断或未知，已被排除；琥珀色标记显示受影响的区间。"
+  },
+  "Amber marks show steps built from compact or partial history.": {
+    "es": "Las marcas ámbar muestran tramos construidos con historial compacto o parcial.",
+    "zh-CN": "琥珀色标记显示由压缩或不完整历史构成的区间。"
+  },
+  "not published": {
+    "es": "no publicado",
+    "zh-CN": "未发布"
+  },
+  "not streamed": {
+    "es": "sin flujo",
+    "zh-CN": "未接入数据流"
+  },
+  "not listed": {
+    "es": "no listado",
+    "zh-CN": "未上架"
+  },
+  "failed": {
+    "es": "falló",
+    "zh-CN": "失败"
+  },
+  "{0} (partial)": {
+    "es": "{0} (parcial)",
+    "zh-CN": "{0}（部分）"
+  },
+  "Coin": {
+    "es": "Moneda",
+    "zh-CN": "币种"
+  },
+  "Max spread (annualized)": {
+    "es": "Diferencial máx. (anualizado)",
+    "zh-CN": "最大价差（年化）"
+  },
+  "The funding board loads while this panel is open for a USD-quoted crypto coin.": {
+    "es": "El tablero de financiación se carga mientras este panel está abierto para una moneda cripto cotizada en USD.",
+    "zh-CN": "此面板针对以 USD 计价的加密币种打开时，资金费率看板才会加载。"
+  },
+  "{0} per settlement every {1} h": {
+    "es": "{0} por cobro cada {1} h",
+    "zh-CN": "每 {1} 小时结算一次，每次 {0}"
+  },
+  "{0}: stream observed": {
+    "es": "{0}: flujo observado",
+    "zh-CN": "{0}：数据流已观测"
+  },
+  "{0}: not connected": {
+    "es": "{0}: sin conexión",
+    "zh-CN": "{0}：未连接"
+  },
+  "No liquidation stream has been observed for this coin yet.": {
+    "es": "Todavía no se observó ningún flujo de liquidaciones para esta moneda.",
+    "zh-CN": "尚未观测到该币种的强平数据流。"
+  },
+  "No liquidations at or above this size were observed in the last 24 hours.": {
+    "es": "No se observaron liquidaciones de este tamaño o mayores en las últimas 24 horas.",
+    "zh-CN": "过去 24 小时内未观测到达到或超过此规模的强平。"
+  },
+  "Long liquidated": {
+    "es": "Largo liquidado",
+    "zh-CN": "多头强平"
+  },
+  "Short liquidated": {
+    "es": "Corto liquidado",
+    "zh-CN": "空头强平"
+  },
+  "Long/short": {
+    "es": "Largo/corto",
+    "zh-CN": "多空比"
+  },
+  "OI 1h": {
+    "es": "OI 1h",
+    "zh-CN": "持仓量 1h"
+  },
+  "OI 24h": {
+    "es": "OI 24h",
+    "zh-CN": "持仓量 24h"
+  },
+  "{0} funding failed: {1}": {
+    "es": "Falló la financiación de {0}: {1}",
+    "zh-CN": "{0} 资金费率加载失败：{1}"
+  },
+  "{0} open interest failed: {1}": {
+    "es": "Falló el interés abierto de {0}: {1}",
+    "zh-CN": "{0} 持仓量加载失败：{1}"
+  },
+  "{0} premium failed: {1}": {
+    "es": "Falló la prima de {0}: {1}",
+    "zh-CN": "{0} 溢价加载失败：{1}"
+  },
+  "{0} long/short ratio failed: {1}": {
+    "es": "Falló la relación largo/corto de {0}: {1}",
+    "zh-CN": "{0} 多空比加载失败：{1}"
+  },
+  "Implied volatility index": {
+    "es": "Índice de volatilidad implícita",
+    "zh-CN": "隐含波动率指数"
+  },
+  "{0} · {1} · {2} contracts · snapshot at {3}": {
+    "es": "{0} · {1} · {2} contratos · instantánea a las {3}",
+    "zh-CN": "{0} · {1} · {2} 份合约 · 快照时间 {3}"
+  },
+  "{0} · {1} · {2} contracts · snapshot at {3} · no contracts in the selected expiries": {
+    "es": "{0} · {1} · {2} contratos · instantánea a las {3} · no hay contratos en los vencimientos elegidos",
+    "zh-CN": "{0} · {1} · {2} 份合约 · 快照时间 {3} · 所选到期日内没有合约"
+  },
+  "Volatility index (DVOL): not provided by this source ({0}).": {
+    "es": "Índice de volatilidad (DVOL): esta fuente no lo provee ({0}).",
+    "zh-CN": "波动率指数（DVOL）：该数据源不提供（{0}）。"
+  },
+  "Loading the {0} daily history…": {
+    "es": "Cargando el historial diario de {0}…",
+    "zh-CN": "正在加载 {0} 的每日历史…"
+  },
+  "{0}: the source's published 30-day implied volatility index; daily UTC closes of the last 30 completed days.": {
+    "es": "{0}: el índice de volatilidad implícita a 30 días que publica la fuente; cierres diarios UTC de los últimos 30 días completos.",
+    "zh-CN": "{0}：数据源发布的 30 天隐含波动率指数；最近 30 个完整交易日的 UTC 日收盘值。"
+  },
+  "{0}: the source's published 30-day implied volatility index; daily UTC closes of the last 30 completed days. {1} days without a published close are hatched, not zero.": {
+    "es": "{0}: el índice de volatilidad implícita a 30 días que publica la fuente; cierres diarios UTC de los últimos 30 días completos. {1} días sin cierre publicado aparecen rayados, no como cero.",
+    "zh-CN": "{0}：数据源发布的 30 天隐含波动率指数；最近 30 个完整交易日的 UTC 日收盘值。{1} 天没有发布收盘值，以斜线标出，而非记为零。"
+  },
+  "{0} · {1} · bought {2} × {3} call {4} · premium {5}": {
+    "es": "{0} · {1} · compró {2} × call {3} {4} · prima {5}",
+    "zh-CN": "{0} · {1} · 买入 {2} × {3} 看涨 {4} · 权利金 {5}"
+  },
+  "{0} · {1} · bought {2} × {3} put {4} · premium {5}": {
+    "es": "{0} · {1} · compró {2} × put {3} {4} · prima {5}",
+    "zh-CN": "{0} · {1} · 买入 {2} × {3} 看跌 {4} · 权利金 {5}"
+  },
+  "{0} · {1} · sold {2} × {3} call {4} · premium {5}": {
+    "es": "{0} · {1} · vendió {2} × call {3} {4} · prima {5}",
+    "zh-CN": "{0} · {1} · 卖出 {2} × {3} 看涨 {4} · 权利金 {5}"
+  },
+  "{0} · {1} · sold {2} × {3} put {4} · premium {5}": {
+    "es": "{0} · {1} · vendió {2} × put {3} {4} · prima {5}",
+    "zh-CN": "{0} · {1} · 卖出 {2} × {3} 看跌 {4} · 权利金 {5}"
+  },
+  "{0} · {1} · traded {2} × {3} call {4} · premium {5}": {
+    "es": "{0} · {1} · se operaron {2} × call {3} {4} · prima {5}",
+    "zh-CN": "{0} · {1} · 成交 {2} × {3} 看涨 {4} · 权利金 {5}"
+  },
+  "{0} · {1} · traded {2} × {3} put {4} · premium {5}": {
+    "es": "{0} · {1} · se operaron {2} × put {3} {4} · prima {5}",
+    "zh-CN": "{0} · {1} · 成交 {2} × {3} 看跌 {4} · 权利金 {5}"
+  },
+  "Waiting for the volatility index": {
+    "es": "Esperando el índice de volatilidad",
+    "zh-CN": "正在等待波动率指数"
+  },
+  "{0} · daily close, last {1} completed UTC days": {
+    "es": "{0} · cierre diario, últimos {1} días UTC completos",
+    "zh-CN": "{0} · 日收盘，最近 {1} 个完整 UTC 日"
+  },
+  "No published closes in this window": {
+    "es": "No hay cierres publicados en este período",
+    "zh-CN": "该时间窗内没有已发布的收盘值"
+  },
+  "Today so far: {0}": {
+    "es": "Hoy hasta ahora: {0}",
+    "zh-CN": "今日至今：{0}"
+  },
+  "Structure summary": {
+    "es": "Resumen de estructura",
+    "zh-CN": "结构摘要"
+  },
+  "Read-only: the chart's own structure, key-level, session-map and VWAP studies run on closed candles of the selected instrument. Each item shows the bar it formed on and the close that confirmed it.": {
+    "es": "Solo lectura: los mismos estudios del gráfico (estructura, niveles clave, mapa de sesiones y VWAP) calculados sobre velas cerradas del instrumento elegido. Cada elemento muestra la barra donde se formó y el cierre que lo confirmó.",
+    "zh-CN": "只读：在所选品种的已收盘 K 线上运行图表自带的结构、关键价位、交易时段图和 VWAP 研究。每一项都显示其形成的 K 线以及确认它的收盘。"
+  },
+  "Timeframe": {
+    "es": "Temporalidad",
+    "zh-CN": "周期"
+  },
+  "OHLC heuristics from the connection's candle history (no footprint), not observed orders. Nothing is known before its confirming close; the forming candle is never used. No order is placed.": {
+    "es": "Heurísticas OHLC sobre el historial de velas de la conexión (sin footprint), no órdenes observadas. Nada se conoce antes de su cierre de confirmación; nunca se usa la vela en formación. No se envía ninguna orden.",
+    "zh-CN": "基于连接的 K 线历史（无足迹数据）的 OHLC 启发式，并非观测到的订单。在确认收盘之前一律视为未知；从不使用正在形成的 K 线。不会下任何订单。"
+  },
+  "This connection has no candle history for the structure summary.": {
+    "es": "Esta conexión no tiene historial de velas para el resumen de estructura.",
+    "zh-CN": "该连接没有可用于结构摘要的 K 线历史。"
+  },
+  "Loading candles…": {
+    "es": "Cargando velas…",
+    "zh-CN": "正在加载 K 线…"
+  },
+  "Candles: {0}": {
+    "es": "Velas: {0}",
+    "zh-CN": "K 线：{0}"
+  },
+  "No closed {0} candles yet.": {
+    "es": "Todavía no hay velas de {0} cerradas.",
+    "zh-CN": "尚无已收盘的 {0} K 线。"
+  },
+  "{0} closed {1} candles · last close {2} · reference price {3}": {
+    "es": "{0} velas de {1} cerradas · último cierre {2} · precio de referencia {3}",
+    "zh-CN": "{0} 根已收盘的 {1} K 线 · 最近收盘 {2} · 参考价 {3}"
+  },
+  "Trend (closed bars)": {
+    "es": "Tendencia (barras cerradas)",
+    "zh-CN": "趋势（已收盘 K 线）"
+  },
+  "No confirmed break yet": {
+    "es": "Todavía sin ruptura confirmada",
+    "zh-CN": "尚无已确认的突破"
+  },
+  "Last BOS / CHoCH": {
+    "es": "Último BOS / CHoCH",
+    "zh-CN": "最近的 BOS / CHoCH"
+  },
+  "None confirmed": {
+    "es": "Ninguno confirmado",
+    "zh-CN": "无已确认项"
+  },
+  "Last CISD": {
+    "es": "Último CISD",
+    "zh-CN": "最近的 CISD"
+  },
+  "Bullish BOS at {0} ({1})": {
+    "es": "BOS alcista en {0} ({1})",
+    "zh-CN": "看涨 BOS 位于 {0}（{1}）"
+  },
+  "Bearish BOS at {0} ({1})": {
+    "es": "BOS bajista en {0} ({1})",
+    "zh-CN": "看跌 BOS 位于 {0}（{1}）"
+  },
+  "Bullish CHoCH at {0} ({1})": {
+    "es": "CHoCH alcista en {0} ({1})",
+    "zh-CN": "看涨 CHoCH 位于 {0}（{1}）"
+  },
+  "Bearish CHoCH at {0} ({1})": {
+    "es": "CHoCH bajista en {0} ({1})",
+    "zh-CN": "看跌 CHoCH 位于 {0}（{1}）"
+  },
+  "Low swept at {0} ({1})": {
+    "es": "Mínimo barrido en {0} ({1})",
+    "zh-CN": "低点在 {0} 被扫（{1}）"
+  },
+  "High swept at {0} ({1})": {
+    "es": "Máximo barrido en {0} ({1})",
+    "zh-CN": "高点在 {0} 被扫（{1}）"
+  },
+  "Bullish CISD at {0} ({1})": {
+    "es": "CISD alcista en {0} ({1})",
+    "zh-CN": "看涨 CISD 位于 {0}（{1}）"
+  },
+  "Bearish CISD at {0} ({1})": {
+    "es": "CISD bajista en {0} ({1})",
+    "zh-CN": "看跌 CISD 位于 {0}（{1}）"
+  },
+  "Bullish breaker {0} ({1})": {
+    "es": "Breaker alcista {0} ({1})",
+    "zh-CN": "看涨 breaker {0}（{1}）"
+  },
+  "Bearish breaker {0} ({1})": {
+    "es": "Breaker bajista {0} ({1})",
+    "zh-CN": "看跌 breaker {0}（{1}）"
+  },
+  "Equal lows {0} ({1})": {
+    "es": "Mínimos iguales {0} ({1})",
+    "zh-CN": "等低点 {0}（{1}）"
+  },
+  "Equal highs {0} ({1})": {
+    "es": "Máximos iguales {0} ({1})",
+    "zh-CN": "等高点 {0}（{1}）"
+  },
+  "Bullish {0} ({1})": {
+    "es": "Alcista {0} ({1})",
+    "zh-CN": "看涨 {0}（{1}）"
+  },
+  "Bearish {0} ({1})": {
+    "es": "Bajista {0} ({1})",
+    "zh-CN": "看跌 {0}（{1}）"
+  },
+  "formed {0} · confirmed at close {1}": {
+    "es": "formado {0} · confirmado al cierre {1}",
+    "zh-CN": "形成于 {0} · 于 {1} 收盘确认"
+  },
+  "PO3 ({0} candles)": {
+    "es": "PO3 (velas de {0})",
+    "zh-CN": "PO3（{0} K 线）"
+  },
+  "None live": {
+    "es": "Ninguno vigente",
+    "zh-CN": "无有效项"
+  },
+  "Bullish, range {0}": {
+    "es": "Alcista, rango {0}",
+    "zh-CN": "看涨，区间 {0}"
+  },
+  "Bullish (two-sided), range {0}": {
+    "es": "Alcista (de dos lados), rango {0}",
+    "zh-CN": "看涨（双向），区间 {0}"
+  },
+  "Bearish, range {0}": {
+    "es": "Bajista, rango {0}",
+    "zh-CN": "看跌，区间 {0}"
+  },
+  "Bearish (two-sided), range {0}": {
+    "es": "Bajista (de dos lados), rango {0}",
+    "zh-CN": "看跌（双向），区间 {0}"
+  },
+  "CISD {0} · confirmed at close {1}": {
+    "es": "CISD {0} · confirmado al cierre {1}",
+    "zh-CN": "CISD {0} · 于 {1} 收盘确认"
+  },
+  "Zones nearest the price": {
+    "es": "Zonas más cercanas al precio",
+    "zh-CN": "离价格最近的区域"
+  },
+  "Nearest FVG above": {
+    "es": "FVG más cercano arriba",
+    "zh-CN": "上方最近的 FVG"
+  },
+  "Nearest FVG below": {
+    "es": "FVG más cercano abajo",
+    "zh-CN": "下方最近的 FVG"
+  },
+  "None unfilled": {
+    "es": "Ninguno sin llenar",
+    "zh-CN": "无未回补项"
+  },
+  "Nearest order block above": {
+    "es": "Order block más cercano arriba",
+    "zh-CN": "上方最近的订单块"
+  },
+  "Nearest order block below": {
+    "es": "Order block más cercano abajo",
+    "zh-CN": "下方最近的订单块"
+  },
+  "Nearest liquidity above": {
+    "es": "Liquidez más cercana arriba",
+    "zh-CN": "上方最近的流动性"
+  },
+  "Nearest liquidity below": {
+    "es": "Liquidez más cercana abajo",
+    "zh-CN": "下方最近的流动性"
+  },
+  "Calendar levels (trading day and week)": {
+    "es": "Niveles de calendario (día y semana de trading)",
+    "zh-CN": "日历价位（交易日与周）"
+  },
+  "Previous day high": {
+    "es": "Máximo del día anterior",
+    "zh-CN": "前一日高点"
+  },
+  "Previous day low": {
+    "es": "Mínimo del día anterior",
+    "zh-CN": "前一日低点"
+  },
+  "Day open": {
+    "es": "Apertura del día",
+    "zh-CN": "当日开盘"
+  },
+  "Previous week high": {
+    "es": "Máximo de la semana anterior",
+    "zh-CN": "前一周高点"
+  },
+  "Previous week low": {
+    "es": "Mínimo de la semana anterior",
+    "zh-CN": "前一周低点"
+  },
+  "Week open": {
+    "es": "Apertura de la semana",
+    "zh-CN": "本周开盘"
+  },
+  "Session VWAP (estimate from candles)": {
+    "es": "VWAP de la sesión (estimado a partir de velas)",
+    "zh-CN": "时段 VWAP（基于 K 线的估算）"
+  },
+  "as of close {0}": {
+    "es": "al cierre {0}",
+    "zh-CN": "截至 {0} 收盘"
+  },
+  "confirmed at close {0}": {
+    "es": "confirmado al cierre {0}",
+    "zh-CN": "于 {0} 收盘确认"
+  },
+  "A dash is a level the study does not publish yet: its period is partial or not fully loaded.": {
+    "es": "Un guion es un nivel que el estudio todavía no publica: su período es parcial o no está cargado por completo.",
+    "zh-CN": "短横线表示该研究尚未发布此价位：其周期不完整或未完全加载。"
+  },
+  "Sessions (closed bars)": {
+    "es": "Sesiones (barras cerradas)",
+    "zh-CN": "交易时段（已收盘 K 线）"
+  },
+  "No session has closed bars in the loaded candles.": {
+    "es": "Ninguna sesión tiene barras cerradas en las velas cargadas.",
+    "zh-CN": "已加载的 K 线中没有任何时段包含已收盘 K 线。"
+  },
+  "Asia session": {
+    "es": "Sesión de Asia",
+    "zh-CN": "亚洲时段"
+  },
+  "London session": {
+    "es": "Sesión de Londres",
+    "zh-CN": "伦敦时段"
+  },
+  "New York session": {
+    "es": "Sesión de Nueva York",
+    "zh-CN": "纽约时段"
+  },
+  "New York morning session": {
+    "es": "Sesión de la mañana de Nueva York",
+    "zh-CN": "纽约上午时段"
+  },
+  "New York afternoon session": {
+    "es": "Sesión de la tarde de Nueva York",
+    "zh-CN": "纽约下午时段"
+  },
+  "{0} to {1} · confirmed at close {2}": {
+    "es": "{0} a {1} · confirmado al cierre {2}",
+    "zh-CN": "{0} 至 {1} · 于 {2} 收盘确认"
+  },
+  "{0} · forming": {
+    "es": "{0} · en formación",
+    "zh-CN": "{0} · 形成中"
+  },
+  "{0} to {1} so far, closed bars only": {
+    "es": "{0} a {1} hasta ahora, solo barras cerradas",
+    "zh-CN": "{0} 至 {1}（截至目前，仅已收盘 K 线）"
+  },
+  "{0} · live, {1} left": {
+    "es": "{0} · en curso, faltan {1}",
+    "zh-CN": "{0} · 进行中，剩余 {1}"
+  },
+  "{0} · starts in {1}": {
+    "es": "{0} · empieza en {1}",
+    "zh-CN": "{0} · {1} 后开始"
+  },
+  "flip": {
+    "es": "giro",
+    "zh-CN": "翻转点"
+  },
+  "Reward/risk": {
+    "es": "Beneficio/riesgo",
+    "zh-CN": "盈亏比"
+  },
+  "Liquidation stream observed: {0}": {
+    "es": "Flujo de liquidaciones observado: {0}",
+    "zh-CN": "已观测强平数据流：{0}"
+  },
+  "Liquidation stream not connected: {0}": {
+    "es": "Flujo de liquidaciones sin conexión: {0}",
+    "zh-CN": "强平数据流未连接：{0}"
+  },
+  "{0} lists no perpetual for {1}.": {
+    "es": "{0} no lista ningún perpetuo para {1}.",
+    "zh-CN": "{0} 未上线 {1} 的永续合约。"
+  },
+  "{0} lists {1} as {2}; its open interest and prices are converted to {3}.": {
+    "es": "{0} lista {1} como {2}; su interés abierto y sus precios se convierten a {3}.",
+    "zh-CN": "{0} 将 {1} 列为 {2}；其持仓量和价格已换算为 {3}。"
   }
 }

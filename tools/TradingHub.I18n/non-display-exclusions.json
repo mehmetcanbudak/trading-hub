@@ -8,7 +8,7 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:657 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:707 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:955 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749 TradingHub.Indicators.Native/DerivativesPane.cs:32",
+    "locations": "TradingHub.App/Services/AppServices.cs:658 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:707 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:955 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749 TradingHub.Indicators.Native/DerivativesPane.cs:32",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Edited": {
@@ -16,11 +16,11 @@
     "reason": "Suffix of the default C# class name for an editable indicator copy. Generated identifiers stay English in every UI language."
   },
   "ExecutionBenchmarks.{0}.VsArrival": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:796",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:822",
     "reason": "Stable persisted DataSeries id of the execution-benchmark arrival series (strategy/workspace identity), not a display label."
   },
   "ExecutionBenchmarks.{0}.VsVwap": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:795",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:821",
     "reason": "Stable persisted DataSeries id of the execution-benchmark window-VWAP series (strategy/workspace identity), not a display label."
   },
   "Fee": {
@@ -48,15 +48,15 @@
     "reason": "Complete concatenated model-input template in BuildPrompt. Assistant response language is selected separately from canonical input instructions."
   },
   "ProfileLevels.Poc.{0}@{1}": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:405",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:424",
     "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
   },
   "ProfileLevels.Vah.{0}@{1}": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:406",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:425",
     "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
   },
   "ProfileLevels.Val.{0}@{1}": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:407",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:426",
     "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
   },
   "State": {
@@ -96,7 +96,7 @@
     "reason": "Signed Binance USD-M per-order trade-history window query (symbol and orderId prefix plus a time range) used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
   },
   "unresolved endpoint": {
-    "locations": "TradingHub.App/Services/AppServices.cs:705",
+    "locations": "TradingHub.App/Services/AppServices.cs:706",
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
   },
   "{0}Edited": {
