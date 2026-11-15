@@ -326,8 +326,9 @@ public abstract class ClosedBarStudy : Indicator
             int alpha = b.Live ? b.FillAlpha : b.FillAlpha / 2;
             if (alpha > 0) ctx.FillRectangle(StudyPalette.A(b.Color, alpha), rect);
             ctx.DrawRectangle(Pen(StudyPalette.A(b.Color, BoxBorderAlpha(b)), 1, b.Style), rect);
-            if (string.IsNullOrEmpty(b.Text)) continue;
-            string t = UiText.Tr(b.Text); var size = ctx.MeasureString(t, font);
+            string? t = BoxText(b);
+            if (string.IsNullOrEmpty(t)) continue;
+            var size = ctx.MeasureString(t, font);
             if (size.Height <= rect.Height + 4) ctx.DrawString(t, font, b.Color, Math.Max(rect.Left + 3, Math.Min(rect.Right - size.Width - 3, right - size.Width - 4)), rect.Top + (rect.Height - size.Height) / 2);
         }
         foreach (var l in _scene.Lines)
@@ -336,10 +337,12 @@ public abstract class ClosedBarStudy : Indicator
             if (!Visible(from, l.To) || l.To >= 0 && l.To < from || !IsShown(l)) continue;
             bool flat = l.Price == l.EndPrice;
             int x0 = X(from), x1 = l.To < 0 ? (flat ? right : X(lastBar, false)) : X(l.To, false), y0 = Y(l.Price), y1 = Y(l.EndPrice);
-            ctx.DrawLine(Pen(l.Color, l.Width, l.Style), x0, y0, Math.Max(x0 + 1, x1), y1);
-            if (string.IsNullOrEmpty(l.Label)) continue;
-            string t = UiText.Tr(l.Label) + (flat ? " " + Price(l.Price) : ""); var size = ctx.MeasureString(t, font);
-            ctx.DrawString(t, font, l.Color, Math.Min(x1 + 3, right - size.Width - 2), y1 - size.Height - 1);
+            ctx.DrawLine(Pen(l.Color, LineWidth(l), l.Style), x0, y0, Math.Max(x0 + 1, x1), y1);
+            string? t = LineLabel(l);
+            if (string.IsNullOrEmpty(t)) continue;
+            var size = ctx.MeasureString(t, font);
+            if (LabelAtRight(l)) ctx.DrawString(t, font, l.Color, Math.Min(x1 + 3, right - size.Width - 2), y1 - size.Height - 1);
+            else ctx.DrawString(t, font, l.Color, Math.Max(region.Left + 2, x0 + 2), y0 - size.Height - 1);
         }
         foreach (var p in _scene.Paths)
         {
@@ -393,6 +396,19 @@ public abstract class ClosedBarStudy : Indicator
 
     /// <summary>Display-only border opacity of a box (0–255).</summary>
     protected virtual int BoxBorderAlpha(StudyBox box) => box.Live ? 150 : 70;
+
+    /// <summary>Display-only box caption (translated); default: the box text.</summary>
+    public virtual string? BoxText(StudyBox box) => box.Text is { Length: > 0 } text ? UiText.Tr(text) : null;
+
+    /// <summary>Display-only line caption (translated); default: the label plus the price of a flat level.</summary>
+    public virtual string? LineLabel(StudyLine line) =>
+        string.IsNullOrEmpty(line.Label) ? null : UiText.Tr(line.Label) + (line.Price == line.EndPrice ? " " + Price(line.Price) : "");
+
+    /// <summary>Display-only caption side: at the line's right end (default) or at its start.</summary>
+    public virtual bool LabelAtRight(StudyLine line) => true;
+
+    /// <summary>Display-only stroke width of a line.</summary>
+    public virtual int LineWidth(StudyLine line) => line.Width;
 
     internal static void DrawMark(RenderContext ctx, StudyMarkKind kind, int x, int y, int r, Color c)
     {
