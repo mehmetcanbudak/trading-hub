@@ -249,11 +249,23 @@ public sealed class BinanceAccountClient : IDisposable
         return null;
     }
 
+    /// <summary>Largest trade page both venues return; a full page cannot prove an order's executions are complete.</summary>
+    internal const int TradePageLimit = 1000;
+
     /// <summary>Inclusive native-ID pagination, without incompatible time filters; both venues cap a page at 1000.</summary>
-    internal async Task<IReadOnlyList<BinanceTrade>> GetTradesAsync(string symbol, long fromId, CancellationToken ct)
+    internal Task<IReadOnlyList<BinanceTrade>> GetTradesAsync(string symbol, long fromId, CancellationToken ct) =>
+        ReadTradesAsync(symbol, $"symbol={Uri.EscapeDataString(symbol)}&fromId={fromId.ToString(CultureInfo.InvariantCulture)}&limit=1000", ct);
+
+    /// <summary>
+    /// One order's executions (symbol plus orderId, documented for Spot myTrades and USD-M userTrades). USD-M returns
+    /// only the last seven days without a time range, so callers must compare the sum with the order's executed quantity.
+    /// </summary>
+    internal Task<IReadOnlyList<BinanceTrade>> GetOrderTradesAsync(string symbol, long orderId, CancellationToken ct) =>
+        ReadTradesAsync(symbol, $"symbol={Uri.EscapeDataString(symbol)}&orderId={orderId.ToString(CultureInfo.InvariantCulture)}&limit=1000", ct);
+
+    private async Task<IReadOnlyList<BinanceTrade>> ReadTradesAsync(string symbol, string query, CancellationToken ct)
     {
-        using var doc = await SignedAsync(HttpMethod.Get, P("/fapi/v1/userTrades", "/api/v3/myTrades"),
-            $"symbol={Uri.EscapeDataString(symbol)}&fromId={fromId.ToString(CultureInfo.InvariantCulture)}&limit=1000", ct).ConfigureAwait(false);
+        using var doc = await SignedAsync(HttpMethod.Get, P("/fapi/v1/userTrades", "/api/v3/myTrades"), query, ct).ConfigureAwait(false);
         var result = new List<BinanceTrade>();
         foreach (var item in doc.RootElement.EnumerateArray())
         {
@@ -489,7 +501,7 @@ public sealed class BinanceAccountClient : IDisposable
 /// remain unavailable (0); strategy cost accounting continues to come from its own fills.
 /// </para>
 /// </remarks>
-public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, IDisposable
+public sealed partial class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, IDisposable
 {
     /// <summary>Starts the <see cref="Order.ExchangeOrderId"/> of a conditional order: an algo id is not an order id.</summary>
     private const string AlgoPrefix = "algo:";
@@ -952,6 +964,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
                 trade.Commission.HasValue && trade.CommissionAsset != null)
                 { ContextId = descriptor.Id, NativeOrder = native };
             var owner = OrderContext.Resolve(report);
+            // An adopted order's exact pre-adoption executions stay the website's; they are excluded, not unresolved.
+            if (owner == null && OrderContext.IsAdoptedExecutionPrefix(report)) continue;
             if (owner == null && (recoveryLookups ??= new HashSet<long>()).Add(trade.OrderId))
             {
                 // Trade rows have no client ID. Query the exact order, including terminal history, before
@@ -2186,7 +2200,8 @@ public sealed class BinanceBroker : ITradingAccount, ITrackedOrderReplacement, I
     {
         lock (_gate)
             return _byOrder.TryGetValue(order, out var t) &&
-                (!t.Accepted || t.Busy > 0 || t.SubmissionUnknown || t.BaselinePending || t.ReplaceFailure != null || t.ReplacementPending || t.QueuedReprice != null);
+                (!t.Accepted || t.Busy > 0 || t.SubmissionUnknown || t.BaselinePending || t.ReplaceFailure != null || t.ReplacementPending ||
+                    t.QueuedReprice != null || _adopting.Contains(t));
     }
 
     private static void ConfirmReplacement(Tracked t, decimal total, decimal price)

@@ -70,6 +70,20 @@ public interface ITrackedOrderReplacement
     bool IsReplacementPending(Order order);
 }
 
+/// <summary>
+/// Optional adoption of an unowned order that has already executed in part. Its earlier executions belong to whoever
+/// placed it, so the adapter reads them from the venue before adopting it: the exact executed quantity becomes the
+/// adopted baseline and its exact executions the excluded prefix, and only later fills are owned. When the venue cannot
+/// establish that baseline the amendment is refused and the order stays unowned and unchanged.
+/// </summary>
+public interface IAuthoritativeAdoption
+{
+    /// <summary>Takes over an amendment of an unowned, partly executed order (asynchronously; the outcome is published
+    /// through <see cref="ITradingAccount.Changed"/> and LastError). False when the order is not such an order.
+    /// <paramref name="quantity"/> null amends only the price.</summary>
+    bool TryAdoptAndReplace(Order order, decimal price, decimal? quantity);
+}
+
 /// <summary>Optional durable, account-scoped client identity, available before a placement acknowledgment and unchanged after it.
 /// Null means the adapter has no durable client identity; callers retain the exchange ID and process-local fallbacks.</summary>
 public interface IStableOrderIdentity

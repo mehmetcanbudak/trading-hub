@@ -21,6 +21,10 @@ public sealed record KlineKeeperStatus(bool IsRunning, string Message, DateTime?
     IReadOnlyDictionary<string, string> Instruments)
 {
     public IReadOnlyList<KlineMaintenanceFailure> Failures { get; init; } = Array.Empty<KlineMaintenanceFailure>();
+    /// <summary>The latest run request (Update now or a background wake); increases by one per request.</summary>
+    public long RunRequest { get; init; }
+    /// <summary>Every request up to this one was served by a cycle that started after it and completed.</summary>
+    public long CompletedRunRequest { get; init; }
 }
 
 /// <summary>
@@ -50,6 +54,7 @@ public sealed class KlineKeeper : IAsyncDisposable
     private Task? _loop;
     private Task? _disposeTask;
     private bool _disposed, _running;
+    private long _requested, _completedThrough, _cancelledThrough;
     private int _instrumentCursor;
     private string _message = "Candle maintenance is disabled.";
     private DateTime? _lastRun;
@@ -72,7 +77,7 @@ public sealed class KlineKeeper : IAsyncDisposable
         {
             lock (_sync) return new(_running, _message, _lastRun, new Dictionary<string, string>(_itemStatus))
             {
-                Failures = _failures.Values.ToArray(),
+                Failures = _failures.Values.ToArray(), RunRequest = _requested, CompletedRunRequest = _completedThrough,
             };
         }
     }
@@ -92,6 +97,7 @@ public sealed class KlineKeeper : IAsyncDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             _settings = Normalize(settings);
+            if (!_settings.Enabled) _cancelledThrough = _requested;
             _active?.Cancel();
             // Persist on the configuring caller before the first await, with no late save after disposal.
             try { _save?.Invoke(Normalize(_settings)); }
@@ -140,17 +146,26 @@ public sealed class KlineKeeper : IAsyncDisposable
         Notify();
     }
 
+    /// <summary>
+    /// Serves this request with a whole cycle that starts after it. While another cycle runs, the request waits for it
+    /// and then runs (or is satisfied by any cycle that started after it), so Update now is never silently dropped.
+    /// Cycles never overlap. Cancel and drain and disabling also drop requests made before them.
+    /// </summary>
     public async Task RunNowAsync(CancellationToken ct = default)
     {
-        if (!await _run.WaitAsync(0, ct).ConfigureAwait(false)) return;
+        long ticket;
+        lock (_sync) ticket = ++_requested;
+        await _run.WaitAsync(ct).ConfigureAwait(false);
         CancellationTokenSource? active = null;
+        long served;
         try
         {
             KlineMaintenanceSettings settings;
             lock (_sync)
             {
-                if (_disposed || !_settings.Enabled) return;
+                if (_disposed || !_settings.Enabled || ticket <= _completedThrough || ticket <= _cancelledThrough) return;
                 settings = Normalize(_settings);
+                served = _requested;
                 active = _active = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
                 active.CancelAfter(TimeSpan.FromMinutes(5));
                 _running = true;
@@ -206,6 +221,7 @@ public sealed class KlineKeeper : IAsyncDisposable
             {
                 _lastRun = now;
                 _message = settings.Instruments.Count == 0 ? "No opened or selected instruments are tracked." : "Candle maintenance cycle completed; older history catches up in bounded monthly batches.";
+                _completedThrough = Math.Max(_completedThrough, served);
             }
         }
         catch (OperationCanceledException) when (active?.IsCancellationRequested == true || ct.IsCancellationRequested)
@@ -224,7 +240,11 @@ public sealed class KlineKeeper : IAsyncDisposable
     }
     public async Task CancelAsync()
     {
-        lock (_sync) _active?.Cancel();
+        lock (_sync)
+        {
+            _cancelledThrough = _requested;
+            _active?.Cancel();
+        }
         await _run.WaitAsync().ConfigureAwait(false);
         _run.Release();
     }
