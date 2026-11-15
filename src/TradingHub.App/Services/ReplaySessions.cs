@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TradingHub.Common;
 using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Replay;
@@ -99,18 +100,15 @@ public sealed class ReplaySessions : IDisposable
     }
     private void SaveResult(ReplayResult result)
     {
-        string temporary = Path.Combine(_resultRoot, result.RunId.ToString("N") + ".pending");
         try
         {
-            Directory.CreateDirectory(_resultRoot);
-            using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
-            { JsonSerializer.Serialize(file, result); file.Flush(flushToDisk: true); }
-            File.Move(temporary, Path.Combine(_resultRoot, result.RunId.ToString("N") + ".json"), overwrite: true);
+            DurableFile.EnsureDirectory(_resultRoot);
+            DurableFile.ReplaceAtomically(Path.Combine(_resultRoot, result.RunId.ToString("N") + ".json"),
+                file => JsonSerializer.Serialize(file, result));
         }
         catch
         {
             _alerts.Raise(AlertKind.System, "Practice", "Replay results", "The practice result could not be saved. It remains visible in this session.", allowExternal: false);
-            try { File.Delete(temporary); } catch { }
         }
     }
     public void Dispose()

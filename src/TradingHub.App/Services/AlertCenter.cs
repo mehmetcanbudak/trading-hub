@@ -62,7 +62,7 @@ public sealed class AlertCenter : IAsyncDisposable
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            DurableFile.EnsureDirectory(Path.GetDirectoryName(_path)!);
             _lease = new FileStream(_path + ".lease", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             Load();
             _redactionReady = !_state.Destinations.Any(d => d.Enabled);
@@ -768,26 +768,22 @@ public sealed class AlertCenter : IAsyncDisposable
     {
         if (_unreadable) return false;
         if (!_dirty) return true;
-        string temporary = _path + ".pending-" + Guid.NewGuid().ToString("N");
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                JsonSerializer.Serialize(stream, StoredStateLocked());
-                stream.Flush(flushToDisk: true);
-            }
-            File.Move(temporary, _path, overwrite: true);
+            // Deliveries become pending only after the flush, atomic rename and directory synchronization succeed.
+            DurableFile.EnsureDirectory(Path.GetDirectoryName(_path)!);
+            DurableFile.ReplaceAtomically(_path, stream => JsonSerializer.Serialize(stream, StoredStateLocked()));
             for (int i = 0; i < _state.Deliveries.Count; i++)
                 if (_state.Deliveries[i].State == NotificationDeliveryState.AwaitingPersistence)
                     _state.Deliveries[i] = _state.Deliveries[i] with { State = NotificationDeliveryState.Pending, Status = "Durable encrypted pending delivery." };
             _dirty = false;
             return true;
         }
-        catch
+        catch (Exception ex)
         {
-            _status = "Alert persistence failed. Local history remains in memory; external sends are blocked until storage recovers.";
-            try { File.Delete(temporary); } catch { }
+            // The cause can name local paths; confirmed private notification material is redacted before display.
+            _status = "Alert persistence failed. Local history remains in memory; external sends are blocked until storage recovers. Cause: " +
+                _redactor.Bounded(ex.Message, 512);
             return false;
         }
     }

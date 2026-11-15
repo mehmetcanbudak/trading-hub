@@ -330,14 +330,9 @@ internal sealed class FileSecretStore(string path) : IAsyncSecretStore, IAsyncDi
             var all = await LoadAsync(operation.Token).ConfigureAwait(false);
             if (string.IsNullOrEmpty(secret)) all.Remove(account);
             else all[account] = secret;
-            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            try
-            {
-                await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(all), operation.Token).ConfigureAwait(false);
-                operation.Token.ThrowIfCancellationRequested();
-                File.Move(temporary, path, overwrite: true);
-            }
-            finally { File.Delete(temporary); }
+            string json = JsonSerializer.Serialize(all);
+            await DurableFile.ReplaceAtomicallyAsync(path,
+                (stream, token) => stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json), token).AsTask(), operation.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (operation.Token.IsCancellationRequested)
         {
@@ -583,19 +578,11 @@ public sealed partial class ConnectionManager
             SetSecret(p, "apikey", p.ApiKey);
             p.ApiKey = "";
         }
-        string directory = Path.GetDirectoryName(Path.GetFullPath(_filePath))!;
-        Directory.CreateDirectory(directory);
         foreach (var profile in Profiles) RefreshTradingIdentity(profile);
-        string temporary = _filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                JsonSerializer.Serialize(file, Profiles, Json);
-                StorageSync.Flush(file);
-            }
-            File.Move(temporary, _filePath, overwrite: true);
-            StorageSync.SyncDirectory(directory);
+            DurableFile.EnsureDirectory(Path.GetDirectoryName(Path.GetFullPath(_filePath))!);
+            DurableFile.ReplaceAtomically(_filePath, file => JsonSerializer.Serialize(file, Profiles, Json));
             _tradingPersistenceError = null;
         }
         catch (Exception ex)
@@ -603,7 +590,6 @@ public sealed partial class ConnectionManager
             _tradingPersistenceError = "Trading configuration namespace is not committed: " + ex.Message;
             throw;
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
         Changed?.Invoke();
     }
 
