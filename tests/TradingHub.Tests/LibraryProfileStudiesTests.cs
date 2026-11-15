@@ -238,6 +238,91 @@ public class LibraryProfileStudiesTests
         }
     }
 
+    [Fact]
+    public void Reversion_bar_painting_is_display_only()
+    {
+        var filtered = AssertDisplayOnly(() => new ValueAreaReversion { DevelopingSessionSignals = true }, () => new ValueAreaReversion { DevelopingSessionSignals = true, ColorBars = false }, Walk(400), ChartPeriod.M15);
+        Assert.All(Enumerable.Range(0, filtered.Bars.Count), bar => Assert.Null(Paint(filtered)[bar]));
+
+        var bars = SessionA.Concat(new[] { Flat(106, 40), new Ohlc(106, 106, 103, 103, 40), Flat(103, 40) }).ToList();
+        using var model = Model(Start, ChartPeriod.H4, null, bars);
+        var study = Add(model, new ValueAreaReversion());
+        var paint = Paint(study);
+        Assert.True(study.ColorBars); // KVP default
+        Assert.Same(paint, study.DataSeries[^1]); // appended after the existing series
+        Assert.True(paint[7] == study.BearColor); // the bearish re-entry close
+        Assert.All(Enumerable.Range(0, 7), bar => Assert.Null(paint[bar]));
+        study.ColorBars = false;
+        Assert.Null(paint[7]); Assert.Equal(-1m, Series(study, "ValueAreaReversion.Prior")[7]);
+        study.ColorBars = true;
+        Assert.True(paint[7] == study.BearColor);
+    }
+
+    [Fact]
+    public void Profile_level_cross_marks_are_display_only()
+    {
+        var filtered = AssertDisplayOnly(() => new ProfileLevelAlerts(), () => new ProfileLevelAlerts { ShowCrosses = false }, Walk(400), ChartPeriod.M15);
+        Assert.NotEmpty(filtered.Scene.Marks);
+        Assert.All(filtered.Scene.Marks, m => Assert.False(filtered.IsShown(m)));
+
+        using var model = Model(Start, ChartPeriod.H4, null, new[] { Flat(100, 160), Flat(102, 40), Flat(98, 40), new Ohlc(98, 101, 98, 101, 40), Flat(101, 40) });
+        var study = Add(model, new ProfileLevelAlerts());
+        Assert.True(study.ShowCrosses); // KVP default
+        Assert.NotEmpty(study.Scene.Marks);
+        Assert.All(study.Scene.Marks, m => Assert.True(study.IsShown(m)));
+        var levels = study.GetAlertLevels().ToList();
+        study.ShowCrosses = false;
+        Assert.All(study.Scene.Marks, m => Assert.False(study.IsShown(m)));
+        Assert.Equal(levels, study.GetAlertLevels());
+        Assert.Equal(2m, Series(study, "ProfileLevels.Cross")[3]);
+    }
+
+    [Fact]
+    public void Heat_hours_drawn_is_display_only_and_keeps_the_latest_hours()
+    {
+        var study = (VolumeHeatHours)AssertDisplayOnly(() => new VolumeHeatHours { BaselineHours = 6 }, () => new VolumeHeatHours { BaselineHours = 6, HoursKept = 5 }, Walk(400), ChartPeriod.M5);
+        Assert.True(study.Hours.Count > 5);
+        var kept = study.Hours.TakeLast(5).Select(h => h.From).ToList();
+        Assert.Equal(kept, study.Scene.Boxes.Where(b => study.IsShown(b)).Select(b => b.From));
+        Assert.All(study.Scene.Tags, t => Assert.Equal(t.Bar >= kept[0], study.IsShown(t)));
+
+        using var model = Model(Start, ChartPeriod.M5, null, Walk(400));
+        var plain = Add(model, new VolumeHeatHours { BaselineHours = 6 });
+        Assert.Equal(60, plain.HoursKept); // KVP default; 400 five-minute bars hold fewer hours
+        Assert.All(plain.Scene.Boxes, b => Assert.True(plain.IsShown(b)));
+        Assert.All(plain.Scene.Tags, t => Assert.True(plain.IsShown(t)));
+    }
+
+    [Fact]
+    public void Execution_benchmark_and_fill_lines_are_display_only()
+    {
+        AssertDisplayOnly(() => new ExecutionBenchmarks { Window = ExecutionWindow.Hour }, () => new ExecutionBenchmarks { Window = ExecutionWindow.Hour, ShowBenchmarks = false }, Walk(400), ChartPeriod.M5);
+        AssertDisplayOnly(() => new ExecutionBenchmarks { Window = ExecutionWindow.Hour }, () => new ExecutionBenchmarks { Window = ExecutionWindow.Hour, ShowFills = false }, Walk(400), ChartPeriod.M5);
+        var unshaded = AssertDisplayOnly(() => new ExecutionBenchmarks { Window = ExecutionWindow.Hour }, () => new ExecutionBenchmarks { Window = ExecutionWindow.Hour, ShadeScheduled = false }, Walk(400), ChartPeriod.M5);
+        Assert.NotEmpty(unshaded.Scene.Tints);
+        Assert.All(unshaded.Scene.Tints, t => Assert.False(unshaded.IsTintShown(t.Key, t.Value)));
+
+        var study = Benchmarks(Flat(106, 40), out var model);
+        using (model)
+        {
+            Assert.True(study.ShowBenchmarks && study.ShowFills && study.ShadeScheduled); // KVP defaults
+            Assert.Equal(new[] { 4, 5, 6, 7 }, study.Scene.Tints.Keys.OrderBy(k => k)); // the scored window's scheduled bars
+            Assert.All(study.Scene.Tints, t => Assert.True(study.IsTintShown(t.Key, t.Value)));
+            study.ShadeScheduled = false;
+            Assert.All(study.Scene.Tints, t => Assert.False(study.IsTintShown(t.Key, t.Value)));
+            study.ShadeScheduled = true;
+            Assert.Equal(5, study.Scene.Lines.Count);
+            Assert.All(study.Scene.Lines, l => Assert.True(study.IsShown(l)));
+            study.ShowFills = false; // arrival and window VWAP remain
+            Assert.Equal(new[] { 100m, 103m }, study.Scene.Lines.Where(l => study.IsShown(l)).Select(l => l.Price));
+            study.ShowFills = true; study.ShowBenchmarks = false; // TWAP, VWAP and POV average prices remain
+            Assert.Equal(new[] { 103m, 104m, 103m }, study.Scene.Lines.Where(l => study.IsShown(l)).Select(l => l.Price));
+            Assert.Equal(400m, Series(study, "ExecutionBenchmarks.Vwap.VsArrival")[7]);
+        }
+    }
+
+    private static PaintbarsDataSeries Paint(Indicator study) => study.DataSeries.OfType<PaintbarsDataSeries>().Single();
+
     private static StudyProfileLevels Current(RollingProfileStudy study) => study.Current ?? throw new InvalidOperationException("The study has no profile.");
 
     private static ExecutionBenchmarks.AlgoFill Fill(ExecutionBenchmarks.AlgoFill? fill) => fill ?? throw new InvalidOperationException("The algorithm did not fill.");

@@ -112,6 +112,8 @@ public class PivotPointLadders : ClosedBarStudy
     private PivotLadderPeriod _period = PivotLadderPeriod.Auto;
     private int _back = 10, _tiers = 5;
     private bool _crosses = true, _labels = true;
+    // display-only tier toggles (index 0 = P, 1–5 = R1/S1 … R5/S5); the ladder is always computed and alertable for every tier
+    private readonly bool[] _shownTiers = { true, true, true, true, true, true };
     private bool _active, _partial, _hasLevels;
     private long _key;
     private decimal _open, _high, _low, _close, _pivot;
@@ -130,12 +132,26 @@ public class PivotPointLadders : ClosedBarStudy
     public PivotLadderPeriod Period { get => _period; set { _period = value; RecalculateValues(); } }
     [Display(Name = "Periods drawn back", GroupName = "Calculation", Order = 13), Range(1, 60)]
     public int PeriodsBack { get => _back; set { _back = Math.Clamp(value, 1, 60); RecalculateValues(); } }
-    [Display(Name = "Highest level shown (R/S 1–5)", GroupName = "Levels", Order = 20), Range(1, 5)]
-    public int MaxTier { get => _tiers; set { _tiers = Math.Clamp(value, 1, 5); RecalculateValues(); } }
+    /// <summary>Display only: tiers above this are hidden on the chart; every tier is still computed and alertable.</summary>
+    [Display(Name = "Highest level shown (R/S 1–5)", GroupName = "Levels", Order = 20, Description = DisplayOnly), Range(1, 5)]
+    public int MaxTier { get => _tiers; set { _tiers = Math.Clamp(value, 1, 5); RedrawChart(); } }
     [Display(Name = "Level names", GroupName = "Levels", Order = 21)]
     public bool ShowLabels { get => _labels; set { _labels = value; RecalculateValues(); } }
-    [Display(Name = "Mark pivot and R2/S2 crossings", GroupName = "Levels", Order = 22)]
-    public bool ShowCrosses { get => _crosses; set { _crosses = value; RecalculateValues(); } }
+    /// <summary>Display only: the crossing marks are always recorded and the signal is always written.</summary>
+    [Display(Name = "Mark pivot and R2/S2 crossings", GroupName = "Levels", Order = 22, Description = DisplayOnly)]
+    public bool ShowCrosses { get => _crosses; set { _crosses = value; RedrawChart(); } }
+    [Display(Name = "P", GroupName = "Levels", Order = 23, Description = DisplayOnly)]
+    public bool ShowP { get => _shownTiers[0]; set => ShowTier(0, value); }
+    [Display(Name = "R1 / S1", GroupName = "Levels", Order = 24, Description = DisplayOnly)]
+    public bool Tier1 { get => _shownTiers[1]; set => ShowTier(1, value); }
+    [Display(Name = "R2 / S2", GroupName = "Levels", Order = 25, Description = DisplayOnly)]
+    public bool Tier2 { get => _shownTiers[2]; set => ShowTier(2, value); }
+    [Display(Name = "R3 / S3", GroupName = "Levels", Order = 26, Description = DisplayOnly)]
+    public bool Tier3 { get => _shownTiers[3]; set => ShowTier(3, value); }
+    [Display(Name = "R4 / S4", GroupName = "Levels", Order = 27, Description = DisplayOnly)]
+    public bool Tier4 { get => _shownTiers[4]; set => ShowTier(4, value); }
+    [Display(Name = "R5 / S5", GroupName = "Levels", Order = 28, Description = DisplayOnly)]
+    public bool Tier5 { get => _shownTiers[5]; set => ShowTier(5, value); }
     [Display(Name = "Pivot", GroupName = "Colors", Order = 30)] public Color PivotColor { get; set; } = StudyPalette.Amber;
     [Display(Name = "Resistances", GroupName = "Colors", Order = 31)] public Color ResistanceColor { get; set; } = StudyPalette.Bear;
     [Display(Name = "Supports", GroupName = "Colors", Order = 32)] public Color SupportColor { get; set; } = StudyPalette.Bull;
@@ -143,6 +159,21 @@ public class PivotPointLadders : ClosedBarStudy
     [Browsable(false)] public override string Status => "Levels of a completed period appear at the first close of the next period; the first loaded period is skipped";
     /// <summary>The live levels of the current period.</summary>
     [Browsable(false)] public IReadOnlyList<StudyLine> CurrentLevels => _current;
+
+    private const string DisplayOnly = "Display only: hides drawings; never changes detection, strategy series or alerts.";
+
+    private void ShowTier(int tier, bool shown) { _shownTiers[tier] = shown; RedrawChart(); }
+
+    /// <summary>Ladder lines carry the alert name "Pivot P", "Pivot R1", "Pivot S1", …; P is tier 0.</summary>
+    public override bool IsShown(StudyLine line)
+    {
+        // every alert-named line of this study is a ladder level; its last character is P or the tier digit
+        if (line.Alert is not { Length: > 0 } name || name[^1] is not ('P' or >= '1' and <= '5')) return true;
+        int tier = name[^1] == 'P' ? 0 : name[^1] - '0';
+        return tier <= MaxTier && _shownTiers[tier];
+    }
+
+    public override bool IsShown(StudyMark mark) => ShowCrosses;
 
     /// <summary>
     /// The pivot ladder of one completed period (<paramref name="open"/>, <paramref name="high"/>, <paramref name="low"/>,
@@ -236,8 +267,7 @@ public class PivotPointLadders : ClosedBarStudy
         foreach (var (name, value) in Ladder(Method, _open, _high, _low, _close, nextOpen, FloorThird))
         {
             if (name == "P") _pivot = value; else if (name == "R2") _r2 = value; else if (name == "S2") _s2 = value;
-            int tier = name == "P" ? 0 : name[1] - '0';
-            if (tier > MaxTier) continue;
+            // every tier is drawn and alertable; MaxTier and the tier toggles only hide lines (IsShown)
             var color = name == "P" ? PivotColor : name[0] == 'R' ? ResistanceColor : SupportColor;
             _current.Add(Scene.Level(bar, bar, value, color, ShowLabels ? name : null, $"Pivot {name}", name == "P" ? 2 : 1));
         }
@@ -249,10 +279,10 @@ public class PivotPointLadders : ClosedBarStudy
     private int Cross(int bar)
     {
         var b = Bars[bar]; decimal prev = Bars[bar - 1].Close, close = b.Close; int signal = 0;
-        if (prev <= _pivot && close > _pivot) { signal = 1; if (ShowCrosses) Scene.Mark(bar, bar, b.Low, StudyMarkKind.TriangleUp, PivotColor, null, false); }
-        else if (prev >= _pivot && close < _pivot) { signal = -1; if (ShowCrosses) Scene.Mark(bar, bar, b.High, StudyMarkKind.TriangleDown, PivotColor); }
-        if (_r2 is { } r2 && prev <= r2 && close > r2) { signal = 2; if (ShowCrosses) Scene.Mark(bar, bar, b.Low, StudyMarkKind.Circle, ResistanceColor, "R2", false); }
-        if (_s2 is { } s2 && prev >= s2 && close < s2) { signal = -2; if (ShowCrosses) Scene.Mark(bar, bar, b.High, StudyMarkKind.Circle, SupportColor, "S2"); }
+        if (prev <= _pivot && close > _pivot) { signal = 1; Scene.Mark(bar, bar, b.Low, StudyMarkKind.TriangleUp, PivotColor, null, false); }
+        else if (prev >= _pivot && close < _pivot) { signal = -1; Scene.Mark(bar, bar, b.High, StudyMarkKind.TriangleDown, PivotColor); }
+        if (_r2 is { } r2 && prev <= r2 && close > r2) { signal = 2; Scene.Mark(bar, bar, b.Low, StudyMarkKind.Circle, ResistanceColor, "R2", false); }
+        if (_s2 is { } s2 && prev >= s2 && close < s2) { signal = -2; Scene.Mark(bar, bar, b.High, StudyMarkKind.Circle, SupportColor, "S2"); }
         return signal;
     }
 
@@ -336,14 +366,15 @@ public class LineBreak : ClosedBarStudy
     public LineBreakCloses CloseSource { get => _source; set { _source = value; RecalculateValues(); } }
     [Display(Name = "Extended run (lines)", GroupName = "Calculation", Order = 12), Range(2, 50)]
     public int ExtendedRun { get => _extended; set { _extended = Math.Clamp(value, 2, 50); RecalculateValues(); } }
-    [Display(Name = "Line bodies", GroupName = "Drawing", Order = 20)]
-    public bool ShowLines { get => _showLines; set { _showLines = value; RecalculateValues(); } }
-    [Display(Name = "Reversal and extended-run marks", GroupName = "Drawing", Order = 21)]
-    public bool ShowMarkers { get => _markers; set { _markers = value; RecalculateValues(); } }
-    [Display(Name = "Reversal labels", GroupName = "Drawing", Order = 22)]
-    public bool ShowReversalLabels { get => _reversalLabels; set { _reversalLabels = value; RecalculateValues(); } }
-    [Display(Name = "Continue and reverse triggers", GroupName = "Drawing", Order = 23)]
-    public bool ShowTriggers { get => _triggers; set { _triggers = value; RecalculateValues(); } }
+    // display only: bodies, marks, labels and trigger levels are always recorded (the current triggers stay alertable)
+    [Display(Name = "Line bodies", GroupName = "Drawing", Order = 20, Description = DisplayOnly)]
+    public bool ShowLines { get => _showLines; set { _showLines = value; RedrawChart(); } }
+    [Display(Name = "Reversal and extended-run marks", GroupName = "Drawing", Order = 21, Description = DisplayOnly)]
+    public bool ShowMarkers { get => _markers; set { _markers = value; RedrawChart(); } }
+    [Display(Name = "Reversal labels", GroupName = "Drawing", Order = 22, Description = DisplayOnly)]
+    public bool ShowReversalLabels { get => _reversalLabels; set { _reversalLabels = value; RedrawChart(); } }
+    [Display(Name = "Continue and reverse triggers", GroupName = "Drawing", Order = 23, Description = DisplayOnly)]
+    public bool ShowTriggers { get => _triggers; set { _triggers = value; RedrawChart(); } }
     [Display(Name = "Color price bars by trend", GroupName = "Drawing", Order = 24)]
     public bool PaintBars { get => _paintBars; set { _paintBars = value; RecalculateValues(); } }
     [Display(Name = "Mini line-break chart right of the last bar", GroupName = "Drawing", Order = 25)]
@@ -356,6 +387,13 @@ public class LineBreak : ClosedBarStudy
     [Browsable(false)] public override string Status => "Closed bars only; a higher-frame close is known at the first chart bar of the next block";
     /// <summary>The most recent lines (at least the last <see cref="LineCount"/> and <see cref="ChartLines"/>).</summary>
     [Browsable(false)] public IReadOnlyList<LineBreakLine> RecentLines => _lines;
+
+    private const string DisplayOnly = "Display only: hides drawings; never changes detection, strategy series or alerts.";
+
+    public override bool IsShown(StudyBox box) => ShowLines;
+    public override bool IsShown(StudyLine line) => ShowTriggers;
+    public override bool IsShown(StudyMark mark) => ShowMarkers;
+    public override bool IsShown(StudyTag tag) => ShowReversalLabels;
 
     protected override void ResetState()
     {
@@ -400,7 +438,7 @@ public class LineBreak : ClosedBarStudy
         if (last.Up ? close > last.Close : close < last.Close)
         {
             Push(new(from, available, last.Close, close, last.Up)); _run++;
-            if (_run == ExtendedRun && ShowMarkers)
+            if (_run == ExtendedRun)
                 Scene.Mark(from, available, last.Up ? Bars[from].Low : Bars[from].High, last.Up ? StudyMarkKind.TriangleUp : StudyMarkKind.TriangleDown,
                     last.Up ? BullColor : BearColor, _run.ToString(System.Globalization.CultureInfo.InvariantCulture), !last.Up);
             return 0;
@@ -410,8 +448,8 @@ public class LineBreak : ClosedBarStudy
         bool up = !last.Up;
         Push(new(from, available, up ? last.Top : last.Bottom, close, up)); _run = 1;
         decimal at = up ? Bars[from].Low : Bars[from].High; var color = up ? BullColor : BearColor;
-        if (ShowMarkers) Scene.Mark(from, available, at, StudyMarkKind.Circle, color, null, !up);
-        if (ShowReversalLabels) Scene.Tag(from, available, at, up ? "Bullish reversal" : "Bearish reversal", color, !up);
+        Scene.Mark(from, available, at, StudyMarkKind.Circle, color, null, !up);
+        Scene.Tag(from, available, at, up ? "Bullish reversal" : "Bearish reversal", color, !up);
         return up ? 1 : -1;
     }
 
@@ -430,8 +468,7 @@ public class LineBreak : ClosedBarStudy
         int cap = Math.Max(LineCount, ChartLines) + 1;
         if (_lines.Count > cap) _lines.RemoveRange(0, _lines.Count - cap);
         var color = line.Up ? BullColor : BearColor;
-        if (ShowLines) _body = Scene.Box(line.From, line.Available, line.Top, line.Bottom, color, fillAlpha: 25);
-        if (!ShowTriggers) return;
+        _body = Scene.Box(line.From, line.Available, line.Top, line.Bottom, color, fillAlpha: 25);
         _continue = Scene.Level(line.From, line.Available, line.Close, color, alert: "Line break continue", style: LineDashStyle.Dot);
         _reverse = Scene.Level(line.From, line.Available, ReverseLevel(), line.Up ? BearColor : BullColor, alert: "Line break reverse", style: LineDashStyle.Dash);
     }
@@ -461,7 +498,7 @@ public class LineBreak : ClosedBarStudy
         var info = ChartInfo;
         if (info == null || _lines.Count == 0) return;
         var font = FootprintStudyData.SmallFont;
-        if (_continue is { } next && _reverse is { } turn)
+        if (ShowTriggers && _continue is { } next && _reverse is { } turn)
         {
             foreach (var (line, text) in new[] { (next, _lines[^1].Up ? "Continue above" : "Continue below"), (turn, "Reverses at") })
             {

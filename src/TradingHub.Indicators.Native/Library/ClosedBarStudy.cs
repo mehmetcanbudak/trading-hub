@@ -313,19 +313,19 @@ public abstract class ClosedBarStudy : Indicator
 
         foreach (var (bar, color) in _scene.Tints)
         {
-            if (bar < first || bar > last) continue;
+            if (bar < first || bar > last || !IsTintShown(bar, color)) continue;
             int x0 = X(bar); ctx.FillRectangle(color, new Rectangle(x0, region.Top, Math.Max(1, X(bar + 1) - x0), region.Height));
         }
         foreach (var b in _scene.Boxes)
         {
             int from = Start(b);
-            if (!Visible(from, b.To) || b.To >= 0 && b.To < from) continue;
+            if (!Visible(from, b.To) || b.To >= 0 && b.To < from || !IsShown(b)) continue;
             int x0 = X(from), x1 = b.To < 0 ? right : X(b.To, false) + bw / 2; if (x1 <= x0) x1 = x0 + 2;
             int y0 = Y(b.Top), y1 = Y(b.Bottom);
             var rect = new Rectangle(x0, Math.Min(y0, y1), x1 - x0, Math.Max(1, Math.Abs(y1 - y0)));
             int alpha = b.Live ? b.FillAlpha : b.FillAlpha / 2;
             if (alpha > 0) ctx.FillRectangle(StudyPalette.A(b.Color, alpha), rect);
-            ctx.DrawRectangle(Pen(StudyPalette.A(b.Color, b.Live ? 150 : 70), 1, b.Style), rect);
+            ctx.DrawRectangle(Pen(StudyPalette.A(b.Color, BoxBorderAlpha(b)), 1, b.Style), rect);
             if (string.IsNullOrEmpty(b.Text)) continue;
             string t = UiText.Tr(b.Text); var size = ctx.MeasureString(t, font);
             if (size.Height <= rect.Height + 4) ctx.DrawString(t, font, b.Color, Math.Max(rect.Left + 3, Math.Min(rect.Right - size.Width - 3, right - size.Width - 4)), rect.Top + (rect.Height - size.Height) / 2);
@@ -333,7 +333,7 @@ public abstract class ClosedBarStudy : Indicator
         foreach (var l in _scene.Lines)
         {
             int from = Start(l);
-            if (!Visible(from, l.To) || l.To >= 0 && l.To < from) continue;
+            if (!Visible(from, l.To) || l.To >= 0 && l.To < from || !IsShown(l)) continue;
             bool flat = l.Price == l.EndPrice;
             int x0 = X(from), x1 = l.To < 0 ? (flat ? right : X(lastBar, false)) : X(l.To, false), y0 = Y(l.Price), y1 = Y(l.EndPrice);
             ctx.DrawLine(Pen(l.Color, l.Width, l.Style), x0, y0, Math.Max(x0 + 1, x1), y1);
@@ -343,14 +343,14 @@ public abstract class ClosedBarStudy : Indicator
         }
         foreach (var p in _scene.Paths)
         {
-            if (p.Points.Count < 2 || p.Points[^1].Bar < first || p.Points[0].Bar > last + 1) continue;
+            if (p.Points.Count < 2 || p.Points[^1].Bar < first || p.Points[0].Bar > last + 1 || !IsShown(p)) continue;
             ctx.DrawLines(Pen(p.Color, p.Width, p.Style), p.Points.Select(q => new Point(X(q.Bar, false), Y(q.Price))).ToArray());
         }
         int ms = Math.Clamp(bw / 2 + 2, 4, 9);
         foreach (var m in _scene.Marks)
         {
             int bar = _retrospective ? m.Bar : Math.Max(m.Bar, m.Available);
-            if (bar < first || bar > last) continue;
+            if (bar < first || bar > last || !IsShown(m)) continue;
             int x = X(bar, false), y = Y(m.Price) + (m.Above ? -ms - 3 : ms + 3);
             DrawMark(ctx, m.Kind, x, y, ms, m.Color);
             if (string.IsNullOrEmpty(m.Text)) continue;
@@ -360,7 +360,7 @@ public abstract class ClosedBarStudy : Indicator
         foreach (var tag in _scene.Tags)
         {
             int bar = _retrospective ? tag.Bar : Math.Max(tag.Bar, tag.Available);
-            if (bar < first || bar > last) continue;
+            if (bar < first || bar > last || !IsShown(tag)) continue;
             string text = UiText.Tr(tag.Text); var size = ctx.MeasureString(text, font);
             int x = Math.Clamp(X(bar, false) - size.Width / 2 - 4, region.Left + 2, Math.Max(region.Left + 2, right - size.Width - 10));
             int y = tag.Above ? Y(tag.Price) - size.Height - 10 : Y(tag.Price) + 6;
@@ -374,6 +374,25 @@ public abstract class ClosedBarStudy : Indicator
 
     /// <summary>Additional drawing (panels, maps) after the scene.</summary>
     protected virtual void RenderExtra(RenderContext ctx, Rectangle region) { }
+
+    /// <summary>
+    /// Display-only visibility filters (for example "only the last test" or "hide filled"). They may hide a drawing on
+    /// the chart but never change detection, confirmation timing, strategy series or the alert levels of still-valid levels.
+    /// </summary>
+    public virtual bool IsShown(StudyBox box) => true;
+    /// <inheritdoc cref="IsShown(StudyBox)"/>
+    public virtual bool IsShown(StudyLine line) => true;
+    /// <inheritdoc cref="IsShown(StudyBox)"/>
+    public virtual bool IsShown(StudyMark mark) => true;
+    /// <inheritdoc cref="IsShown(StudyBox)"/>
+    public virtual bool IsShown(StudyTag tag) => true;
+    /// <inheritdoc cref="IsShown(StudyBox)"/>
+    public virtual bool IsShown(StudyPath path) => true;
+    /// <inheritdoc cref="IsShown(StudyBox)"/>
+    public virtual bool IsTintShown(int bar, Color color) => true;
+
+    /// <summary>Display-only border opacity of a box (0–255).</summary>
+    protected virtual int BoxBorderAlpha(StudyBox box) => box.Live ? 150 : 70;
 
     internal static void DrawMark(RenderContext ctx, StudyMarkKind kind, int x, int y, int r, Color c)
     {

@@ -276,4 +276,97 @@ public class LibrarySessionStudiesTests
                 Render(model);
             }
     }
+
+    private sealed class BorderProbe : MarketSessions
+    {
+        public int Border(StudyBox box) => BoxBorderAlpha(box);
+    }
+
+    [Fact]
+    public void Market_sessions_days_kept_hides_only_older_sessions()
+    {
+        Assert.Equal(10, new MarketSessions().DaysKept);
+        Assert.Equal(5, new SessionMap().DaysKept);
+        // H1 Monday 2 .. Friday 6 March 2026: the latest session date is 6 March
+        var study = AssertDisplayOnly(() => new MarketSessions { S1Vwap = true, Midline = true }, () => new MarketSessions { S1Vwap = true, Midline = true, DaysKept = 1 }, Walk(5 * 24 + 1), ChartPeriod.H1);
+        Assert.Contains(study.Scene.Boxes, b => !study.IsShown(b));
+        Assert.All(study.Scene.Boxes, b => Assert.Equal(study.Bars[b.From].Time.Day == 6, study.IsShown(b)));
+        Assert.All(study.Scene.Lines, l => Assert.Equal(l.Live || study.Bars[l.From].Time.Day == 6, study.IsShown(l)));
+        Assert.Contains(study.Scene.Lines, l => l.Live && study.IsShown(l));
+        Assert.All(study.Scene.Paths, p => Assert.Equal(study.Bars[p.Available].Time.Day == 6, study.IsShown(p)));
+        Assert.Contains(study.Scene.Paths, p => !study.IsShown(p));
+    }
+
+    [Fact]
+    public void Session_map_days_kept_is_display_only()
+    {
+        var study = AssertDisplayOnly(() => new SessionMap(), () => new SessionMap { DaysKept = 2 }, Walk(5 * 24 + 1), ChartPeriod.H1);
+        var boxes = study.Scene.Boxes.Where(b => b.Text is "London" or "New York").ToList();
+        Assert.Contains(boxes, b => !study.IsShown(b));
+        Assert.All(boxes, b => Assert.Equal(study.Bars[b.From].Time.Day >= 5, study.IsShown(b)));
+    }
+
+    [Fact]
+    public void Market_sessions_border_opacity_is_display_only()
+    {
+        Assert.Equal(100, new MarketSessions().BorderOpacity);
+        var study = (BorderProbe)AssertDisplayOnly(() => new BorderProbe(), () => new BorderProbe { BorderOpacity = 40 }, Walk(2 * 24 + 1), ChartPeriod.H1);
+        Assert.NotEmpty(study.Scene.Boxes);
+        Assert.All(study.Scene.Boxes, b => Assert.Equal(70 * 40 / 100, study.Border(b)));
+        Assert.All(study.Scene.Boxes, b => Assert.True(study.IsShown(b)));
+        var hidden = new BorderProbe { BorderOpacity = 0 };
+        Assert.All(study.Scene.Boxes, b => Assert.Equal(0, hidden.Border(b)));
+    }
+
+    [Fact]
+    public void Asian_session_sweeps_draw_only_the_last_sessions()
+    {
+        Assert.Equal(20, new AsianSessionSweeps().MaxSessions);
+        var study = AssertDisplayOnly(() => new AsianSessionSweeps { TrendFilter = false }, () => new AsianSessionSweeps { TrendFilter = false, MaxSessions = 2 }, Walk(5 * 24 + 1), ChartPeriod.H1);
+        var boxes = study.Scene.Boxes.Where(b => b.Text == "Asia").ToList();
+        Assert.True(boxes.Count >= 3);
+        Assert.Equal(boxes.Select((_, i) => i >= boxes.Count - 2), boxes.Select(study.IsShown));
+        foreach (var name in new[] { "Asia high", "Asia low" })
+        {
+            var levels = study.Scene.Lines.Where(l => l.Alert == name).ToList();
+            Assert.Equal(boxes.Count, levels.Count);
+            Assert.Equal(levels.Select((_, i) => i >= levels.Count - 2), levels.Select(study.IsShown));
+            Assert.True(levels[^1].Live);
+        }
+    }
+
+    /// <summary>H1 UTC sessions: a filled bullish gap (24), a filled bearish gap (48), an unfilled bullish gap (72) and the current session's bullish gap (96).</summary>
+    private static List<Ohlc> GapDays()
+    {
+        var flat = new Ohlc(100, 101, 99, 100); var bars = new List<Ohlc>();
+        bars.AddRange(Enumerable.Repeat(flat, 24));
+        bars.Add(new(105, 108, 103, 104)); bars.Add(new(104, 104, 99, 100)); bars.AddRange(Enumerable.Repeat(flat, 22));
+        bars.Add(new(95, 97, 94, 96)); bars.Add(new(96, 101, 95, 100)); bars.AddRange(Enumerable.Repeat(flat, 22));
+        bars.Add(new(110, 112, 108, 111)); bars.AddRange(Enumerable.Repeat(new Ohlc(111, 112, 110, 111), 23));
+        bars.Add(new(120, 122, 118, 121)); bars.AddRange(Enumerable.Repeat(new Ohlc(121, 122, 120, 121), 4));
+        return bars;
+    }
+
+    [Theory]
+    [InlineData(nameof(SessionGapFill.ShowFilledBull), 24)]
+    [InlineData(nameof(SessionGapFill.ShowFilledBear), 48)]
+    [InlineData(nameof(SessionGapFill.ShowUnfilled), 72)]
+    public void Session_gap_filters_hide_only_ended_gaps_of_their_kind(string option, int hidden)
+    {
+        var defaults = new SessionGapFill();
+        Assert.True(defaults.ShowFilledBull && defaults.ShowFilledBear && defaults.ShowUnfilled);
+        SessionGapFill Filtered()
+        {
+            var filtered = new SessionGapFill();
+            typeof(SessionGapFill).GetProperty(option)!.SetValue(filtered, false);
+            return filtered;
+        }
+        var study = AssertDisplayOnly(() => new SessionGapFill(), Filtered, GapDays(), ChartPeriod.H1, session: new SessionSettings());
+        Assert.Equal(new[] { 24, 48, 72, 96 }, study.Scene.Boxes.Select(b => b.From));
+        Assert.Equal(study.Scene.Boxes.Select(b => b.From != hidden), study.Scene.Boxes.Select(study.IsShown));
+        Assert.Equal(2, study.Scene.Lines.Count(l => l.From == hidden)); // prior close level and excursion line
+        Assert.All(study.Scene.Lines, l => Assert.Equal(l.From != hidden, study.IsShown(l)));
+        Assert.All(study.Scene.Marks, m => Assert.True(study.IsShown(m)));
+        Assert.Contains("Session gap: top edge", study.GetAlertLevels().Select(l => l.Name));
+    }
 }

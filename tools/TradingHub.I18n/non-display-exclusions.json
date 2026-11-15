@@ -72,11 +72,11 @@
     "reason": "Default C# class name of an editable indicator copy (original type name + English suffix), not a display label."
   },
   "ExecutionBenchmarks.{0}.VsArrival": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:796",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:822",
     "reason": "Stable persisted DataSeries id of the execution-benchmark arrival series (strategy/workspace identity), not a display label."
   },
   "ExecutionBenchmarks.{0}.VsVwap": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:795",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:821",
     "reason": "Stable persisted DataSeries id of the execution-benchmark window-VWAP series (strategy/workspace identity), not a display label."
   },
   "KeyLevels.{0}.PriorClose": {
@@ -88,15 +88,15 @@
     "reason": "Stable persisted DataSeries id of the Multi-period VWAP band series (horizon and band), not a display label."
   },
   "ProfileLevels.Poc.{0}@{1}": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:405",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:424",
     "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
   },
   "ProfileLevels.Vah.{0}@{1}": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:406",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:425",
     "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
   },
   "ProfileLevels.Val.{0}@{1}": {
-    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:407",
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:426",
     "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
   }
 }

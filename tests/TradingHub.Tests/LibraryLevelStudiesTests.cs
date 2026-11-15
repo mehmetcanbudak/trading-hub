@@ -215,4 +215,95 @@ public class LibraryLevelStudiesTests
         Add(model, new LineBreak { PaintBars = true, CloseSource = LineBreakCloses.Hour });
         Render(model);
     }
+
+    [Fact]
+    public void Cme_sunday_evening_session_opens_the_new_week_and_counts_in_the_monday_range()
+    {
+        // hourly bars from Friday 2026-03-06 19:00 UTC; Sunday 2026-03-08 18:00 New York (22:00 UTC, after the DST change) is bar 51
+        var cme = new SessionSettings { TimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York"), Start = TimeSpan.FromHours(18) };
+        var bars = Enumerable.Range(0, 80).Select(i => new Ohlc(1000 + i, i == 51 ? 2000 : 1002 + i, 998 + i, 1001 + i)).ToList();
+        using var model = Model(new DateTime(2026, 3, 6, 19, 0, 0, DateTimeKind.Utc), ChartPeriod.H1, cme, bars);
+        var study = Add(model, new KeyLevels());
+        Assert.True(model.IsNewWeek(51)); Assert.False(model.IsNewWeek(50)); Assert.False(model.IsNewWeek(52));
+        var weekOpen = Series(study, "KeyLevels.Week.Open");
+        Assert.True(weekOpen.IsAvailable(51)); Assert.Equal(1051m, weekOpen[51]); Assert.Equal(1051m, weekOpen[60]);
+        // the Monday trading day runs from Sunday 22:00 UTC to Monday 22:00 UTC (bars 51..74): its range includes the Sunday spike
+        var mondayHigh = Series(study, "KeyLevels.Monday.High");
+        Assert.False(mondayHigh.IsAvailable(74)); Assert.True(mondayHigh.IsAvailable(75)); Assert.Equal(2000m, mondayHigh[75]);
+    }
+
+    // ------------------------------------------------------------------ display-only filters
+
+    private static PivotPointLadders Ladders(string? hide = null)
+    {
+        var study = new PivotPointLadders { Period = PivotLadderPeriod.Session, PeriodsBack = 60 };
+        switch (hide)
+        {
+            case nameof(PivotPointLadders.ShowP): study.ShowP = false; break;
+            case nameof(PivotPointLadders.Tier1): study.Tier1 = false; break;
+            case nameof(PivotPointLadders.Tier2): study.Tier2 = false; break;
+            case nameof(PivotPointLadders.Tier3): study.Tier3 = false; break;
+            case nameof(PivotPointLadders.Tier4): study.Tier4 = false; break;
+            case nameof(PivotPointLadders.Tier5): study.Tier5 = false; break;
+            case nameof(PivotPointLadders.MaxTier): study.MaxTier = 2; break;
+            case nameof(PivotPointLadders.ShowCrosses): study.ShowCrosses = false; break;
+        }
+        return study;
+    }
+
+    [Theory]
+    [InlineData(nameof(PivotPointLadders.ShowP), 0)]
+    [InlineData(nameof(PivotPointLadders.Tier1), 1)]
+    [InlineData(nameof(PivotPointLadders.Tier2), 2)]
+    [InlineData(nameof(PivotPointLadders.Tier3), 3)]
+    [InlineData(nameof(PivotPointLadders.Tier4), 4)]
+    [InlineData(nameof(PivotPointLadders.Tier5), 5)]
+    [InlineData(nameof(PivotPointLadders.MaxTier), -1)]
+    [InlineData(nameof(PivotPointLadders.ShowCrosses), -1)]
+    public void Pivot_level_toggles_only_hide_drawings(string option, int hiddenTier)
+    {
+        var study = AssertDisplayOnly(() => Ladders(), () => Ladders(option), DstSessions(), ChartPeriod.H1, ThursdayAfternoon, NewYork18);
+        // every tier of the current (Traditional) ladder stays alertable: P and R1–R5/S1–S5
+        Assert.Equal(11, study.GetAlertLevels().Count());
+        Assert.NotEmpty(study.Scene.Lines);
+        Assert.All(study.Scene.Lines, l =>
+        {
+            int tier = l.Alert![^1] == 'P' ? 0 : l.Alert[^1] - '0';
+            bool shown = option switch { nameof(PivotPointLadders.MaxTier) => tier <= 2, nameof(PivotPointLadders.ShowCrosses) => true, _ => tier != hiddenTier };
+            Assert.Equal(shown, study.IsShown(l));
+        });
+        Assert.NotEmpty(study.Scene.Marks);
+        Assert.All(study.Scene.Marks, m => Assert.Equal(option != nameof(PivotPointLadders.ShowCrosses), study.IsShown(m)));
+    }
+
+    private static LineBreak Breaks(string? hide = null)
+    {
+        var study = new LineBreak { ExtendedRun = 4, MaximumObjects = 5000 };
+        switch (hide)
+        {
+            case nameof(LineBreak.ShowLines): study.ShowLines = false; break;
+            case nameof(LineBreak.ShowMarkers): study.ShowMarkers = false; break;
+            case nameof(LineBreak.ShowReversalLabels): study.ShowReversalLabels = false; break;
+            case nameof(LineBreak.ShowTriggers): study.ShowTriggers = false; break;
+        }
+        return study;
+    }
+
+    [Theory]
+    [InlineData(nameof(LineBreak.ShowLines))]
+    [InlineData(nameof(LineBreak.ShowMarkers))]
+    [InlineData(nameof(LineBreak.ShowReversalLabels))]
+    [InlineData(nameof(LineBreak.ShowTriggers))]
+    public void Line_break_drawing_toggles_only_hide_drawings(string option)
+    {
+        var study = AssertDisplayOnly(() => Breaks(), () => Breaks(option), Walk(600));
+        // the current continue and reverse triggers stay alertable even when hidden
+        Assert.Equal(new[] { "Line break continue", "Line break reverse" }, study.GetAlertLevels().Select(a => a.Name).OrderBy(n => n).ToArray());
+        Assert.NotEmpty(study.Scene.Boxes); Assert.NotEmpty(study.Scene.Lines); Assert.NotEmpty(study.Scene.Marks); Assert.NotEmpty(study.Scene.Tags);
+        Assert.Contains(study.Scene.Marks, m => m.Kind == StudyMarkKind.TriangleUp || m.Kind == StudyMarkKind.TriangleDown);
+        Assert.All(study.Scene.Boxes, b => Assert.Equal(option != nameof(LineBreak.ShowLines), study.IsShown(b)));
+        Assert.All(study.Scene.Lines, l => Assert.Equal(option != nameof(LineBreak.ShowTriggers), study.IsShown(l)));
+        Assert.All(study.Scene.Marks, m => Assert.Equal(option != nameof(LineBreak.ShowMarkers), study.IsShown(m)));
+        Assert.All(study.Scene.Tags, t => Assert.Equal(option != nameof(LineBreak.ShowReversalLabels), study.IsShown(t)));
+    }
 }

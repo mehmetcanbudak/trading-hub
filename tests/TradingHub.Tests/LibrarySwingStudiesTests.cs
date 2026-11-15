@@ -1,4 +1,5 @@
 using TradingHub.Data;
+using TradingHub.Indicators;
 using TradingHub.Indicators.Native;
 using static TradingHub.Tests.LibraryStudyFixture;
 
@@ -210,4 +211,199 @@ public class LibrarySwingStudiesTests
         Add(model, new WaveExtensions { SwingLength = 2, SubLength = 1 });
         Render(model);
     }
+
+    // ------------------------------------------------------------------ display-only drawing filters
+
+    private static T Filtered<T>(Func<T> plain, Func<T> filtered, IReadOnlyList<Ohlc> bars, ChartPeriod? period = null) where T : ClosedBarStudy =>
+        (T)AssertDisplayOnly(plain, filtered, bars, period);
+
+    private static PaintbarsDataSeries Paint(ClosedBarStudy study, string id) => Assert.IsType<PaintbarsDataSeries>(study.DataSeries.Single(s => s.Id == id));
+
+    [Fact]
+    public void Shift_sweep_drawing_toggles_only_hide_drawings()
+    {
+        StructureShiftSweeps Plain() => new() { Length = 1 };
+        static bool Bos(StudyTag t) => t.Text == "BOS";
+        static bool Choch(StudyTag t) => t.Text == "CHoCH";
+
+        var noBos = Filtered(Plain, () => new StructureShiftSweeps { Length = 1, ShowBos = false }, Shifts(), ChartPeriod.M1);
+        Assert.False(noBos.IsShown(Assert.Single(noBos.Scene.Tags, Bos)));
+        Assert.True(noBos.IsShown(Assert.Single(noBos.Scene.Tags, Choch)));
+        Assert.False(noBos.IsShown(Assert.Single(noBos.Scene.Marks, m => m.Kind == StudyMarkKind.TriangleUp)));
+        Assert.False(noBos.IsShown(Assert.Single(noBos.Scene.Lines, l => l.Alert == null && l.Style == LineDashStyle.Solid)));
+        Assert.True(noBos.IsShown(Assert.Single(noBos.Scene.Lines, l => l.Alert == null && l.Style == LineDashStyle.Dash)));
+
+        var noChoch = Filtered(Plain, () => new StructureShiftSweeps { Length = 1, ShowChoch = false }, Shifts(), ChartPeriod.M1);
+        Assert.False(noChoch.IsShown(Assert.Single(noChoch.Scene.Tags, Choch)));
+        Assert.False(noChoch.IsShown(Assert.Single(noChoch.Scene.Marks, m => m.Kind == StudyMarkKind.TriangleDown)));
+        Assert.True(noChoch.IsShown(Assert.Single(noChoch.Scene.Tags, Bos)));
+
+        var noSweeps = Filtered(Plain, () => new StructureShiftSweeps { Length = 1, ShowSweeps = false }, Shifts(), ChartPeriod.M1);
+        Assert.False(noSweeps.IsShown(Assert.Single(noSweeps.Scene.Marks, m => m.Text == "Sweep")));
+        Assert.All(noSweeps.Scene.Marks.Where(m => m.Text != "Sweep"), m => Assert.True(noSweeps.IsShown(m)));
+
+        // the protected level is hidden but stays alertable
+        var noProtected = Filtered(Plain, () => new StructureShiftSweeps { Length = 1, ShowProtected = false }, Shifts(), ChartPeriod.M1);
+        Assert.Equal(2, noProtected.Scene.Lines.Count(l => l.Alert == "Protected swing"));
+        Assert.All(noProtected.Scene.Lines, l => Assert.Equal(l.Alert != "Protected swing", noProtected.IsShown(l)));
+        Assert.Contains(noProtected.GetAlertLevels(), l => l.Name == "Protected swing" && l.Price == 18);
+
+        // the BOS at 5 precedes the first CHoCH (9): hidden, while the CHoCH stays
+        var late = Filtered(Plain, () => new StructureShiftSweeps { Length = 1, HideBosBeforeFirstChoch = true }, Shifts(), ChartPeriod.M1);
+        Assert.False(late.IsShown(Assert.Single(late.Scene.Tags, Bos)));
+        Assert.False(late.IsShown(Assert.Single(late.Scene.Marks, m => m.Kind == StudyMarkKind.TriangleUp)));
+        Assert.True(late.IsShown(Assert.Single(late.Scene.Tags, Choch)));
+        Assert.False(new StructureShiftSweeps().HideBosBeforeFirstChoch);
+
+        // over a long walk a BOS after the first CHoCH is shown again
+        StructureShiftSweeps Walked() => new() { Length = 3, MaximumObjects = 5000 };
+        var walked = Filtered(Walked, () => new StructureShiftSweeps { Length = 3, MaximumObjects = 5000, HideBosBeforeFirstChoch = true }, Walk(400));
+        int firstChoch = walked.Scene.Tags.Where(Choch).Min(t => t.Available);
+        Assert.All(walked.Scene.Tags.Where(Bos), t => Assert.Equal(t.Available > firstChoch, walked.IsShown(t)));
+        Assert.Contains(walked.Scene.Tags, t => Bos(t) && walked.IsShown(t));
+        Filtered(Walked, () => new StructureShiftSweeps { Length = 3, MaximumObjects = 5000, ShowBos = false, ShowChoch = false, ShowSweeps = false, ShowProtected = false }, Walk(400));
+    }
+
+    [Fact]
+    public void Anchored_structure_drawing_toggles_only_hide_drawings()
+    {
+        AnchoredMarketStructure Plain() => new() { MaximumObjects = 5000 };
+        var bars = Walk(400);
+        static bool Verdict(StudyMark m) => m.Kind is StudyMarkKind.Square or StudyMarkKind.Cross;
+
+        // swing marks: circles (short term), ITH/ITL, LTH/LTL
+        var noShortSwings = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, ShortSwings = false }, bars);
+        Assert.Contains(noShortSwings.Scene.Marks, m => m.Kind == StudyMarkKind.Circle);
+        Assert.All(noShortSwings.Scene.Marks, m => Assert.Equal(m.Kind != StudyMarkKind.Circle, noShortSwings.IsShown(m)));
+        var noMidSwings = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, IntermediateSwings = false }, bars);
+        Assert.Contains(noMidSwings.Scene.Marks, m => m.Text is "ITH" or "ITL");
+        Assert.All(noMidSwings.Scene.Marks, m => Assert.Equal(m.Text is not ("ITH" or "ITL"), noMidSwings.IsShown(m)));
+        var noLongSwings = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, LongSwings = false }, bars);
+        Assert.All(noLongSwings.Scene.Marks, m => Assert.Equal(m.Text is not ("LTH" or "LTL"), noLongSwings.IsShown(m)));
+
+        // structure of one tier: its break segments and labels, but not the long-term swing levels (alertable)
+        var noShort = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, ShortStructure = false }, bars);
+        Assert.Contains(noShort.Scene.Tags, t => t.Text.StartsWith("ST "));
+        Assert.All(noShort.Scene.Tags, t => Assert.Equal(!t.Text.StartsWith("ST "), noShort.IsShown(t)));
+        Assert.All(noShort.Scene.Lines, l => Assert.Equal(l.Alert != null || l.Style != LineDashStyle.Dot, noShort.IsShown(l)));
+        var noMid = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, IntermediateStructure = false }, bars);
+        Assert.Contains(noMid.Scene.Tags, t => t.Text.StartsWith("IT "));
+        Assert.All(noMid.Scene.Tags, t => Assert.Equal(!t.Text.StartsWith("IT "), noMid.IsShown(t)));
+        var noLong = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, LongStructure = false }, bars);
+        Assert.All(noLong.Scene.Tags, t => Assert.Equal(!t.Text.StartsWith("LT "), noLong.IsShown(t)));
+        Assert.All(noLong.Scene.Lines.Where(l => l.Alert != null), l => Assert.True(noLong.IsShown(l)));
+
+        var unvalidated = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, ValidateBreaks = false }, bars);
+        Assert.NotEmpty(unvalidated.Scene.Boxes);
+        Assert.All(unvalidated.Scene.Boxes, b => Assert.False(unvalidated.IsShown(b)));
+        Assert.All(unvalidated.Scene.Marks, m => Assert.Equal(!Verdict(m), unvalidated.IsShown(m)));
+
+        var noLabels = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, ShowBreakLabels = false }, bars);
+        Assert.All(noLabels.Scene.Tags, t => Assert.False(noLabels.IsShown(t)));
+        Assert.All(noLabels.Scene.Lines, l => Assert.True(noLabels.IsShown(l)));
+
+        var noBoxes = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, StructureBoxes = false }, bars);
+        Assert.All(noBoxes.Scene.Boxes, b => Assert.False(noBoxes.IsShown(b)));
+        Assert.Contains(noBoxes.Scene.Marks, m => Verdict(m) && noBoxes.IsShown(m));
+
+        var noTint = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, BreakTint = false }, bars);
+        Assert.NotEmpty(noTint.Scene.Tints);
+        Assert.All(noTint.Scene.Tints, t => Assert.False(noTint.IsTintShown(t.Key, t.Value)));
+        var higherOff = Filtered(Plain, () => new AnchoredMarketStructure { MaximumObjects = 5000, IntermediateStructure = false, LongStructure = false }, bars);
+        Assert.All(higherOff.Scene.Tints, t => Assert.False(higherOff.IsTintShown(t.Key, t.Value)));
+        var tinted = Filtered(Plain, Plain, bars);
+        Assert.All(tinted.Scene.Tints, t => Assert.True(tinted.IsTintShown(t.Key, t.Value)));
+    }
+
+    [Fact]
+    public void Scatter_panel_drawing_toggles_only_hide_drawings()
+    {
+        StructureScatterPanel Plain() => new() { PivotLength = 3, MaximumObjects = 5000 };
+        var noStructure = Filtered(Plain, () => new StructureScatterPanel { PivotLength = 3, MaximumObjects = 5000, ShowStructure = false }, Walk(400));
+        Assert.NotEmpty(noStructure.Scene.Lines); Assert.NotEmpty(noStructure.Scene.Tags);
+        Assert.All(noStructure.Scene.Lines, l => Assert.False(noStructure.IsShown(l)));
+        Assert.All(noStructure.Scene.Tags, t => Assert.False(noStructure.IsShown(t)));
+
+        // the bar colors are still computed, only not painted
+        var noHeat = Filtered(Plain, () => new StructureScatterPanel { PivotLength = 3, MaximumObjects = 5000, Heatmap = false }, Walk(400));
+        var paint = Paint(noHeat, "StructureScatter.Paint");
+        Assert.False(paint.Visible);
+        Assert.Contains(Enumerable.Range(0, noHeat.Bars.Count), bar => paint[bar] != null);
+        Assert.True(Paint(Plain(), "StructureScatter.Paint").Visible);
+    }
+
+    [Fact]
+    public void Trend_panel_drawing_toggles_only_hide_drawings()
+    {
+        StructureTrendPanel Plain() => new() { SwingLength = 2, MaximumObjects = 5000 };
+        var bars = Walk(400);
+
+        var noStructure = Filtered(Plain, () => new StructureTrendPanel { SwingLength = 2, MaximumObjects = 5000, ShowStructure = false }, bars);
+        Assert.NotEmpty(noStructure.Scene.Tags);
+        Assert.All(noStructure.Scene.Tags, t => Assert.False(noStructure.IsShown(t)));
+        Assert.All(noStructure.Scene.Lines, l => Assert.Equal(l.Style == LineDashStyle.Dot, noStructure.IsShown(l)));
+
+        // sweeps are still detected (strategy series identical), only not drawn
+        var noLiquidity = Filtered(Plain, () => new StructureTrendPanel { SwingLength = 2, MaximumObjects = 5000, ShowLiquidity = false }, bars);
+        Assert.NotEmpty(noLiquidity.Scene.Marks);
+        Assert.All(noLiquidity.Scene.Marks, m => Assert.False(noLiquidity.IsShown(m)));
+        Assert.All(noLiquidity.Scene.Lines, l => Assert.Equal(l.Style != LineDashStyle.Dot, noLiquidity.IsShown(l)));
+        var sweep = Series(noLiquidity, "StructureTrend.Sweep");
+        Assert.Contains(Enumerable.Range(0, noLiquidity.Bars.Count), bar => sweep[bar] != 0);
+
+        // gaps are hidden but their live edges stay alertable
+        var noFvg = Filtered(Plain, () => new StructureTrendPanel { SwingLength = 2, MaximumObjects = 5000, ShowFvg = false }, bars);
+        Assert.NotEmpty(noFvg.Scene.Boxes);
+        Assert.All(noFvg.Scene.Boxes, b => Assert.False(noFvg.IsShown(b)));
+        Assert.Contains(noFvg.GetAlertLevels(), l => l.Name.Contains("FVG"));
+
+        var noPaint = Filtered(Plain, () => new StructureTrendPanel { SwingLength = 2, MaximumObjects = 5000, ColorCandles = false }, bars);
+        var paint = Paint(noPaint, "StructureTrend.Paint");
+        Assert.False(paint.Visible);
+        Assert.Contains(Enumerable.Range(0, noPaint.Bars.Count), bar => paint[bar] != null);
+    }
+
+    [Fact]
+    public void Wave_extension_drawing_toggles_only_hide_drawings()
+    {
+        WaveExtensions Plain() => new() { SwingLength = 1, RequireSubwaves = false };
+        static bool Target(StudyLine l) => l.Alert?.StartsWith("Wave 5 target") == true;
+
+        var noTargets = Filtered(Plain, () => new WaveExtensions { SwingLength = 1, RequireSubwaves = false, ShowTargets = false }, Waves(), ChartPeriod.M1);
+        Assert.Equal(2, noTargets.Scene.Lines.Count(Target));
+        Assert.All(noTargets.Scene.Lines, l => Assert.Equal(!Target(l), noTargets.IsShown(l)));
+
+        var noLabels = Filtered(Plain, () => new WaveExtensions { SwingLength = 1, RequireSubwaves = false, ShowLabels = false }, Waves(), ChartPeriod.M1);
+        Assert.Equal(5, noLabels.Scene.Tags.Count);
+        Assert.All(noLabels.Scene.Tags, t => Assert.False(noLabels.IsShown(t)));
+
+        // the zone (114.55-120.45) is reached at bar 13: the box and its mark are hidden, the zone alert existed until then
+        var reached = Waves().Take(13).Append(new Ohlc(130, 131, 118, 119)).Append(new Ohlc(119, 120, 118, 119)).ToArray();
+        var noZone = Filtered(Plain, () => new WaveExtensions { SwingLength = 1, RequireSubwaves = false, ShowZone = false }, reached, ChartPeriod.M1);
+        Assert.False(noZone.IsShown(Assert.Single(noZone.Scene.Boxes)));
+        Assert.False(noZone.IsShown(Assert.Single(noZone.Scene.Marks, m => m.Text == "Zone reached" && m.Available == 13)));
+        var live = Filtered(Plain, () => new WaveExtensions { SwingLength = 1, RequireSubwaves = false, ShowZone = false }, Waves(), ChartPeriod.M1);
+        Assert.Contains(live.GetAlertLevels(), l => l.Name.StartsWith("Extension retracement zone"));
+
+        var noPath = Filtered(Plain, () => new WaveExtensions { SwingLength = 1, RequireSubwaves = false, ShowPath = false }, Waves(), ChartPeriod.M1);
+        Assert.NotEmpty(noPath.Scene.Paths);
+        Assert.All(noPath.Scene.Paths, p => Assert.False(noPath.IsShown(p)));
+
+        // wave 1 (10) ≈ wave 3 (11): the watch tag is hidden by its own toggle or with the targets; the targets stay alertable
+        static bool Watch(StudyTag t) => t.Text == "Watch: possible extended wave 5";
+        var noWatch = Filtered(Plain, () => new WaveExtensions { SwingLength = 1, RequireSubwaves = false, ShowWatch = false }, WatchWaves(), ChartPeriod.M1);
+        Assert.False(noWatch.IsShown(Assert.Single(noWatch.Scene.Tags, Watch)));
+        Assert.All(noWatch.Scene.Lines, l => Assert.True(noWatch.IsShown(l)));
+        var watchNoTargets = Filtered(Plain, () => new WaveExtensions { SwingLength = 1, RequireSubwaves = false, ShowTargets = false }, WatchWaves(), ChartPeriod.M1);
+        Assert.False(watchNoTargets.IsShown(Assert.Single(watchNoTargets.Scene.Tags, Watch)));
+        Assert.Equal(2, watchNoTargets.GetAlertLevels().Count(l => l.Name.StartsWith("Wave 5 target")));
+    }
+
+    // zigzag 100 (bar 1), 110 (3), 105 (5), 116 (7), 111 (9), each confirmed one bar later: wave 4 with waves 1 and 3 within 10 %
+    private static Ohlc[] WatchWaves() => new Ohlc[]
+    {
+        new(103, 104, 101, 102), new(102, 103, 100, 101), new(102, 106, 102, 105), new(105, 110, 105, 109), new(108, 108, 106, 107),
+        new(107, 107, 105, 106), new(107, 112, 107, 111), new(111, 116, 111, 115), new(115, 115, 113, 114), new(114, 114, 111, 112),
+        new(112, 113, 112, 113), new(113, 113, 112, 112),
+    };
 }

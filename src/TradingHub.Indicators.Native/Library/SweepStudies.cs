@@ -5,6 +5,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Drawing;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace TradingHub.Indicators.Native;
 
@@ -36,6 +37,9 @@ internal static class SweepMath
         typeof(WorldSession).GetField(session.ToString())?.GetCustomAttribute<DisplayAttribute>()?.Name ?? session.ToString();
 
     internal static OptionalValueDataSeries Series(string id, string name) => new(id, name) { VisualType = VisualMode.Hide, ShowZeroValue = true };
+
+    /// <summary>Setting description of every display-only visibility filter.</summary>
+    internal const string DisplayOnly = "Display only: hides drawings; never changes detection, strategy series or alerts.";
 }
 
 public enum LiquiditySweepMode
@@ -52,16 +56,16 @@ public class LiquiditySweeps : ClosedBarStudy
 {
     private const int LevelLifetime = 2000;
 
-    private sealed class SweepLevel(StudySwing swing, StudyLine? line)
+    private sealed class SweepLevel(StudySwing swing, StudyLine line)
     {
         public StudySwing Swing { get; } = swing;
-        public StudyLine? Line { get; } = line;
+        public StudyLine Line { get; } = line;
         public bool Broken, Wicked, Dead;
     }
 
     private int _length = 5, _maxBars = 300;
     private LiquiditySweepMode _mode = LiquiditySweepMode.All;
-    private bool _extend = true, _showZones = true, _showLevels = true, _showLabels = true;
+    private bool _extend = true, _showZones = true, _showLevels = true, _showLabels = true, _showBackground = true;
     private readonly List<SweepLevel> _levels = new();
     private readonly List<(StudyBox Box, bool Bull)> _zones = new();
     private int _bullWick, _bearWick, _bullRetest, _bearRetest, _barWick, _barRetest;
@@ -81,16 +85,23 @@ public class LiquiditySweeps : ClosedBarStudy
     public bool ExtendUntilBroken { get => _extend; set { _extend = value; RecalculateValues(); } }
     [Display(Name = "Swept area lifetime (bars)", GroupName = "Calculation", Order = 13), Range(1, 5000)]
     public int MaxZoneBars { get => _maxBars; set { _maxBars = Math.Clamp(value, 1, 5000); RecalculateValues(); } }
-    [Display(Name = "Swept areas", GroupName = "Drawing", Order = 20)]
-    public bool ShowZones { get => _showZones; set { _showZones = value; RecalculateValues(); } }
-    [Display(Name = "Liquidity levels", GroupName = "Drawing", Order = 21)]
-    public bool ShowLevels { get => _showLevels; set { _showLevels = value; RecalculateValues(); } }
-    [Display(Name = "Labels (wick / retest)", GroupName = "Drawing", Order = 22)]
-    public bool ShowLabels { get => _showLabels; set { _showLabels = value; RecalculateValues(); } }
-    [Display(Name = "Background on the sweep bar", GroupName = "Drawing", Order = 23)]
-    public bool ShowBackground { get; set; } = true;
+    // display-only filters: every area, level, label and tint is always recorded (and alertable); IsShown hides them
+    [Display(Name = "Swept areas", GroupName = "Drawing", Order = 20, Description = SweepMath.DisplayOnly)]
+    public bool ShowZones { get => _showZones; set { _showZones = value; RedrawChart(); } }
+    [Display(Name = "Liquidity levels", GroupName = "Drawing", Order = 21, Description = SweepMath.DisplayOnly)]
+    public bool ShowLevels { get => _showLevels; set { _showLevels = value; RedrawChart(); } }
+    [Display(Name = "Labels (wick / retest)", GroupName = "Drawing", Order = 22, Description = SweepMath.DisplayOnly)]
+    public bool ShowLabels { get => _showLabels; set { _showLabels = value; RedrawChart(); } }
+    [Display(Name = "Background on the sweep bar", GroupName = "Drawing", Order = 23, Description = SweepMath.DisplayOnly)]
+    public bool ShowBackground { get => _showBackground; set { _showBackground = value; RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 30)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 31)] public Color BearColor { get; set; } = StudyPalette.Bear;
+
+    // the only boxes, lines, tags and tints of this study are swept areas, liquidity levels, sweep labels and sweep tints
+    public override bool IsShown(StudyBox box) => ShowZones;
+    public override bool IsShown(StudyLine line) => ShowLevels;
+    public override bool IsShown(StudyTag tag) => ShowLabels;
+    public override bool IsTintShown(int bar, Color color) => ShowBackground;
 
     protected override void ResetState()
     {
@@ -101,7 +112,7 @@ public class LiquiditySweeps : ClosedBarStudy
     protected override void OnCoverageGap(int bar)
     {
         foreach (var (box, _) in _zones) box.End(bar);
-        foreach (var level in _levels) level.Line?.End(bar);
+        foreach (var level in _levels) level.Line.End(bar);
         ResetState();
     }
 
@@ -140,14 +151,14 @@ public class LiquiditySweeps : ClosedBarStudy
             }
         }
         for (int i = _levels.Count - 1; i >= 0; i--)
-            if (_levels[i].Dead) { _levels[i].Line?.End(bar); _levels.RemoveAt(i); }
+            if (_levels[i].Dead) { _levels[i].Line.End(bar); _levels.RemoveAt(i); }
 
         var (swingHigh, swingLow) = StudySwings.Confirm(Bars, bar, SwingLength, SwingLength);
         if (swingHigh is { } h) AddLevel(h, bar);
         if (swingLow is { } l) AddLevel(l, bar);
 
         int signal = Math.Sign(_barWick + _barRetest);
-        if ((_barWick != 0 || _barRetest != 0) && ShowBackground) Scene.Tints[bar] = StudyPalette.A(_lastColor, 18);
+        if (_barWick != 0 || _barRetest != 0) Scene.Tints[bar] = StudyPalette.A(_lastColor, 18);
         _signal.Set(bar, signal); _wick.Set(bar, Math.Sign(_barWick)); _retest.Set(bar, Math.Sign(_barRetest));
         Dashboard();
     }
@@ -155,15 +166,15 @@ public class LiquiditySweeps : ClosedBarStudy
     private void AddLevel(StudySwing swing, int bar)
     {
         var color = swing.High ? BearColor : BullColor;
-        var line = ShowLevels ? Scene.Level(swing.Bar, bar, swing.Price, StudyPalette.A(color, 150), null, swing.High ? "Liquidity high" : "Liquidity low", style: LineDashStyle.Dot) : null;
+        var line = Scene.Level(swing.Bar, bar, swing.Price, StudyPalette.A(color, 150), null, swing.High ? "Liquidity high" : "Liquidity low", style: LineDashStyle.Dot);
         _levels.Add(new SweepLevel(swing, line));
     }
 
     private void Sweep(int bar, bool bull, decimal top, decimal bottom, bool wick)
     {
         var b = Bars[bar]; var color = bull ? BullColor : BearColor;
-        if (ShowZones) _zones.Add((Scene.Box(bar, bar, top, bottom, color, null, "Swept area"), bull));
-        if (ShowLabels) Scene.Tag(bar, bar, bull ? b.Low : b.High, wick ? "Wick" : "Retest", color, !bull);
+        _zones.Add((Scene.Box(bar, bar, top, bottom, color, null, "Swept area"), bull));
+        Scene.Tag(bar, bar, bull ? b.Low : b.High, wick ? "Wick" : "Retest", color, !bull);
         int dir = bull ? 1 : -1;
         if (wick) { _barWick += dir; if (bull) _bullWick++; else _bearWick++; }
         else { _barRetest += dir; if (bull) _bullRetest++; else _bearRetest++; }
@@ -197,7 +208,7 @@ public class SessionSweepInverseFvg : ClosedBarStudy
     private int _sweepBars = 10, _atrLength = 14;
     private decimal _maxSweepAtr = 5, _targetAtr = 2;
     private SessionSweepStop _stopKind = SessionSweepStop.InverseFvg;
-    private bool _strict;
+    private bool _strict, _showSessionBox = true, _showSweeps = true, _showSignals = true;
     private RunningAtr _atr = new(14);
     // session range
     private bool _seen, _prevIn, _prevClosedInside, _ranged;
@@ -237,6 +248,13 @@ public class SessionSweepInverseFvg : ClosedBarStudy
     public bool Strict { get => _strict; set { _strict = value; RecalculateValues(); } }
     [Display(Name = "Target (ATR)", GroupName = "Calculation", Order = 16), Range(0.1, 50)]
     public decimal TargetAtr { get => _targetAtr; set { _targetAtr = Math.Clamp(value, 0.1m, 50); RecalculateValues(); } }
+    // display-only filters: every range, sweep mark and hypothetical signal drawing is always recorded (and alertable)
+    [Display(Name = "Session box and range levels", GroupName = "Drawing", Order = 20, Description = SweepMath.DisplayOnly)]
+    public bool ShowSessionBox { get => _showSessionBox; set { _showSessionBox = value; RedrawChart(); } }
+    [Display(Name = "Sweeps", GroupName = "Drawing", Order = 21, Description = SweepMath.DisplayOnly)]
+    public bool ShowSweeps { get => _showSweeps; set { _showSweeps = value; RedrawChart(); } }
+    [Display(Name = "Hypothetical signals (trendline, inverse FVG, stop, target)", GroupName = "Drawing", Order = 22, Description = SweepMath.DisplayOnly)]
+    public bool ShowSignals { get => _showSignals; set { _showSignals = value; RedrawChart(); } }
     [Display(Name = "Session", GroupName = "Colors", Order = 30)] public Color SessionColor { get; set; } = StudyPalette.Neutral;
     [Display(Name = "Bullish", GroupName = "Colors", Order = 31)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 32)] public Color BearColor { get; set; } = StudyPalette.Bear;
@@ -244,6 +262,13 @@ public class SessionSweepInverseFvg : ClosedBarStudy
 
     /// <summary>Completed session ranges (source bar = first session bar, <c>To</c> = last session bar).</summary>
     [Browsable(false)] public IReadOnlyList<StudyBox> SessionRanges => _ranges;
+
+    // range boxes have no text and only the range levels carry the session alert names; sweeps are circles and tags;
+    // everything else (trendline, signal and exit marks, inverse FVG, stop and target) belongs to a hypothetical signal
+    public override bool IsShown(StudyBox box) => box.Text == null ? ShowSessionBox : ShowSignals;
+    public override bool IsShown(StudyLine line) => line.Alert is "Session high" or "Session low" ? ShowSessionBox : ShowSignals;
+    public override bool IsShown(StudyMark mark) => mark.Kind == StudyMarkKind.Circle ? ShowSweeps : ShowSignals;
+    public override bool IsShown(StudyTag tag) => ShowSweeps;
 
     protected override void ResetState()
     {
@@ -443,14 +468,20 @@ public class PriorDayFvg : ClosedBarStudy
         public bool Touched;
     }
 
+    /// <summary>Unfilled FVGs tracked (and alertable) at most; older ones are retired. The display filters draw a subset.</summary>
+    private const int TrackedFvgs = 50;
+
     private int _days = 10, _maxFvgs = 10, _fvgAtrLength = 14, _window = 30, _stopAtrLength = 14, _trendEma = 200;
     private decimal _fvgAtrMult = 0.25m, _stopAtr = 1.5m, _targetAtr = 3;
-    private bool _showFvgs = true, _sizeFilter = true, _showMid = true, _longs = true, _shorts = true, _invert, _trendFilter;
+    private bool _showFvgs = true, _keepFilled, _sizeFilter = true, _showMid = true, _longs = true, _shorts = true, _invert, _trendFilter;
     private PriorDayEntryTiming _entry = PriorDayEntryTiming.AtMidpoint;
     private RunningAtr _fvgAtr = new(14), _tradeAtr = new(14);
     private RunningEma _ema = new(200);
     private readonly List<DayLevel> _levels = new();
-    private readonly List<(StudyBox Box, StudyLine? Mid, bool Bull)> _fvgs = new();
+    private readonly List<(StudyBox Box, StudyLine Mid, bool Bull)> _fvgs = new();
+    // presentation only: source bars of the FVGs currently drawn, cached per (bars, boxes, MaxFvgs, KeepFilled)
+    private readonly HashSet<int> _drawnFvgs = new();
+    private (int Bars, int Boxes, int Max, bool Keep) _drawnKey = (-1, 0, 0, false);
     private readonly List<(decimal Mid, bool Long)> _queue = new();
     private List<(int Bar, decimal Price)>? _emaPoints;
     private bool _dayComplete;
@@ -472,18 +503,21 @@ public class PriorDayFvg : ClosedBarStudy
 
     [Display(Name = "Days kept", GroupName = "Levels", Order = 10), Range(1, 60)]
     public int DaysToKeep { get => _days; set { _days = Math.Clamp(value, 1, 60); RecalculateValues(); } }
-    [Display(Name = "Show the FVGs", GroupName = "FVG", Order = 20)]
-    public bool ShowFvgs { get => _showFvgs; set { _showFvgs = value; RecalculateValues(); } }
-    [Display(Name = "Live FVGs drawn", GroupName = "FVG", Order = 21), Range(1, 50)]
-    public int MaxFvgs { get => _maxFvgs; set { _maxFvgs = Math.Clamp(value, 1, 50); RecalculateValues(); } }
-    [Display(Name = "Size filter (ATR)", GroupName = "FVG", Order = 22)]
+    // display-only filters: every FVG and midpoint line is always recorded and alertable until filled; IsShown hides them
+    [Display(Name = "Show the FVGs", GroupName = "FVG", Order = 20, Description = SweepMath.DisplayOnly)]
+    public bool ShowFvgs { get => _showFvgs; set { _showFvgs = value; RedrawChart(); } }
+    [Display(Name = "FVGs drawn", GroupName = "FVG", Order = 21, Description = SweepMath.DisplayOnly), Range(1, 50)]
+    public int MaxFvgs { get => _maxFvgs; set { _maxFvgs = Math.Clamp(value, 1, 50); RedrawChart(); } }
+    [Display(Name = "Keep filled FVGs", GroupName = "FVG", Order = 22, Description = SweepMath.DisplayOnly)]
+    public bool KeepFilled { get => _keepFilled; set { _keepFilled = value; RedrawChart(); } }
+    [Display(Name = "Size filter (ATR)", GroupName = "FVG", Order = 23)]
     public bool SizeFilter { get => _sizeFilter; set { _sizeFilter = value; RecalculateValues(); } }
-    [Display(Name = "FVG ATR length", GroupName = "FVG", Order = 23), Range(1, 200)]
+    [Display(Name = "FVG ATR length", GroupName = "FVG", Order = 24), Range(1, 200)]
     public int FvgAtrLength { get => _fvgAtrLength; set { _fvgAtrLength = Math.Clamp(value, 1, 200); RecalculateValues(); } }
-    [Display(Name = "Minimum size (ATR)", GroupName = "FVG", Order = 24), Range(0, 10)]
+    [Display(Name = "Minimum size (ATR)", GroupName = "FVG", Order = 25), Range(0, 10)]
     public decimal FvgAtrMult { get => _fvgAtrMult; set { _fvgAtrMult = Math.Clamp(value, 0, 10); RecalculateValues(); } }
-    [Display(Name = "Midpoint line", GroupName = "FVG", Order = 25)]
-    public bool ShowMid { get => _showMid; set { _showMid = value; RecalculateValues(); } }
+    [Display(Name = "Midpoint line", GroupName = "FVG", Order = 26, Description = SweepMath.DisplayOnly)]
+    public bool ShowMid { get => _showMid; set { _showMid = value; RedrawChart(); } }
     [Display(Name = "Long signals", GroupName = "Signals", Order = 30)]
     public bool Longs { get => _longs; set { _longs = value; RecalculateValues(); } }
     [Display(Name = "Short signals", GroupName = "Signals", Order = 31)]
@@ -508,10 +542,28 @@ public class PriorDayFvg : ClosedBarStudy
     [Display(Name = "Bearish", GroupName = "Colors", Order = 41)] public Color BearColor { get; set; } = StudyPalette.Bear;
     [Display(Name = "Prior-day levels", GroupName = "Colors", Order = 42)] public Color LevelColor { get; set; } = StudyPalette.Amber;
 
+    /// <summary>
+    /// FVG boxes are this study's only boxes: the newest <see cref="MaxFvgs"/> unfilled ones (with <see cref="KeepFilled"/>,
+    /// the newest of all) are drawn. Midpoint lines (no alert, no label) follow their FVG.
+    /// </summary>
+    public override bool IsShown(StudyBox box) => ShowFvgs && DrawnFvgs().Contains(box.From);
+    public override bool IsShown(StudyLine line) => line.Alert != null || ShowMid && ShowFvgs && DrawnFvgs().Contains(line.From);
+
+    // one FVG completes per bar, so its source bar identifies it (and its midpoint line)
+    private HashSet<int> DrawnFvgs()
+    {
+        var key = (Bars.Count, Scene.Boxes.Count, MaxFvgs, KeepFilled);
+        if (key == _drawnKey) return _drawnFvgs;
+        _drawnKey = key; _drawnFvgs.Clear();
+        for (int i = Scene.Boxes.Count - 1; i >= 0 && _drawnFvgs.Count < MaxFvgs; i--)
+            if (KeepFilled || Scene.Boxes[i].Live) _drawnFvgs.Add(Scene.Boxes[i].From);
+        return _drawnFvgs;
+    }
+
     protected override void ResetState()
     {
         _fvgAtr = new(FvgAtrLength); _tradeAtr = new(StopAtrLength); _ema = new(TrendEma);
-        _levels.Clear(); _fvgs.Clear(); _queue.Clear(); _emaPoints = null;
+        _levels.Clear(); _fvgs.Clear(); _queue.Clear(); _emaPoints = null; _drawnKey = (-1, 0, 0, false);
         _dayComplete = false; _dayStart = _setupBar = -1; _setupDir = _pos = _wins = _losses = 0; _dayHigh = _dayLow = 0;
         _stopLine = _targetLine = null;
     }
@@ -519,7 +571,7 @@ public class PriorDayFvg : ClosedBarStudy
     protected override void OnCoverageGap(int bar)
     {
         foreach (var level in _levels) if (!level.Touched) level.Line.End(bar);
-        foreach (var (box, mid, _) in _fvgs) { box.End(bar); mid?.End(bar); }
+        foreach (var (box, mid, _) in _fvgs) { box.End(bar); mid.End(bar); }
         _stopLine?.End(bar); _targetLine?.End(bar);
         ResetState();
     }
@@ -573,13 +625,10 @@ public class PriorDayFvg : ClosedBarStudy
         if (SweepMath.Gap(Bars, bar, SizeFilter ? fvgAtr * FvgAtrMult : 0) is { } gap)
         {
             var color = gap.Bull ? BullColor : BearColor; decimal mid = (gap.Top + gap.Bottom) / 2;
-            if (ShowFvgs)
-            {
-                var box = Scene.Box(bar - 1, bar, gap.Top, gap.Bottom, color, null, "Fair value gap", 35);
-                var midLine = ShowMid ? Scene.Level(bar - 1, bar, mid, StudyPalette.A(color, 150), style: LineDashStyle.Dot) : null;
-                _fvgs.Add((box, midLine, gap.Bull));
-                while (_fvgs.Count > MaxFvgs) { _fvgs[0].Box.End(bar); _fvgs[0].Mid?.End(bar); _fvgs.RemoveAt(0); }
-            }
+            var box = Scene.Box(bar - 1, bar, gap.Top, gap.Bottom, color, null, "Fair value gap", 35);
+            var midLine = Scene.Level(bar - 1, bar, mid, StudyPalette.A(color, 150), style: LineDashStyle.Dot);
+            _fvgs.Add((box, midLine, gap.Bull));
+            while (_fvgs.Count > TrackedFvgs) { _fvgs[0].Box.End(bar); _fvgs[0].Mid.End(bar); _fvgs.RemoveAt(0); }
             bool inWindow = _setupDir != 0 && bar - _setupBar <= Window;
             bool longSignal = gap.Bull && inWindow && _setupDir is 1 or 2;
             bool shortSignal = !gap.Bull && inWindow && _setupDir is -1 or 2;
@@ -598,12 +647,12 @@ public class PriorDayFvg : ClosedBarStudy
             if (q >= 0) { (signal, stop, target) = Open(bar, _queue[q].Mid, _queue[q].Long, tradeAtr); _queue.Clear(); }
         }
 
-        // drawn FVGs end when filled (from the bar after the one that completes them)
+        // tracked FVGs end when filled (from the bar after the one that completes them)
         for (int i = _fvgs.Count - 1; i >= 0; i--)
         {
             var (box, midLine, bull) = _fvgs[i];
             if (box.Available >= bar || (bull ? b.Low > box.Bottom : b.High < box.Top)) continue;
-            box.End(bar); midLine?.End(bar); _fvgs.RemoveAt(i);
+            box.End(bar); midLine.End(bar); _fvgs.RemoveAt(i);
         }
 
         if (TrendFilter && _ema.Ready)
@@ -690,20 +739,25 @@ public class EqualHighsLowsFvg : ClosedBarStudy
     public int MaxAge { get => _maxAge; set { _maxAge = Math.Clamp(value, 1, 1000); RecalculateValues(); } }
     [Display(Name = "Volume in the zone", GroupName = "Drawing", Order = 20)]
     public bool ShowVolume { get => _showVolume; set { _showVolume = value; RecalculateValues(); } }
-    [Display(Name = "Breakout marks", GroupName = "Breakout", Order = 30)]
-    public bool ShowBreakouts { get => _showBreakouts; set { _showBreakouts = value; RecalculateValues(); } }
+    // display-only filters: breakout marks and gaps are always recorded (gaps stay alertable until filled or projected out)
+    [Display(Name = "Breakout marks", GroupName = "Breakout", Order = 30, Description = SweepMath.DisplayOnly)]
+    public bool ShowBreakouts { get => _showBreakouts; set { _showBreakouts = value; RedrawChart(); } }
     [Display(Name = "ATR length", GroupName = "Breakout", Order = 31), Range(1, 200)]
     public int AtrLength { get => _atrLength; set { _atrLength = Math.Clamp(value, 1, 200); RecalculateValues(); } }
     [Display(Name = "Minimum body (ATR)", GroupName = "Breakout", Order = 32), Range(0, 10)]
     public decimal BodyAtr { get => _bodyAtr; set { _bodyAtr = Math.Clamp(value, 0, 10); RecalculateValues(); } }
     [Display(Name = "Minimum FVG (ATR)", GroupName = "Breakout", Order = 33), Range(0, 10)]
     public decimal FvgAtr { get => _fvgAtr; set { _fvgAtr = Math.Clamp(value, 0, 10); RecalculateValues(); } }
-    [Display(Name = "Breakout FVG", GroupName = "Breakout", Order = 34)]
-    public bool ShowFvgs { get => _showFvgs; set { _showFvgs = value; RecalculateValues(); } }
+    [Display(Name = "Breakout FVG", GroupName = "Breakout", Order = 34, Description = SweepMath.DisplayOnly)]
+    public bool ShowFvgs { get => _showFvgs; set { _showFvgs = value; RedrawChart(); } }
     [Display(Name = "FVG projection (bars)", GroupName = "Breakout", Order = 35), Range(1, 200)]
     public int FvgProjection { get => _projection; set { _projection = Math.Clamp(value, 1, 200); RecalculateValues(); } }
     [Display(Name = "Equal highs", GroupName = "Colors", Order = 40)] public Color EqualHighsColor { get; set; } = StudyPalette.Bear;
     [Display(Name = "Equal lows", GroupName = "Colors", Order = 41)] public Color EqualLowsColor { get; set; } = StudyPalette.Bull;
+
+    // breakout marks are this study's only marks; breakout gaps are the boxes alerted as "Breakout gap"
+    public override bool IsShown(StudyMark mark) => ShowBreakouts;
+    public override bool IsShown(StudyBox box) => box.Alert != "Breakout gap" || ShowFvgs;
 
     protected override void ResetState()
     {
@@ -728,8 +782,8 @@ public class EqualHighsLowsFvg : ClosedBarStudy
         {
             bool up = _pendingDir > 0; var color = up ? EqualLowsColor : EqualHighsColor;
             signal = _pendingDir; if (up) _bullBreaks++; else _bearBreaks++;
-            if (ShowBreakouts) Scene.Mark(bar, bar, up ? b.Low : b.High, up ? StudyMarkKind.TriangleUp : StudyMarkKind.TriangleDown, color, "Breakout", !up);
-            if (ShowFvgs) _gaps.Add((Scene.Box(bar - 1, bar, gap.Top, gap.Bottom, color, "FVG", "Breakout gap", 45), up));
+            Scene.Mark(bar, bar, up ? b.Low : b.High, up ? StudyMarkKind.TriangleUp : StudyMarkKind.TriangleDown, color, "Breakout", !up);
+            _gaps.Add((Scene.Box(bar - 1, bar, gap.Top, gap.Bottom, color, "FVG", "Breakout gap", 45), up));
         }
         _pendingDir = 0;
 
@@ -831,14 +885,20 @@ public class GapFillBreakouts : ClosedBarStudy
     public int MaxBarsBack { get => _maxBack; set { _maxBack = Math.Clamp(value, 10, 2000); RecalculateValues(); } }
     [Display(Name = "Live gaps at most", GroupName = "Calculation", Order = 13), Range(1, 50)]
     public int MaxGaps { get => _maxGaps; set { _maxGaps = Math.Clamp(value, 1, 50); RecalculateValues(); } }
-    [Display(Name = "Gaps", GroupName = "Drawing", Order = 20)]
-    public bool ShowGaps { get => _showGaps; set { _showGaps = value; RecalculateValues(); } }
-    [Display(Name = "Levels", GroupName = "Drawing", Order = 21)]
-    public bool ShowLevels { get => _showLevels; set { _showLevels = value; RecalculateValues(); } }
-    [Display(Name = "Break labels", GroupName = "Drawing", Order = 22)]
-    public bool ShowLabels { get => _showLabels; set { _showLabels = value; RecalculateValues(); } }
+    // display-only filters: every gap, level and break label is always recorded (and alertable); IsShown hides them
+    [Display(Name = "Gaps", GroupName = "Drawing", Order = 20, Description = SweepMath.DisplayOnly)]
+    public bool ShowGaps { get => _showGaps; set { _showGaps = value; RedrawChart(); } }
+    [Display(Name = "Levels", GroupName = "Drawing", Order = 21, Description = SweepMath.DisplayOnly)]
+    public bool ShowLevels { get => _showLevels; set { _showLevels = value; RedrawChart(); } }
+    [Display(Name = "Break labels", GroupName = "Drawing", Order = 22, Description = SweepMath.DisplayOnly)]
+    public bool ShowLabels { get => _showLabels; set { _showLabels = value; RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 30)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 31)] public Color BearColor { get; set; } = StudyPalette.Bear;
+
+    // the only boxes, lines and tags of this study are gaps, structure levels and break labels
+    public override bool IsShown(StudyBox box) => ShowGaps;
+    public override bool IsShown(StudyLine line) => ShowLevels;
+    public override bool IsShown(StudyTag tag) => ShowLabels;
 
     protected override void ResetState() { _atr = new(14); _book.Clear(); _bullBreaks = _bearBreaks = 0; }
 
@@ -874,7 +934,7 @@ public class GapFillBreakouts : ClosedBarStudy
             if (!gap.HasLevel && !gap.Used && candidate is { } level && pivotBar > gap.Bar && (gap.Bull ? level > gap.Remain : level < gap.Remain))
             {
                 gap.HasLevel = true; gap.LevelPrice = level; gap.LevelBar = pivotBar;
-                if (ShowLevels) gap.Level = Scene.Level(pivotBar, bar, level, StudyPalette.A(gap.Bull ? BullColor : BearColor, 200), null, "Gap structure level", style: LineDashStyle.Dash);
+                gap.Level = Scene.Level(pivotBar, bar, level, StudyPalette.A(gap.Bull ? BullColor : BearColor, 200), null, "Gap structure level", style: LineDashStyle.Dash);
             }
             if (gap.HasLevel && !gap.LevelDone && bar > gap.LevelBar + PivotLength && (gap.Bull ? b.Close < gap.LevelPrice : b.Close > gap.LevelPrice))
             {
@@ -884,7 +944,7 @@ public class GapFillBreakouts : ClosedBarStudy
                     // a bullish gap leaves support above it: cutting it is bearish (and the reverse)
                     bool bearish = gap.Bull; signal += bearish ? -1 : 1;
                     if (bearish) _bearBreaks++; else _bullBreaks++;
-                    if (ShowLabels) Scene.Tag(bar, bar, bearish ? b.High : b.Low, bearish ? "Bearish break" : "Bullish break", bearish ? BearColor : BullColor, bearish);
+                    Scene.Tag(bar, bar, bearish ? b.High : b.Low, bearish ? "Bearish break" : "Bullish break", bearish ? BearColor : BullColor, bearish);
                 }
             }
             if (bar - gap.Bar > MaxBarsBack && gap.HasLevel && !gap.LevelDone) { gap.LevelDone = true; gap.Level?.End(bar); }
@@ -896,7 +956,7 @@ public class GapFillBreakouts : ClosedBarStudy
         Scene.Row("Breaks (bullish / bearish)", $"{_bullBreaks} / {_bearBreaks}");
     }
 
-    private StudyBox? Draw(FillGap gap, int from, int available) => !ShowGaps ? null :
+    private StudyBox Draw(FillGap gap, int from, int available) =>
         Scene.Box(from, available, gap.Bull ? gap.Remain : gap.Top, gap.Bull ? gap.Bottom : gap.Remain, gap.Bull ? BullColor : BearColor, "FVG", "Unfilled gap");
 
     private static void Retire(FillGap gap, int bar)
@@ -939,15 +999,28 @@ public class BreakoutTestsRetests : ClosedBarStudy
     private sealed class Zone(bool bull)
     {
         public bool Bull { get; } = bull;
-        public int State, Since, Tests, Retests, LastMark = int.MinValue / 2;
+        public int State, Since, Tests, Retests;
         public decimal Top, Bottom;
         public StudyBox? Box;
+        // presentation only (never feeds detection or series): MinBars spacing and the zone's latest test / retest mark
+        public int LastSpaced = int.MinValue / 2;
+        public StudyMark? LatestTest, LatestRetest;
+    }
+
+    /// <summary>Presentation-only facts of one test or retest mark.</summary>
+    private sealed class GlyphInfo(Zone zone, bool retest, bool spaced)
+    {
+        public Zone Zone { get; } = zone;
+        public bool Retest { get; } = retest;
+        public bool Spaced { get; } = spaced;
     }
 
     private BreakoutZoneSides _sides = BreakoutZoneSides.Both;
     private decimal _width = 1;
     private int _maxBars = 500, _minBars, _left = 10, _right = 1;
-    private bool _showZones = true, _showGlyphs = true;
+    private bool _onlyLast, _showZones = true, _showGlyphs = true, _showBackground = true;
+    // keyed by mark identity; entries go with the marks the scene drops
+    private readonly ConditionalWeakTable<StudyMark, GlyphInfo> _glyphs = new();
     private RunningAtr _atr = new(200);
     private Zone _bull = new(true), _bear = new(false);
     private int _breaksUp, _breaksDown;
@@ -963,20 +1036,39 @@ public class BreakoutTestsRetests : ClosedBarStudy
     public decimal Width { get => _width; set { _width = Math.Clamp(value, 0.05m, 10); RecalculateValues(); } }
     [Display(Name = "Zone lifetime (bars)", GroupName = "Calculation", Order = 12), Range(10, 5000)]
     public int MaxBars { get => _maxBars; set { _maxBars = Math.Clamp(value, 10, 5000); RecalculateValues(); } }
-    [Display(Name = "Minimum bars between marks", GroupName = "Calculation", Order = 14), Range(0, 100)]
+    // display-only filters: every zone, test/retest mark and tint is always recorded (and zones alertable); IsShown hides them
+    [Display(Name = "Only the latest test and retest", GroupName = "Calculation", Order = 13, Description = SweepMath.DisplayOnly)]
+    public bool OnlyLast { get => _onlyLast; set { _onlyLast = value; RedrawChart(); } }
+    /// <summary>Display only; changing it rebuilds the (identical) scene to re-space the drawn marks.</summary>
+    [Display(Name = "Minimum bars between marks", GroupName = "Calculation", Order = 14, Description = SweepMath.DisplayOnly), Range(0, 100)]
     public int MinBars { get => _minBars; set { _minBars = Math.Clamp(value, 0, 100); RecalculateValues(); } }
     [Display(Name = "Bars to the left", GroupName = "Calculation", Order = 15), Range(1, 100)]
     public int Left { get => _left; set { _left = Math.Clamp(value, 1, 100); RecalculateValues(); } }
     [Display(Name = "Bars to the right", GroupName = "Calculation", Order = 16), Range(1, 50)]
     public int Right { get => _right; set { _right = Math.Clamp(value, 1, 50); RecalculateValues(); } }
-    [Display(Name = "Zones", GroupName = "Drawing", Order = 20)]
-    public bool ShowZones { get => _showZones; set { _showZones = value; RecalculateValues(); } }
-    [Display(Name = "Test and retest marks", GroupName = "Drawing", Order = 21)]
-    public bool ShowGlyphs { get => _showGlyphs; set { _showGlyphs = value; RecalculateValues(); } }
-    [Display(Name = "Background on the breakout", GroupName = "Drawing", Order = 22)]
-    public bool ShowBreakoutBackground { get; set; } = true;
+    [Display(Name = "Zones", GroupName = "Drawing", Order = 20, Description = SweepMath.DisplayOnly)]
+    public bool ShowZones { get => _showZones; set { _showZones = value; RedrawChart(); } }
+    [Display(Name = "Test and retest marks", GroupName = "Drawing", Order = 21, Description = SweepMath.DisplayOnly)]
+    public bool ShowGlyphs { get => _showGlyphs; set { _showGlyphs = value; RedrawChart(); } }
+    [Display(Name = "Background on the breakout", GroupName = "Drawing", Order = 22, Description = SweepMath.DisplayOnly)]
+    public bool ShowBreakoutBackground { get => _showBackground; set { _showBackground = value; RedrawChart(); } }
     [Display(Name = "Bullish", GroupName = "Colors", Order = 30)] public Color BullColor { get; set; } = StudyPalette.Bull;
     [Display(Name = "Bearish", GroupName = "Colors", Order = 31)] public Color BearColor { get; set; } = StudyPalette.Bear;
+
+    // zones are this study's only boxes and breakout tints its only tints
+    public override bool IsShown(StudyBox box) => ShowZones;
+    public override bool IsTintShown(int bar, Color color) => ShowBreakoutBackground;
+
+    /// <summary>
+    /// Test and retest marks: hidden with <see cref="ShowGlyphs"/> off; with <see cref="OnlyLast"/> only each zone's latest
+    /// test and latest retest are drawn, otherwise only marks at least <see cref="MinBars"/> after the previous drawn one.
+    /// </summary>
+    public override bool IsShown(StudyMark mark)
+    {
+        if (!_glyphs.TryGetValue(mark, out var glyph)) return true;
+        if (!ShowGlyphs) return false;
+        return OnlyLast ? ReferenceEquals(mark, glyph.Retest ? glyph.Zone.LatestRetest : glyph.Zone.LatestTest) : glyph.Spaced;
+    }
 
     private bool UseBull => Sides != BreakoutZoneSides.Bearish;
     private bool UseBear => Sides != BreakoutZoneSides.Bullish;
@@ -1011,7 +1103,7 @@ public class BreakoutTestsRetests : ClosedBarStudy
         Close(previous, bar);
         var zone = new Zone(previous.Bull) { State = 1, Since = bar, Top = top, Bottom = bottom };
         var color = zone.Bull ? BullColor : BearColor;
-        if (ShowZones) zone.Box = Scene.Box(swing.Bar, bar, top, bottom, color, null, zone.Bull ? "Support zone" : "Resistance zone");
+        zone.Box = Scene.Box(swing.Bar, bar, top, bottom, color, null, zone.Bull ? "Support zone" : "Resistance zone");
         Scene.Mark(swing.Bar, bar, swing.Price, StudyMarkKind.Circle, StudyPalette.A(color, 160), null, !zone.Bull);
         return zone;
     }
@@ -1027,13 +1119,10 @@ public class BreakoutTestsRetests : ClosedBarStudy
             {
                 zone.State = 2; zone.Since = bar; signal += bull ? -1 : 1;
                 if (bull) _breaksDown++; else _breaksUp++;
-                if (ShowBreakoutBackground) Scene.Tints[bar] = StudyPalette.A(flipped, 30);
+                Scene.Tints[bar] = StudyPalette.A(flipped, 30);
                 Scene.Mark(bar, bar, bull ? b.Low : b.High, bull ? StudyMarkKind.TriangleDown : StudyMarkKind.TriangleUp, flipped, null, !bull);
-                if (zone.Box != null)
-                {
-                    zone.Box.End(bar);
-                    zone.Box = Scene.Box(bar, bar, zone.Top, zone.Bottom, flipped, "Broken", bull ? "Broken support zone" : "Broken resistance zone");
-                }
+                zone.Box?.End(bar);
+                zone.Box = Scene.Box(bar, bar, zone.Top, zone.Bottom, flipped, "Broken", bull ? "Broken support zone" : "Broken resistance zone");
             }
             else if (openInside && (bull ? b.Close > zone.Top : b.Close < zone.Bottom))
             {
@@ -1060,9 +1149,12 @@ public class BreakoutTestsRetests : ClosedBarStudy
 
     private void Glyph(Zone zone, int bar, string text, decimal price, Color color, bool above, bool retest)
     {
-        if (!ShowGlyphs || bar - zone.LastMark < MinBars) return;
         Scene.Mark(bar, bar, price, retest ? StudyMarkKind.Diamond : StudyMarkKind.Square, color, text, above);
-        zone.LastMark = bar;
+        var mark = Scene.Marks[^1];
+        bool spaced = bar - zone.LastSpaced >= MinBars;
+        if (spaced) zone.LastSpaced = bar;
+        if (retest) zone.LatestRetest = mark; else zone.LatestTest = mark;
+        _glyphs.Add(mark, new GlyphInfo(zone, retest, spaced));
     }
 
     private static void Close(Zone zone, int bar)
