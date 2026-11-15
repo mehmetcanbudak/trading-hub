@@ -281,6 +281,7 @@ public sealed class AccountCenter
         }
         if (session.PositionCloseRecoveryStatus is { } recovery) s.Status += "; " + recovery;
 
+        var context = _svc.RithmicContextFor(s.Account.Profile!, session, acc); // the chart brokers' context and order lane
         foreach (var o in session.OrdersOf(acc))
         {
             string type = o.PriceType switch { 2 => "Market", 3 => "Stop limit", 4 => "Stop", _ => "Limit" };
@@ -290,7 +291,7 @@ public sealed class AccountCenter
                 : o.Cancelled ? o.Filled > 0 ? "Canceled (partial)" : "Canceled"
                 : "Filled";
             s.Orders.Add(new OrderLine(o.BasketId, o.Time, o.Symbol, o.IsBuy, type, o.Quantity, o.PriceType is 3 or 4 ? o.Trigger : o.Price,
-                o.Filled, o.AvgFillPrice, status, !o.Done, new RithmicOrderTarget(session, acc, o.BasketId)));
+                o.Filled, o.AvgFillPrice, status, !o.Done, new RithmicOrderTarget(session, acc, o.BasketId, context)));
         }
 
         var sum = session.SummaryFor(acc);
@@ -384,30 +385,51 @@ public sealed class AccountCenter
     /// Cancels an active order. A cancel never adds exposure, so it stays available on real accounts even with real
     /// orders disabled (the Account page confirms it first).
     /// </summary>
-    public async Task CancelAsync(AccountEntry a, OrderLine o)
+    /// <returns>null normally; a status-bar note when the cancel was sent before an earlier order's outcome settled.</returns>
+    public async Task<string?> CancelAsync(AccountEntry a, OrderLine o)
     {
-        if (!o.Active) return;
+        if (!o.Active) return null;
         if (o.Ref is (SimBroker b, Order order))
         {
             b.Cancel(order);
-            return;
+            return null;
         }
         if (o.Ref is (BybitTradingSession bybit, Order bybitOrder))
         {
-            bybit.Cancel(bybitOrder);
-            return;
+            // Same FIFO lane as the chart's gestures on this account; the durable commit runs off the UI thread.
+            await _svc.OrderLanes.RunAsync(bybit.OrderContext, "Cancel order", () => { bybit.Cancel(bybitOrder); return true; });
+            return null;
         }
         if (a.Kind == AccountKind.Replay && o.Ref is (ITradingAccount replay, Order replayOrder))
         {
             replay.Cancel(replayOrder);
-            return;
+            return null;
         }
 
+        // Native accounts: the same FIFO lane as the chart's gestures on this account, so the cancel starts only after
+        // every gesture issued before it has been handed to the account.
         if (a.Kind == AccountKind.Rithmic && o.Ref is RithmicOrderTarget rithmic)
-            await rithmic.Session.CancelAsync(rithmic.Account, rithmic.Basket, CancellationToken.None).ConfigureAwait(false);
+            await InLaneAsync(rithmic.Context, "Cancel order",
+                () => rithmic.Session.CancelAsync(rithmic.Account, rithmic.Basket, CancellationToken.None)).ConfigureAwait(false);
         else if (a.Kind == AccountKind.Tradovate && o.Ref is TradingHub.Feeds.Tradovate.TradovateOrderState tv)
-            await _svc.TradovateSessionFor(a.Profile!).CancelAsync(tv.Id, CancellationToken.None).ConfigureAwait(false);
+        {
+            // Tradovate also sends it in the account's send-turn order, after earlier requests were answered.
+            var session = _svc.TradovateSessionFor(a.Profile!);
+            return await InLaneAsync(_svc.TradovateContextFor(a.Profile!, session, a.Id, tv.AccountId), "Cancel order",
+                () => session.CancelAsync(tv.AccountId, tv.Id, CancellationToken.None)).ConfigureAwait(false);
+        }
+        return null;
     }
+
+    /// <summary>
+    /// Starts a native session call in its account's order lane, after every gesture already handed to that lane, then
+    /// awaits the call it started (only the start is ordered: the lane does not wait for the broker's reply).
+    /// </summary>
+    private async Task<T> InLaneAsync<T>(OrderContext context, string label, Func<Task<T>> start) =>
+        await (await _svc.OrderLanes.RunAsync(context, label, start).ConfigureAwait(false)).ConfigureAwait(false);
+
+    private async Task InLaneAsync(OrderContext context, string label, Func<Task> start) =>
+        await (await _svc.OrderLanes.RunAsync(context, label, start).ConfigureAwait(false)).ConfigureAwait(false);
 
     /// <summary>
     /// Closes a contract's position at market, canceling its orders first (like Chart Trader's Close). Closing only
@@ -435,19 +457,27 @@ public sealed class AccountCenter
             if (net == 0) return NothingToClose(position.Symbol, 0);
             if (Math.Sign(net) != Math.Sign(p.Net)) return "Bybit position changed side; check the new position before closing.";
             var instrument = await bybit.GetInstrumentAsync(position.Symbol, CancellationToken.None).ConfigureAwait(false);
-            bybit.Flatten(instrument);
-            return bybit.LastError ?? "Bybit close requested; check position and order status for confirmation.";
+            string? error = await _svc.OrderLanes.RunAsync(bybit.OrderContext, "Close position", () =>
+            {
+                bybit.Flatten(instrument);
+                return bybit.LastError; // read in the lane: a later queued action may clear or replace it
+            }).ConfigureAwait(false);
+            return error ?? "Bybit close requested; check position and order status for confirmation.";
         }
 
         if (a.Kind == AccountKind.Tradovate && p.Ref is TradingHub.Feeds.Tradovate.TradovatePositionState tp)
         {
-            // Tradovate cancela las órdenes del contrato y cierra a mercado en un solo pedido
-            await _svc.TradovateSessionFor(a.Profile!).LiquidateAsync(tp.AccountId, tp.ContractId, CancellationToken.None).ConfigureAwait(false);
-            return null;
+            // Tradovate cancels the contract's orders and closes at market in one request, sent in the account's send-turn
+            // order: after the venue answered every earlier request.
+            var session = _svc.TradovateSessionFor(a.Profile!);
+            return await InLaneAsync(_svc.TradovateContextFor(a.Profile!, session, a.Id, tp.AccountId), "Close position",
+                () => session.LiquidateAsync(tp.AccountId, tp.ContractId, CancellationToken.None)).ConfigureAwait(false);
         }
 
+        // In the account's order lane: the close starts after every chart gesture issued before it.
         if (a.Kind == AccountKind.Rithmic && p.Ref is RithmicPositionTarget rithmic)
-            return await rithmic.Broker.ClosePositionAsync(rithmic.Confirmation).ConfigureAwait(false);
+            return await InLaneAsync(rithmic.Broker.OrderContext, "Close position",
+                () => rithmic.Broker.ClosePositionAsync(rithmic.Confirmation)).ConfigureAwait(false);
 
         return null;
     }

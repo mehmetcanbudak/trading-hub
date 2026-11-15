@@ -332,11 +332,11 @@ public sealed class TradovateNativeProtectionTests : IDisposable
         await Until(() => broker.PositionReflects(order));
     }
 
-    [Fact]
-    public async Task A_restarted_app_re_owns_and_adopts_the_working_oco_without_sending_again()
+    /// <summary>The first process: a market entry whose exchange-side pair the venue acknowledges, then the app stops
+    /// with the position and both linked legs still working at the venue.</summary>
+    private async Task<(string Stop, string Target)> ProtectAndStop(FakeTradovate fake)
     {
-        using var fake = new FakeTradovate();
-        string stopClient, targetClient;
+        (string Stop, string Target) protection;
         {
             var (feed, session, account) = await Connect(fake);
             using var _f = feed;
@@ -346,19 +346,14 @@ public sealed class TradovateNativeProtectionTests : IDisposable
             UseTargetOnly(brackets);
             OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 2);
             await Until(() => brackets.Mode == ProtectionMode.ExchangeSide);
-            stopClient = brackets.StopLoss!.ClientOrderId!;
-            targetClient = brackets.Targets[0].ClientOrderId!;
+            protection = (brackets.StopLoss!.ClientOrderId!, brackets.Targets[0].ClientOrderId!);
         }
         fake.ReplayPositions.Add(JsonNode.Parse("{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":2,\"netPrice\":5000.25,\"bought\":2,\"boughtValue\":10000.5,\"sold\":0,\"soldValue\":0}"));
+        return protection;
+    }
 
-        var (feed2, session2, account2) = await Connect(fake);
-        using var _f2 = feed2;
-        using var _s2 = session2;
-        using var restarted = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session2, account2, "DEMO101", Context(), () => true);
-        using var adopted = Brackets(restarted);
-        UseTargetOnly(adopted);
-        await Until(() => adopted.Mode == ProtectionMode.ExchangeSide, () => $"mode {adopted.Mode}; error {restarted.LastError}; position {restarted.Position.Volume}");
-
+    private static async Task AssertAdoptedWithoutSendingAgain(FakeTradovate fake, TradovateBroker restarted, BracketManager adopted, string stopClient, string targetClient)
+    {
         var stop = adopted.StopLoss!;
         var target = Assert.Single(adopted.Targets);
         Assert.Equal(stopClient, stop.ClientOrderId);
@@ -372,6 +367,57 @@ public sealed class TradovateNativeProtectionTests : IDisposable
         await Until(() => restarted.Position.Volume == 0 && target.Canceled);
         Assert.Equal(1, fake.OcoRequests);
         Assert.Equal(1, Count(fake, "placeorder"));
+    }
+
+    [Fact]
+    public async Task A_restarted_app_re_owns_and_adopts_the_working_oco_without_sending_again()
+    {
+        using var fake = new FakeTradovate();
+        var (stopClient, targetClient) = await ProtectAndStop(fake);
+
+        var (feed2, session2, account2) = await Connect(fake);
+        using var _f2 = feed2;
+        using var _s2 = session2;
+        using var restarted = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session2, account2, "DEMO101", Context(), () => true);
+        using var adopted = Brackets(restarted);
+        UseTargetOnly(adopted);
+        await Until(() => adopted.Mode == ProtectionMode.ExchangeSide, () => $"mode {adopted.Mode}; error {restarted.LastError}; position {restarted.Position.Volume}");
+        await AssertAdoptedWithoutSendingAgain(fake, restarted, adopted, stopClient, targetClient);
+    }
+
+    /// <summary>
+    /// The interleaving the restart test hit under load: the restarted account finishes its replay and raises its last
+    /// change before the protection manager exists. A quiet account raises no later change, so the manager must
+    /// reconcile when it is created, not on the next account event.
+    /// </summary>
+    [Fact]
+    public async Task A_protection_manager_created_after_the_restarted_account_settled_adopts_its_working_oco_at_once()
+    {
+        using var fake = new FakeTradovate();
+        var (stopClient, targetClient) = await ProtectAndStop(fake);
+
+        var (feed2, session2, account2) = await Connect(fake);
+        using var _f2 = feed2;
+        using var _s2 = session2;
+        using var restarted = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session2, account2, "DEMO101", Context(), () => true);
+        string manual = restarted.OrderContext.ManualOwner.Id;
+        bool Settled() => restarted is { PositionReady: true, OrdersReady: true } && restarted.Position.Volume == 2 &&
+            restarted.ActiveOrders.Count(o => o.OwnerId == manual && restarted.ProtectionGroupOf(o) != null) == 2;
+        // Wait for the account change that reports the settled replay to finish: its handlers have all run.
+        var settledChange = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnChanged() { if (Settled()) settledChange.TrySetResult(); }
+        restarted.Changed += OnChanged;
+        try
+        {
+            OnChanged();
+            await settledChange.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally { restarted.Changed -= OnChanged; }
+
+        using var adopted = Brackets(restarted);
+        UseTargetOnly(adopted);
+        Assert.Equal(ProtectionMode.ExchangeSide, adopted.Mode);
+        await AssertAdoptedWithoutSendingAgain(fake, restarted, adopted, stopClient, targetClient);
     }
 
     public void Dispose()

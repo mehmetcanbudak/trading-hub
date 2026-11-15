@@ -42,6 +42,7 @@ public static class SearchZoomFixture
         Set(services, "<Connections>k__BackingField", manager);
         Set(services, "<Settings>k__BackingField", new AppSettings());
         Set(services, "<Work>k__BackingField", new OwnedOperationRegistry());
+        Set(services, "<OrderLanes>k__BackingField", new OrderActionLanes()); // Accounts and chart order actions share it
         return services;
     }
 

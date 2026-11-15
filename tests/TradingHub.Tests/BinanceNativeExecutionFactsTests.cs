@@ -760,7 +760,8 @@ public sealed class BinanceNativeExecutionFactsTests
             using var broker = orders.Binance(data, fake.Settings, "Native target adoption", context);
             await Until(() => broker.OrdersReady && broker.PositionReady, broker, fake);
             var target = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Sell, 3m, 104m, "Manual target", reduceOnly: true);
-            await Until(() => target.ExchangeOrderId == "7001", broker, fake);
+            // the exchange id is assigned first in the acceptance section, the native identity last (after its durable binding)
+            await Until(() => target.ExchangeOrderId == "7001" && target.NativeIdentity != null, broker, fake);
             string manualIntent = Assert.IsType<string>(target.IntentId);
             var native = Assert.IsType<NativeOrderIdentity>(target.NativeIdentity);
             var prepared = Assert.IsType<OwnedOrderIntent>(context.Find(manualIntent));
@@ -1230,7 +1231,8 @@ public sealed class BinanceNativeExecutionFactsTests
                 generation = LiveStore.CaptureLedgerGeneration(root, key);
                 owner = context.LedgerOwner(key, generation);
                 var opening = OrderActions.Place(first, owner, OrderTypes.Limit, OrderDirections.Buy, 2m, 173m);
-                await Until(() => opening.ExchangeOrderId.Length > 0, first, fake);
+                // the exchange id is assigned first in the acceptance section, the native identity last (after its durable binding)
+                await Until(() => opening.ExchangeOrderId.Length > 0 && opening.NativeIdentity != null, first, fake);
                 nativeId = long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture);
                 native = Assert.IsType<NativeOrderIdentity>(opening.NativeIdentity);
                 intentId = Assert.IsType<string>(opening.IntentId);
@@ -4017,7 +4019,8 @@ public sealed class BinanceNativeExecutionFactsTests
                 generation = LiveStore.CaptureLedgerGeneration(root, key);
                 owner = context.LedgerOwner(key, generation);
                 var opening = OrderActions.Place(first, owner, OrderTypes.Limit, OrderDirections.Buy, 2m, 173m);
-                await Until(() => opening.ExchangeOrderId.Length > 0, first, fake);
+                // the exchange id is assigned first in the acceptance section, the native identity last (after its durable binding)
+                await Until(() => opening.ExchangeOrderId.Length > 0 && opening.NativeIdentity != null, first, fake);
                 openingId = long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture);
                 intentId = Assert.IsType<string>(opening.IntentId);
                 logicalId = Assert.IsType<string>(opening.LogicalOrderId);

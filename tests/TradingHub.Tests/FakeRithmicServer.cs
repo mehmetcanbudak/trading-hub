@@ -14,6 +14,7 @@ internal sealed class FakeRithmicServer : IDisposable
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _pnlSends = new(1, 1);
     private WebSocket? _pnlSocket;
     private int _basket;
     private readonly Dictionary<string, int> _filled = new();
@@ -537,17 +538,27 @@ internal sealed class FakeRithmicServer : IDisposable
             PositionUpdateRequested.TrySetResult();
             await release.Task.WaitAsync(_cts.Token);
         }
-        double open = (MarketPrice - AvgPrice) * Position * 50;
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        foreach (var ws in targets)
+        // Rithmic's PnL plant is one ordered stream: snapshot and send under one turn, so a report taken earlier can
+        // never reach the client after a later one (concurrent fills would otherwise leave a stale final position).
+        await _pnlSends.WaitAsync(_cts.Token);
+        try
         {
-            await Send(ws, new ProtoWriter().Int(154467, 450).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1").String(110100, "ESZ6").String(110101, "CME")
-                .Int(156967, ReportedPositionOverride ?? Position).Double(154434, AvgPrice).String(156961, open.ToString(inv)).Double(157955, ClosedPnl));
-            await Send(ws, new ProtoWriter().Int(154467, 451).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1")
-                .String(156970, (StartBalance + ClosedPnl).ToString("0.00", inv)).String(156971, (StartBalance + ClosedPnl).ToString("0.00", inv))
-                .String(157015, (StartBalance + ClosedPnl - Math.Abs(Position) * 500).ToString("0.00", inv)).String(156961, open.ToString("0.00", inv))
-                .Double(157955, ClosedPnl).Double(157956, ClosedPnl + open));
+            int position, reported;
+            double averagePrice, closedPnl;
+            lock (_gate) (position, reported, averagePrice, closedPnl) = (Position, ReportedPositionOverride ?? Position, AvgPrice, ClosedPnl);
+            double open = (MarketPrice - averagePrice) * position * 50;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            foreach (var ws in targets)
+            {
+                await Send(ws, new ProtoWriter().Int(154467, 450).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1").String(110100, "ESZ6").String(110101, "CME")
+                    .Int(156967, reported).Double(154434, averagePrice).String(156961, open.ToString(inv)).Double(157955, closedPnl));
+                await Send(ws, new ProtoWriter().Int(154467, 451).Int(110121, snapshot ? 1 : 0).String(154008, "ACC1")
+                    .String(156970, (StartBalance + closedPnl).ToString("0.00", inv)).String(156971, (StartBalance + closedPnl).ToString("0.00", inv))
+                    .String(157015, (StartBalance + closedPnl - Math.Abs(position) * 500).ToString("0.00", inv)).String(156961, open.ToString("0.00", inv))
+                    .Double(157955, closedPnl).Double(157956, closedPnl + open));
+            }
         }
+        finally { _pnlSends.Release(); }
     }
 
     public Task PublishPosition() => SendPnl(snapshot: false);

@@ -588,6 +588,10 @@ internal static partial class SafetyScene
             }
         });
 
+        Part("order gestures never wait on durable storage on the UI thread", () => OrderGesturesOffUiThread(window, pump, tv, chart, cache, Check, Status));
+
+        Part("order gestures always report their outcome", () => GestureOutcomes(pump, tv, chart, cache, Check));
+
         Part("Account page on a REAL account with real orders disabled", () =>
         {
             var rp = svc.Connections.Profiles.FirstOrDefault(p => p.IsRithmic && p.Enabled && p.RithmicUser == "demo");
@@ -1053,8 +1057,13 @@ internal static partial class SafetyScene
         TradingHub.App.Views.ChartTab? chartTab = null, windowTab = null;
         FixtureSlowCloseAccount? slow = null;
 
-        // after a quit that only recorded the exit: the services were never shut down, only the live saves stopped
-        void Reopen() => Set(svc, "_closingDown", false);
+        // after a quit that only recorded the exit: the services were never shut down, only the live saves stopped and
+        // the order lanes stopped admitting gestures (the next simulated process admits them again)
+        void Reopen()
+        {
+            Set(svc, "_closingDown", false);
+            Set(svc.OrderLanes, "_closed", false);
+        }
 
         try
         {
@@ -1312,6 +1321,33 @@ internal static partial class SafetyScene
                 dialog = Find(QuitTitle, 1.5);
                 Check(flat is { OwnPosition: 0 } && !flat.IsRunning && !allowed && dialog == null && desktop.Shutdowns == 1,
                     "no positions: the platform request is canceled, then the asynchronous terminal operation stops the strategy and exits without a dialog");
+            });
+
+            Part("Quit drains order gestures already handed to a lane", () =>
+            {
+                Reopen();
+                var desktop = Desktop();
+                var lane = new FixtureLaneAccount(quitSim);
+                using var release = new ManualResetEventSlim();
+                int exitsWhenRan = -1;
+                // a confirmed gesture still journaling in its account's lane when the user quits
+                var handed = svc.OrderLanes.RunAsync(lane, "Fixture gesture", () =>
+                {
+                    release.Wait(TimeSpan.FromSeconds(30));
+                    exitsWhenRan = desktop.Shutdowns;
+                    return true;
+                });
+                MenuBar.Quit();
+                pump(0.5);
+                var late = svc.OrderLanes.RunAsync(lane, "Late fixture gesture", () => true);
+                Check(!handed.IsCompleted && desktop.Shutdowns == 0 && Find(QuitTitle, 0.2) == null,
+                    $"Quit waits for the gesture already handed to the order lane before stopping anything (exits {desktop.Shutdowns})");
+                Check(late.IsFaulted && late.Exception!.GetBaseException() is OrderActionsClosedException,
+                    $"a gesture after the quit was accepted is refused visibly, not queued behind the exit ({late.Status})");
+                release.Set();
+                Until(() => desktop.Shutdowns > 0, 10);
+                Check(handed.IsCompletedSuccessfully && exitsWhenRan == 0 && desktop.Shutdowns == 1,
+                    $"the handed-over gesture finished before the app exited once (ran at exits {exitsWhenRan}, exits {desktop.Shutdowns})");
             });
 
             Part("restart with new parameters keeps and adopts", () =>

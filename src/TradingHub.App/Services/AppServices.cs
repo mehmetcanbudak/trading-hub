@@ -622,9 +622,7 @@ public sealed partial class AppServices
             var session = TradovateSessionFor(tp);
             long id = long.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
             var acc = session.Accounts.FirstOrDefault(a => a.Id == id) ?? new TradingHub.Feeds.Tradovate.TradovateAccount(id, parts[2], true);
-            var context = TradingContext(tp, accountId, "Tradovate", "futures",
-                (session.IsDemo ? "demo|" : "live|") + PublicEndpoint(session.Connection.RestBase),
-                session.Accounts.Any(a => a.Id == id) ? id.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
+            var context = TradovateContextFor(tp, session, accountId, id);
             // The opt-in is read at each protection placement, so switching it in Connections needs no reconnection.
             return Cache(key, tp, new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc,
                 $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}", context, () => tp.ExchangeSideProtection), session.Connection);
@@ -652,6 +650,13 @@ public sealed partial class AppServices
         return Cache(key, p, new BinanceBroker(data, settings, p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL",
             BinanceContext(p, accountId, settings), network: NetworkProxy.CreateFactory()));
     }
+
+    /// <summary>The ownership context of a Tradovate account; chart brokers and Accounts-page actions share it (and its order lane).</summary>
+    internal OrderContext TradovateContextFor(ConnectionProfile profile, TradingHub.Feeds.Tradovate.TradovateTradingSession session,
+        string accountId, long account) =>
+        TradingContext(profile, accountId, "Tradovate", "futures",
+            (session.IsDemo ? "demo|" : "live|") + PublicEndpoint(session.Connection.RestBase),
+            session.Accounts.Any(a => a.Id == account) ? account.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
 
     /// <summary>The ownership context of a Binance account: its id keys the persisted intents, executions and native bindings.</summary>
     internal OrderContext BinanceContext(ConnectionProfile p, string accountId, BinanceAccountSettings settings) =>
@@ -963,6 +968,43 @@ public sealed partial class AppServices
         return completion.Task;
     }
 
+    /// <summary>The longest quit waits for issued native order requests, in total: a reducing request's wait for earlier
+    /// replies, its position confirmation, and its own HTTP reply (tests shorten it).</summary>
+    internal TimeSpan NativeSendDrainLimit
+    {
+        get => _nativeSendDrainLimit ?? TimeSpan.FromSeconds(30);
+        set => _nativeSendDrainLimit = value;
+    }
+
+    private TimeSpan? _nativeSendDrainLimit;
+
+    private DateTime? _nativeDrainDeadline;
+
+    /// <summary>
+    /// Waits until every order request already issued on a Tradovate session or a Binance broker was answered, refused
+    /// or failed: a confirmed Close or Cancel queued behind an earlier order's reply is sent before quit closes brokers
+    /// and connections. Quit and shutdown (both on the UI thread) each drain what was issued by then, against one
+    /// deadline, <see cref="NativeSendDrainLimit"/> after the first drain: quitting never waits for it twice. Logged when
+    /// the deadline is reached.
+    /// </summary>
+    internal async Task DrainNativeSendsAsync()
+    {
+        var idle = new List<Task>();
+        foreach (var session in _tradovateSessions.Values.Concat(_retiredTradovateSessions)) idle.Add(session.SendsIdle);
+        foreach (var broker in _realBrokers.Values.Concat(_replacedBrokers).OfType<BinanceBroker>().Distinct()) idle.Add(broker.SendsIdle);
+        var all = Task.WhenAll(idle);
+        var deadline = _nativeDrainDeadline ??= DateTime.UtcNow + NativeSendDrainLimit;
+        if (all.IsCompleted) return;
+        var left = deadline - DateTime.UtcNow;
+        if (left > TimeSpan.Zero)
+        {
+            _live?.Notify("Sending queued order requests before quitting…");
+            // The caller's context is kept: shutdown continues on it and reads UI-owned broker maps afterwards.
+            if (await Task.WhenAny(all, Task.Delay(left)) == all) return;
+        }
+        this.LogWarn("Order requests were still waiting to be sent or answered when Trading Hub quit; check orders and positions at the broker.");
+    }
+
     private async Task CompleteShutdownAsync(TaskCompletionSource completion)
     {
         void Close(Action action)
@@ -977,6 +1019,12 @@ public sealed partial class AppServices
         }
         try
         {
+            // Gestures already handed to an order lane finish (durably and through transport) before strategies stop
+            // and providers close; later gestures are refused visibly.
+            await CloseOwnedAsync(OrderLanes.DrainAsync, "Error draining order actions");
+            // Requests those gestures (and earlier ones) issued, such as a Close waiting for an earlier order's reply in
+            // its send turn, are sent and answered before brokers and connections close (bounded).
+            await CloseOwnedAsync(DrainNativeSendsAsync, "Error draining native order requests");
             var workDrain = CloseOwnedAsync(Work.StopAsync, "Error closing ordinary work");
             var localApiDrain = CloseOwnedAsync(ShutdownLocalApiAsync, "Error closing the local market-data API");
             var recordingDrain = CloseOwnedAsync(Hub.StopRecordingAsync, "Error closing recorded history");

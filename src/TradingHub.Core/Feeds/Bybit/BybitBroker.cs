@@ -5,7 +5,7 @@ using TradingHub.Trading;
 namespace TradingHub.Feeds.Bybit;
 
 /// <summary>A symbol view over one immutable UTA credential context. Native reducing exits are set before dispatch.</summary>
-public sealed class BybitBroker : ITradingAccount, ITrackedOrderReplacement, IStableOrderIdentity, IAccountExecutionSource, ICoordinatedPositionOperations, IDisposable
+public sealed class BybitBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, IStableOrderIdentity, IAccountExecutionSource, ICoordinatedPositionOperations, IDisposable
 {
     private readonly InstrumentData _data;
     private readonly Position _position;

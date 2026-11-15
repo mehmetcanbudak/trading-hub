@@ -841,17 +841,22 @@ public sealed partial class TradingView
         if (!await ConfirmAsync(chart, acc, desc)) return null;
         if (Blocked(chart, acc, signed)) return null; // the permission or the position may have changed while confirming
         bool entry = IsEntry(acc, dir);
-        var order = type switch
-        {
-            OrderTypes.Market => OrderActions.Manual(acc, OrderTypes.Market, dir, qty),
-            OrderTypes.Limit => OrderActions.Manual(acc, OrderTypes.Limit, dir, qty, price),
-            _ => OrderActions.Manual(acc, OrderTypes.Stop, dir, qty, price),
-        };
-
-        // orden de entrada con la plantilla activa: lleva el stop y los objetivos adjuntos
         var br = _svc.BracketsFor(acc);
-        if (type != OrderTypes.Market && entry && br.Template.Enabled && order.State == OrderStates.Active) br.AttachTemplate(order);
-        _status(desc + " submitted");
+        bool attach = type != OrderTypes.Market && entry && br.Template.Enabled;
+        var (sent, order) = await OrderGestureAsync(acc, desc, () =>
+        {
+            var placed = type switch
+            {
+                OrderTypes.Market => OrderActions.Manual(acc, OrderTypes.Market, dir, qty),
+                OrderTypes.Limit => OrderActions.Manual(acc, OrderTypes.Limit, dir, qty, price),
+                _ => OrderActions.Manual(acc, OrderTypes.Stop, dir, qty, price),
+            };
+            // orden de entrada con la plantilla activa: lleva el stop y los objetivos adjuntos
+            if (attach && placed.State == OrderStates.Active) br.AttachTemplate(placed);
+            return placed;
+        });
+        if (!sent) return null;
+        GestureStatus(acc, desc + " submitted");
         chart.Model?.Invalidate();
         return order;
     }
@@ -866,7 +871,10 @@ public sealed partial class TradingView
         if (acc == null || chart == null) return;
         string desc = $"Move {(order.Direction == OrderDirections.Buy ? "buy order" : "sell order")} to {acc.Instrument.FormatPrice(price)}";
         if (!await ConfirmAsync(chart, acc, desc)) return;
-        _status(_svc.BracketsFor(acc).Move(order, price));
+        var br = _svc.BracketsFor(acc);
+        var (sent, message) = await OrderGestureAsync(acc, desc, () => br.Move(order, price));
+        if (!sent) return;
+        GestureStatus(acc, GestureOutcome(acc, desc, message));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -876,16 +884,19 @@ public sealed partial class TradingView
         var acc = AccountOf(chart);
         if (acc == null) return;
         var br = _svc.BracketsFor(acc);
-        string msg;
-        if (d.Pending != null) msg = br.MovePending(d.Pending, d.Index, price);
-        else if (d.Entry != null) msg = br.AttachToEntry(d.Entry, price, d.Role);
+        string label = $"Place stop/target on {acc.Instrument.FormatPrice(price)}";
+        Func<string> drop;
+        if (d.Pending is { } pending) drop = () => br.MovePending(pending, d.Index, price);
+        else if (d.Entry is { } entry) drop = () => br.AttachToEntry(entry, price, d.Role);
         else
         {
-            if (!await ConfirmAsync(chart, acc, $"Place stop/target on {acc.Instrument.FormatPrice(price)}")) return;
-            msg = br.DropFromPosition(price, d.Role);
+            if (!await ConfirmAsync(chart, acc, label)) return;
+            drop = () => br.DropFromPosition(price, d.Role);
         }
 
-        if (msg.Length > 0) _status(msg);
+        var (sent, msg) = await OrderGestureAsync(acc, label, drop);
+        if (!sent) return;
+        if (GestureOutcome(acc, label, msg) is { Length: > 0 } shown) GestureStatus(acc, shown);
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -898,8 +909,10 @@ public sealed partial class TradingView
         if (adds != null && Blocked(chart, acc, adds(acc))) return;
         if (acc.IsReal && !await ConfirmAsync(chart, acc, message + "?")) return;
         if (adds != null && Blocked(chart, acc, adds(acc))) return;
-        action(acc);
-        _status(acc.LastError is { Length: > 0 } error ? error : $"{message} requested; check account status for confirmation.");
+        // The error is read in the lane, right after this gesture's account call: a later queued gesture may clear it.
+        var (sent, error) = await OrderGestureAsync(acc, message, () => { action(acc); return acc.LastError; });
+        if (!sent) return;
+        GestureStatus(acc, error is { Length: > 0 } ? error : $"{message} requested; check account status for confirmation.");
     }
 
     /// <summary>Reverses the position: it opens the other side, so it needs real-order permission like an entry.</summary>
@@ -910,9 +923,67 @@ public sealed partial class TradingView
         var acc = AccountOf(chart);
         if (acc == null || chart == null) return;
         if (acc.IsReal && !await ConfirmAsync(chart, acc, description + "?")) return;
-        _status(action(_svc.BracketsFor(acc)));
+        var br = _svc.BracketsFor(acc);
+        var (sent, message) = await OrderGestureAsync(acc, description, () => action(br));
+        if (!sent) return;
+        GestureStatus(acc, GestureOutcome(acc, description, message));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
+    }
+
+    /// <summary>An unconfirmed bracket gesture from the chart menu, in its account's order lane like every other.</summary>
+    private async Task BracketGestureAsync(ChartTab chart, ITradingAccount acc, BracketManager br, string label, Func<BracketManager, string> action)
+    {
+        var (sent, message) = await OrderGestureAsync(acc, label, () => action(br));
+        if (!sent) return;
+        if (GestureOutcome(acc, label, message) is { Length: > 0 } shown) GestureStatus(acc, shown);
+        chart.Model?.Invalidate();
+        _dom.InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Hands a gesture whose confirmations and permission checks already passed to its account's FIFO order lane. On a
+    /// thread-safe native account the unchanged account call runs off the UI thread, so durable journaling never
+    /// freezes the window, and the status bar shows it pending until it returns; other accounts run inline as before.
+    /// An exception from the account call is written to the crash log, as an unobserved gesture failure was before, and
+    /// shown in the status line without claiming nothing was sent: the call may have submitted an order before failing.
+    /// </summary>
+    private async Task<(bool Sent, T Result)> OrderGestureAsync<T>(ITradingAccount acc, string label, Func<T> action)
+    {
+        if (OrderActionLanes.RunsOffCaller(acc)) _status($"{label}: pending…");
+        try
+        {
+            return (true, await _svc.OrderLanes.RunAsync(acc, label, action));
+        }
+        catch (OrderActionsClosedException closed)
+        {
+            _status(closed.Message);
+            return (false, default!);
+        }
+        catch (Exception error)
+        {
+            CrashLog.Write(error);
+            GestureStatus(acc, $"{label}: error after submission; check orders and position: {error.Message}");
+            return (false, default!);
+        }
+    }
+
+    /// <summary>
+    /// The status text for a gesture's result. On a native account it always replaces the '&lt;label&gt;: pending…' line,
+    /// with the label when the account call returned no message; inline accounts show the message as before.
+    /// </summary>
+    private static string GestureOutcome(ITradingAccount acc, string label, string message) =>
+        message.Length == 0 && OrderActionLanes.RunsOffCaller(acc) ? label : message;
+
+    /// <summary>A gesture's result; gestures still waiting in a lane, and the account's requests still waiting for an
+    /// earlier reply before they are sent (Tradovate, Binance), stay visible in the same status line.</summary>
+    private void GestureStatus(ITradingAccount acc, string message)
+    {
+        int pending = _svc.OrderLanes.Pending.Count;
+        if (pending > 0) message = $"{message} · {pending} order action(s) pending";
+        if (acc is INativeSendQueue { QueuedRequests: > 0 and var queued })
+            message = $"{message} · waiting for an earlier reply ({queued} queued)";
+        _status(message);
     }
 
     private async void OnDomOrder(DomColumn col, decimal price, bool cancel)
@@ -923,8 +994,10 @@ public sealed partial class TradingView
         if (acc == null || chart?.Model == null) return;
         if (cancel)
         {
-            acc.CancelAt(price);
-            _status(acc.LastError is { Length: > 0 } error ? error : $"Order cancellation requested at {acc.Instrument.FormatPrice(price)}; check account status for confirmation.");
+            string label = $"Cancel orders at {acc.Instrument.FormatPrice(price)}";
+            var (sent, error) = await OrderGestureAsync(acc, label, () => { acc.CancelAt(price); return acc.LastError; });
+            if (!sent) return;
+            GestureStatus(acc, error is { Length: > 0 } ? error : $"Order cancellation requested at {acc.Instrument.FormatPrice(price)}; check account status for confirmation.");
             return;
         }
 
@@ -1059,32 +1132,33 @@ public sealed partial class TradingView
         {
             var role = br.RoleOf(order);
             items.Add(Item(role switch { BracketRole.StopLoss => "Cancel stop loss", BracketRole.Target => "Cancel target", _ => "Cancel order" },
-                MaterialIconKind.CloseCircleOutline, () => _status(br.CancelBracket(order))));
+                MaterialIconKind.CloseCircleOutline, () => _ = BracketGestureAsync(tab, acc!, br, role switch { BracketRole.StopLoss => "Cancel stop loss", BracketRole.Target => "Cancel target", _ => "Cancel order" }, b => b.CancelBracket(order))));
             if (role == BracketRole.Target)
             {
                 var qty = new MenuItem { Header = "Target quantity", Icon = Ui.Icon(MaterialIconKind.ScaleBalance, 16) };
                 foreach (var f in new[] { 0.25m, 0.5m, 0.75m, 1m })
-                    qty.Items.Add(Item($"{f * 100:0}% of position", null, () => _status(br.SetTargetFraction(order, f))));
+                    qty.Items.Add(Item($"{f * 100:0}% of position", null, () => _ = BracketGestureAsync(tab, acc!, br, "Target quantity", b => b.SetTargetFraction(order, f))));
                 items.Add(qty);
             }
 
             if (role == BracketRole.StopLoss) items.Add(Item("Stop to breakeven", MaterialIconKind.ShieldOutline, () => _ = BracketActionAsync(tab, b => b.MoveStopToBreakeven(), "Move stop to breakeven")));
             if (role == BracketRole.None && !order.ReduceOnly && IsEntry(acc!, order.Direction))
                 items.Add(Item("Attach stop and targets from template", MaterialIconKind.TargetVariant, () =>
-                {
-                    br.AttachTemplate(order);
-                    _status("Attached stops and targets submit after the entry order fills");
-                    model.Invalidate();
-                }));
+                    _ = BracketGestureAsync(tab, acc!, br, "Attach stop and targets from template", b =>
+                    {
+                        b.AttachTemplate(order);
+                        return "Attached stops and targets submit after the entry order fills";
+                    })));
             items.Add(new Separator());
         }
         else if (br != null && ctrl?.HandleAt(x, y, false) is { Drag.Pending: { } pb } handle)
         {
             items.Add(Item(handle.Drag.Index < 0 ? "Remove attached stop" : "Remove attached target", MaterialIconKind.CloseCircleOutline, () =>
-            {
-                br.RemovePending(pb, handle.Drag.Index);
-                model.Invalidate();
-            }));
+                _ = BracketGestureAsync(tab, acc!, br, handle.Drag.Index < 0 ? "Remove attached stop" : "Remove attached target", b =>
+                {
+                    b.RemovePending(pb, handle.Drag.Index);
+                    return "";
+                })));
             items.Add(new Separator());
         }
 
