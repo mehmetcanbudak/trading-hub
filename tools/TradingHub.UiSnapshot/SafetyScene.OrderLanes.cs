@@ -159,6 +159,85 @@ internal static partial class SafetyScene
             pump(0.2);
         }
     }
+
+    /// <summary>
+    /// A gesture run in a native account's lane always replaces its '&lt;label&gt;: pending…' line: with the label when the
+    /// account call returns no message, with the failure when it throws, and with the error the account reported for
+    /// that gesture, read in the lane before a later queued gesture can clear it. Fixture account; no order is routed.
+    /// </summary>
+    private static void GestureOutcomes(Action<double> pump, TradingView tv, ChartTab chart,
+        Dictionary<string, ITradingAccount> cache, Action<bool, string> check)
+    {
+        var svc = App.Services;
+        if (tv.AccountOf(chart) is not { } display) { check(false, "the chart has an account for the outcome fixture"); return; }
+        var account = new FixtureOutcomeAccount(display);
+        const string id = "safety-outcomes";
+        string key = id + "|" + (chart.CrossData ?? chart.Model!.Data).Instrument.Key;
+        var statusField = typeof(TradingView).GetField("_status", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var original = (Action<string>)statusField.GetValue(tv)!;
+        var shown = new List<string>(); // the fixture gestures' status lines, in order (UI thread only)
+        string previousAccount = chart.AccountId;
+        statusField.SetValue(tv, (Action<string>)(text =>
+        {
+            if (text.StartsWith("Fixture", StringComparison.Ordinal) || text.StartsWith("Remove attached target", StringComparison.Ordinal) ||
+                text.StartsWith("Cancel all orders", StringComparison.Ordinal)) shown.Add(text);
+            original(text);
+        }));
+        cache[key] = account; // what AccountFor returns for this account id
+        chart.AccountId = id;
+        void Settle(Task gesture)
+        {
+            var until = DateTime.UtcNow.AddSeconds(30);
+            while (!gesture.IsCompleted && DateTime.UtcNow < until) pump(0.02);
+            pump(0.05);
+        }
+        string Shown() => string.Join(" | ", shown);
+        try
+        {
+            check(ReferenceEquals(tv.AccountOf(chart), account) && OrderActionLanes.RunsOffCaller(account),
+                "the chart trades a thread-safe fixture account whose gestures run in its order lane");
+
+            shown.Clear();
+            var brackets = svc.BracketsFor(account);
+            var remove = (Task)typeof(TradingView).GetMethod("BracketGestureAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(tv, [chart, account, brackets, "Remove attached target", (Func<BracketManager, string>)(_ => "")])!;
+            Settle(remove);
+            check(remove.IsCompletedSuccessfully && shown.FirstOrDefault() == "Remove attached target: pending…" && shown.LastOrDefault() == "Remove attached target",
+                $"a gesture whose account call returns no message replaces its pending line with its label («{Shown()}»)");
+
+            shown.Clear();
+            var failing = tv.AccountActionAsync(chart, _ => throw new InvalidOperationException("Fixture broker refused the gesture."), "Fixture failing gesture");
+            Settle(failing);
+            check(failing.IsCompletedSuccessfully && shown.LastOrDefault() == "Fixture failing gesture failed with an error: Fixture broker refused the gesture.",
+                $"a gesture whose account call throws shows the failure instead of staying pending ({failing.Status}, «{Shown()}»)");
+
+            shown.Clear();
+            using var durableWrite = new ManualResetEventSlim();
+            var held = svc.OrderLanes.RunAsync(account, "Fixture slow durable write", () => durableWrite.Wait(TimeSpan.FromSeconds(30)));
+            var refused = tv.AccountActionAsync(chart, a => a.CancelAll(), "Cancel all orders"); // the fixture reports an error
+            var clearing = tv.AccountActionAsync(chart, a => a.CancelAt(1m), "Fixture clearing gesture"); // the next one clears it
+            durableWrite.Set();
+            // Both lane entries finish before the UI thread (not pumped here) runs either gesture's continuation.
+            bool drained = SpinWait.SpinUntil(() => svc.OrderLanes.Pending.Count == 0, TimeSpan.FromSeconds(30));
+            Settle(held);
+            Settle(refused);
+            Settle(clearing);
+            check(drained && refused.IsCompletedSuccessfully && clearing.IsCompletedSuccessfully &&
+                shown.SequenceEqual(new[]
+                {
+                    "Cancel all orders: pending…", "Fixture clearing gesture: pending…", FixtureOutcomeAccount.CancelAllError,
+                    "Fixture clearing gesture requested; check account status for confirmation.",
+                }),
+                $"each gesture shows the error its own account call reported, even after a later queued gesture cleared it («{Shown()}»)");
+        }
+        finally
+        {
+            statusField.SetValue(tv, original);
+            chart.AccountId = previousAccount;
+            cache.Remove(key);
+            pump(0.1);
+        }
+    }
 }
 
 /// <summary>A thread-safe account identity for the quit-drain proof: gestures handed to its lane are fixture actions;
@@ -179,4 +258,26 @@ internal sealed class FixtureLaneAccount(ITradingAccount display) : ITradingAcco
     public void Cancel(Order order) { }
     public void CancelAt(decimal price) { }
     public void CancelAll() { }
+}
+
+/// <summary>A thread-safe fixture account for gesture outcomes: Cancel all reports an error, Cancel at clears it, like a
+/// broker whose next action replaces its last error. It never routes an order.</summary>
+internal sealed class FixtureOutcomeAccount(ITradingAccount display) : ITradingAccount, IThreadSafeOrderEntry
+{
+    public const string CancelAllError = "Fixture: the cancellation was not queued.";
+    private volatile string? _error;
+    public OrderContext OrderContext { get; } = OrderContext.EphemeralSimulation("SAFETY-OUTCOMES");
+    public IExecutionSource Executions => OrderContext.Executions;
+    public string Name => "Fixture outcomes";
+    public bool IsReal => false;
+    public Instrument Instrument => display.Instrument;
+    public Position Position { get; } = new();
+    public IEnumerable<Order> ActiveOrders => Array.Empty<Order>();
+    public string? LastError => _error;
+    public event Action? Changed { add { } remove { } }
+    public Order Submit(PreparedOrderIntent intent) => throw new NotSupportedException("The outcome fixture routes no orders.");
+    public Order Replace(Order order, PreparedOrderIntent intent) => throw new NotSupportedException("The outcome fixture routes no orders.");
+    public void Cancel(Order order) { }
+    public void CancelAt(decimal price) => _error = null;
+    public void CancelAll() => _error = CancelAllError;
 }

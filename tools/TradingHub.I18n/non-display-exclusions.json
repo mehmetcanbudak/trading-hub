@@ -8,7 +8,7 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:657 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:710 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:956 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1171 TradingHub.Core/Trading/OrderContext.cs:162 TradingHub.Core/Trading/OrderContext.cs:755 TradingHub.Indicators.Native/DerivativesPane.cs:32",
+    "locations": "TradingHub.App/Services/AppServices.cs:662 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:710 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:956 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1171 TradingHub.Core/Trading/OrderContext.cs:162 TradingHub.Core/Trading/OrderContext.cs:755 TradingHub.Indicators.Native/DerivativesPane.cs:32",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Edited": {
@@ -76,7 +76,7 @@
     "reason": "Simulation account-context environment identity. Preserve it rather than translating routing metadata."
   },
   "rithmic-position|{0}|{1}|{2}": {
-    "locations": "TradingHub.App/Services/AppServices.Rithmic.cs:74",
+    "locations": "TradingHub.App/Services/AppServices.Rithmic.cs:75",
     "reason": "Internal exact native-account-context, symbol and exchange broker-cache key. Preserve its stable partition prefix and separators rather than translating routing identity."
   },
   "session:{0}|{1}": {
@@ -96,7 +96,7 @@
     "reason": "Signed Binance USD-M per-order trade-history window query (symbol and orderId prefix plus a time range) used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
   },
   "unresolved endpoint": {
-    "locations": "TradingHub.App/Services/AppServices.cs:705",
+    "locations": "TradingHub.App/Services/AppServices.cs:710",
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
   },
   "{0}Edited": {

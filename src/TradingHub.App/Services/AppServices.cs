@@ -621,9 +621,7 @@ public sealed partial class AppServices
             var session = TradovateSessionFor(tp);
             long id = long.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
             var acc = session.Accounts.FirstOrDefault(a => a.Id == id) ?? new TradingHub.Feeds.Tradovate.TradovateAccount(id, parts[2], true);
-            var context = TradingContext(tp, accountId, "Tradovate", "futures",
-                (session.IsDemo ? "demo|" : "live|") + PublicEndpoint(session.Connection.RestBase),
-                session.Accounts.Any(a => a.Id == id) ? id.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
+            var context = TradovateContextFor(tp, session, accountId, id);
             // The opt-in is read at each protection placement, so switching it in Connections needs no reconnection.
             return Cache(key, tp, new TradingHub.Feeds.Tradovate.TradovateBroker(data, session, acc,
                 $"{acc.Name} · Tradovate{(session.IsDemo ? " (demo)" : " — REAL")}", context, () => tp.ExchangeSideProtection), session.Connection);
@@ -651,6 +649,13 @@ public sealed partial class AppServices
         return Cache(key, p, new BinanceBroker(data, settings, p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL",
             BinanceContext(p, accountId, settings), network: NetworkProxy.CreateFactory()));
     }
+
+    /// <summary>The ownership context of a Tradovate account; chart brokers and Accounts-page actions share it (and its order lane).</summary>
+    internal OrderContext TradovateContextFor(ConnectionProfile profile, TradingHub.Feeds.Tradovate.TradovateTradingSession session,
+        string accountId, long account) =>
+        TradingContext(profile, accountId, "Tradovate", "futures",
+            (session.IsDemo ? "demo|" : "live|") + PublicEndpoint(session.Connection.RestBase),
+            session.Accounts.Any(a => a.Id == account) ? account.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
 
     /// <summary>The ownership context of a Binance account: its id keys the persisted intents, executions and native bindings.</summary>
     internal OrderContext BinanceContext(ConnectionProfile p, string accountId, BinanceAccountSettings settings) =>

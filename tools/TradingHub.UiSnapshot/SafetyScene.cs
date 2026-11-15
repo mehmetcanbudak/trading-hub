@@ -590,6 +590,8 @@ internal static partial class SafetyScene
 
         Part("order gestures never wait on durable storage on the UI thread", () => OrderGesturesOffUiThread(window, pump, tv, chart, cache, Check, Status));
 
+        Part("order gestures always report their outcome", () => GestureOutcomes(pump, tv, chart, cache, Check));
+
         Part("Account page on a REAL account with real orders disabled", () =>
         {
             var rp = svc.Connections.Profiles.FirstOrDefault(p => p.IsRithmic && p.Enabled && p.RithmicUser == "demo");

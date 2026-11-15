@@ -874,7 +874,7 @@ public sealed partial class TradingView
         var br = _svc.BracketsFor(acc);
         var (sent, message) = await OrderGestureAsync(acc, desc, () => br.Move(order, price));
         if (!sent) return;
-        GestureStatus(message);
+        GestureStatus(GestureOutcome(acc, desc, message));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -896,7 +896,7 @@ public sealed partial class TradingView
 
         var (sent, msg) = await OrderGestureAsync(acc, label, drop);
         if (!sent) return;
-        if (msg.Length > 0) GestureStatus(msg);
+        if (GestureOutcome(acc, label, msg) is { Length: > 0 } shown) GestureStatus(shown);
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -909,8 +909,10 @@ public sealed partial class TradingView
         if (adds != null && Blocked(chart, acc, adds(acc))) return;
         if (acc.IsReal && !await ConfirmAsync(chart, acc, message + "?")) return;
         if (adds != null && Blocked(chart, acc, adds(acc))) return;
-        if (!(await OrderGestureAsync(acc, message, () => { action(acc); return true; })).Sent) return;
-        GestureStatus(acc.LastError is { Length: > 0 } error ? error : $"{message} requested; check account status for confirmation.");
+        // The error is read in the lane, right after this gesture's account call: a later queued gesture may clear it.
+        var (sent, error) = await OrderGestureAsync(acc, message, () => { action(acc); return acc.LastError; });
+        if (!sent) return;
+        GestureStatus(error is { Length: > 0 } ? error : $"{message} requested; check account status for confirmation.");
     }
 
     /// <summary>Reverses the position: it opens the other side, so it needs real-order permission like an entry.</summary>
@@ -924,7 +926,7 @@ public sealed partial class TradingView
         var br = _svc.BracketsFor(acc);
         var (sent, message) = await OrderGestureAsync(acc, description, () => action(br));
         if (!sent) return;
-        GestureStatus(message);
+        GestureStatus(GestureOutcome(acc, description, message));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -934,7 +936,7 @@ public sealed partial class TradingView
     {
         var (sent, message) = await OrderGestureAsync(acc, label, () => action(br));
         if (!sent) return;
-        if (message.Length > 0) GestureStatus(message);
+        if (GestureOutcome(acc, label, message) is { Length: > 0 } shown) GestureStatus(shown);
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
     }
@@ -943,7 +945,7 @@ public sealed partial class TradingView
     /// Hands a gesture whose confirmations and permission checks already passed to its account's FIFO order lane. On a
     /// thread-safe native account the unchanged account call runs off the UI thread, so durable journaling never
     /// freezes the window, and the status bar shows it pending until it returns; other accounts run inline as before.
-    /// Exceptions from the account call surface here exactly as when it ran inline.
+    /// Exceptions from the account call are shown in the status line; the gesture then reports it was not sent.
     /// </summary>
     private async Task<(bool Sent, T Result)> OrderGestureAsync<T>(ITradingAccount acc, string label, Func<T> action)
     {
@@ -957,7 +959,19 @@ public sealed partial class TradingView
             _status(closed.Message);
             return (false, default!);
         }
+        catch (Exception error)
+        {
+            GestureStatus($"{label} failed with an error: {error.Message}");
+            return (false, default!);
+        }
     }
+
+    /// <summary>
+    /// The status text for a gesture's result. On a native account it always replaces the '&lt;label&gt;: pending…' line,
+    /// with the label when the account call returned no message; inline accounts show the message as before.
+    /// </summary>
+    private static string GestureOutcome(ITradingAccount acc, string label, string message) =>
+        message.Length == 0 && OrderActionLanes.RunsOffCaller(acc) ? label : message;
 
     /// <summary>A gesture's result; gestures still waiting in a lane stay visible in the same status line.</summary>
     private void GestureStatus(string message)
@@ -975,8 +989,9 @@ public sealed partial class TradingView
         if (cancel)
         {
             string label = $"Cancel orders at {acc.Instrument.FormatPrice(price)}";
-            if (!(await OrderGestureAsync(acc, label, () => { acc.CancelAt(price); return true; })).Sent) return;
-            GestureStatus(acc.LastError is { Length: > 0 } error ? error : $"Order cancellation requested at {acc.Instrument.FormatPrice(price)}; check account status for confirmation.");
+            var (sent, error) = await OrderGestureAsync(acc, label, () => { acc.CancelAt(price); return acc.LastError; });
+            if (!sent) return;
+            GestureStatus(error is { Length: > 0 } ? error : $"Order cancellation requested at {acc.Instrument.FormatPrice(price)}; check account status for confirmation.");
             return;
         }
 

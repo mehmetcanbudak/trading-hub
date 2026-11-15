@@ -88,13 +88,15 @@ internal sealed class OrderActionLanes
             // the gesture's outcome belongs to its own completion.
             lane.Tail = lane.Tail.ContinueWith(_ =>
             {
-                try { completion.SetResult(action()); }
-                catch (Exception error) { completion.SetException(error); }
-                finally
-                {
-                    lock (_gate) _pending.Remove(entry);
-                    Changed?.Invoke();
-                }
+                T result = default!;
+                Exception? failure = null;
+                try { result = action(); }
+                catch (Exception error) { failure = error; }
+                // Leave the pending set before completing: the caller's result line counts only gestures still waiting.
+                lock (_gate) _pending.Remove(entry);
+                if (failure != null) completion.SetException(failure);
+                else completion.SetResult(result);
+                Changed?.Invoke();
             }, CancellationToken.None, TaskContinuationOptions.DenyChildAttach, TaskScheduler.Default);
         }
         Changed?.Invoke();

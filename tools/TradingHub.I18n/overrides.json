@@ -22738,5 +22738,9 @@
   "Protection gap: the venue cancelled the linked target; waiting for its fills and position to confirm the remaining position.": {
     "es": "Hueco de protección: el exchange canceló el objetivo vinculado; se esperan sus ejecuciones y la posición para confirmar la posición restante.",
     "zh-CN": "保护缺口：交易场所取消了关联目标；正在等待成交和持仓报告以确认剩余持仓。"
+  },
+  "{0} failed with an error: {1}": {
+    "es": "{0} falló con un error: {1}",
+    "zh-CN": "{0} 失败，发生错误：{1}"
   }
 }
