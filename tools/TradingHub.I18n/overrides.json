@@ -15702,5 +15702,29 @@
   "Binance returned trades before the requested trade ID.": {
     "es": "Binance devolvió operaciones anteriores al ID de operación solicitado.",
     "zh-CN": "Binance 返回了早于所请求成交 ID 的成交。"
+  },
+  "Alert persistence failed. Local history remains in memory; external sends are blocked until storage recovers. Cause: ": {
+    "es": "Falló la persistencia de alertas. El historial local permanece en memoria; los envíos externos están bloqueados hasta que se recupere el almacenamiento. Causa: ",
+    "zh-CN": "提醒持久化失败。本地历史仍保留在内存中；存储恢复前，外部发送将被阻止。原因："
+  },
+  "Alert persistence failed. Local history remains in memory; external sends are blocked until storage recovers. Cause: {0}": {
+    "es": "Falló la persistencia de alertas. El historial local permanece en memoria; los envíos externos están bloqueados hasta que se recupere el almacenamiento. Causa: {0}",
+    "zh-CN": "提醒持久化失败。本地历史仍保留在内存中；存储恢复前，外部发送将被阻止。原因：{0}"
+  },
+  "Live strategy state could not be saved and will be retried: ": {
+    "es": "No se pudo guardar el estado de las estrategias en vivo; se reintentará: ",
+    "zh-CN": "无法保存实盘策略状态，将重试："
+  },
+  "Live strategy state could not be saved and will be retried: {0}": {
+    "es": "No se pudo guardar el estado de las estrategias en vivo; se reintentará: {0}",
+    "zh-CN": "无法保存实盘策略状态，将重试：{0}"
+  },
+  "Live strategy state": {
+    "es": "Estado de las estrategias en vivo",
+    "zh-CN": "实盘策略状态"
+  },
+  "Write-through rename to '{0}' failed (OS error {1}).": {
+    "es": "Falló el cambio de nombre con escritura directa a '{0}' (error del sistema {1}).",
+    "zh-CN": "直写重命名到“{0}”失败（系统错误 {1}）。"
   }
 }
