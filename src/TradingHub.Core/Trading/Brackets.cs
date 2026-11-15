@@ -139,6 +139,11 @@ public sealed class BracketManager : IDisposable
         _exitCapacity = Math.Abs(_lastVolume);
         _entryPrice = account.Position.AveragePrice;
         account.Changed += OnAccountChanged;
+        // An account that already finished its replay raises no change until its next event, which a quiet account may
+        // never send. Reconcile once now, exactly as that change would: working venue-linked protection is adopted at
+        // once instead of looking absent (and inviting a duplicate). Nothing is placed here: the position is the known
+        // baseline above and the default template is off.
+        lock (_gate) SyncLoop();
     }
 
     public ITradingAccount Account { get; }
