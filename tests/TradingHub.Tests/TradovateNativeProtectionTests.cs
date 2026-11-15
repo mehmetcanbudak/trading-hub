@@ -203,7 +203,8 @@ public sealed class TradovateNativeProtectionTests : IDisposable
 
         using var outer = broker.LinkProtection(owner);
         using var inner = broker.LinkProtection(owner);
-        Assert.NotSame(outer, inner);
+        Assert.NotNull(outer);
+        Assert.Null(inner); // a nested scope links nothing, so its legs are never marked as linked
     }
 
     [Fact]

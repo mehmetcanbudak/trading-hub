@@ -364,6 +364,108 @@ public class NativeProtectionTests
     }
 
     [Fact]
+    public void A_linked_target_smaller_than_the_position_filling_completely_restores_a_stop_for_the_rest()
+    {
+        var venue = new OcoVenue();
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var linkedTarget = Assert.Single(brackets.Targets);
+        brackets.AddTarget(130); // splits: the linked target now closes 2, a separate target closes 2
+        Assert.Equal(2m, linkedTarget.Unfilled);
+        int submitted = venue.Submitted.Count;
+
+        venue.ReportCancel(stop); // the venue cancels the stop because the linked target filled
+        venue.ReportExecution(linkedTarget, 2);
+        Assert.Equal(submitted, venue.Submitted.Count);
+        venue.ReportPosition(2);
+
+        var restored = brackets.StopLoss!;
+        Assert.NotSame(stop, restored);
+        Assert.Equal(2m, restored.Unfilled);
+        Assert.Equal(submitted + 1, venue.Submitted.Count);
+    }
+
+    [Fact]
+    public void After_a_reduction_outside_the_brackets_the_replacement_waits_for_the_confirming_position_only()
+    {
+        var venue = new OcoVenue();
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+        venue.ReportPosition(2); // a manual 50% close outside the brackets; the pair is resized natively
+        Assert.Equal(2m, stop.Unfilled);
+        Assert.Equal(2m, target.Unfilled);
+
+        venue.ReportCancel(stop);
+        venue.ReportExecution(target, 1);
+        venue.ReportPosition(1);
+
+        var restored = brackets.StopLoss!;
+        Assert.NotSame(stop, restored);
+        Assert.Equal(1m, restored.Unfilled);
+    }
+
+    [Fact]
+    public void A_stale_position_report_never_sizes_a_replacement_from_the_pre_fill_position()
+    {
+        var venue = new OcoVenue();
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+
+        venue.ReportCancel(stop);
+        venue.ReportExecution(target, 1);
+        venue.ReportPosition(4); // stale: still the position before the fill
+        Assert.Equal(2, venue.Submitted.Count);
+
+        venue.ReportPosition(3);
+        Assert.Equal(3m, brackets.StopLoss!.Unfilled);
+    }
+
+    [Fact]
+    public void A_partner_cancelled_from_the_order_list_restores_the_stop_the_venue_cancelled_with_it()
+    {
+        var venue = new OcoVenue { DeferCancels = true };
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        var target = Assert.Single(brackets.Targets);
+
+        venue.Cancel(target); // from the DOM or order list, not through the brackets
+        venue.ReportCancel(stop); // OCO: the venue cancels the stop too
+        Assert.Equal(2, venue.Submitted.Count);
+        venue.ReportCancel(target);
+
+        var restored = brackets.StopLoss!;
+        Assert.NotSame(stop, restored);
+        Assert.Equal(4m, restored.Unfilled);
+        Assert.Empty(brackets.Targets);
+    }
+
+    [Fact]
+    public void An_explicit_stop_during_the_wait_is_placed_at_once()
+    {
+        var venue = new OcoVenue();
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        venue.ReportCancel(stop);
+        Assert.Contains("Protection gap", brackets.ProtectionNote);
+
+        string message = brackets.SetStopLoss(85);
+
+        var placed = brackets.StopLoss!;
+        Assert.NotSame(stop, placed);
+        Assert.Equal(85m, placed.TriggerPrice);
+        Assert.Equal(4m, placed.Unfilled);
+        Assert.StartsWith("Stop loss at", message);
+        Assert.DoesNotContain("Protection gap", brackets.ProtectionNote ?? "");
+    }
+
+    [Fact]
     public void An_unexplained_cancellation_ends_in_a_visible_protection_gap_after_the_wait_bound()
     {
         var venue = new OcoVenue();

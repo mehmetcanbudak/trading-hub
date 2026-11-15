@@ -1394,13 +1394,13 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         }
     }
 
-    public IDisposable LinkProtection(OrderOwner owner)
+    public IDisposable? LinkProtection(OrderOwner owner)
     {
         var scope = new LinkScope(this, Environment.CurrentManagedThreadId, owner);
         lock (_gate)
         {
             // A scope opened inside another (a consumer reacting synchronously to an account change) collects nothing.
-            if (_link != null) return NoLink.Instance;
+            if (_link != null) return null;
             _link = scope;
         }
         return scope;
@@ -1473,12 +1473,6 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         public readonly OrderOwner Owner = owner;
         public readonly List<PendingLeg> Legs = new();
         public void Dispose() => broker.CloseLink(this);
-    }
-
-    private sealed class NoLink : IDisposable
-    {
-        public static readonly NoLink Instance = new();
-        public void Dispose() { }
     }
 
     private bool TryDeferLinkedLeg(PendingLeg leg)

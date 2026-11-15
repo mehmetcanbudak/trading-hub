@@ -103,6 +103,9 @@ public sealed class BracketManager : IDisposable
         // The partner's cumulative execution while this leg was working and already sized to the remaining position:
         // only executions beyond it can explain a later venue cancellation of this leg.
         public decimal PartnerBaseline;
+        // The reported |position| when that baseline was taken: a replacement waits until the reported position has
+        // fallen by the partner's later executions, so a stale report can never size it.
+        public decimal VolumeAtBaseline;
     }
 
     private readonly List<ExitIntent> _exits = new();
@@ -824,7 +827,10 @@ public sealed class BracketManager : IDisposable
             if (!Terminal(order))
             {
                 if (owned.Partner is { } seen && order.Unfilled <= ExitQuantity)
+                {
                     owned.PartnerBaseline = Executed(Current(seen));
+                    owned.VolumeAtBaseline = Math.Abs(Volume);
+                }
                 continue;
             }
             bool replacement = intent.Phase == ExitPhase.CancelPending && intent.Quantity > 0;
@@ -862,21 +868,25 @@ public sealed class BracketManager : IDisposable
             var partner = leg.Partner;
             var other = partner != null ? Current(partner) : null;
             bool stopping = intent.Role == BracketRole.StopLoss;
-            if (Volume == 0 || intent.Generation != _generation || intent.Side != Math.Sign(Volume) || ExitQuantity == 0 ||
-                partner == null || other == null || other.Status == OrderStatus.Filled)
+            if (Volume == 0 || ExitQuantity == 0 || intent.Generation != _generation || intent.Side != Math.Sign(Volume) ||
+                partner == null || other == null)
             {
-                Settle(intent, gap: null); // the position closed or the partner completed it: nothing left to protect
+                Settle(intent, gap: null); // the position closed: nothing left to protect
                 continue;
             }
+            decimal partnerExecuted = Executed(other) - leg.PartnerBaseline;
             bool partnerDone = Terminal(other) && Executed(other) <= partner.Booked;
             bool cause;
-            if (partner.RemovalRequested) cause = partnerDone && other.Status == OrderStatus.Canceled; // removal: await its outcome
-            else if (CancelRequested(partner)) { Settle(intent, gap: null); continue; } // Cancel all / Close position
-            else if (Executed(other) > leg.PartnerBaseline) cause = true; // the partner executed after this leg was sized
+            if (partner.RemovalRequested || CancelRequested(partner))
+                // This app removed the partner (brackets, DOM, order list): await its outcome, then this leg is needed.
+                cause = partnerDone && (other.Status == OrderStatus.Canceled || partnerExecuted > 0);
+            else if (partnerExecuted > 0) cause = true; // the partner executed (even completely) after this leg was sized
             else if (Terminal(other)) { Settle(intent, gap: null); continue; } // both cancelled, nobody here asked: respected
             else cause = false;
 
-            bool confirmed = NotReady == null && Executed(other) <= partner.Booked && Math.Abs(Volume) == _exitCapacity;
+            // Confirmed once the fills are booked and the reported position has fallen by them; sized from that position.
+            bool confirmed = NotReady == null && Executed(other) <= partner.Booked &&
+                Math.Abs(Volume) <= leg.VolumeAtBaseline - Math.Max(0, partnerExecuted);
             if (cause && confirmed)
             {
                 intent.Dissolved = null;
@@ -921,11 +931,19 @@ public sealed class BracketManager : IDisposable
             Quantity = quantity, Phase = ExitPhase.Waiting,
         });
 
-    private static void ChangeExit(ExitIntent intent, decimal price, decimal quantity)
+    // An explicit change (a new stop price, breakeven, a resize) ends a dissolved link's wait: the leg is placed at once as
+    // app-managed protection.
+    private void ChangeExit(ExitIntent intent, decimal price, decimal quantity)
     {
         intent.Price = price;
         intent.Quantity = quantity;
         intent.FailedTotal = null;
+        if (intent.Phase != ExitPhase.Dissolving) return;
+        intent.Dissolved = null;
+        intent.Phase = ExitPhase.Waiting;
+        _linkFallback = true;
+        if (_protectionNote?.StartsWith("Protection gap:", StringComparison.Ordinal) == true &&
+            !_exits.Any(e => e.Phase == ExitPhase.Dissolving)) _protectionNote = null;
     }
 
     private void ResizeToPosition()
@@ -1094,7 +1112,7 @@ public sealed class BracketManager : IDisposable
             }
             if (quantity <= 0) continue;
             var order = OrderActions.Manual(Account, intent.Role == BracketRole.StopLoss ? OrderTypes.Stop : OrderTypes.Limit, intent.Side > 0 ? OrderDirections.Sell : OrderDirections.Buy, quantity, intent.Price, intent.Role == BracketRole.StopLoss ? "SL" : "TP", reduceOnly: true);
-            var owned = new OwnedExit { Handle = order, Latest = order, Intent = intent, Linked = link != null };
+            var owned = new OwnedExit { Handle = order, Latest = order, Intent = intent, Linked = link != null, VolumeAtBaseline = Math.Abs(Volume) };
             if (link != null)
             {
                 if (first == null) first = owned;
@@ -1171,6 +1189,8 @@ public sealed class BracketManager : IDisposable
             var stopLeg = AdoptLeg(stop, BracketRole.StopLoss);
             var targetLeg = AdoptLeg(target, BracketRole.Target);
             (stopLeg.Partner, targetLeg.Partner) = (targetLeg, stopLeg);
+            (stopLeg.PartnerBaseline, targetLeg.PartnerBaseline) = (Executed(target), Executed(stop));
+            stopLeg.VolumeAtBaseline = targetLeg.VolumeAtBaseline = Math.Abs(Volume);
             _protectionNote = null;
             Message?.Invoke($"Exchange-side stop {Inst.FormatPrice(PriceOf(stop))} and target {Inst.FormatPrice(PriceOf(target))} adopted from the venue.");
             return true;

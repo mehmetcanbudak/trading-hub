@@ -103,9 +103,14 @@ A Tradovate connection can opt in to **Exchange-side protection (Tradovate OCO)*
 - Partial targets, a stop without a target, or a target that does not cover the whole position stay app-managed. Chart Trader says why.
 - If Tradovate refuses the OCO, both legs are sent again as separate app-managed orders and the reason stays visible. Linking stays off for that session until the option is switched off and on again.
 - If Tradovate cancels a leg that Trading Hub never asked to cancel, Trading Hub waits for the cause, because cancellation, fill and position reports arrive separately and in any order. Chart Trader shows a **Protection gap** while it waits.
-  - The leg is replaced with an app-managed order only when the other leg has executed since the cancelled leg was last sized, or Trading Hub had removed the other leg and that removal has ended. The replacement is sent only once the reported position matches the booked fills, and it is sized from that position.
-  - The wait ends without sending anything when the other leg filled completely or the position is flat.
-  - Legs that Trading Hub asked to cancel through any path (**Cancel all**, **Close position** or a bracket change), and cancellations of both legs that nobody here requested, are respected as they are for app-managed orders.
+  - The leg is replaced with an app-managed order only for a confirmed cause:
+    - the other leg executed, partly or completely, after the cancelled leg was last sized; or
+    - Trading Hub cancelled the other leg (bracket removal, the DOM or the order list) and that cancellation has ended.
+
+    The replacement is sent only once those fills are booked and the reported position has fallen by them, so a stale position report never sizes it. It is sized from the reported position, including reductions made outside the brackets.
+  - The wait ends without sending anything when the position is flat.
+  - Legs that Trading Hub itself asked to cancel (including **Cancel all** and **Close position**) are never replaced. When both legs were cancelled and nobody here requested either, the cancellation is respected as for app-managed orders.
+  - Setting a stop or moving it to breakeven during the wait ends it: that stop is placed at once as app-managed protection.
   - When no cause is confirmed within 30 seconds, Chart Trader keeps showing the **Protection gap** and that no stop (or target) is working. Nothing is sent automatically, so place a new stop yourself.
 - A strategy's linked pair and the chart's are separate: one owner's order is never paired with another's.
 - After a restart, chart protection that is still working at Tradovate is re-owned from the saved client IDs and adopted. It is never placed a second time. A strategy re-adopts its own kept stop and target as before.

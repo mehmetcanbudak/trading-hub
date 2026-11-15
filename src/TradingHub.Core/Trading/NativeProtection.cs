@@ -30,8 +30,9 @@ public interface INativeProtection
     string? NativeProtectionFault { get; }
     /// <summary>Collects the protective stop and target that <paramref name="owner"/> submits on this thread until disposal,
     /// then sends them as one linked group when both are valid exits of equal quantity, or individually otherwise. Another
-    /// owner's orders are never collected, and a scope opened while one is already open collects nothing.</summary>
-    IDisposable LinkProtection(OrderOwner owner);
+    /// owner's orders are never collected. Null when a scope is already open: nothing is collected, so callers must not
+    /// treat orders submitted then as linked.</summary>
+    IDisposable? LinkProtection(OrderOwner owner);
 
     /// <summary>The venue's identity of the linked group an order belongs to, or null when the venue reports none.</summary>
     string? ProtectionGroupOf(Order order);
