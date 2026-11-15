@@ -1642,38 +1642,69 @@ public static class LiveStore
         }
     }
 
+    // Live runner/portfolio state files whose last save failed, with the reported message. Guarded by Gate.
+    private static readonly Dictionary<string, string> StateFailures = new(StringComparer.Ordinal);
+
+    /// <summary>The live runner/portfolio state save that is currently failing, or null when every such file saved.
+    /// Those saves are retried on the next periodic save or change; in-memory state stays authoritative meanwhile.</summary>
+    public static string? StateSaveError { get { lock (Gate) return StateFailures.Values.FirstOrDefault(); } }
+
+    /// <summary>Raised outside the store lock when a live state file starts failing to save (once per failure episode,
+    /// not on every retry). Arguments: the user-facing message and the underlying error.</summary>
+    public static event Action<string, Exception>? StateSaveFailed;
+
+    private static Action? RecordStateSave(string path, Exception? error)
+    {
+        if (error == null)
+        {
+            StateFailures.Remove(path);
+            return null;
+        }
+        bool first = !StateFailures.ContainsKey(path);
+        string message = "Live strategy state could not be saved and will be retried: " + error.Message;
+        StateFailures[path] = message;
+        return first ? () => StateSaveFailed?.Invoke(message, error) : null;
+    }
+
     /// <summary>Guarda el estado (mezcla con lo guardado: las estrategias detenidas quedan con su historia).</summary>
     public static void SaveRunners(IEnumerable<LiveRunnerInfo> current)
     {
-        lock (Gate)
-        {
-            var all = new Dictionary<string, LiveRunnerInfo>();
-            try
-            {
-                if (File.Exists(RunnersPath))
-                    foreach (var r in JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new()) all[r.Key] = r;
-            }
-            catch
-            {
-                // archivo dañado
-            }
+        Action? report;
+        lock (Gate) report = SaveRunnersLocked(current);
+        report?.Invoke();
+    }
 
-            foreach (var r in all.Values) r.Running = false;
-            foreach (var r in current) all[r.Key] = r;
-            try
-            {
-                // solo si cambió algo (se llama cada pocos segundos)
-                var json = JsonSerializer.Serialize(all.Values.ToList(), Json);
-                if (json == _lastRunnersJson && _lastRunnersPath == RunnersPath && File.Exists(RunnersPath)) return;
-                Directory.CreateDirectory(Root);
-                DurableFile.ReplaceAtomically(RunnersPath, json);
-                _lastRunnersJson = json;
-                _lastRunnersPath = RunnersPath;
-            }
-            catch
-            {
-                // se reintenta en la próxima vuelta
-            }
+    private static Action? SaveRunnersLocked(IEnumerable<LiveRunnerInfo> current)
+    {
+        var all = new Dictionary<string, LiveRunnerInfo>();
+        try
+        {
+            if (File.Exists(RunnersPath))
+                foreach (var r in JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new()) all[r.Key] = r;
+        }
+        catch
+        {
+            // archivo dañado
+        }
+
+        foreach (var r in all.Values) r.Running = false;
+        foreach (var r in current) all[r.Key] = r;
+        string path = RunnersPath;
+        try
+        {
+            // solo si cambió algo (se llama cada pocos segundos)
+            var json = JsonSerializer.Serialize(all.Values.ToList(), Json);
+            if (json == _lastRunnersJson && _lastRunnersPath == path && File.Exists(path)) return RecordStateSave(path, null);
+            DurableFile.EnsureDirectory(Root);
+            DurableFile.ReplaceAtomically(path, json);
+            _lastRunnersJson = json;
+            _lastRunnersPath = path;
+            return RecordStateSave(path, null);
+        }
+        catch (Exception ex)
+        {
+            // Retried on the next periodic save; the failure stays visible through StateSaveError/StateSaveFailed.
+            return RecordStateSave(path, ex);
         }
     }
 
@@ -1690,7 +1721,7 @@ public static class LiveStore
             if (deleteFills) DeleteFills(key);
             var all = File.Exists(RunnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new() : new();
             all.RemoveAll(r => r.Key == key);
-            Directory.CreateDirectory(Root);
+            DurableFile.EnsureDirectory(Root);
             DurableFile.ReplaceAtomically(RunnersPath, JsonSerializer.Serialize(all, Json));
             _lastRunnersJson = null;
         }
@@ -1713,7 +1744,7 @@ public static class LiveStore
                 var all = File.Exists(runnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(runnersPath)) ?? new() : new();
                 if (all.FirstOrDefault(r => r.Key == info.Key) is { } saved) saved.ProtectionOrderIds = info.ProtectionOrderIds;
                 else all.Add(info);
-                Directory.CreateDirectory(root);
+                DurableFile.EnsureDirectory(root);
                 DurableFile.ReplaceAtomically(runnersPath, JsonSerializer.Serialize(all, Json));
                 _lastRunnersJson = null;
                 return null;
@@ -1728,22 +1759,28 @@ public static class LiveStore
     /// <summary>Actualiza lo guardado de una estrategia que no está corriendo (tamaño, límites, portafolio).</summary>
     public static void UpdateRunner(string key, Action<LiveRunnerInfo> change)
     {
+        Action? report = null;
         lock (Gate)
         {
+            string path = RunnersPath;
             try
             {
-                var all = File.Exists(RunnersPath) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(RunnersPath)) ?? new() : new();
+                var all = File.Exists(path) ? JsonSerializer.Deserialize<List<LiveRunnerInfo>>(File.ReadAllText(path)) ?? new() : new();
                 var info = all.FirstOrDefault(r => r.Key == key);
-                if (info == null) return;
-                change(info);
-                DurableFile.ReplaceAtomically(RunnersPath, JsonSerializer.Serialize(all, Json));
-                _lastRunnersJson = null;
+                if (info != null)
+                {
+                    change(info);
+                    DurableFile.ReplaceAtomically(path, JsonSerializer.Serialize(all, Json));
+                    _lastRunnersJson = null;
+                    report = RecordStateSave(path, null);
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // se reintenta
+                report = RecordStateSave(path, ex); // retried by the next change or periodic runner save
             }
         }
+        report?.Invoke();
     }
 
     /// <summary>Portafolios en vivo guardados (el automático incluido, con su configuración).</summary>
@@ -1766,18 +1803,22 @@ public static class LiveStore
 
     public static void SavePortfolios(List<LivePortfolioDef> list)
     {
+        Action? report;
         lock (Gate)
         {
+            string path = PortfoliosPath;
             try
             {
-                Directory.CreateDirectory(Root);
-                DurableFile.ReplaceAtomically(PortfoliosPath, JsonSerializer.Serialize(list, Json));
+                DurableFile.EnsureDirectory(Root);
+                DurableFile.ReplaceAtomically(path, JsonSerializer.Serialize(list, Json));
+                report = RecordStateSave(path, null);
             }
-            catch
+            catch (Exception ex)
             {
-                // se reintenta en el próximo cambio
+                report = RecordStateSave(path, ex); // retried on the next portfolio change
             }
         }
+        report?.Invoke();
     }
 
     public static List<SizingProposal> LoadProposals()
@@ -1801,7 +1842,7 @@ public static class LiveStore
     {
         lock (Gate)
         {
-            Directory.CreateDirectory(Root);
+            DurableFile.EnsureDirectory(Root);
             DurableFile.ReplaceAtomically(ProposalsPath, JsonSerializer.Serialize(list.OrderByDescending(p => p.CreatedUtc).Take(100).ToList(), Json));
         }
     }

@@ -8,7 +8,7 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:654 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:656 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:904 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749 TradingHub.Indicators.Native/DerivativesPane.cs:32",
+    "locations": "TradingHub.App/Services/AppServices.cs:655 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:656 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:904 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749 TradingHub.Indicators.Native/DerivativesPane.cs:32",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
   "Edited": {
@@ -16,7 +16,7 @@
     "reason": "Suffix of the default C# class name for an editable indicator copy. Generated identifiers stay English in every UI language."
   },
   "Fee": {
-    "locations": "TradingHub.Strategies/LivePortfolio.cs:1560 TradingHub.Strategies/LivePortfolio.cs:1565",
+    "locations": "TradingHub.Strategies/LivePortfolio.cs:1540 TradingHub.Strategies/LivePortfolio.cs:1545",
     "reason": "Existing imported-execution JSON property name, validated and decoded without renaming persisted records."
   },
   "Indicator copy backups": {
@@ -36,7 +36,7 @@
     "reason": "Persisted IB recovery-journal JSON property. Renaming it would invalidate existing transactions."
   },
   "Symbol": {
-    "locations": "TradingHub.Strategies/LivePortfolio.cs:1574",
+    "locations": "TradingHub.Strategies/LivePortfolio.cs:1554",
     "reason": "Existing imported-execution JSON property, not a column label. Preserve its stored schema."
   },
   "Version": {
@@ -64,7 +64,7 @@
     "reason": "Signed Binance per-order trade-history query template used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
   },
   "unresolved endpoint": {
-    "locations": "TradingHub.App/Services/AppServices.cs:702",
+    "locations": "TradingHub.App/Services/AppServices.cs:703",
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
   },
   "{0}Edited": {

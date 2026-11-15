@@ -55,7 +55,7 @@ public sealed class DurableStateWriterTests : IDisposable
     {
         string target = PathFor("state.json");
         File.WriteAllText(target, "previous");
-        var recorder = new DurabilityRecorder { FailWhen = step => step.StartsWith("sync:", StringComparison.Ordinal) };
+        var recorder = new DurabilityRecorder { FailWhen = step => step == "sync:" + DurabilityRecorder.Full(_root) };
         using (recorder.Install())
             Assert.Throws<IOException>(() => DurableFile.ReplaceAtomically(target, "next"));
         recorder.LoseUnsyncedRenames();
@@ -320,6 +320,137 @@ public sealed class DurableStateWriterTests : IDisposable
         Assert.InRange(steps.ToList().FindLastIndex(step => step == "sync:" + DurabilityRecorder.Full(Path.GetDirectoryName(selection.AppRoot!)!)), stageSync + 1, selectionPublished - 1);
         Assert.False(File.Exists(Path.Combine(fixture.AppRoot, "storage-relocation.json")));
         Assert.Contains("sync:" + bootstrap, steps.Skip(selectionPublished + 1)); // pending-request removal is durable too
+    }
+
+    [Fact]
+    public void Windows_rename_requests_a_write_through_move_and_maps_native_errors()
+    {
+        string source = PathFor("state.json.tmp"), destination = PathFor("state.json");
+        File.WriteAllText(source, "next");
+        var calls = new List<(string Source, string Destination, int Flags)>();
+        int result = 0;
+        int Native(string from, string to, int flags) { calls.Add((from, to, flags)); return result; }
+
+        StorageSync.Rename(source, destination, overwrite: true, windows: true, Native);
+        StorageSync.Rename(source, destination, overwrite: false, windows: true, Native);
+        Assert.Equal(new[]
+        {
+            (source, destination, StorageSync.MoveFileWriteThrough | StorageSync.MoveFileReplaceExisting),
+            (source, destination, StorageSync.MoveFileWriteThrough),
+        }, calls);
+        Assert.True(File.Exists(source)); // the Windows branch never falls back to File.Move
+
+        result = 2;
+        Assert.Throws<FileNotFoundException>(() => StorageSync.Rename(source, destination, true, true, Native));
+        result = 5;
+        Assert.Throws<UnauthorizedAccessException>(() => StorageSync.Rename(source, destination, true, true, Native));
+        result = 183;
+        var exists = Assert.Throws<IOException>(() => StorageSync.Rename(source, destination, false, true, Native));
+        Assert.Contains("OS error 183", exists.Message);
+
+        string longPath = "/" + new string('d', 300) + "/state.json";
+        Assert.Equal(@"\\?\" + Path.GetFullPath(longPath), StorageSync.WindowsPath(longPath));
+        Assert.Equal(Path.GetFullPath(destination), StorageSync.WindowsPath(destination));
+
+        // Elsewhere the native mover is never used; File.Move performs the rename and directory sync follows it.
+        StorageSync.Rename(source, destination, overwrite: true, windows: false, (_, _, _) => throw new InvalidOperationException());
+        Assert.Equal("next", File.ReadAllText(destination));
+        Assert.False(File.Exists(source));
+    }
+
+    [Fact]
+    public void A_new_or_unconfirmed_directory_is_persisted_in_its_parent_before_the_first_durable_write()
+    {
+        string root = DurabilityRecorder.Full(_root), created = PathFor("created"), nested = PathFor("created", "nested");
+        var recorder = new DurabilityRecorder();
+        // Replacement never creates a missing directory: the failure stays visible and nothing is left behind.
+        Assert.Throws<DirectoryNotFoundException>(() => DurableFile.ReplaceAtomically(Path.Combine(nested, "state.json"), "early"));
+        Assert.False(Directory.Exists(created));
+        using (recorder.Install())
+        {
+            DurableFile.EnsureDirectory(nested);
+            DurableFile.ReplaceAtomically(Path.Combine(nested, "state.json"), "first");
+        }
+        recorder.AssertAtomicReplace(Path.Combine(nested, "state.json"));
+        var steps = recorder.Steps.ToList();
+        int firstFlush = steps.FindIndex(step => step.StartsWith("flush:", StringComparison.Ordinal));
+        Assert.InRange(steps.IndexOf("sync:" + root), 0, firstFlush - 1);
+        Assert.InRange(steps.IndexOf("sync:" + DurabilityRecorder.Full(created)), steps.IndexOf("sync:" + root) + 1, firstFlush - 1);
+
+        // A directory left by a process that crashed before synchronizing its parent is confirmed once per process.
+        string orphan = PathFor("orphan");
+        Directory.CreateDirectory(orphan);
+        var confirm = new DurabilityRecorder();
+        using (confirm.Install())
+        {
+            DurableFile.ReplaceAtomically(Path.Combine(orphan, "state.json"), "first");
+            DurableFile.ReplaceAtomically(Path.Combine(orphan, "state.json"), "second");
+        }
+        Assert.Equal("sync:" + root, confirm.Steps[0]);
+        Assert.Single(confirm.Steps, step => step == "sync:" + root);
+        confirm.AssertEveryTemporaryRenameIsDurable();
+        Assert.Equal("second", File.ReadAllText(Path.Combine(orphan, "state.json")));
+    }
+
+    [Fact]
+    public async Task Alert_persistence_failure_status_names_its_cause()
+    {
+        string path = PathFor("failing-alerts", "alerts.json");
+        var recorder = new DurabilityRecorder();
+        using var scope = recorder.Install();
+        using var http = new HttpClient(new NoNetwork());
+        await using var center = new AlertCenter(path, new MemorySecrets(), http);
+        recorder.FailWhen = step => step == "sync:" + DurabilityRecorder.Full(Path.GetDirectoryName(path)!);
+        Assert.True(center.Raise(AlertKind.System, "TEST", "Durability", "Local alert", "failing-alert", allowExternal: false));
+        _ = await Record.ExceptionAsync(() => center.FlushAsync());
+        string status = center.Snapshot().Status;
+        Assert.Contains("Alert persistence failed.", status);
+        Assert.Contains("Cause: Simulated storage failure before sync:", status);
+    }
+
+    [Fact]
+    public async Task Failing_live_state_saves_are_reported_once_per_episode_logged_and_raised_as_local_alerts()
+    {
+        string previous = LiveStore.Root;
+        LiveStore.Root = PathFor("live-state");
+        using var http = new HttpClient(new NoNetwork());
+        await using var center = new AlertCenter(PathFor("live-alerts", "alerts.json"), new MemorySecrets(), http);
+        var reported = new List<string>();
+        void Observe(string message, Exception error)
+        {
+            if (error.Message.StartsWith("Simulated storage failure", StringComparison.Ordinal)) lock (reported) reported.Add(message);
+        }
+        LiveStore.StateSaveFailed += Observe;
+        try
+        {
+            using (new LiveStateFaultReporter(center))
+            {
+                var recorder = new DurabilityRecorder { FailWhen = step => step.StartsWith("rename:", StringComparison.Ordinal) };
+                using (recorder.Install())
+                {
+                    LiveStore.SaveRunners(new[] { new LiveRunnerInfo { Key = "durable-runner", Size = 1 } });
+                    LiveStore.SaveRunners(new[] { new LiveRunnerInfo { Key = "durable-runner", Size = 2 } }); // retried, still failing
+                    LiveStore.SavePortfolios(new List<LivePortfolioDef>());
+                }
+                Assert.Equal(2, reported.Count); // one episode per state file, not one per retry
+                Assert.All(reported, message => Assert.StartsWith("Live strategy state could not be saved and will be retried: ", message));
+                Assert.Contains("Simulated storage failure", LiveStore.StateSaveError);
+                Assert.False(File.Exists(Path.Combine(LiveStore.Root, "estrategias.json")));
+
+                LiveStore.SaveRunners(new[] { new LiveRunnerInfo { Key = "durable-runner", Size = 2 } });
+                LiveStore.SavePortfolios(new List<LivePortfolioDef>());
+                Assert.Null(LiveStore.StateSaveError);
+                Assert.Equal(2m, Assert.Single(LiveStore.LoadRunners()).Size);
+                await center.FlushAsync();
+                Assert.Equal(2, center.Snapshot().Recent.Count(alert =>
+                    alert.Source == "Live strategy state" && alert.Message.Contains("Simulated storage failure", StringComparison.Ordinal)));
+            }
+        }
+        finally
+        {
+            LiveStore.StateSaveFailed -= Observe;
+            LiveStore.Root = previous;
+        }
     }
 
     private sealed class MemorySecrets : ISecretStore

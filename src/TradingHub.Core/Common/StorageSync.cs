@@ -77,8 +77,52 @@ public static class StorageSync
         return true;
     }
 
+    internal const int MoveFileReplaceExisting = 0x1, MoveFileWriteThrough = 0x8;
+
+    /// <summary>Same-volume rename. On Windows it uses MoveFileEx with MOVEFILE_WRITE_THROUGH so the rename is flushed
+    /// before returning (Windows has no directory-handle synchronization); elsewhere <see cref="File.Move(string, string, bool)"/>,
+    /// followed by the caller's <see cref="SyncDirectory"/>.</summary>
+    public static void Rename(string source, string destination, bool overwrite) =>
+        Rename(source, destination, overwrite, OperatingSystem.IsWindows(), WindowsMove);
+
+    /// <summary>Platform dispatch with an injectable native mover returning a Win32 error code (0 on success).</summary>
+    internal static void Rename(string source, string destination, bool overwrite, bool windows, Func<string, string, int, int> windowsMove)
+    {
+        if (!windows)
+        {
+            File.Move(source, destination, overwrite);
+            return;
+        }
+        int flags = MoveFileWriteThrough | (overwrite ? MoveFileReplaceExisting : 0);
+        int error = windowsMove(WindowsPath(source), WindowsPath(destination), flags);
+        if (error == 0) return;
+        string message = $"Write-through rename to '{destination}' failed (OS error {error}).";
+        throw error switch
+        {
+            2 => new FileNotFoundException(message, source),
+            3 => new DirectoryNotFoundException(message),
+            5 => new UnauthorizedAccessException(message, new Win32Exception(error)),
+            _ => new IOException(message, new Win32Exception(error)),
+        };
+    }
+
+    // MoveFileExW accepts paths beyond MAX_PATH only with the extended-length prefix.
+    internal static string WindowsPath(string path)
+    {
+        string full = Path.GetFullPath(path);
+        if (full.Length < 260 || full.StartsWith(@"\\?\", StringComparison.Ordinal)) return full;
+        return full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full[2..] : @"\\?\" + full;
+    }
+
+    private static int WindowsMove(string source, string destination, int flags) =>
+        MoveFileEx(source, destination, flags) ? 0 : Marshal.GetLastPInvokeError();
+
     private static IOException Failure(string operation, int error) =>
         new($"{operation} failed (OS error {error}).", new Win32Exception(error));
+
+    [DllImport("kernel32.dll", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MoveFileEx(string existingFileName, string newFileName, int flags);
 
     [DllImport("libSystem.B.dylib", EntryPoint = "fcntl", SetLastError = true)]
     private static extern int DarwinFcntl(int descriptor, int command);

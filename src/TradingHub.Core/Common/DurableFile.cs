@@ -14,7 +14,7 @@ public class DurabilityOperations
     public virtual void Flush(Stream stream) => StorageSync.Flush(stream);
 
     /// <summary>Renames within one directory. Durability of the new name requires a later <see cref="SyncDirectory"/>.</summary>
-    public virtual void Rename(string source, string destination, bool overwrite) => File.Move(source, destination, overwrite);
+    public virtual void Rename(string source, string destination, bool overwrite) => StorageSync.Rename(source, destination, overwrite);
 
     /// <summary>Persists a directory's names on macOS/Linux; a no-op where the platform has no directory handle sync.</summary>
     public virtual void SyncDirectory(string directory) => StorageSync.SyncDirectory(directory);
@@ -50,6 +50,7 @@ public static class DurableFile
         var operations = Operations;
         string target = Path.GetFullPath(path);
         string directory = Path.GetDirectoryName(target)!;
+        ConfirmDirectory(directory, create: false);
         string temporary = TemporaryFor(target);
         try
         {
@@ -82,6 +83,7 @@ public static class DurableFile
         var operations = Operations;
         string target = Path.GetFullPath(path);
         string directory = Path.GetDirectoryName(target)!;
+        ConfirmDirectory(directory, create: false);
         string temporary = TemporaryFor(target);
         try
         {
@@ -110,24 +112,43 @@ public static class DurableFile
     /// Callers follow it with <see cref="SyncDirectory"/>.</summary>
     public static void Rename(string source, string destination, bool overwrite) => Operations.Rename(source, destination, overwrite);
 
-    /// <summary>Creates any missing directory levels, persisting each new name in its parent. Existing levels cost one
-    /// existence check and no synchronization.</summary>
-    public static void EnsureDirectory(string directory)
+    // Directories whose own name this process has persisted in their parent. Keyed by normalized full path.
+    private static readonly HashSet<string> Confirmed =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    /// <summary>Creates any missing directory levels, persisting each new name in its parent. A directory that already
+    /// existed (for example, created by a process that crashed before synchronizing) has its parent synchronized once per
+    /// process, so its name is durable before the first durable write inside it is acknowledged.</summary>
+    public static void EnsureDirectory(string directory) => ConfirmDirectory(directory, create: true);
+
+    // Replacement never creates its directory (a missing location stays a visible error), but confirms an existing one.
+    private static void ConfirmDirectory(string directory, bool create)
     {
+        string target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        lock (Confirmed)
+            if (Confirmed.Contains(target))
+            {
+                if (Directory.Exists(target)) return;
+                Confirmed.Remove(target); // removed since confirmation: recreate and confirm again
+            }
+        if (!create && !Directory.Exists(target)) return; // the temporary's creation reports the missing directory
         var missing = new Stack<string>();
-        string? current = Path.GetFullPath(directory);
+        string? current = target;
         while (current != null && !Directory.Exists(current))
         {
             missing.Push(current);
             current = Path.GetDirectoryName(current);
         }
         var operations = Operations;
+        if (missing.Count == 0 && Path.GetDirectoryName(target) is { } existingParent) operations.SyncDirectory(existingParent);
         while (missing.Count > 0)
         {
             string created = missing.Pop();
             Directory.CreateDirectory(created);
             if (Path.GetDirectoryName(created) is { } parent) operations.SyncDirectory(parent);
+            if (missing.Count > 0) lock (Confirmed) Confirmed.Add(created);
         }
+        lock (Confirmed) Confirmed.Add(target);
     }
 
     /// <summary>Persists a directory's entries (creations, renames and deletions) on macOS/Linux.</summary>

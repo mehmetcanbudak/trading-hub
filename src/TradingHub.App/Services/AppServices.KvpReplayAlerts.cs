@@ -12,6 +12,7 @@ public sealed partial class AppServices
     private readonly ConditionalWeakTable<LiveStrategyRunner, RunnerAlertSubscription> _runnerAlerts = new();
     private readonly ConditionalWeakTable<TradingHub.Trading.ITradingAccount, object> _accountAlerts = new();
     private HttpClient? _notificationHttp;
+    private LiveStateFaultReporter? _liveStateFaults;
 
     private void InitializeReplayAlerts()
     {
@@ -23,6 +24,7 @@ public sealed partial class AppServices
         }), disposeHandler: true) { Timeout = TimeSpan.FromSeconds(15) };
         Alerts = new AlertCenter(Path.Combine(AppPaths.Root, "notifications.json"), Keychain.Store, _notificationHttp);
         ReplaySessions = new ReplaySessions(Hub, AppPaths.Ticks, Path.Combine(AppPaths.Root, "Practice"), Alerts);
+        _liveStateFaults = new LiveStateFaultReporter(Alerts);
         BracketsCreated += OnAlertBracketsCreated;
     }
     private void OnAlertBracketsCreated(TradingHub.Trading.BracketManager brackets) =>
@@ -57,6 +59,7 @@ public sealed partial class AppServices
     private async ValueTask DisposeReplayAlertsAsync()
     {
         BracketsCreated -= OnAlertBracketsCreated;
+        _liveStateFaults?.Dispose();
         ReplaySessions?.Dispose();
         if (Alerts != null) await Alerts.DisposeAsync().ConfigureAwait(false);
         _notificationHttp?.Dispose();

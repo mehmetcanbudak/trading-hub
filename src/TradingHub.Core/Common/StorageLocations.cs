@@ -179,7 +179,7 @@ public sealed class StorageLocationStore
         IProgress<StorageRelocationProgress>? progress = null)
     {
         if (!HasPending) return new(true, false, "No storage relocation is pending.");
-        Directory.CreateDirectory(_bootstrapRoot);
+        DurableFile.EnsureDirectory(_bootstrapRoot);
         var stages = new List<string>();
         StorageRelocationResult result;
         try
