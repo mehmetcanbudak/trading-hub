@@ -300,6 +300,39 @@ public sealed class TradovateNativeProtectionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_position_is_never_proven_to_include_executions_without_dated_fill_reports()
+    {
+        using var fake = new FakeTradovate();
+        var (feed, session, account) = await Connect(fake);
+        using var _f = feed;
+        using var _s = session;
+        using var broker = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session, account, "DEMO101", Context(), () => true);
+        var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1, 4990);
+        await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
+        long id = long.Parse(order.ExchangeOrderId, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(broker.PositionReflects(order)); // nothing executed yet
+
+        // Executed, but no fill entity has arrived yet.
+        await fake.PublishOrder(new JsonObject { ["id"] = id, ["accountId"] = 101, ["contractId"] = 555, ["action"] = "Buy",
+            ["ordStatus"] = "Filled", ["timestamp"] = "2026-11-15T12:00:00Z" });
+        await Until(() => order.Status == OrderStatus.Filled);
+        Assert.False(broker.PositionReflects(order));
+
+        // A fill without a timestamp, and a dated position report: still unprovable.
+        await fake.PublishFill(new JsonObject { ["id"] = 9001, ["orderId"] = id, ["contractId"] = 555, ["action"] = "Buy",
+            ["qty"] = 1, ["price"] = 4990m, ["active"] = true });
+        await fake.PublishPosition(new JsonObject { ["id"] = 1, ["accountId"] = 101, ["contractId"] = 555, ["netPos"] = 1,
+            ["netPrice"] = 4990m, ["bought"] = 1, ["boughtValue"] = 4990m, ["sold"] = 0, ["soldValue"] = 0, ["timestamp"] = "2026-11-15T12:00:05Z" });
+        await Until(() => broker.Position.Volume == 1);
+        Assert.False(broker.PositionReflects(order));
+
+        // Once the fill carries its venue timestamp, the later position report proves it.
+        await fake.PublishFill(new JsonObject { ["id"] = 9001, ["orderId"] = id, ["contractId"] = 555, ["action"] = "Buy",
+            ["qty"] = 1, ["price"] = 4990m, ["active"] = true, ["timestamp"] = "2026-11-15T12:00:01Z" });
+        await Until(() => broker.PositionReflects(order));
+    }
+
+    [Fact]
     public async Task A_restarted_app_re_owns_and_adopts_the_working_oco_without_sending_again()
     {
         using var fake = new FakeTradovate();

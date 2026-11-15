@@ -871,6 +871,11 @@ public sealed class BracketManager : IDisposable
         foreach (var intent in _exits.Where(e => e.Phase == ExitPhase.Dissolving).ToList())
         {
             var leg = intent.Dissolved!;
+            if (intent.Quantity <= 0)
+            {
+                Settle(intent, gap: null); // removed or superseded by the user (Apply template, a resize to zero): never revived
+                continue;
+            }
             var partner = leg.Partner;
             var other = partner != null ? Current(partner) : null;
             bool stopping = intent.Role == BracketRole.StopLoss;
@@ -899,7 +904,7 @@ public sealed class BracketManager : IDisposable
             {
                 intent.Dissolved = null;
                 intent.Phase = ExitPhase.Waiting;
-                intent.Quantity = ExitQuantity;
+                intent.Quantity = Math.Min(intent.Quantity, ExitQuantity);
                 _linkFallback = true;
                 _protectionNote = "The venue cancelled one linked leg while the position remains open: app-managed protection replaces it.";
                 Message?.Invoke(_protectionNote);
@@ -913,7 +918,7 @@ public sealed class BracketManager : IDisposable
                     // already included the fill): place it, sized from the booked fills and the reported position.
                     intent.Dissolved = null;
                     intent.Phase = ExitPhase.Waiting;
-                    intent.Quantity = ExitQuantity;
+                    intent.Quantity = Math.Min(intent.Quantity, ExitQuantity);
                     _linkFallback = true;
                     _protectionNote = "The venue cancelled one linked leg while the position remains open: app-managed protection replaces it.";
                     Message?.Invoke(_protectionNote);
@@ -1125,11 +1130,9 @@ public sealed class BracketManager : IDisposable
             if (intent.Generation != _generation || intent.Side != Math.Sign(Volume)) continue;
             if (_exits.Any(e => e.Role == intent.Role && PendingChange(e))) continue;
             decimal quantity = Math.Min(intent.Quantity, ExitQuantity);
-            if (intent.Role == BracketRole.Target)
-            {
-                decimal working = Working(BracketRole.Target).Sum(e => e.Order.Unfilled);
-                quantity = Math.Min(quantity, Math.Max(0, ExitQuantity - working));
-            }
+            // Working exits of the same role already cover part of the position: never protect more than it holds.
+            decimal covered = Working(intent.Role).Sum(e => e.Order.Unfilled);
+            quantity = Math.Min(quantity, Math.Max(0, ExitQuantity - covered));
             if (quantity <= 0) continue;
             var order = OrderActions.Manual(Account, intent.Role == BracketRole.StopLoss ? OrderTypes.Stop : OrderTypes.Limit, intent.Side > 0 ? OrderDirections.Sell : OrderDirections.Buy, quantity, intent.Price, intent.Role == BracketRole.StopLoss ? "SL" : "TP", reduceOnly: true);
             var owned = new OwnedExit { Handle = order, Latest = order, Intent = intent, Linked = link != null, VolumeAtBaseline = Math.Abs(Volume) };

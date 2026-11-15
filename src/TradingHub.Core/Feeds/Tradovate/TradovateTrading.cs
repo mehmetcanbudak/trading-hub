@@ -498,16 +498,24 @@ public sealed class TradovateTradingSession : IDisposable
         lock (_gate) return _orders.TryGetValue(id, out var o) ? o : null;
     }
 
-    /// <summary>The venue timestamp of the order's latest reported fill; null when it has none.</summary>
-    public DateTime? LastFillTime(long orderId)
+    /// <summary>The order's reported fill quantity and the venue timestamp of its latest fill report. Last is null when any
+    /// report lacks a valid timestamp (stored as <see cref="DateTime.MinValue"/>): an undated fill cannot be ordered against
+    /// a position report.</summary>
+    public (decimal Quantity, DateTime? Last) FillTimes(long orderId)
     {
         lock (_gate)
         {
-            if (!_fillsByOrder.TryGetValue(orderId, out var ids)) return null;
+            if (!_fillsByOrder.TryGetValue(orderId, out var ids)) return (0, null);
+            decimal quantity = 0;
             DateTime? last = null;
             foreach (long id in ids)
-                if (_fills.TryGetValue(id, out var fill) && (last == null || fill.Time > last)) last = fill.Time;
-            return last;
+            {
+                if (!_fills.TryGetValue(id, out var fill)) continue;
+                if (fill.Time == DateTime.MinValue) return (quantity + fill.Quantity, null);
+                quantity += fill.Quantity;
+                if (last == null || fill.Time > last) last = fill.Time;
+            }
+            return (quantity, last);
         }
     }
 
@@ -1436,11 +1444,16 @@ public sealed class TradovateBroker : ITradingAccount, ITrackedOrderReplacement,
         lock (_gate) return _cancelRequested.ContainsKey(order);
     }
 
-    // Tradovate fill and position entities both carry the venue's timestamp; a report without one proves nothing.
+    // Tradovate fill and position entities both carry the venue's timestamp. Executions that have no dated fill report
+    // yet (or only part of one) cannot be proven included, so a position never confirms them.
     public bool PositionReflects(Order order)
     {
+        decimal executed = order.Status == OrderStatus.Filled ? Math.Max(order.Filled, order.QuantityToFill) : order.Filled;
+        if (executed <= 0) return true;
         long id = IdOf(order);
-        if (id == 0 || _session.LastFillTime(id) is not { } fill) return true;
+        if (id == 0) return false;
+        var (reportedFills, last) = _session.FillTimes(id);
+        if (reportedFills < executed || last is not { } fill) return false;
         return _contract is { } c && _session.PositionFor(_account.Id, c.Id)?.Time is { } reported && reported >= fill;
     }
 

@@ -535,6 +535,27 @@ public class NativeProtectionTests
     }
 
     [Fact]
+    public void Applying_the_template_during_a_protection_gap_never_revives_the_superseded_stop()
+    {
+        var venue = new OcoVenue();
+        using var brackets = Brackets(venue);
+        venue.Open(4, 100);
+        var stop = brackets.StopLoss!;
+        venue.ReportCancel(stop); // waiting for the cause
+        Assert.Contains("Protection gap", brackets.ProtectionNote);
+
+        brackets.ApplyTemplate(); // replaces the whole layout: the old target is cancelled, a new pair is placed
+        venue.Publish();
+        venue.Publish();
+
+        var stops = venue.Working.Where(o => o.Type == OrderTypes.Stop).ToList();
+        var placed = Assert.Single(stops);
+        Assert.NotSame(stop, placed);
+        Assert.Equal(4m, placed.Unfilled);
+        Assert.True(stops.Sum(o => o.Unfilled) <= Math.Abs(venue.Position.Volume));
+    }
+
+    [Fact]
     public void An_explicit_stop_during_the_wait_is_placed_at_once()
     {
         var venue = new OcoVenue();
