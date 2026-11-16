@@ -1991,6 +1991,73 @@ public partial class BinanceBrokerTests : IDisposable
         Assert.Contains("POST /api/v3/order", fake.Calls);
         Assert.DoesNotContain(fake.Calls, c => c.Contains("/fapi/", StringComparison.Ordinal) || c.Contains("algo", StringComparison.OrdinalIgnoreCase));
     }
+
+    /// <summary>A close whose bounded wait behind an unanswered market buy timed out is sent right then: its order does
+    /// not wait a second bound when it is submitted. (Port of the Tradovate send-turn test: with the earlier buy's reply
+    /// held, the close is sent after one <see cref="NativeSendTurns.ReducingWait"/> bound, not two.)</summary>
+    [Fact]
+    public async Task Binance_close_behind_an_unanswered_buy_is_sent_after_one_bounded_wait()
+    {
+        using var fake = new FakeBinance(futures: true);
+        using var broker = Broker(fake);
+        await Until(() => broker.PositionReady && broker.OrdersReady);
+        var opening = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
+        await Until(() => broker.Position.Volume == 0.01m && opening.ExchangeOrderId.Length > 0);
+
+        var bound = NativeSendTurns.ReducingWait;
+        var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int holdNextPost = 1, measuring = 0;
+        long sellArrived = 0;
+        fake.BeforePostReply = async _ =>
+        {
+            if (Volatile.Read(ref measuring) == 1) Interlocked.CompareExchange(ref sellArrived, DateTime.UtcNow.Ticks, 0);
+            if (Interlocked.Exchange(ref holdNextPost, 0) == 1) await buyReply.Task;
+        };
+        var buy = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
+        await Until(() => fake.Placed.Count(order => order.Side == "BUY") == 2); // the buy's POST arrived, its reply is held
+        try
+        {
+            Volatile.Write(ref measuring, 1);
+            var issued = DateTime.UtcNow;
+            OrderActions.Flatten(broker);
+            await Until(() => Interlocked.Read(ref sellArrived) != 0, 30000);
+            var waited = new DateTime(Interlocked.Read(ref sellArrived), DateTimeKind.Utc) - issued;
+            Assert.True(waited >= bound - TimeSpan.FromMilliseconds(500),
+                $"The close was sent after {waited.TotalMilliseconds} ms, before its bound. LastError: {broker.LastError}.");
+            Assert.True(waited < bound * 2 - TimeSpan.FromMilliseconds(3000),
+                $"The close waited {waited.TotalMilliseconds} ms: a second bound. LastError: {broker.LastError}.");
+        }
+        finally { buyReply.TrySetResult(); }
+
+        await Until(() => buy.ExchangeOrderId.Length > 0);
+        Assert.Equal(new[] { ("BUY", false), ("SELL", true) }, fake.Placed.Skip(1).Select(order => (order.Side, order.ReduceOnly)));
+        await broker.SendsIdle.WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>Submitting a planned close throws after its send turn was handed over (here, a Changed subscriber that
+    /// throws while the close is published): the turn is not leaked, so a later new-exposure order is still sent and
+    /// the account's sends become idle.</summary>
+    [Fact]
+    public async Task Binance_position_order_whose_submission_throws_does_not_hold_later_requests()
+    {
+        using var fake = new FakeBinance(futures: true);
+        using var broker = Broker(fake);
+        await Until(() => broker.PositionReady && broker.OrdersReady);
+        var opening = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
+        await Until(() => broker.Position.Volume == 0.01m && opening.ExchangeOrderId.Length > 0);
+
+        int armed = 1;
+        broker.Changed += () =>
+        {
+            if (broker.ActiveOrders.Any(o => o.Comment == "Close") && Interlocked.Exchange(ref armed, 0) == 1)
+                throw new InvalidOperationException("Fixture subscriber failed.");
+        };
+        OrderActions.Flatten(broker);
+        await Until(() => Volatile.Read(ref armed) == 0);
+        var buy = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
+        await Until(() => fake.Placed.Count(order => order.Side == "BUY") == 2, 30000);
+        await broker.SendsIdle.WaitAsync(TimeSpan.FromSeconds(30)); // no dangling turn blocks the quit drain
+    }
 }
 
 [Collection("LiveStore")]
