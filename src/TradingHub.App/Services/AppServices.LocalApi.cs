@@ -69,7 +69,7 @@ internal sealed class LocalApiHost(Func<ILocalMarketDataSource> source)
             var api = new LocalMarketDataApi(source(), new LocalMarketDataApiOptions { Port = port, AllowedOrigins = origins });
             try
             {
-                if (!OperatingSystem.IsWindows() && WildcardListenerHolds(port))
+                if (WildcardListenerHolds(port))
                     throw new SocketException((int)SocketError.AddressAlreadyInUse);
                 api.Start();
                 Api = api;
@@ -103,14 +103,24 @@ internal sealed class LocalApiHost(Func<ILocalMarketDataSource> source)
     }
 
     /// <summary>
-    /// macOS (BSD sockets) lets a 127.0.0.1 bind succeed while another program listens on the IPv4 or dual-stack
-    /// wildcard of the same port, which would silently take that program's loopback connections. A wildcard bind
-    /// with address reuse (tolerating TIME_WAIT) fails exactly when such a listener exists.
+    /// True when another socket holds the IPv4 wildcard (0.0.0.0) of the port, directly or as a dual-stack [::] socket
+    /// (which reserves the port on both stacks). Both macOS and Windows let our 127.0.0.1 bind succeed beside such a
+    /// holder, which would silently take that program's loopback connections; the probe is bound, never listens, and is
+    /// closed at once.
+    /// <para>macOS (BSD sockets): a wildcard bind with SO_REUSEADDR (tolerating TIME_WAIT) fails exactly when a wildcard
+    /// listener exists; a holder on a specific address does not conflict.</para>
+    /// <para>Windows (Server 2003+ enhanced socket security, "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE",
+    /// https://learn.microsoft.com/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse): after a wildcard
+    /// bind without SO_EXCLUSIVEADDRUSE (the default), a later same-user specific bind succeeds even with
+    /// SO_EXCLUSIVEADDRUSE, which is why our exclusive 127.0.0.1 listener alone does not detect it. A later wildcard bind
+    /// with no options fails with WSAEADDRINUSE for a wildcard holder with any option, by the same or another user, and
+    /// succeeds beside specific-address holders. SO_REUSEADDR is not set here: on Windows it can bind over (hijack) a
+    /// holder that set it instead of detecting it.</para>
     /// </summary>
     internal static bool WildcardListenerHolds(int port)
     {
         using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        probe.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        if (!OperatingSystem.IsWindows()) probe.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         try
         {
             probe.Bind(new IPEndPoint(IPAddress.Any, port));

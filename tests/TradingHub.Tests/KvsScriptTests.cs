@@ -110,7 +110,11 @@ public sealed class KvsScriptTests : IDisposable
         decimal expected = 0;
         for (int i = 0; i < Bars; i++) expected += i;
         Assert.Equal(expected, Value(indicator, 0, Bars - 1));
-        Assert.Equal((decimal)((27 * 28 / 2 + 28 * 29 / 2 + 29 * 30 / 2) / 3.0), Value(indicator, 1, Bars - 1));
+        // KVS series are double: sma = (378 + 406 + 435) / 3.0, published through KvsRuntime.ToDecimal, whose runtime
+        // decimal(double) conversion keeps 15 significant digits (documented by System.Decimal(Double)). The expected value
+        // is that literal rather than a compile-time (decimal)(double) fold, which the build host evaluated to all 28
+        // digits (406.33333333333331438552704640) on Windows ARM64 while the runtime returned 406.333333333333.
+        Assert.Equal(406.333333333333m, Value(indicator, 1, Bars - 1));
         Assert.Equal(IndicatorDataProvider.NewPanel, indicator.Panel);
         Assert.Equal(128, ((ValueDataSeries)indicator.DataSeries[1]).Color.A);
         Assert.Equal(System.Drawing.Color.FromArgb(255, 0x26, 0xc2, 0x81), ((ValueDataSeries)indicator.DataSeries[0]).Colors[Bars - 1]);
