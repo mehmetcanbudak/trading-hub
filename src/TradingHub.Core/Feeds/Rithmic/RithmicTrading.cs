@@ -823,24 +823,25 @@ public sealed partial class RithmicTradingSession : IDisposable
     /// <summary>Cancels an order in the account's send-turn order: after earlier requests were answered, or after
     /// <see cref="NativeSendTurns.ReducingWait"/>, then sent anyway. A caller that already paid the account's
     /// send-turn wait (a bounded close cancelling its own reserved protections) passes its turn and no turn is
-    /// taken or waited.</summary>
+    /// taken or waited. A cancellation while waiting (the bounded close's protection cancels wait with its 15 s
+    /// timeout token) still releases the taken turn.</summary>
     public async Task<string?> CancelAsync(string accountId, string basketId, CancellationToken ct, NativeSendTurns.Turn? heldTurn = null)
     {
         var a = AccountOf(accountId);
         var turn = heldTurn;
         bool inOrder = true;
-        if (turn == null)
-        {
-            turn = SendTurns(accountId).Take();
-            inOrder = await turn.WaitAsync(bounded: true, ct).ConfigureAwait(false);
-        }
         try
         {
+            if (turn == null)
+            {
+                turn = SendTurns(accountId).Take();
+                inOrder = await turn.WaitAsync(bounded: true, ct).ConfigureAwait(false);
+            }
             await RequestAsync(Account(new ProtoWriter().Int(Rp.TemplateId, RpO.RequestCancelOrder), a)
                 .String(RpO.WindowName, "TradingHub").String(RpO.BasketId, basketId).Int(RpO.ManualOrAuto, 1), ct).ConfigureAwait(false);
             return inOrder ? null : NativeSendTurns.UnsettledMessage;
         }
-        finally { if (heldTurn == null) turn.Release(); }
+        finally { if (heldTurn == null && turn != null) turn.Release(); }
     }
 
     public Task ModifyAsync(string accountId, RithmicOrderState order, int quantity, decimal priceOrTrigger, CancellationToken ct) =>

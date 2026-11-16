@@ -129,6 +129,86 @@ public sealed class RithmicSendTurnTests : IDisposable
     }
 
     /// <summary>
+    /// A cancel cancelled while it waits its bounded send-turn wait (the bounded close's protection cancels wait with
+    /// its 15 s timeout token) releases the turn it took: later new-exposure sends proceed and the account's sends
+    /// become idle. Before the fix the cancelled turn leaked and held every later request.
+    /// </summary>
+    [Fact]
+    public async Task A_cancel_cancelled_during_its_turn_wait_releases_the_turn()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        server.SeedPosition(true, 2, 5000);
+        using var session = new RithmicTradingSession(Settings(server));
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        var replyGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.NewOrderResponseRelease = replyGate;
+        var earlier = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 1m);
+        await Until(() => Requests(server, "312") == 1, () => "earlier buy not sent");
+
+        // Behind that unanswered buy, a cancel waits its bounded turn — cancelled mid-wait, like the bounded
+        // close's protection cancel whose 15 s timeout fires.
+        var cancelCts = new CancellationTokenSource();
+        Task<string?> cancel = session.CancelAsync("ACC1", "held-cancel-target", cancelCts.Token);
+        await Until(() => session.SendTurns("ACC1").Waiting == 1, () => "cancel not waiting for its turn");
+        cancelCts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancel.WaitAsync(Deadline));
+
+        // The turn must be released despite the cancellation: once the earlier reply arrives the queue drains.
+        replyGate.TrySetResult();
+        await Until(() => earlier.State == OrderStates.Done && earlier.Status == OrderStatus.Filled, () => broker.LastError ?? "earlier buy pending");
+        await session.SendsIdle.WaitAsync(Deadline);
+        var later = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 1m);
+        await Until(() => Requests(server, "312") == 2 && later.Status == OrderStatus.Filled, () => broker.LastError ?? "later buy not sent");
+        await session.SendsIdle.WaitAsync(Deadline);
+    }
+
+    /// <summary>
+    /// The documented residual: a buy whose admission stays unresolved past the close's reducing bound. The close is
+    /// sent anyway after one bound (unsettled note) and completes; the buy is then admitted against the fresh flat
+    /// position and opens exposure after the close. Exactly what operar.md tells the user to check for.
+    /// </summary>
+    [Fact]
+    public async Task A_buy_admission_unresolved_past_the_bound_is_admitted_after_the_bound_close()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        server.SeedPosition(true, 2, 5000);
+        using var session = new RithmicTradingSession(Settings(server));
+        session.SendTurnWait = TimeSpan.FromMilliseconds(500);
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        var contractGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        using var buyBroker = _orders.Rithmic(data, session, "ACC1", "delayed",
+            async ct => { await contractGate.Task.WaitAsync(ct); return ("ESZ6", "CME"); });
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        Assert.Equal(2m, broker.Position.Volume);
+        Assert.False(buyBroker.PositionReady, "The buy broker's contract must still be unresolved.");
+
+        var buy = OrderActions.Manual(buyBroker, OrderTypes.Market, OrderDirections.Buy, 1m);
+        await Until(() => buy.State == OrderStates.Active && buy.ExchangeOrderId.Length == 0);
+        Assert.Empty(server.Tags);
+
+        var confirmation = broker.CapturePositionClose(2m);
+        Task<string?> close = session.ClosePositionAsync(confirmation);
+
+        // The close's bounded wait expires while the buy's admission is still unresolved: it sends anyway.
+        Assert.Equal(NativeSendTurns.UnsettledMessage, await close.WaitAsync(Deadline));
+        Assert.Equal(0, server.Position);
+        await Until(() => !session.HasUnresolvedPositionClose, () => "close not completed");
+
+        // Only then does the buy's admission proceed, against the fresh flat position.
+        contractGate.TrySetResult();
+        await Until(() => buy.State == OrderStates.Done && buy.Status == OrderStatus.Filled, () => buyBroker.LastError ?? "buy not admitted");
+        Assert.Equal(1, server.Position);
+        await session.SendsIdle.WaitAsync(Deadline);
+    }
+
+    /// <summary>
     /// A Changed subscriber that throws while the close's dispatch is published does not hold the account's send
     /// turn: a later new-exposure order is still sent and the account's sends become idle.
     /// </summary>
