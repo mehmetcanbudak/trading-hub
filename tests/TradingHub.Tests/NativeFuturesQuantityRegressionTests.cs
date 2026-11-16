@@ -9,6 +9,7 @@ using TradingHub.Trading;
 
 namespace TradingHub.Tests;
 
+[Collection("LiveStore")] // static Rithmic close reservations: never in parallel with other native sessions
 public class NativeFuturesQuantityRegressionTests
 {
     [Fact]

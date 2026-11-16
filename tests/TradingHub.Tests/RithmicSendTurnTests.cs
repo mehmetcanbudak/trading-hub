@@ -12,6 +12,7 @@ namespace TradingHub.Tests;
 /// sends anyway with the unsettled note. The turn is released on every path, so a failing subscriber never holds
 /// later requests.
 /// </summary>
+[Collection("LiveStore")] // static Rithmic close reservations: never in parallel with other native sessions
 public sealed class RithmicSendTurnTests : IDisposable
 {
     private readonly NativeOrderTestFixture _orders = new();
