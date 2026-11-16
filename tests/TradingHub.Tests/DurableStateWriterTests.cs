@@ -192,6 +192,45 @@ public sealed class DurableStateWriterTests : IDisposable
     }
 
     [Fact]
+    public void A_read_only_runner_index_refuses_panel_removal_and_keeps_its_saved_metadata()
+    {
+        string previous = LiveStore.Root;
+        LiveStore.Root = PathFor("live");
+        string runners = Path.Combine(LiveStore.Root, "estrategias.json");
+        try
+        {
+            Assert.Null(LiveStore.SaveProtectionOrderIds(new LiveRunnerInfo { Key = "read-only|test:TEST|sim", ProtectionOrderIds = new() { "stop-1" } }));
+            byte[] saved = File.ReadAllBytes(runners);
+            File.SetAttributes(runners, File.GetAttributes(runners) | FileAttributes.ReadOnly);
+            Assert.Throws<UnauthorizedAccessException>(() => LiveStore.RemoveRunner("read-only|test:TEST|sim", deleteFills: false));
+            Assert.Equal(saved, File.ReadAllBytes(runners));
+            Assert.True(File.GetAttributes(runners).HasFlag(FileAttributes.ReadOnly));
+            Assert.Empty(Directory.GetFiles(LiveStore.Root, "*.tmp"));
+        }
+        finally
+        {
+            if (File.Exists(runners)) File.SetAttributes(runners, FileAttributes.Normal);
+            LiveStore.Root = previous;
+        }
+    }
+
+    [Fact]
+    public void Replacing_rename_refuses_a_read_only_destination_on_every_platform()
+    {
+        string source = PathFor("new.json"), destination = PathFor("old.json");
+        File.WriteAllText(source, "new");
+        File.WriteAllText(destination, "old");
+        File.SetAttributes(destination, FileAttributes.ReadOnly);
+        try
+        {
+            Assert.Throws<UnauthorizedAccessException>(() => StorageSync.Rename(source, destination, overwrite: true, windows: false, (_, _, _) => 0));
+            Assert.Equal("old", File.ReadAllText(destination));
+            Assert.Equal("new", File.ReadAllText(source));
+        }
+        finally { File.SetAttributes(destination, FileAttributes.Normal); }
+    }
+
+    [Fact]
     public async Task Bybit_order_state_is_durable_before_transport_and_an_unsynchronized_save_blocks_the_create()
     {
         string statePath = PathFor("bybit", "orders.json");

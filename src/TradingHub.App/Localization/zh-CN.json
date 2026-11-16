@@ -6597,6 +6597,7 @@
   "Rename group…": "重命名分组…",
   "Rename indicator": "重命名指标",
   "Rename indicator source file": "重命名指标源文件",
+  "Rename refused: '{0}' is read-only.": "重命名被拒绝：“{0}”为只读。",
   "Rename this file without changing its C# type or saved identities": "重命名此文件，不更改其 C# 类型或已保存标识",
   "Rename…": "重命名…",
   "Rendering error: ": "绘制出错：",

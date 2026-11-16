@@ -132,6 +132,25 @@ public sealed class DerivativesTests : IDisposable
     }
 
     [Fact]
+    public void A_recorded_day_stays_appendable_while_read_and_an_unterminated_record_is_not_parsed()
+    {
+        string file = Path.Combine(_root, "day.csv");
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(file, "W,binance,1,2\nW,bybit,3,4\nW,bybit,3,63");
+        Assert.Equal(new[] { "W,binance,1,2", "W,bybit,3,4" }, DerivativesData.ReadCompleteLines(file));
+        using (var reading = DerivativesData.ReadCompleteLines(file).GetEnumerator())
+        {
+            Assert.True(reading.MoveNext());
+            // A stream that closes during the read appends its final window; Windows refused this append under File.ReadLines.
+            File.AppendAllText(file, "9\n");
+            var rest = new List<string>();
+            while (reading.MoveNext()) rest.Add(reading.Current);
+            Assert.Equal(new[] { "W,bybit,3,4", "W,bybit,3,639" }, rest);
+        }
+        Assert.EndsWith("W,bybit,3,639\n", File.ReadAllText(file));
+    }
+
+    [Fact]
     public void Pane_symbol_and_sampling_keep_unknown_periods_as_gaps()
     {
         Assert.Equal("BTCUSDT", DerivativesPane.DerivedSymbol("BTC-USDT-SWAP", "BTC", "USDT"));

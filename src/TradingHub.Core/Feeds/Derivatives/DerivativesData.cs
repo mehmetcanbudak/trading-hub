@@ -441,7 +441,7 @@ public sealed partial class DerivativesData : IDisposable
         for (int d = days; d >= 0; d--)
         {
             if (DayFile(symbol, today.AddDays(-d)) is not { } file || !File.Exists(file)) continue;
-            foreach (var line in File.ReadLines(file))
+            foreach (var line in ReadCompleteLines(file))
             {
                 var p = line.Split(',');
                 try
@@ -461,6 +461,25 @@ public sealed partial class DerivativesData : IDisposable
             }
         }
         return (events, windows.Select(w => new ObservedWindow(w.Key.Item1, w.Key.Item2, w.Value)).OrderBy(w => w.From).ToList());
+    }
+
+    /// <summary>Newline-terminated records of a recorded day. The file is opened with ReadWrite|Delete sharing so a live
+    /// stream can keep appending while it is read: on Windows, File.ReadLines shares only Read, which makes a concurrent
+    /// File.AppendAllText (it requests write access) fail with a sharing violation and drop that record, such as the final
+    /// observed window of a stream that just closed. A trailing record without its newline is still being appended (or
+    /// was cut by a crash) and is not returned, so a partially written number is never parsed as a shorter value.</summary>
+    internal static IEnumerable<string> ReadCompleteLines(string file)
+    {
+        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var line = new StringBuilder();
+        int next;
+        while ((next = reader.Read()) >= 0)
+        {
+            if (next != '\n') { line.Append((char)next); continue; }
+            yield return line.ToString();
+            line.Clear();
+        }
     }
 
     private sealed class Release(Action release) : IDisposable

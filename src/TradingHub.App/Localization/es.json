@@ -6597,6 +6597,7 @@
   "Rename group…": "Renombrar grupo…",
   "Rename indicator": "Renombrar indicador",
   "Rename indicator source file": "Renombrar archivo fuente del indicador",
+  "Rename refused: '{0}' is read-only.": "Cambio de nombre rechazado: '{0}' es de solo lectura.",
   "Rename this file without changing its C# type or saved identities": "Renombrar este archivo sin cambiar su tipo C# ni sus identidades guardadas",
   "Rename…": "Renombrar…",
   "Rendering error: ": "Error al dibujar: ",

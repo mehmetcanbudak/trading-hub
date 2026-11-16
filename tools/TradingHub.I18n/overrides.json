@@ -24298,5 +24298,9 @@
   "Sending queued order requests before quitting…": {
     "es": "Enviando las solicitudes de órdenes en cola antes de salir…",
     "zh-CN": "退出前正在发送排队中的订单请求…"
+  },
+  "Rename refused: '{0}' is read-only.": {
+    "es": "Cambio de nombre rechazado: '{0}' es de solo lectura.",
+    "zh-CN": "重命名被拒绝：“{0}”为只读。"
   }
 }

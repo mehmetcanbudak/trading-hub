@@ -81,7 +81,10 @@ public static class StorageSync
 
     /// <summary>Same-volume rename. On Windows it uses MoveFileEx with MOVEFILE_WRITE_THROUGH so the rename is flushed
     /// before returning (Windows has no directory-handle synchronization); elsewhere <see cref="File.Move(string, string, bool)"/>,
-    /// followed by the caller's <see cref="SyncDirectory"/>.</summary>
+    /// followed by the caller's <see cref="SyncDirectory"/>. A read-only destination is never replaced: Windows refuses
+    /// it (error 5, <see cref="UnauthorizedAccessException"/>), but a POSIX rename only needs write access to the
+    /// directory and would silently publish over a file the user or another program made read-only, so that case is
+    /// refused the same way here, as the direct writes these renames replaced were.</summary>
     public static void Rename(string source, string destination, bool overwrite) =>
         Rename(source, destination, overwrite, OperatingSystem.IsWindows(), WindowsMove);
 
@@ -90,6 +93,8 @@ public static class StorageSync
     {
         if (!windows)
         {
+            if (overwrite && File.Exists(destination) && File.GetAttributes(destination).HasFlag(FileAttributes.ReadOnly))
+                throw new UnauthorizedAccessException($"Rename refused: '{destination}' is read-only.");
             File.Move(source, destination, overwrite);
             return;
         }

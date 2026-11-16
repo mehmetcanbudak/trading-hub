@@ -103,27 +103,37 @@ internal sealed class LocalApiHost(Func<ILocalMarketDataSource> source)
     }
 
     /// <summary>
-    /// True when another socket holds the IPv4 wildcard (0.0.0.0) of the port, directly or as a dual-stack [::] socket
-    /// (which reserves the port on both stacks). Both macOS and Windows let our 127.0.0.1 bind succeed beside such a
-    /// holder, which would silently take that program's loopback connections; the probe is bound, never listens, and is
-    /// closed at once.
-    /// <para>macOS (BSD sockets): a wildcard bind with SO_REUSEADDR (tolerating TIME_WAIT) fails exactly when a wildcard
-    /// listener exists; a holder on a specific address does not conflict.</para>
+    /// True when another socket holds the IPv4 wildcard (0.0.0.0) of the port, directly or as a dual-stack [::] socket.
+    /// Both macOS and Windows let our 127.0.0.1 bind succeed beside such a holder, which would silently take that
+    /// program's loopback connections; the probes are bound, never listen, and are closed at once.
+    /// <para>macOS (BSD sockets): an IPv4 wildcard bind with SO_REUSEADDR (tolerating TIME_WAIT) fails exactly when an
+    /// IPv4 or dual-stack wildcard listener exists; a holder on a specific address does not conflict.</para>
     /// <para>Windows (Server 2003+ enhanced socket security, "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE",
     /// https://learn.microsoft.com/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse): after a wildcard
     /// bind without SO_EXCLUSIVEADDRUSE (the default), a later same-user specific bind succeeds even with
     /// SO_EXCLUSIVEADDRUSE, which is why our exclusive 127.0.0.1 listener alone does not detect it. A later wildcard bind
-    /// with no options fails with WSAEADDRINUSE for a wildcard holder with any option, by the same or another user, and
-    /// succeeds beside specific-address holders. SO_REUSEADDR is not set here: on Windows it can bind over (hijack) a
-    /// holder that set it instead of detecting it.</para>
+    /// of the same family with no options fails with WSAEADDRINUSE for a wildcard holder with any option, by the same or
+    /// another user, and succeeds beside specific-address holders. An IPv4 wildcard bind did not conflict with an
+    /// existing dual-stack [::] listener on the Windows CI runners, so a second probe binds a dual-stack [::] socket:
+    /// per the same page, a dual-stack wildcard bind reserves the port on both stacks and its checks must succeed on
+    /// both, so it fails beside an IPv4 or IPv6 wildcard holder. SO_REUSEADDR is never set on Windows: there it can
+    /// bind over (hijack) a holder that set it instead of detecting it.</para>
     /// </summary>
     internal static bool WildcardListenerHolds(int port)
     {
-        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        if (!OperatingSystem.IsWindows()) probe.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        if (!OperatingSystem.IsWindows()) return Conflicts(AddressFamily.InterNetwork, port, reuseAddress: true);
+        return Conflicts(AddressFamily.InterNetwork, port, reuseAddress: false) ||
+            Socket.OSSupportsIPv6 && Conflicts(AddressFamily.InterNetworkV6, port, reuseAddress: false);
+    }
+
+    private static bool Conflicts(AddressFamily family, int port, bool reuseAddress)
+    {
+        using var probe = new Socket(family, SocketType.Stream, ProtocolType.Tcp);
+        if (reuseAddress) probe.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        if (family == AddressFamily.InterNetworkV6) probe.DualMode = true;
         try
         {
-            probe.Bind(new IPEndPoint(IPAddress.Any, port));
+            probe.Bind(new IPEndPoint(family == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, port));
             return false;
         }
         catch (SocketException error) when (error.SocketErrorCode == SocketError.AddressAlreadyInUse)
