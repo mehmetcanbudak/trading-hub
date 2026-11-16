@@ -120,7 +120,7 @@ public sealed class StrategyMcpEnvironmentTests
     }
 
 
-    private static string DotnetHost()
+    internal static string DotnetHost()
     {
         string? configured = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
         if (!string.IsNullOrEmpty(configured) && File.Exists(configured)) return Path.GetFullPath(configured);

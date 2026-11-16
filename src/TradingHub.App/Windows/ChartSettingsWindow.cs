@@ -68,7 +68,8 @@ internal sealed class ChartSettingsWindow : Window
             ColorRow("Axis lines", nameof(ChartTheme.AxisLine)),
             ColorRow("Text", nameof(ChartTheme.Text)),
             ColorRow("Secondary text", nameof(ChartTheme.TextDim)),
-            Toggle("Bar data above (O, H, L, C…)", () => _model.Settings.ShowInfoPanel, v => _model.Settings.ShowInfoPanel = v));
+            Toggle("Bar data above (O, H, L, C…)", () => _model.Settings.ShowInfoPanel, v => _model.Settings.ShowInfoPanel = v),
+            Toggle("Wheel zooms the whole chart (price and time together, like an image)", () => _model.Settings.ZoomBothAxes, v => _model.Settings.ZoomBothAxes = v));
         Tab("Price",
             ColorRow("Last price (up)", nameof(ChartTheme.LastPriceUp)),
             ColorRow("Last price (down)", nameof(ChartTheme.LastPriceDown)),

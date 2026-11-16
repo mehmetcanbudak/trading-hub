@@ -29,6 +29,12 @@ public sealed partial class AccountsRithmicCloseRegressionTests
 
         await fixture.Center.CloseAsync(fixture.Account, confirmed).WaitAsync(Deadline);
         await Until(() => fixture.Net == 3);
+        // The position (PnL plant) and the close's terminal order report (order plant) arrive on independent
+        // connections in either order; wait until the close has observed its order's terminal report.
+        var context = captured.Confirmation.Context;
+        await Until(() => context.PositionCloses().SingleOrDefault() is { } pending &&
+            context.Find(pending.Id)?.PositionClose?.Phase is { } phase &&
+            phase is not (PositionClosePhase.Dispatching or PositionClosePhase.Working));
         await fixture.Center.CloseAsync(fixture.Account, confirmed).WaitAsync(Deadline);
 
         string tag = Assert.Single(Tags(server));

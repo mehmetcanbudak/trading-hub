@@ -22,6 +22,15 @@ public enum DrawingKind
     ShortPosition,
     AnchoredVwap = 12,
     FixedRangeProfile = 13,
+
+    // Drawings persist this enum as its number: new kinds take explicit values at the end and never renumber.
+    ParallelChannel = 14,
+    Ellipse = 15,
+    Arrow = 16,
+    Path = 17,
+    Brush = 18,
+    Highlighter = 19,
+    CrossLine = 20,
 }
 
 public enum LineStyleKind
@@ -123,9 +132,13 @@ public sealed partial class ChartDrawing
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsAlert => Alert || Text == "alerta";
 
+    /// <summary>The user label: empty for the legacy price-alert marker text.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayText => Text == "alerta" ? "" : Text;
+
     public int RequiredPoints => Kind switch
     {
-        DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.VerticalLine or DrawingKind.Text => 1,
+        DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.VerticalLine or DrawingKind.Text or DrawingKind.CrossLine => 1,
         DrawingKind.LongPosition or DrawingKind.ShortPosition or DrawingKind.AnchoredVwap => 1,
         _ => 2,
     };
@@ -150,7 +163,14 @@ public sealed partial class ChartDrawing
         DrawingKind.LongPosition => "Long position",
         DrawingKind.ShortPosition => "Short position",
         DrawingKind.AnchoredVwap => "Anchored VWAP",
+        DrawingKind.ParallelChannel => "Parallel channel",
         DrawingKind.FixedRangeProfile => "Fixed-range volume / delta profile",
+        DrawingKind.Ellipse => "Ellipse",
+        DrawingKind.Arrow => "Arrow",
+        DrawingKind.Path => "Path",
+        DrawingKind.Brush => "Brush",
+        DrawingKind.Highlighter => "Highlighter",
+        DrawingKind.CrossLine => "Cross line",
         _ => k.ToString(),
     };
 
@@ -216,6 +236,7 @@ public sealed partial class ChartDrawing
     /// </summary>
     public void MoveHandle(int handle, ChartPoint p)
     {
+        if (MoveChannelHandle(handle, p)) return;
         if (IsPosition && Points.Count >= 3)
         {
             switch (handle)
@@ -261,29 +282,8 @@ public sealed partial class ChartDrawing
     // ------------------------------------------------------------------ coordenadas
 
     /// <summary>X de un instante (interpola entre velas y extrapola al futuro).</summary>
-    public static float XOf(ChartLayout layout, CandleSeries series, DateTime time)
-    {
-        if (series.Count == 0) return layout.Plot.Right;
-        var lastTime = series[^1].Time;
-        if (time > lastTime)
-        {
-            var dur = series.Period.ApproxDuration;
-            double bars = dur > TimeSpan.Zero ? (time - lastTime).Ticks / (double)dur.Ticks : 1;
-            return layout.CenterX(series.Count - 1 + bars);
-        }
-
-        int bar = series.FindBar(time);
-        if (bar < 0) return layout.CenterX(0);
-        double frac = 0;
-        if (bar + 1 < series.Count)
-        {
-            var t0 = series[bar].Time;
-            var t1 = series[bar + 1].Time;
-            if (t1 > t0) frac = Math.Clamp((time - t0).Ticks / (double)(t1 - t0).Ticks, 0, 0.999);
-        }
-
-        return layout.CenterX(bar + frac);
-    }
+    public static float XOf(ChartLayout layout, CandleSeries series, DateTime time) =>
+        series.Count == 0 ? layout.Plot.Right : layout.CenterX(BarPos(series, time));
 
     /// <summary>Instante en una coordenada X.</summary>
     public static DateTime TimeAt(ChartLayout layout, CandleSeries series, float x)
@@ -387,6 +387,9 @@ public sealed partial class ChartDrawing
 
                 break;
             }
+            case DrawingKind.ParallelChannel:
+                RenderChannel(canvas, layout, series, stroke, fill, text, labelFont, label);
+                break;
             case DrawingKind.Rectangle:
             {
                 var r = new SKRect(Math.Min(x0, x1), Math.Min(y0, y1), Math.Max(x0, x1), Math.Max(y0, y1));
@@ -451,6 +454,14 @@ public sealed partial class ChartDrawing
             case DrawingKind.FixedRangeProfile:
                 if (trades != null && runtime != null) RenderTradeDrawing(canvas, layout, series, trades, theme, decimals, font, stroke, generation, concealSource, runtime);
                 break;
+            case DrawingKind.Ellipse:
+            case DrawingKind.Arrow:
+            case DrawingKind.CrossLine:
+            case DrawingKind.Path:
+            case DrawingKind.Brush:
+            case DrawingKind.Highlighter:
+                RenderShape(canvas, layout, series, decimals, stroke, fill, text, font, labelFont, label, x0, y0, x1, y1);
+                break;
         }
 
         if (Selected)
@@ -464,9 +475,11 @@ public sealed partial class ChartDrawing
             }
         }
 
+        if (Selected && IsFreehand) DrawFreehandSelection(canvas, layout, series, theme);
+
         if (Locked && Selected)
         {
-            var (lx, ly) = HandlePositions(layout, series, runtime).FirstOrDefault();
+            var (lx, ly) = HandlePositions(layout, series, runtime).DefaultIfEmpty((x0, y0)).First();
             DrawLock(canvas, lx + 9, ly - 14, theme.Selection);
         }
     }
@@ -613,6 +626,9 @@ public sealed partial class ChartDrawing
             yield break;
         }
 
+        // freehand strokes move as a whole: hundreds of points are never dragged one by one
+        if (IsFreehand) yield break;
+
         for (int i = 0; i < Points.Count; i++)
         {
             float x = Kind == DrawingKind.HorizontalLine ? (main.Rect.Left + main.Rect.Right) / 2 : XOf(layout, series, Points[i].Time);
@@ -664,6 +680,14 @@ public sealed partial class ChartDrawing
                 return Math.Abs(y - y0) <= tol && (ExtendLeft || x >= x0 - tol);
             case DrawingKind.VerticalLine:
                 return Math.Abs(x - x0) <= tol;
+            case DrawingKind.CrossLine:
+            case DrawingKind.Ellipse:
+            case DrawingKind.Path:
+            case DrawingKind.Brush:
+            case DrawingKind.Highlighter:
+                return HitTestShape(layout, series, x, y, tol, x0, y0, x1, y1);
+            case DrawingKind.ParallelChannel:
+                return HitTestChannel(layout, series, x, y, tol);
             case DrawingKind.Rectangle:
             case DrawingKind.Ruler:
             case DrawingKind.FibRetracement:

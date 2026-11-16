@@ -7,9 +7,9 @@ Full English guides for this fork's canonical C# branch, `memoshi`, covering App
 | Area | Guide |
 |---|---|
 | Setup | [Installation](./instalacion.md), [Getting started](./primeros-pasos.md), [Install with Claude](./instalar-con-claude-code.md) |
-| Markets | [Connections](./conexiones.md), [Charts](./graficos.md), [Trading](./operar.md), [Indicators](./indicadores.md), [Data](./datos.md) |
+| Markets | [Connections](./conexiones.md), [Charts](./graficos.md), [Trading](./operar.md), [Indicators](./indicadores.md), [Data](./datos.md), [Workbench](./workbench.md) |
 | Automation | [Strategies](./estrategias.md), [Backtesting](./backtesting.md), [Live strategies](./en-vivo.md), [Claude](./asistente-claude.md) |
-| Reference | [Settings](./ajustes.md), [Privacy](./privacidad.md), [Development](./desarrollo.md), [Windows installation/platforms](./portar-a-windows.md) |
+| Reference | [Settings](./ajustes.md), [Privacy](./privacidad.md), [Development](./desarrollo.md), [Windows installation/platforms](./portar-a-windows.md), [External acceptance checklist](./external-acceptance.md) |
 | Project history | [Nine completed plans](../../advisor-plans/README.md), [adoption research](../research/fork-feature-report.md), [KVP selection review](../research/kvp-adoption-review.md), [review-only port handoff](../research/non-kvp-canonical-handoff.md) |
 
 **Trading risk:** Backtests do not predict future results. Practice in simulation before using a live brokerage account. Source code is publicly available under MIT with the Commons Clause; commercial redistribution and related paid services are restricted.

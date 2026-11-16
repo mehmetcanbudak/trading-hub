@@ -36,10 +36,12 @@ internal interface IScriptDirectoryMonitor : IDisposable
 internal static class ScriptDirectoryFiles
 {
     internal static IEnumerable<string> Enumerate(string folder) =>
-        Directory.EnumerateFiles(folder, "*.cs", SearchOption.AllDirectories).Where(IsIncluded);
+        Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Where(IsIncluded);
 
+    /// <summary>C# indicator sources and KVS scripts compile together; bin/obj build output never does.</summary>
     internal static bool IsIncluded(string file)
     {
+        if (!file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !KvsTranslator.IsScript(file)) return false;
         string path = file.Replace(Path.DirectorySeparatorChar, '/');
         return !path.Contains("/bin/") && !path.Contains("/obj/");
     }
@@ -64,7 +66,9 @@ internal sealed class NativeScriptDirectoryMonitor : IScriptDirectoryMonitor
     internal NativeScriptDirectoryMonitor(string folder, Action changed)
     {
         _folder = folder;
-        _watcher = new FileSystemWatcher(folder, "*.cs") { IncludeSubdirectories = true };
+        _watcher = new FileSystemWatcher(folder) { IncludeSubdirectories = true };
+        _watcher.Filters.Add("*.cs");
+        _watcher.Filters.Add("*" + KvsTranslator.Extension);
         _watcher.Changed += Changed;
         _watcher.Created += Changed;
         _watcher.Deleted += Changed;

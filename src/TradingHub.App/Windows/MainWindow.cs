@@ -35,6 +35,12 @@ public sealed class MainWindow : Window
         new("accounts", "Account", MaterialIconKind.WalletOutline, static window => new AccountsView(window._svc, window.SetStatus, window), new KeyGesture(Key.D5, Keys.Command)),
         new("strategies", "Backtesting", MaterialIconKind.FlaskOutline, static window => new StrategiesView(window._svc, window.SetStatus), new KeyGesture(Key.D2, Keys.Command)),
         new("live", "Live", MaterialIconKind.AccessPoint, static window => new LiveView(window._svc, window.SetStatus, window), new KeyGesture(Key.D7, Keys.Command)),
+        new("workbench", "Workbench", MaterialIconKind.ViewDashboardOutline, static window =>
+        {
+            var workbench = new Views.Workbench.WorkbenchView(window._svc, window.SetStatus, window);
+            workbench.RestoreWindows();
+            return workbench;
+        }, new KeyGesture(Key.D6, Keys.Command)),
         new("data", "Data", MaterialIconKind.DatabaseOutline, static window => new DataView(window._svc, window.SetStatus, window), new KeyGesture(Key.D3, Keys.Command)),
         new("connections", "Connections", MaterialIconKind.LanConnect, static window => new ConnectionsView(window._svc, window.SetStatus), new KeyGesture(Key.D4, Keys.Command)),
         new("settings", "Settings", MaterialIconKind.CogOutline, static window => new SettingsView(window._svc, window.SetStatus), new KeyGesture(Key.OemComma, Keys.Command)),
@@ -60,6 +66,7 @@ public sealed class MainWindow : Window
     {
         _svc = svc;
         Title = TradingHub.Common.Product.Name;
+        FrameProbe.Current?.Watch(this);
         Width = Math.Max(1000, svc.Settings.WindowWidth);
         Height = Math.Max(640, svc.Settings.WindowHeight);
         MinWidth = 1000;
@@ -94,6 +101,8 @@ public sealed class MainWindow : Window
             : $"Error compiling custom indicators: {result.Diagnostics.FirstOrDefault(d => d.Severity == "error")}");
         scripts.Compiled += OnScriptsCompiled;
         if (scripts.LastResult == null) scripts.CompileAll();
+        IndicatorLibrary.Apply(_svc.Settings.IndicatorLibrary); // library renames are display aliases on every chart
+        _ = _svc.ReviewSourceCopiesAtStartupAsync(SetStatus);
 
         Log.Entry += e =>
         {
@@ -187,6 +196,7 @@ public sealed class MainWindow : Window
             }
 
             Trading.CloseFloating();
+            (Page("workbench") as Views.Workbench.WorkbenchView)?.CloseForShutdown();
         };
         Closed += (_, _) =>
         {

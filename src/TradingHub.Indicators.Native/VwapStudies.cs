@@ -24,8 +24,11 @@ internal readonly record struct PeriodVwapState(long Key, WeightedStudyMoments M
 public class MultiPeriodVwap : Indicator
 {
     private readonly OptionalValueDataSeries[] _lines = new OptionalValueDataSeries[5];
+    // weighted ±σ bands per horizon (+first, -first, +second, -second), appended after the original series
+    private readonly OptionalValueDataSeries[][] _bands = new OptionalValueDataSeries[5][];
+    private readonly bool[] _bandsOn = new bool[5];
     private readonly List<PeriodVwapState>[] _states = new List<PeriodVwapState>[5];
-    private StudyVwapSource _source; private bool _estimate;
+    private StudyVwapSource _source; private bool _estimate, _secondBand; private decimal _first = 1, _second = 2;
     public MultiPeriodVwap() : base(true)
     {
         Color[] colors = { Color.Coral, Color.White, Color.DodgerBlue, Color.MediumSeaGreen, Color.Gold };
@@ -35,12 +38,40 @@ public class MultiPeriodVwap : Indicator
             _states[i] = new(); _lines[i] = new($"MultiVwap.{name}", $"{name} VWAP") { Color = colors[i], Width = 2, ShowZeroValue = true };
             if (i == 0) DataSeries[0] = _lines[i]; else DataSeries.Add(_lines[i]);
         }
+        for (int i = 0; i < 5; i++)
+        {
+            string name = StudyMath.Horizons[i].ToString();
+            _bands[i] = new OptionalValueDataSeries[4];
+            for (int j = 0; j < 4; j++)
+            {
+                string band = (j % 2 == 0 ? "Upper" : "Lower") + (j < 2 ? "1" : "2");
+                _bands[i][j] = new($"MultiVwap.{name}.{band}", $"{name} VWAP {(j % 2 == 0 ? "+" : "-")}{(j < 2 ? "first" : "second")} band") { Color = Color.FromArgb(130, colors[i]), ShowZeroValue = true, LineDashStyle = LineDashStyle.Dash, VisualType = VisualMode.Hide };
+                DataSeries.Add(_bands[i][j]);
+            }
+        }
         EnableCustomDrawing = true; SubscribeToDrawingEvents(DrawingLayouts.Final);
     }
+    private void ApplyBandVisibility()
+    {
+        for (int i = 0; i < 5; i++)
+            for (int j = 0; j < 4; j++) _bands[i][j].VisualType = _bandsOn[i] && (j < 2 || _secondBand) ? VisualMode.Line : VisualMode.Hide;
+    }
+    private void SetBands(int horizon, bool on) { _bandsOn[horizon] = on; ApplyBandVisibility(); RedrawChart(); }
     [Display(Name = "Price source", GroupName = "Calculation")]
     public StudyVwapSource Source { get => _source; set { _source = value; RecalculateValues(); } }
     [Display(Name = "Allow estimated OHLC fallback", GroupName = "Calculation")]
     public bool AllowEstimated { get => _estimate; set { _estimate = value; RecalculateValues(); } }
+    [Display(Name = "Session bands", GroupName = "Bands")] public bool SessionBands { get => _bandsOn[0]; set => SetBands(0, value); }
+    [Display(Name = "Week bands", GroupName = "Bands")] public bool WeekBands { get => _bandsOn[1]; set => SetBands(1, value); }
+    [Display(Name = "Month bands", GroupName = "Bands")] public bool MonthBands { get => _bandsOn[2]; set => SetBands(2, value); }
+    [Display(Name = "Quarter bands", GroupName = "Bands")] public bool QuarterBands { get => _bandsOn[3]; set => SetBands(3, value); }
+    [Display(Name = "Year bands", GroupName = "Bands")] public bool YearBands { get => _bandsOn[4]; set => SetBands(4, value); }
+    [Display(Name = "Show the second band", GroupName = "Bands")] public bool ShowSecondBand { get => _secondBand; set { _secondBand = value; ApplyBandVisibility(); RedrawChart(); } }
+    [Display(Name = "First band (deviations)", GroupName = "Bands"), Range(0.1, 5)]
+    public decimal FirstBandDeviations { get => _first; set { _first = Math.Clamp(value, 0.1m, 5); RecalculateValues(); } }
+    [Display(Name = "Second band (deviations)", GroupName = "Bands"), Range(0.1, 10)]
+    public decimal SecondBandDeviations { get => _second; set { _second = Math.Clamp(value, 0.1m, 10); RecalculateValues(); } }
+    [Display(Name = "Price at the end of the line", GroupName = "Visualization")] public bool ShowPriceLabels { get; set; }
     [Browsable(false)] public StudyCoverage Coverage => _states[0].Count == 0 ? 0 : _states[0][^1].Coverage;
     [Browsable(false)] public string Status => FootprintStudyData.Label(Coverage);
     public StudyCoverage CoverageAt(StudyTimeFrame period, int bar)
@@ -62,19 +93,40 @@ public class MultiPeriodVwap : Indicator
                 var sourceCoverage = coverage | (b == 0 && !StudyMath.IsPeriodOpening(c, StudyMath.Horizons[k]) ? StudyCoverage.Partial : 0)
                     | (!StudyMath.IsContained(c, StudyMath.Horizons[k]) ? StudyCoverage.MissingBars : 0);
                 var state = (b == 0 ? default : _states[k][b - 1]).Add(StudyMath.PeriodKey(c, StudyMath.Horizons[k]), contribution, sourceCoverage, b == 0);
-                _states[k].Add(state); _lines[k].Set(b, state.Moments.Mean, StudyMath.HasValue(state.Moments, state.Coverage));
-                if (b > 0 && state.Key != _states[k][b - 1].Key) _lines[k].SetPointOfEndLine(b - 1);
+                _states[k].Add(state); bool has = StudyMath.HasValue(state.Moments, state.Coverage);
+                _lines[k].Set(b, state.Moments.Mean, has);
+                decimal deviation = has ? state.Moments.Deviation : 0, mean = state.Moments.Mean;
+                _bands[k][0].Set(b, mean + _first * deviation, has); _bands[k][1].Set(b, mean - _first * deviation, has);
+                _bands[k][2].Set(b, mean + _second * deviation, has); _bands[k][3].Set(b, mean - _second * deviation, has);
+                if (b > 0 && state.Key != _states[k][b - 1].Key)
+                {
+                    _lines[k].SetPointOfEndLine(b - 1);
+                    foreach (var band in _bands[k]) band.SetPointOfEndLine(b - 1);
+                }
             }
         }
     }
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
-    { if (ChartInfo != null) FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Multi-period VWAP: {Status}", Color.LightSkyBlue); }
+    {
+        if (ChartInfo == null) return;
+        FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Multi-period VWAP: {Status}", Color.LightSkyBlue);
+        int bar = _states[0].Count - 1;
+        if (!ShowPriceLabels || bar < 0) return;
+        int x = ChartInfo.GetXByBar(bar, false) + 8; decimal tick = InstrumentInfo?.TickSize is > 0 and var t ? t : 0.01m;
+        for (int k = 0; k < 5; k++)
+        {
+            var line = _lines[k];
+            if (line.VisualType == VisualMode.Hide || line.IsHidden || !line.IsAvailable(bar)) continue;
+            string text = TradingHub.Rendering.UiText.Tr(line.Name) + " " + FootprintStudyData.Nearest(line[bar], tick).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            context.DrawString(text, FootprintStudyData.SmallFont, line.Color, x, ChartInfo.GetYByPrice(line[bar], false) - 6);
+        }
+    }
 }
 
 [DisplayName("Prior and closing VWAP levels")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 [Description("Last completed period VWAP and weighted bands, plus a bounded history of closing levels. A close becomes available at the next observed period, never backfilled into a strategy series.")]
-public class PriorClosingVwap : Indicator
+public partial class PriorClosingVwap : Indicator
 {
     public readonly record struct ClosingLevel(int SourceEndBar, int AvailableBar, decimal Value, decimal Deviation, StudyCoverage Coverage);
     private readonly List<PeriodVwapState> _states = new();
@@ -124,10 +176,12 @@ public class PriorClosingVwap : Indicator
             _prior.Set(b, state.Prior.Mean, available); _upper.Set(b, state.Prior.Mean + width, available && Sigma > 0); _lower.Set(b, state.Prior.Mean - width, available && Sigma > 0);
         }
     }
+    /// <summary>False when a composite (the VWAP suite) draws one combined fidelity legend for all its parts.</summary>
+    internal bool DrawLegend { get; set; } = true;
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (ChartInfo == null) return;
-        FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Prior VWAP: {Status}", Color.Goldenrod);
+        if (DrawLegend) FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Prior VWAP: {Status}", Color.Goldenrod);
         if (!ShowClosingLevels) return;
         for (int i = Math.Max(0, _closed.Count - Keep); i < _closed.Count; i++)
         {
@@ -221,12 +275,24 @@ public class RollingVwap : Indicator
 [Description("VWAP within a chosen local-time session, including overnight windows and DST. Only bars whose opening time is inside contribute; a bar spanning a boundary is not silently split.")]
 public class TimedSessionVwap : Indicator
 {
+    /// <summary>A world-session preset; <see cref="Custom"/> uses the time zone and local times set below.</summary>
+    public enum SessionPreset
+    {
+        [Display(Name = "Custom")] Custom,
+        [Display(Name = "Sydney")] Sydney,
+        [Display(Name = "Tokyo")] Tokyo,
+        [Display(Name = "London")] London,
+        [Display(Name = "New York")] NewYork,
+    }
     private readonly List<(DateOnly Date, WeightedStudyMoments Moments, StudyCoverage Coverage)> _states = new();
+    private SessionPreset _preset = SessionPreset.Custom;
     private readonly OptionalValueDataSeries _line = new("TimedSessionVwap", "Session VWAP") { Color = Color.Turquoise, ShowZeroValue = true, Width = 2 };
     private string _zone = "America/New_York"; private TimeSpan _start = TimeSpan.FromHours(9.5), _end = TimeSpan.FromHours(16);
     private StudyVwapSource _source; private bool _estimate;
     private TimeZoneInfo _timeZone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
     public TimedSessionVwap() : base(true) { DataSeries[0] = _line; EnableCustomDrawing = true; SubscribeToDrawingEvents(DrawingLayouts.Final); }
+    // presets never overwrite the custom fields, so switching back to Custom restores them in any load order
+    [Display(Name = "Session preset", GroupName = "Session")] public SessionPreset Preset { get => _preset; set { _preset = value; RecalculateValues(); } }
     [Display(Name = "Time zone", GroupName = "Session")] public string TimeZoneId { get => _zone; set { _timeZone = TimeZoneInfo.FindSystemTimeZoneById(value); _zone = value; RecalculateValues(); } }
     [Display(Name = "Start local time", GroupName = "Session")] public TimeSpan StartLocal { get => _start; set { if (value < TimeSpan.Zero || value >= TimeSpan.FromDays(1)) throw new ArgumentOutOfRangeException(nameof(value)); _start = value; RecalculateValues(); } }
     [Display(Name = "End local time", GroupName = "Session")] public TimeSpan EndLocal { get => _end; set { if (value < TimeSpan.Zero || value >= TimeSpan.FromDays(1)) throw new ArgumentOutOfRangeException(nameof(value)); _end = value; RecalculateValues(); } }
@@ -239,23 +305,34 @@ public class TimedSessionVwap : Indicator
     {
         int target = bar; if (bar < _states.Count - 1) { _states.Clear(); Clear(); }
         if (bar == _states.Count - 1) _states.RemoveAt(bar);
-        var zone = _timeZone;
+        var (zone, startLocal, endLocal) = Window();
         for (int b = _states.Count; b <= target; b++)
         {
             var c = GetCandle(b); var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(c.Time, DateTimeKind.Utc), zone);
             var date = DateOnly.FromDateTime(local); var time = local.TimeOfDay;
-            bool inside = StartLocal == EndLocal || (StartLocal < EndLocal ? time >= StartLocal && time < EndLocal : time >= StartLocal || time < EndLocal);
-            if (StartLocal >= EndLocal && time < EndLocal) date = date.AddDays(-1);
+            bool inside = startLocal == endLocal || (startLocal < endLocal ? time >= startLocal && time < endLocal : time >= startLocal || time < endLocal);
+            if (startLocal >= endLocal && time < endLocal) date = date.AddDays(-1);
             var state = b > 0 && _states[b - 1].Date == date ? _states[b - 1] : (date, new WeightedStudyMoments(), StudyCoverage.Missing);
             if (inside)
             {
                 var contribution = StudyMath.Vwap(c, Source, AllowEstimated, out var coverage);
-                if (b == 0 && time != StartLocal) coverage |= StudyCoverage.Partial;
+                if (b == 0 && time != startLocal) coverage |= StudyCoverage.Partial;
                 state.Item2.Merge(contribution); state.Item3 |= coverage;
             }
             _states.Add(state); _line.Set(b, state.Item2.Mean, inside && StudyMath.HasValue(state.Item2, state.Item3));
             if (!inside && b > 0) _line.SetPointOfEndLine(b - 1);
         }
+    }
+    /// <summary>The effective zone and local window: the preset's when one is selected, otherwise the custom settings.</summary>
+    internal (TimeZoneInfo Zone, TimeSpan Start, TimeSpan End) Window()
+    {
+        if (_preset == SessionPreset.Custom) return (_timeZone, _start, _end);
+        var window = LocalSessionWindow.Of(_preset switch
+        {
+            SessionPreset.Sydney => WorldSession.Sydney, SessionPreset.Tokyo => WorldSession.Tokyo,
+            SessionPreset.London => WorldSession.London, _ => WorldSession.NewYork,
+        });
+        return (window.Zone, window.Start, window.End);
     }
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     { if (ChartInfo != null) FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, Status, Color.Turquoise); }

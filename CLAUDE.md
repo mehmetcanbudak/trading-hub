@@ -14,7 +14,7 @@ Read [the sync guide](docs/en/upstream-sync.md) and [the upstream ledger](.githu
 
 Explain each step briefly; do not request personal information, broker credentials, passwords, or API secrets for installation. The steps below are for macOS. For Windows installation, packaging and native validation, follow [Windows integration](docs/en/portar-a-windows.md); upstream binaries do not include fork-only changes by implication.
 
-1. **Check the Mac.** `uname -m` must return `arm64` (Apple Silicon), and `sw_vers -productVersion` must be 12 or newer. Do not attempt this macOS build on Intel (`x86_64`). For Windows, see [the Windows porting guide](docs/en/portar-a-windows.md).
+1. **Check the Mac.** `uname -m` returns `arm64` (Apple Silicon, the primary target) or `x86_64` (Intel), and `sw_vers -productVersion` must be 12 or newer. `build-app.sh` picks `osx-arm64` or `osx-x64` from the hardware; on Intel, tell the user the Intel package has only been launched under Rosetta, not on physical Intel hardware. For Windows, see [the Windows porting guide](docs/en/portar-a-windows.md).
 2. **Check .NET 10.** Run `~/.dotnet/dotnet --list-sdks` or `dotnet --list-sdks`; locate a `10.*` SDK. If absent, install without requiring administrator access:
    ```bash
    curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh

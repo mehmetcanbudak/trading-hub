@@ -55,14 +55,14 @@ public sealed class DrawingSettingsWindow : Window
         body.Children.Add(Ui.H2(ChartDrawing.KindName(drawing.Kind)));
 
         if (!drawing.IsPosition && drawing.Kind != DrawingKind.Ruler) body.Children.Add(StyleSection());
-        if (drawing.Kind == DrawingKind.Rectangle) body.Children.Add(FillSection());
-        if (drawing.Kind is not (DrawingKind.Ruler or DrawingKind.FibRetracement) && !drawing.IsPosition) body.Children.Add(TextSection());
-        if (drawing.Kind is DrawingKind.TrendLine or DrawingKind.Rectangle or DrawingKind.HorizontalRay or DrawingKind.FibRetracement) body.Children.Add(ExtendSection());
+        if (drawing.Kind is DrawingKind.Rectangle or DrawingKind.Ellipse or DrawingKind.ParallelChannel) body.Children.Add(FillSection());
+        if (drawing.Kind is not (DrawingKind.Ruler or DrawingKind.FibRetracement) && !drawing.IsPosition && !drawing.IsFreehand) body.Children.Add(TextSection());
+        if (drawing.Kind is DrawingKind.TrendLine or DrawingKind.Rectangle or DrawingKind.HorizontalRay or DrawingKind.FibRetracement or DrawingKind.ParallelChannel) body.Children.Add(ExtendSection());
         if (drawing.Kind == DrawingKind.FibRetracement) body.Children.Add(LevelsSection());
         if (drawing.IsPosition) body.Children.Add(PositionSection());
         else if (drawing.Kind == DrawingKind.AnchoredVwap) body.Children.Add(AnchoredVwapSection());
         else if (drawing.Kind == DrawingKind.FixedRangeProfile) body.Children.Add(ProfileSection());
-        else if (drawing.Kind != DrawingKind.VerticalLine) body.Children.Add(PricesSection());
+        else if (drawing.Kind != DrawingKind.VerticalLine && !drawing.IsMultiPoint) body.Children.Add(PricesSection());
         body.Children.Add(VisibilitySection());
 
         var makeDefault = Ui.Button("Use as default", MaterialIconKind.StarOutline, () =>
@@ -395,7 +395,7 @@ public sealed class DrawingSettingsWindow : Window
     private Control PricesSection()
     {
         var rows = new List<Control>();
-        int n = _d.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.Text ? 1 : _d.Points.Count;
+        int n = _d.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.Text or DrawingKind.CrossLine ? 1 : _d.Points.Count;
         for (int i = 0; i < n && i < _d.Points.Count; i++)
         {
             int k = i;
@@ -428,7 +428,7 @@ public sealed class DrawingSettingsWindow : Window
             Changed();
         };
         var rows = new List<Control> { hidden, only, locked };
-        if (_d.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay)
+        if (_d.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.CrossLine)
         {
             var alert = new CheckBox { Content = "Alert when price touches", IsChecked = _d.IsAlert };
             alert.IsCheckedChanged += (_, _) =>

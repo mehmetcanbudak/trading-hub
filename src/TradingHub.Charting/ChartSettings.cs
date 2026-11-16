@@ -80,6 +80,18 @@ public sealed class ChartSettings
 
     public TradeLineStyle TradeLineStyle { get; set; } = TradeLineStyle.Dashed;
 
+    /// <summary>Hide every drawing on this chart (they stay saved and their alerts keep running).</summary>
+    public bool HideDrawings { get; set; }
+
+    /// <summary>Lock every drawing on this chart: they can be selected but not moved, stretched or erased by a gesture.</summary>
+    public bool LockDrawings { get; set; }
+
+    /// <summary>
+    /// The mouse wheel and +/- zoom the whole chart around the pointer (time and price in the same proportion, like an
+    /// image). Off (default): the wheel only changes the bar width and the price scale keeps its current behavior.
+    /// </summary>
+    public bool ZoomBothAxes { get; set; }
+
     /// <summary>Ticks por fila del footprint. 0 = automático.</summary>
     public int PriceStep { get; set; }
 

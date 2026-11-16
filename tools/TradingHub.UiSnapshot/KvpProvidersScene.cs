@@ -52,7 +52,7 @@ internal static class KvpProvidersScene
             {
                 Section("Longbridge data-only OAuth and market consumers", () => Longbridge(oauth));
                 Section("Aggregate constituent/time coverage and non-executable routing", Aggregate);
-                Section("Bybit actual account factory, snapshots, executions and ownership", () => Bybit(exchange));
+                Section("Bybit actual account factory, snapshots, executions and ownership", () => InMiddayAccountDay(() => Bybit(exchange)));
                 Check(exchange.UnexpectedRoutes.IsEmpty, "all actual Bybit HTTP calls reached explicitly implemented fake endpoints", new { routes = exchange.UnexpectedRoutes.ToArray() });
                 Check(exchange.InvalidSignatures == 0 && exchange.SignedRequests > 0 && exchange.AdjustedRequests == exchange.SignedRequests,
                     "actual account requests verify HMAC and adjust to a fake server clock 90 seconds ahead", new { exchange.SignedRequests, exchange.InvalidSignatures, exchange.AdjustedRequests });
@@ -83,6 +83,21 @@ internal static class KvpProvidersScene
             _checks++; if (!condition) _failures++;
             _assertions.Add(new { number = _checks, passed = condition, description, evidence });
             Console.WriteLine($"{(condition ? "OK" : "FAIL")} KVP providers: {description}");
+        }
+        /// <summary>The account center counts provider-reported realized PnL for the selected zone's calendar day at
+        /// DateTime.UtcNow. The fake Bybit closes are stamped two minutes before the checks read them, so a run that crosses
+        /// local midnight (CI started one at 00:01 UTC) correctly moves them to yesterday. Pin the account day to the system
+        /// zone whose local time is nearest noon (whole-hour zones span -12..+14 h, so within 30 minutes): the section lasts
+        /// seconds, far from either midnight. The user's selection is restored afterwards.</summary>
+        private void InMiddayAccountDay(Action action)
+        {
+            var settings = Services.Settings;
+            string? previous = settings.TimeZoneId;
+            DateTime now = DateTime.UtcNow;
+            settings.TimeZoneId = TimeZoneInfo.GetSystemTimeZones()
+                .MinBy(zone => Math.Abs((TimeZoneInfo.ConvertTimeFromUtc(now, zone).TimeOfDay - TimeSpan.FromHours(12)).Ticks))!.Id;
+            try { action(); }
+            finally { settings.TimeZoneId = previous; }
         }
         private void Section(string description, Action action)
         {
@@ -369,7 +384,7 @@ internal static class KvpProvidersScene
                 catch (InvalidOperationException) { Check(true, "actual aggregate account factory rejects execution even with a requested simulated account"); }
             }
             var page = SelectConnection(profile);
-            Check(Texts(page).Any(text => text.Contains("Missing constituents remain marked as partial", StringComparison.Ordinal)), "actual aggregate connection panel warns about partial constituents, non-executable prices and Binance-only DOM");
+            Check(Texts(page).Any(text => text.Contains("Prices are not executable. Missing or deviating constituents remain marked as partial", StringComparison.Ordinal)), "actual aggregate connection panel warns about partial constituents, non-executable prices and Binance-only DOM");
             var tested = Await(Connections.TestAsync(profile, default), "actual aggregate connection consumer tests only registered fake constituents");
             Check(tested.Ok && tested.Message.Contains("Non-executable", StringComparison.Ordinal), "actual aggregate test never offers executable composite prices", new { tested.Ok, tested.Message });
             Shot("kvp_providers_aggregate_partial");

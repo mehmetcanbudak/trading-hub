@@ -1,10 +1,13 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Rendering.SceneGraph;
 using Avalonia.Skia;
+using Avalonia.Threading;
 using SkiaSharp;
+using TradingHub.App.Services;
 using TradingHub.Rendering;
 
 namespace TradingHub.App.Controls;
@@ -30,6 +33,8 @@ public abstract class SkiaView : Control
     {
         float w = (float)Bounds.Width, h = (float)Bounds.Height;
         if (w < 2 || h < 2) return;
+        var probe = FrameProbe.Current;
+        long started = probe != null ? Stopwatch.GetTimestamp() : 0;
         using var recorder = new SKPictureRecorder();
         var canvas = recorder.BeginRecording(new SKRect(0, 0, w, h));
         if (CornerRadius > 0)
@@ -50,17 +55,22 @@ public abstract class SkiaView : Control
         }
 
         var picture = recorder.EndRecording();
-        context.Custom(new PictureDrawOperation(new Rect(0, 0, w, h), picture));
+        context.Custom(new PictureDrawOperation(new Rect(0, 0, w, h), picture, probe != null ? this : null));
+        if (probe == null) return;
+        probe.Phase("record", this, w, h, started, "");
+        if (probe.ContinuousRedraw && this is ChartView) Dispatcher.UIThread.Post(InvalidateVisual, DispatcherPriority.Background);
     }
 
     private sealed class PictureDrawOperation : ICustomDrawOperation
     {
         private readonly SKPicture _picture;
+        private readonly SkiaView? _probed;
 
-        public PictureDrawOperation(Rect bounds, SKPicture picture)
+        public PictureDrawOperation(Rect bounds, SKPicture picture, SkiaView? probed)
         {
             Bounds = bounds;
             _picture = picture;
+            _probed = probed;
         }
 
         public Rect Bounds { get; }
@@ -75,8 +85,11 @@ public abstract class SkiaView : Control
         {
             var feature = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
             if (feature == null) return;
+            long started = _probed != null ? Stopwatch.GetTimestamp() : 0;
             using var lease = feature.Lease();
             lease.SkCanvas.DrawPicture(_picture);
+            if (_probed != null)
+                FrameProbe.Current?.Phase("draw", _probed, (float)Bounds.Width, (float)Bounds.Height, started, lease.GrContext?.Backend.ToString() ?? "Software");
         }
     }
 }

@@ -324,9 +324,9 @@ public class QuanTAlibTests
     public void Session_identity_handles_CME_DST_fractional_start_gaps_and_year_boundaries()
     {
         var cme = CamarillaSessions.Create("America/New_York", 18);
-        Assert.Equal(new DateOnly(2026, 3, 6), cme.SessionDate(new DateTime(2026, 3, 7, 22, 59, 0, DateTimeKind.Utc)));
-        Assert.Equal(new DateOnly(2026, 3, 7), cme.SessionDate(new DateTime(2026, 3, 7, 23, 0, 0, DateTimeKind.Utc)));
-        Assert.Equal(new DateOnly(2026, 3, 8), cme.SessionDate(new DateTime(2026, 3, 8, 22, 0, 0, DateTimeKind.Utc)));
+        Assert.Equal(new DateOnly(2026, 3, 7), cme.SessionDate(new DateTime(2026, 3, 7, 22, 59, 0, DateTimeKind.Utc)));
+        Assert.Equal(new DateOnly(2026, 3, 8), cme.SessionDate(new DateTime(2026, 3, 7, 23, 0, 0, DateTimeKind.Utc)));
+        Assert.Equal(new DateOnly(2026, 3, 9), cme.SessionDate(new DateTime(2026, 3, 8, 22, 0, 0, DateTimeKind.Utc)));
         var fractional = CamarillaSessions.Create("UTC", 9.5);
         Assert.Equal(new DateOnly(2025, 12, 31), fractional.SessionDate(Start.AddHours(9).AddMinutes(29)));
         Assert.Equal(new DateOnly(2026, 1, 1), fractional.SessionDate(Start.AddHours(9).AddMinutes(30)));

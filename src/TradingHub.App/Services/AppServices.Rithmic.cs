@@ -6,7 +6,8 @@ using TradingHub.Trading;
 namespace TradingHub.App.Services;
 
 public sealed record RithmicPositionTarget(RithmicBroker Broker, RithmicCloseConfirmation Confirmation);
-public sealed record RithmicOrderTarget(RithmicTradingSession Session, string Account, string Basket);
+/// <param name="Context">The account's ownership context: its order lane orders the Accounts cancel with chart gestures.</param>
+public sealed record RithmicOrderTarget(RithmicTradingSession Session, string Account, string Basket, OrderContext Context);
 
 public sealed partial class AppServices
 {

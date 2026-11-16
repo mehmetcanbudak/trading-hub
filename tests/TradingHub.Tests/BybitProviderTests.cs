@@ -31,6 +31,9 @@ public sealed class BybitProviderTests : IDisposable
         try { Changed(); await completion.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
         finally { session.Changed -= Changed; }
     }
+    // An exchange id appears before the placement settles; refreshing in that window leaves working orders unknown.
+    private static Task Placed(BybitTradingSession session, Order order) =>
+        Observe(session, () => order.ExchangeOrderId.Length > 0 && !session.IsSending(order));
 
     [Fact]
     public async Task Signed_protocol_uses_server_clock_exact_payload_and_selected_environment()
@@ -128,7 +131,7 @@ public sealed class BybitProviderTests : IDisposable
         await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new FixedClock(FakeBybitProtocol.Now));
         await session.RefreshAsync();
         var order = session.Place(Btc, 100, OrderDirections.Sell, OrderTypes.Stop, 1, 90, reduceOnly: true);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         await session.RefreshAsync();
         session.Replace(order, 92, .8m, Btc);
         await protocol.AmendReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -160,7 +163,7 @@ public sealed class BybitProviderTests : IDisposable
         session.FillReceived += delivered.Add;
         await session.RefreshAsync();
         var order = session.Place(Btc, 999, OrderDirections.Buy, OrderTypes.Limit, 1, 100);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         protocol.Fill("fill-a", .3m, 101, .015m);
         await session.RefreshAsync();
         Assert.Equal(.3m, order.Filled);
@@ -192,7 +195,7 @@ public sealed class BybitProviderTests : IDisposable
         session.FillReceived += delivered.Add;
         await session.RefreshAsync();
         var order = session.Place(Btc, 100, OrderDirections.Buy, OrderTypes.Limit, 1, 99);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         Assert.True(session.IsSubmissionUnknown(order));
         session.Cancel(order);
         Assert.DoesNotContain(protocol.Requests, request => request.Path == "/v5/order/cancel");
@@ -224,7 +227,7 @@ public sealed class BybitProviderTests : IDisposable
         await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new FixedClock(FakeBybitProtocol.Now));
         await session.RefreshAsync();
         var order = session.Place(Btc, 100, OrderDirections.Buy, OrderTypes.Limit, 1, 99);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         string link = JsonNode.Parse(Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create").Body)!["orderLinkId"]!.GetValue<string>();
         protocol.ResponseFor = request => request.Path != "/v5/order/realtime" ? null : new HttpResponseMessage(HttpStatusCode.OK)
         { Content = new StringContent($$$"""{"retCode":0,"result":{"list":[{"orderId":"unexpected-child-id","orderLinkId":"{{{link}}}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","price":"99","triggerPrice":"0","qty":"1","cumExecQty":"0","leavesQty":"1","orderStatus":"New","reduceOnly":false,"positionIdx":0,"avgPrice":"0","createdTime":"1793786400000","updatedTime":"1793786400001"}],"nextPageCursor":""}}""") };
@@ -307,7 +310,7 @@ public sealed class BybitProviderTests : IDisposable
         Assert.Equal(OrderStatus.Rejected, denied.Status);
         session.Retire();
         var reduction = session.Place(Btc, 100, OrderDirections.Sell, OrderTypes.Market, .4m, 0, reduceOnly: true);
-        await Observe(session, () => reduction.ExchangeOrderId.Length > 0);
+        await Placed(session, reduction);
         await session.RefreshAsync();
         session.Cancel(reduction);
         await protocol.CancelReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -520,7 +523,7 @@ public sealed class BybitProviderTests : IDisposable
         session.Reactivate();
         Assert.Equal(OrderStatus.Rejected, old.Market(OrderDirections.Buy, .1m).Status);
         var exit = old.Exit(OrderTypes.Market, OrderDirections.Sell, .3m, 0);
-        await Observe(session, () => exit.ExchangeOrderId.Length > 0);
+        await Placed(session, exit);
         Assert.True(JsonNode.Parse(Assert.Single(protocol.Requests, r => r.Path == "/v5/order/create").Body)!["reduceOnly"]!.GetValue<bool>());
     }
 
@@ -532,7 +535,7 @@ public sealed class BybitProviderTests : IDisposable
         await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new FixedClock(FakeBybitProtocol.Now));
         await session.RefreshAsync();
         var order = session.Place(Btc, 999, OrderDirections.Buy, OrderTypes.Limit, 1, 100);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         protocol.Fill("durable-fill", .25m, 101, .0125m);
         int attempts = 0;
         var delivered = new List<BybitExecution>();
@@ -592,7 +595,7 @@ public sealed class BybitProviderTests : IDisposable
             sendGuard: (_, _, _, _) => permitted ? null : "Permission revoked at transport", clock: new FixedClock(FakeBybitProtocol.Now));
         await session.RefreshAsync();
         var order = session.Place(Btc, 100, OrderDirections.Buy, OrderTypes.Limit, 1, 99);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         await session.RefreshAsync();
         var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -662,7 +665,7 @@ public sealed class BybitProviderTests : IDisposable
         await arrived.Task.WaitAsync(TimeSpan.FromSeconds(10));
         session.Retire();
         release.TrySetResult();
-        await Observe(session, () => exit.ExchangeOrderId.Length > 0);
+        await Placed(session, exit);
         Assert.True(JsonNode.Parse(Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create").Body)!["reduceOnly"]!.GetValue<bool>());
     }
 
@@ -687,7 +690,7 @@ public sealed class BybitProviderTests : IDisposable
         await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new FixedClock(FakeBybitProtocol.Now));
         await session.RefreshAsync();
         var order = session.Place(Btc, 100, OrderDirections.Buy, OrderTypes.Limit, 1, 99);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         protocol.Fill("late-execution", .5m, 101, .025m);
         bool exactVisible = false;
         protocol.ResponseFor = request => request.Path == "/v5/execution/list" && (!exactVisible || !request.Query.Contains("orderId=", StringComparison.Ordinal))
@@ -794,7 +797,7 @@ public sealed class BybitProviderTests : IDisposable
         await using var session = new BybitTradingSession(protocol.Settings, statePath: NewStatePath(), httpClient: http, clock: new FixedClock(FakeBybitProtocol.Now));
         await session.RefreshAsync();
         var order = session.Place(Btc, 100, OrderDirections.Buy, OrderTypes.Limit, 1, 99);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         protocol.Fill("not-yet-journalled", 1, 101, .05m);
         await session.RefreshAsync();
         Assert.True(session.SnapshotReady);
@@ -837,7 +840,7 @@ public sealed class BybitProviderTests : IDisposable
         var fillsSession = new BybitTradingSession(fillsProtocol.Settings, statePath: NewStatePath(), httpClient: fillsHttp, clock: new FixedClock(FakeBybitProtocol.Now), ownsHttpClient: true);
         await fillsSession.RefreshAsync();
         var order = fillsSession.Place(Btc, 100, OrderDirections.Buy, OrderTypes.Limit, 1, 99);
-        await Observe(fillsSession, () => order.ExchangeOrderId.Length > 0);
+        await Placed(fillsSession, order);
         fillsProtocol.Fill("held-publication", 1, 101, .05m);
         using var publicationRelease = new ManualResetEventSlim();
         var publicationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

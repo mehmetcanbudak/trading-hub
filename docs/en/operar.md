@@ -44,6 +44,16 @@ It appears on each chart's right edge (collapse with the arrow or ⌥T), and abo
 
 PnL and position are below the buttons so updates do not shift click targets.
 
+### Order actions on broker accounts
+
+On Binance, Bybit, Rithmic and Tradovate accounts, an order action you confirm (Chart Trader and DOM buttons, hotkeys, chart and DOM drags, stop/target drops, chart-menu bracket actions, and Cancel/Close in **Accounts**) is handed to that account's order queue and the window keeps responding while the order is recorded on disk and sent. The status bar shows **<action>: pending…** until the account call returns, then its result: the account's message or error for that action, the action's name when the account returned no message, or **<action>: error after submission; check orders and position: …** when the call failed (the error is also written to the crash log; an order may already have been sent). If more actions are still queued it adds **· N order action(s) pending**. Actions on one account run one at a time in the order you issued them, whether issued from a chart, the DOM, a hotkey or **Accounts**; confirmations and permission checks happen before the hand-off, exactly as before.
+
+On Tradovate (per account) and Binance (per instrument), the requests themselves also reach the venue in that order: each order, change, cancel or close is sent only after the venue answered the previous request. A close, cancel, protective order or change of a protective order waits at most 10 seconds for that answer; after that it is sent anyway and the status shows **An earlier order's outcome was still unsettled after 10 seconds; this reducing request was sent anyway. Check orders and position.** New orders, changes of entry orders and **Reverse** wait for the answer without that limit. On Rithmic, a close reserves the contract while it runs, so a buy that reaches the venue's admission during the close is refused. On Binance and Tradovate a chart **Close position** includes market orders you sent just before it: when its turn comes it closes the position found once those orders have filled, whichever side it is on (if that side differs from what you had, the status says so), and sends nothing (**No open position.**) if nothing is left. **Reverse** works the same way: one opposite order of twice that position, so you end with the opposite of the position including those orders; if the position changed side meanwhile it sends nothing and says so. If the position cannot be confirmed within 10 seconds, Close position sends at most what is left whether or not those orders fill, with the message above, and Reverse sends nothing (**An earlier order's outcome was still unsettled after 10 seconds; nothing was sent. Check orders and position.**). **Close** in **Accounts** on Tradovate is sized by Tradovate itself when it processes the request, so an earlier buy is included. On Rithmic, **Reverse** is still sized from the position known when you issue it.
+
+While requests on that account still wait for an earlier answer, an order action's status line ends with **· waiting for an earlier reply (N queued)**.
+
+The simulated account, practice replay accounts and live strategies still record their orders on the window's thread, so a slow disk can briefly freeze the window while they do.
+
 ## Order types
 
 | Type | Submission | Simulated fill |
@@ -68,6 +78,10 @@ DOM uses the active chart's quantity. **Double-click to trade** disables single-
 
 The optional execution strip has quantity shortcuts, Buy/Sell MKT, Buy/Sell Bid/Ask, Cancel, Reverse and Close, all operating on the active chart.
 
+### DOM trading switch
+
+The lock in the DOM header is a separate, saved switch for trading from the DOM; chart trading, Chart Trader and hotkeys are unaffected. It is **on** by default, so the gestures above and the execution strip work exactly as before, behind the same real-account confirmation, real-order permission and risk limits. Turned **off**, the DOM is read-only: clicks, cancel clicks, order drags and the execution strip's order buttons send nothing and open no confirmation, the status bar explains why, and the ladder shows **DOM trading off**. Scrolling, recentering (double-click also recenters while off) and quantity entry still work.
+
 ## Trade from the chart
 
 - Right-click below last price for buy-limit/sell-stop; above for sell-limit/buy-stop, using Chart Trader quantity. The menu also cancels all orders.
@@ -88,7 +102,35 @@ With the template enabled, a new position gets client-coordinated stop/target or
 
 **Apply to position** replaces the current position's stop/targets with the template. You can also drag SL/TP handles from a position or pending entry, or drag from the position line toward profit for a target and toward loss for a stop.
 
-None of the integrated live-account adapters currently submits broker-native OCO groups. Safe native amendments or sequenced replacements retain one tracked handle and wait for actual working-state acknowledgment; an optimistic price/quantity update is not confirmation. Unknown placement replies are reconciled by exact client identity instead of blindly retried. Client-managed sibling cancellation, trailing and resizing require the application and connection to remain operational; broker orders left after Quit have no app-managed OCO protection. Verify authorized demo-account behavior before relying on real trading.
+By default every connection's protection is **app-managed**: the stop and targets are separate working orders, and Trading Hub cancels the remaining ones and resizes them. Safe native amendments or sequenced replacements retain one tracked handle and wait for actual working-state acknowledgment; an optimistic price/quantity update is not confirmation. Unknown placement replies are reconciled by exact client identity instead of blindly retried. Sibling cancellation, trailing and resizing require the application and connection to remain operational; broker orders left after Quit have no app-managed OCO protection.
+
+### Exchange-side protection
+
+A Tradovate connection can opt in to **Exchange-side protection (Tradovate OCO)** under **Connections → Tradovate → Stops and targets**. It is off by default. When it is on and the position's protection is exactly one stop and one target, each for the whole position, both are sent in one [`placeOCO`](https://partner.tradovate.com/api/rest-api-endpoints/orders/place-oco) request. When one fills, Tradovate cancels the other even if Trading Hub is closed or disconnected. Chart Trader shows **Exchange-side protection** once Tradovate reports both legs in one OCO group, and **App-managed protection** otherwise. Automatic SL/TP, Chart Trader brackets and a live strategy's stop loss and take profit use it.
+
+- Each leg keeps its own client order ID, saved ownership and acknowledgment rules. An unknown reply is reconciled from those IDs and never sent again.
+- Moving a leg is a native amendment of that leg. Position increases and partial exits resize the legs natively while Trading Hub runs.
+- Partial targets, a stop without a target, or a target that does not cover the whole position stay app-managed. Chart Trader says why.
+- If Tradovate refuses the OCO, both legs are sent again as separate app-managed orders and the reason stays visible. Linking stays off for that session until the option is switched off and on again.
+- If Tradovate cancels a leg that Trading Hub never asked to cancel, Trading Hub waits for the cause, because cancellation, fill and position reports arrive separately and in any order. Chart Trader shows a **Protection gap** while it waits.
+  - The leg is replaced with an app-managed order only for a confirmed cause:
+    - the other leg executed, partly or completely, after the cancelled leg was last sized; or
+    - Trading Hub cancelled the other leg (bracket removal, the DOM or the order list) and that cancellation has ended.
+
+    The replacement is sent only once those fills are booked, the reported position has fallen by them, and Tradovate's timestamp on that position report is no earlier than the other leg's last fill. Until then, an older position report can neither confirm nor size it. It is sized from the reported position, including reductions made outside the brackets.
+  - The wait ends without sending anything when the position is flat.
+  - Legs that Trading Hub itself asked to cancel (including **Cancel all** and **Close position**) are never replaced. When both legs were cancelled and nobody here requested either, the cancellation is respected as for app-managed orders.
+  - Setting a stop or moving it to breakeven yourself ends the wait: that stop is placed at once as app-managed protection. The automatic breakeven after the first target only changes the price the waiting stop will use. Removing protection or applying the template during the wait discards the cancelled leg; it is never revived.
+  - A position report proves nothing about executions whose fill reports are missing or undated. Working stops (or targets) never add up to more than the position.
+  - After 30 seconds, a leg whose cause was confirmed but whose position check never passed is placed anyway, sized from the booked fills and the reported position. Without a confirmed cause, Chart Trader keeps showing the **Protection gap** and that no stop (or target) is working. Nothing is sent automatically, so place a new stop yourself.
+- A strategy's linked pair and the chart's are separate: one owner's order is never paired with another's.
+- After a restart, chart protection that is still working at Tradovate is re-owned from the saved client IDs and adopted. It is never placed a second time. A strategy re-adopts its own kept stop and target as before.
+
+Tradovate documents neither reduce-only orders nor how OCO legs follow partial fills or a cancellation of one leg. While Trading Hub is closed, a leg that is larger than the remaining position is not resized, and a cancelled leg is not replaced. While it runs, a replacement waits for the position report, so a short gap with a visible status is possible. These behaviours are verified against a fake venue that publishes cancellation, fill and position reports separately; follow the [demo checklist](./native-protection-demo-checklist.md) before relying on them with real money.
+
+Binance, Bybit and Rithmic connections stay app-managed. Their documented linked contracts do not fit these ownership and resizing rules; the [checklist](./native-protection-demo-checklist.md#venues-that-stay-app-managed) records why.
+
+Verify authorized demo-account behavior before relying on real trading.
 
 ## Cross trading
 
@@ -128,6 +170,7 @@ For simulation, change **Initial balance** or **Reset simulated account**. Reset
 - **Maximum order size.** Real orders larger than the configured connection limit are blocked with an **Order blocked** message.
 - **Strategy limits.** Automatic strategies have daily-loss and drawdown limits; **0 means no limit**. **Live → Stop all** stops strategies, cancels their orders and requests closure of their positions. Confirm resulting broker positions; network failures can prevent closure.
 - **Quitting asks first.** While live strategies hold positions, ⌘Q and **Quit Trading Hub** show the same **Quit Trading Hub** dialog: keep their stop loss and take profit working at the broker (the default), cancel them, close the positions (never by Enter) or don't quit (Esc). Quitting never closes positions unless you choose that. Details are in Live strategies, under Closing the window and reopening.
+- **Queued order actions finish before quitting.** After you quit, order actions already handed to a broker account's queue are recorded and sent before strategies stop or connections close. On Binance and Tradovate, quitting also waits (at most 30 seconds in total) until the order requests they issued were sent and answered, for example a Close waiting for an earlier order's answer; while it waits, the status bar shows **Sending queued order requests before quitting…**. If that limit is reached, the log says so and you should check orders and positions at the broker. An order action issued after that is refused with **Trading Hub is quitting: the order action was not sent.**
 - **Visible real-account warnings.** Real destinations are marked orange with **REAL** / **REAL ACCOUNT**.
 
 A launch confirmation authorizes an automatic strategy to trade without an individual dialog for every generated order. Start with simulation; a translated interface is not a guarantee of trading safety.

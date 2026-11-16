@@ -11,7 +11,7 @@ namespace TradingHub.Indicators.Native;
 [DisplayName("Double inside day")]
 [Category(IndicatorCategories.Levels)]
 [Description("Exchange-session mother day plus two completed inside days. Configurable body/range containment, nested/mother containment and chart/daily close breakout. No pattern is available before the second inside day completes; expiry is counted in observed sessions.")]
-public class DoubleInsideDay : Indicator
+public partial class DoubleInsideDay : Indicator
 {
     public enum Containment { Range, Body }
     public enum Nesting { BothInMother, Nested }

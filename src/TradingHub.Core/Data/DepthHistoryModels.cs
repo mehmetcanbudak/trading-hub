@@ -129,7 +129,7 @@ public sealed record DepthMeasurement(bool IsAvailable, decimal Bid, decimal Ask
 public static class DepthStatistics
 {
     public static DepthMeasurement Measure(DepthHistoryQuery query, int withinTicks,
-        DepthAggregation aggregation, TimeSpan maxAge, bool allowPartial = false)
+        DepthAggregation aggregation, TimeSpan maxAge, bool allowPartial = false, decimal withinPercent = 0)
     {
         if (query.To <= query.From) return Missing("The depth interval is empty.");
         maxAge = maxAge <= TimeSpan.Zero ? TimeSpan.FromSeconds(10) : maxAge;
@@ -152,7 +152,7 @@ public static class DepthStatistics
             ObserveSource(sample);
             if (aggregation is DepthAggregation.Maximum or DepthAggregation.SampleAverage)
             {
-                var size = sample.Within(withinTicks);
+                var size = Size(sample);
                 if (aggregation == DepthAggregation.Maximum)
                 {
                     bid = Math.Max(bid, size.Bid);
@@ -174,7 +174,7 @@ public static class DepthStatistics
         {
             if (active == null || !Usable(active) || query.To - active.Time > maxAge)
                 return new(false, 0, 0, count, TimeSpan.FromTicks(coveredTicks), coverage | DepthCoverage.Missing, "No fresh book at the interval end.");
-            (bid, ask) = active.Within(withinTicks);
+            (bid, ask) = Size(active);
             coverage |= active.Coverage;
         }
         else if (aggregation == DepthAggregation.DurationAverage)
@@ -197,6 +197,15 @@ public static class DepthStatistics
         bool Usable(DepthSample sample) => sample.IsUsable &&
             (allowPartial || (sample.Coverage & (DepthCoverage.PartialBook | DepthCoverage.Truncated)) == 0);
 
+        // A positive percentage selects the mid-relative "0 – X %" band; otherwise ticks from each side's own best.
+        (decimal Bid, decimal Ask) Size(DepthSample sample)
+        {
+            if (withinPercent <= 0) return sample.Within(withinTicks);
+            if (!sample.IsUsable) return (0, 0);
+            var band = DepthBands.WithinPercent(sample.Snapshot, withinPercent);
+            return (band.Bid, band.Ask);
+        }
+
         void ObserveSource(DepthSample sample)
         {
             if (provider != null && (provider != sample.ProviderId || venue != sample.Venue)) multipleSources = true;
@@ -215,7 +224,7 @@ public static class DepthStatistics
             {
                 coverage |= active.Coverage;
                 ObserveSource(active);
-                var size = active.Within(withinTicks);
+                var size = Size(active);
                 if (coveredTicks == 0)
                     (bid, ask) = size;
                 else

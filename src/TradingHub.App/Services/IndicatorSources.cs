@@ -44,7 +44,7 @@ public sealed class IndicatorSources
             documents.Add(new(resource, reader.ReadToEnd(),
                 $"{a.GetName().Name}: {resource}. Original authors and license terms are retained; see Trading Hub LICENSE and THIRD_PARTY_NOTICES.md."));
         }
-        return new IndicatorSources(documents);
+        return new IndicatorSources(documents) { AssemblyName = a.GetName().Name };
     });
 
     /// <summary>Returns every declaration document, including partial declarations; never guesses by filename.</summary>
@@ -57,25 +57,48 @@ public sealed class IndicatorSources
     /// <summary>
     /// Publishes all required source types in one directory move, only after the normal compiler can emit
     /// the complete result alongside existing user sources. No constructors or static initializers run.
+    /// The copy records which original source it came from (<see cref="IndicatorSourceCopies"/>).
     /// </summary>
     public IndicatorSourceCopy Fork(string metadataTypeName, string newClassName, string folder)
     {
         if (newClassName.StartsWith('@') || !SyntaxFacts.IsValidIdentifier(newClassName) || SyntaxFacts.GetKeywordKind(newClassName) != SyntaxKind.None)
             throw new ArgumentException("Choose a valid C# class name, not a keyword.", nameof(newClassName));
+        var generated = Generate(metadataTypeName, newClassName, "TradingHub.UserIndicators.Copy_" + Guid.NewGuid().ToString("N"));
+        string root = Path.GetFullPath(folder);
+        Preflight(root, generated.Sources, excludeDirectory: null);
+        Directory.CreateDirectory(root);
+        string destination = UniqueDirectory(root, newClassName);
+        // Staging is a sibling of the watched root: the watcher never sees half a dependency closure.
+        string stage = Stage(root, generated, previous: null);
+        try { Directory.Move(stage, destination); } // no overwrite; a concurrent collision fails safely
+        finally { if (Directory.Exists(stage)) Directory.Delete(stage, recursive: true); }
+        return new(Path.Combine(destination, generated.EntryFile), generated.TypeName, generated.Sources.Keys.Select(f => Path.Combine(destination, f)).ToArray());
+    }
+
+    /// <summary>Assembly whose embedded resources these documents are (null for an ad-hoc document set).</summary>
+    public string? AssemblyName { get; private init; }
+
+    /// <summary>
+    /// Deterministic copy text for a fixed class name and namespace prefix: the same original always yields the same
+    /// files, so an untouched copy can be recognised and regenerated under its unchanged type identity.
+    /// </summary>
+    public GeneratedSourceCopy Generate(string metadataTypeName, string newClassName, string prefix)
+    {
         var target = FindType(metadataTypeName);
         if (target.ContainingType != null || target.Arity != 0 || target.TypeKind != TypeKind.Class)
             throw new NotSupportedException("Copying a nested or generic indicator is not supported. No files were written.");
 
         var compilation = _compilation.Value;
         var closure = RequiredTypes(compilation, target);
-        string prefix = "TradingHub.UserIndicators.Copy_" + Guid.NewGuid().ToString("N");
         var sources = new Dictionary<string, string>(StringComparer.Ordinal);
+        var originals = new Dictionary<string, string>(StringComparer.Ordinal);
         string? entryFile = null;
         int index = 0;
         foreach (var tree in compilation.SyntaxTrees.Where(t => _documents.ContainsKey(t.FilePath)))
         {
             if (!closure.Any(t => t.DeclaringSyntaxReferences.Any(r => r.SyntaxTree == tree))) continue;
             var document = _documents[tree.FilePath];
+            originals[document.Id] = IndicatorSourceCopies.Hash(document.Text);
             var model = compilation.GetSemanticModel(tree);
             var rewritten = (CompilationUnitSyntax)new CopyRewriter(model, closure, target, newClassName, prefix).Visit(tree.GetRoot())!;
             if (rewritten.Members.OfType<BaseTypeDeclarationSyntax>().Any() || rewritten.Members.OfType<DelegateDeclarationSyntax>().Any())
@@ -95,33 +118,75 @@ public sealed class IndicatorSources
             if (target.DeclaringSyntaxReferences.Any(r => r.SyntaxTree == tree)) entryFile ??= file;
         }
 
-        string root = Path.GetFullPath(folder);
-        var existing = new IndicatorSourceFiles(root).ReadAll();
-        var preflight = new Dictionary<string, string>(existing, StringComparer.Ordinal);
+        string typeName = prefix + "." + (target.ContainingNamespace.IsGlobalNamespace ? "" : target.ContainingNamespace.ToDisplayString() + ".") + newClassName;
+        var manifest = new SourceCopyManifest
+        {
+            OriginalType = metadataTypeName,
+            OriginalAssembly = AssemblyName,
+            ClassName = newClassName,
+            NamespacePrefix = prefix,
+            CopyType = typeName,
+            EntryFile = entryFile!,
+            Originals = originals,
+            Files = sources.ToDictionary(p => p.Key, p => IndicatorSourceCopies.Hash(p.Value), StringComparer.Ordinal),
+        };
+        return new(sources, entryFile!, typeName, manifest);
+    }
+
+    /// <summary>Current hashes of the given embedded documents; null when any of them no longer exists.</summary>
+    public IReadOnlyDictionary<string, string>? CurrentHashes(IEnumerable<string> documentIds)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string id in documentIds)
+        {
+            if (!_documents.TryGetValue(id, out var document)) return null;
+            result[id] = IndicatorSourceCopies.Hash(document.Text);
+        }
+
+        return result;
+    }
+
+    /// <summary>The generated copy must compile with every other user source; the copy's own directory may be excluded.</summary>
+    internal static void Preflight(string root, IReadOnlyDictionary<string, string> sources, string? excludeDirectory)
+    {
+        var preflight = new Dictionary<string, string>(StringComparer.Ordinal);
+        string? excluded = excludeDirectory == null ? null : Path.TrimEndingDirectorySeparator(Path.GetFullPath(excludeDirectory)) + Path.DirectorySeparatorChar;
+        foreach (var (path, text) in new IndicatorSourceFiles(root).ReadAll())
+            if (excluded == null || !path.StartsWith(excluded, StringComparison.Ordinal)) preflight.Add(path, text);
         foreach (var (file, text) in sources) preflight.Add(Path.Combine(root, ".source-copy-preflight", file), text);
         var validation = ScriptCompiler.ValidateSources(preflight);
         if (!validation.Success)
             throw new NotSupportedException("This source and its dependencies cannot be copied safely. No files were written.\n" +
                 string.Join("\n", validation.Diagnostics.Where(d => d.Severity == "error").Take(12).Select(d => d.ToString())));
+    }
 
-        Directory.CreateDirectory(root);
-        string destination = UniqueDirectory(root, newClassName);
-        // Staging is a sibling of the watched root: the watcher never sees half a dependency closure.
+    /// <summary>Writes a complete copy (sources + manifest, plus any preserved previous files) outside the watched root.</summary>
+    internal static string Stage(string root, GeneratedSourceCopy generated, IReadOnlyDictionary<string, string>? previous)
+    {
         string stage = Path.Combine(Path.GetDirectoryName(root)!, ".indicator-copy-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stage);
         try
         {
-            foreach (var (file, text) in sources) File.WriteAllText(Path.Combine(stage, file), text, new UTF8Encoding(false));
-            Directory.Move(stage, destination); // no overwrite; a concurrent collision fails safely
+            foreach (var (file, text) in generated.Sources) File.WriteAllText(Path.Combine(stage, file), text, new UTF8Encoding(false));
+            if (previous != null)
+                foreach (var (file, text) in previous) File.WriteAllText(Path.Combine(stage, file), text, new UTF8Encoding(false));
+            IndicatorSourceCopies.WriteManifest(stage, generated.Manifest);
+            return stage;
         }
-        finally { if (Directory.Exists(stage)) Directory.Delete(stage, recursive: true); }
-        string typeName = prefix + "." + (target.ContainingNamespace.IsGlobalNamespace ? "" : target.ContainingNamespace.ToDisplayString() + ".") + newClassName;
-        return new(Path.Combine(destination, entryFile!), typeName, sources.Keys.Select(f => Path.Combine(destination, f)).ToArray());
+        catch
+        {
+            Directory.Delete(stage, recursive: true);
+            throw;
+        }
     }
 
     public static IReadOnlyList<string> UserFiles(Type type, string folder)
     {
-        var sources = new IndicatorSourceFiles(folder).ReadAll();
+        var files = new IndicatorSourceFiles(folder);
+        if (type.Namespace == KvsTranslator.Namespace)
+            return files.EditablePaths().Where(p => KvsTranslator.IsScript(p) &&
+                KvsTranslator.ClassNameFor(Path.GetFileNameWithoutExtension(p)) == type.Name).Take(1).ToArray();
+        var sources = files.ReadAll();
         if (sources.Count == 0) return Array.Empty<string>();
         var index = new IndicatorSources(sources.Select(p => new IndicatorSourceDocument(p.Key, p.Value, "User-owned source")), adaptCompatibleNamespaces: true);
         try { return index.View(type.FullName!).Select(d => d.Id).ToArray(); }

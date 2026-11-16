@@ -361,13 +361,12 @@ public sealed partial class CandleSeries
     /// <summary>
     /// Sugiere un paso de fila (ticks por fila) para que una vela típica tenga ~<paramref name="targetRows"/> filas.
     /// </summary>
-    public static int SuggestPriceStep(TradeStore store, Instrument instrument, ChartPeriod period, int targetRows = 18)
+    public static int SuggestPriceStep(TradeStore store, Instrument instrument, ChartPeriod period, int targetRows = 18) =>
+        SuggestPriceStep(store, TradeStoreView.Capture(store), instrument, period, targetRows);
+
+    private static int SuggestFromProbe(CandleSeries probe, int targetRows)
     {
-        if (store.Count < 50) return 1;
-        var probe = new CandleSeries(instrument, period, 1);
         // A suggestion is a bounded sample, not a second aggregation of years of ticks.
-        int first = Math.Max(0, store.Count - 100_000);
-        for (int i = first; i < store.Count; i++) probe.ProcessTrade(store, i);
         if (probe.Count < 2) return 1;
         var ranges = new List<long>();
         int from = Math.Max(0, probe.Count - 200);

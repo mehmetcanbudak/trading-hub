@@ -54,14 +54,16 @@ public sealed class KlineKeeperTests
             }, utcNow: () => Now);
         var first = keeper.RunNowAsync();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await keeper.RunNowAsync();
+        // A second request waits for the held cycle instead of overlapping it, and disabling drops it unserved.
+        var second = keeper.RunNowAsync();
+        Assert.False(second.IsCompleted);
         Assert.Equal(1, requests);
         var disabled = keeper.Settings with { Enabled = false };
         var disabling = keeper.ConfigureAsync(disabled);
         await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(disabling.IsCompleted);
         release.TrySetResult();
-        await Task.WhenAll(first, disabling).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, second, disabling).WaitAsync(TimeSpan.FromSeconds(5));
         string committed = File.ReadAllText(fixture.PathFor("completed-cache-month.fixture"));
         Assert.Equal("completed before drain\n", committed);
         Assert.Equal(1, maximumActive);
@@ -225,5 +227,114 @@ public sealed class KlineKeeperTests
         keeper.Track("fixture-profile", "fixture-provider", Instrument("SECOND"), explicitlySelected: true);
         keeper.Track("fixture-profile", "fixture-provider", Instrument("THIRD"), explicitlySelected: true);
         Assert.Equal(2, keeper.Settings.Instruments.Count);
+    }
+
+    [Fact]
+    public async Task UpdateNowDuringAnEarlierCycleRunsAFreshCycleAfterItInsteadOfReturningUnserved()
+    {
+        // A background cycle is holding a monthly load when the user presses Update now (for example after repairing a
+        // cache blocker). The request must be served by a cycle that starts after it, never dropped as "already running".
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int active = 0, maximumActive = 0;
+        var calls = new List<long>();
+        KlineKeeper? observed = null;
+        await using var keeper = new KlineKeeper(new KlineMaintenanceSettings { Enabled = true, Instruments = new() { Tracked("HELD") } },
+            async (_, _, _, _, ct) =>
+            {
+                // The keeper's own cycle number, so a load is attributed to the cycle that actually made it.
+                lock (calls) calls.Add(observed!.Status.Cycle);
+                maximumActive = Math.Max(maximumActive, Interlocked.Increment(ref active));
+                try
+                {
+                    started.TrySetResult();
+                    await release.Task.WaitAsync(ct);
+                    return 1;
+                }
+                finally { Interlocked.Decrement(ref active); }
+            }, utcNow: () => Now);
+        observed = keeper;
+        var earlier = keeper.RunNowAsync();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var updateNow = keeper.RunNowAsync();
+        long requested = keeper.Status.RunRequest;
+        Assert.False(updateNow.IsCompleted);
+        Assert.True(keeper.Status.CompletedRunRequest < requested);
+
+        release.TrySetResult();
+        await Task.WhenAll(earlier, updateNow).WaitAsync(TimeSpan.FromSeconds(5));
+        long[] loads;
+        lock (calls) loads = calls.ToArray();
+        // Two whole cycles, each with its full bounded plan (4 resolutions plus 2 catch-up months), never overlapping.
+        Assert.Equal(new long[] { 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2 }, loads);
+        Assert.Equal(1, maximumActive);
+        Assert.True(keeper.Status.CompletedRunRequest >= requested);
+        Assert.False(keeper.Status.IsRunning);
+    }
+
+    [Fact]
+    public async Task ChangingSettingsWaitsOnlyForTheCycleItCancelledNotAnUpdateNowQueuedBehindIt()
+    {
+        // Update now is queued behind a running background cycle when the user changes the lookback. The change cancels
+        // and drains the running cycle; it must not also wait for the whole fresh cycle that serves Update now.
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecond = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<long>();
+        KlineKeeper? observed = null;
+        await using var keeper = new KlineKeeper(new KlineMaintenanceSettings { Enabled = true, Instruments = new() { Tracked("HELD") } },
+            async (_, _, _, _, ct) =>
+            {
+                long cycle = observed!.Status.Cycle;
+                lock (calls) calls.Add(cycle);
+                if (cycle == 1)
+                {
+                    firstStarted.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                secondStarted.TrySetResult();
+                await releaseSecond.Task.WaitAsync(ct);
+                return 1;
+            }, utcNow: () => Now);
+        observed = keeper;
+        var background = keeper.RunNowAsync();
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var updateNow = keeper.RunNowAsync();
+        long requested = keeper.Status.RunRequest;
+
+        var configuring = keeper.ConfigureAsync(keeper.Settings with { LookbackYears = 2 });
+        await Task.WhenAll(background, configuring).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, keeper.Settings.LookbackYears);
+        Assert.False(updateNow.IsCompleted);
+
+        // Update now is still served afterwards by a whole fresh cycle.
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        releaseSecond.TrySetResult();
+        await updateNow.WaitAsync(TimeSpan.FromSeconds(5));
+        lock (calls) Assert.Equal(new long[] { 1, 2, 2, 2, 2, 2, 2 }, calls);
+        Assert.True(keeper.Status.CompletedRunRequest >= requested);
+        Assert.False(keeper.Status.IsRunning);
+    }
+
+    [Fact]
+    public async Task CancelAndDrainAlsoDropsAnUpdateNowQueuedBehindTheCancelledCycle()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int requests = 0;
+        await using var keeper = new KlineKeeper(new KlineMaintenanceSettings { Enabled = true, Instruments = new() { Tracked("CANCEL") } },
+            async (_, _, _, _, ct) =>
+            {
+                Interlocked.Increment(ref requests);
+                started.TrySetResult();
+                await Task.Delay(Timeout.Infinite, ct);
+                return 1;
+            }, utcNow: () => Now);
+        var running = keeper.RunNowAsync();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var queued = keeper.RunNowAsync();
+        await keeper.CancelAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(running, queued).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, requests);
+        Assert.False(keeper.Status.IsRunning);
     }
 }

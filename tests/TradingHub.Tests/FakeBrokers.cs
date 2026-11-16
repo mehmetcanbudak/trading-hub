@@ -286,6 +286,25 @@ internal sealed class FakeTradovate : IDisposable
     public JsonArray ReplayOrders { get; } = new();
     public JsonArray ReplayVersions { get; } = new();
     public JsonArray ReplayFills { get; } = new();
+    public int OcoRequests;
+    public JsonArray ReplayPositions { get; } = new();
+    private readonly List<Task> _lifecycles = new();
+
+    /// <summary>Position reports from order lifecycles carry the venue timestamp, as Tradovate's position entities do.</summary>
+    public bool TimestampPositions { get; set; }
+
+    /// <summary>The fake venue's net position for account 101 / contract 555.</summary>
+    public int NetPosition => Volatile.Read(ref _position);
+
+    /// <summary>Starts with a net position the venue holds and replays.</summary>
+    public void SeedPosition(int net)
+    {
+        _position = net;
+        ReplayPositions.Add(JsonNode.Parse(string.Create(CultureInfo.InvariantCulture,
+            $"{{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":{net},\"netPrice\":5000.25,\"bought\":{Math.Max(net, 0)},\"boughtValue\":{Math.Max(net, 0) * 5000.25m},\"sold\":{Math.Max(-net, 0)},\"soldValue\":{Math.Max(-net, 0) * 5000.25m},\"timestamp\":\"{DateTime.UtcNow.AddMinutes(-1):O}\"}}")));
+    }
+    // OCO legs this fixture placed: leg ID → sibling ID, action, quantity and price (stop or limit).
+    private readonly Dictionary<long, (long Sibling, string Action, int Quantity, decimal Price, string ClientId, long OcoId, string Type)> _ocoLegs = new();
 
     public Task PublishOrder(JsonObject order) => Push("order", "Updated", order.ToJsonString());
     public Task PublishVersion(JsonObject version) => Push("orderVersion", "Created", version.ToJsonString());
@@ -328,10 +347,51 @@ internal sealed class FakeTradovate : IDisposable
                 var o = JsonNode.Parse(req.Body)!.AsObject();
                 long id = Interlocked.Increment(ref _nextOrder);
                 lock (Orders) Orders.Add(o);
-                _ = Task.Run(() => OrderLifecycle(id, o));
+                var lifecycle = Task.Run(() => OrderLifecycle(id, o));
+                lock (_lifecycles) _lifecycles.Add(lifecycle);
                 return (200, $"{{\"failureReason\":\"Success\",\"failureText\":\"\",\"orderId\":{id}}}");
             }
 
+            // POST /order/liquidateposition: the venue processes it after the orders it received earlier and closes the
+            // position it then holds at market.
+            if (req.Route == "/v1/order/liquidateposition")
+            {
+                Task[] earlier;
+                lock (_lifecycles) earlier = _lifecycles.ToArray();
+                long id = Interlocked.Increment(ref _nextOrder);
+                var liquidation = Task.Run(async () =>
+                {
+                    await Task.WhenAll(earlier);
+                    int net = Volatile.Read(ref _position);
+                    if (net == 0) return;
+                    await OrderLifecycle(id, new JsonObject { ["action"] = net > 0 ? "Sell" : "Buy", ["orderType"] = "Market", ["orderQty"] = Math.Abs(net) });
+                });
+                lock (_lifecycles) _lifecycles.Add(liquidation);
+                return (200, $"{{\"orderId\":{id}}}");
+            }
+
+            // POST /order/placeoco: the primary (stop) and its "other" leg become one OCO; the reply names the primary.
+            if (req.Route == "/v1/order/placeoco")
+            {
+                var o = JsonNode.Parse(req.Body)!.AsObject();
+                lock (Orders) Orders.Add(o);
+                Interlocked.Increment(ref OcoRequests);
+                long primary = Interlocked.Increment(ref _nextOrder), other = Interlocked.Increment(ref _nextOrder), oco = Interlocked.Increment(ref _nextOrder);
+                var leg = o["other"]!.AsObject();
+                string action = o["action"]!.GetValue<string>();
+                int qty = o["orderQty"]!.GetValue<int>();
+                lock (_ocoLegs)
+                {
+                    _ocoLegs[primary] = (other, action, qty, o["stopPrice"]!.GetValue<decimal>(), o["clOrdId"]!.GetValue<string>(), oco, o["orderType"]!.GetValue<string>());
+                    _ocoLegs[other] = (primary, leg["action"]!.GetValue<string>(), qty, leg["price"]!.GetValue<decimal>(), leg["clOrdId"]!.GetValue<string>(), oco, leg["orderType"]!.GetValue<string>());
+                }
+                _ = Task.Run(async () =>
+                {
+                    await PublishOcoLeg(primary, "Working");
+                    await PublishOcoLeg(other, "Working");
+                });
+                return (200, $"{{\"failureReason\":\"Success\",\"failureText\":\"\",\"orderId\":{primary},\"ocoId\":{oco}}}");
+            }
             if (req.Route == "/v1/order/cancelorder")
             {
                 long id = JsonNode.Parse(req.Body)!["orderId"]!.GetValue<long>();
@@ -380,7 +440,7 @@ internal sealed class FakeTradovate : IDisposable
                 {
                     case "user/syncrequest":
                         await FakeHttpServer.SendText(ws, $"a[{{\"s\":200,\"i\":{id},\"d\":{{\"accounts\":[{{\"id\":101,\"name\":\"DEMO101\",\"active\":true}}],\"contracts\":[{{\"id\":555,\"name\":\"{Contract}\"}}]," +
-                                                          $"\"positions\":[],\"orders\":{ReplayOrders.ToJsonString()},\"orderVersions\":{ReplayVersions.ToJsonString()},\"fills\":{ReplayFills.ToJsonString()},\"cashBalances\":[{{\"accountId\":101,\"amount\":50000,\"realizedPnL\":0}}]}}}}]", ct);
+                                                          $"\"positions\":{ReplayPositions.ToJsonString()},\"orders\":{ReplayOrders.ToJsonString()},\"orderVersions\":{ReplayVersions.ToJsonString()},\"fills\":{ReplayFills.ToJsonString()},\"cashBalances\":[{{\"accountId\":101,\"amount\":50000,\"realizedPnL\":0}}]}}}}]", ct);
                         break;
                     case "md/getChart":
                     {
@@ -445,6 +505,51 @@ internal sealed class FakeTradovate : IDisposable
         await FakeHttpServer.SendText(_user, $"a[{{\"e\":\"props\",\"d\":{{\"entityType\":\"{entityType}\",\"eventType\":\"{eventType}\",\"entity\":{entity}}}}}]", CancellationToken.None);
     }
 
+    /// <summary>Publishes an OCO leg's version and order (with its clOrdId and ocoId) and mirrors a working one into the
+    /// user-sync replay, so a later session sees it as a restarted app would.</summary>
+    private async Task PublishOcoLeg(long id, string status)
+    {
+        (long Sibling, string Action, int Quantity, decimal Price, string ClientId, long OcoId, string Type) leg;
+        lock (_ocoLegs) leg = _ocoLegs[id];
+        string priceField = leg.Type == "Stop" ? "stopPrice" : "price";
+        string version = string.Create(CultureInfo.InvariantCulture,
+            $"{{\"id\":{id + 100000},\"orderId\":{id},\"orderQty\":{leg.Quantity},\"orderType\":\"{leg.Type}\",\"{priceField}\":{leg.Price}}}");
+        string order = $"{{\"id\":{id},\"accountId\":101,\"contractId\":555,\"clOrdId\":\"{leg.ClientId}\",\"ocoId\":{leg.OcoId},\"action\":\"{leg.Action}\",\"ordStatus\":\"{status}\",\"timestamp\":\"{DateTime.UtcNow:O}\"}}";
+        lock (ReplayOrders)
+        {
+            foreach (var node in ReplayOrders.Where(n => n!["id"]!.GetValue<long>() == id).ToList()) ReplayOrders.Remove(node);
+            foreach (var node in ReplayVersions.Where(n => n!["orderId"]!.GetValue<long>() == id).ToList()) ReplayVersions.Remove(node);
+            if (status == "Working")
+            {
+                ReplayVersions.Add(JsonNode.Parse(version));
+                ReplayOrders.Add(JsonNode.Parse(order));
+            }
+        }
+        await Push("orderVersion", "Created", version);
+        await Push("order", "Updated", order);
+    }
+
+    /// <summary>The venue fills an OCO leg completely and then cancels its sibling (the documented OCO contract).</summary>
+    public async Task FillOcoLeg(long id)
+    {
+        (long Sibling, string Action, int Quantity, decimal Price, string ClientId, long OcoId, string Type) leg;
+        lock (_ocoLegs) leg = _ocoLegs[id];
+        _position += leg.Action == "Buy" ? leg.Quantity : -leg.Quantity;
+        long fill = Interlocked.Increment(ref _nextFill);
+        string now = DateTime.UtcNow.ToString("O");
+        await Push("fill", "Created", string.Create(CultureInfo.InvariantCulture,
+            $"{{\"id\":{fill},\"orderId\":{id},\"contractId\":555,\"timestamp\":\"{now}\",\"action\":\"{leg.Action}\",\"qty\":{leg.Quantity},\"price\":{leg.Price},\"active\":true}}"));
+        await Push("position", "Updated", string.Create(CultureInfo.InvariantCulture,
+            $"{{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":{_position},\"netPrice\":{(_position == 0 ? 0 : 5000.25m)},\"bought\":0,\"boughtValue\":0,\"sold\":0,\"soldValue\":0}}"));
+        await PublishOcoLeg(id, "Filled");
+        await PublishOcoLeg(leg.Sibling, "Canceled");
+    }
+
+    public long OcoLegFor(string clientOrderId)
+    {
+        lock (_ocoLegs) return _ocoLegs.First(l => l.Value.ClientId == clientOrderId).Key;
+    }
+
     /// <summary>Orden creada; las de mercado se ejecutan (ejecución, posición y orden completa).</summary>
     private async Task OrderLifecycle(long id, JsonObject o)
     {
@@ -456,10 +561,11 @@ internal sealed class FakeTradovate : IDisposable
         await Push("order", "Created", $"{{\"id\":{id},\"accountId\":101,\"contractId\":555,\"clOrdId\":{o["clOrdId"]?.ToJsonString() ?? "null"},\"action\":\"{action}\",\"ordStatus\":\"Working\",\"timestamp\":\"{now}\"}}");
         if (type != "Market") return;
         await Task.Delay(30);
-        _position += action == "Buy" ? qty : -qty;
+        int net = Interlocked.Add(ref _position, action == "Buy" ? qty : -qty);
         long fill = Interlocked.Increment(ref _nextFill);
         await Push("fill", "Created", $"{{\"id\":{fill},\"orderId\":{id},\"contractId\":555,\"timestamp\":\"{now}\",\"action\":\"{action}\",\"qty\":{qty},\"price\":5000.25,\"active\":true}}");
-        await Push("position", "Updated", string.Create(CultureInfo.InvariantCulture, $"{{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":{_position},\"netPrice\":5000.25,\"bought\":{(action == "Buy" ? qty : 0)},\"boughtValue\":{(action == "Buy" ? qty * 5000.25 : 0)},\"sold\":0,\"soldValue\":0}}"));
+        string stamp = TimestampPositions ? $",\"timestamp\":\"{DateTime.UtcNow:O}\"" : "";
+        await Push("position", "Updated", string.Create(CultureInfo.InvariantCulture, $"{{\"id\":1,\"accountId\":101,\"contractId\":555,\"netPos\":{net},\"netPrice\":5000.25,\"bought\":{(action == "Buy" ? qty : 0)},\"boughtValue\":{(action == "Buy" ? qty * 5000.25 : 0)},\"sold\":0,\"soldValue\":0{stamp}}}"));
         await Push("order", "Updated", $"{{\"id\":{id},\"accountId\":101,\"contractId\":555,\"action\":\"{action}\",\"ordStatus\":\"Filled\",\"timestamp\":\"{now}\"}}");
     }
 

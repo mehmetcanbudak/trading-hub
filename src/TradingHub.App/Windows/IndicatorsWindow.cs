@@ -11,7 +11,7 @@ using TradingHub.Indicators;
 namespace TradingHub.App.Windows;
 
 /// <summary>Agregar, quitar y configurar indicadores del gráfico activo.</summary>
-public sealed class IndicatorsWindow : Window
+public sealed partial class IndicatorsWindow : Window
 {
     private readonly AppServices _svc;
     private readonly ChartModel _model;
@@ -51,7 +51,8 @@ public sealed class IndicatorsWindow : Window
         FillOnChart();
         _search.TextChanged += (_, _) => FillAvailable();
         _svc.Catalog.Changed += FillAvailable;
-        Closed += (_, _) => _svc.Catalog.Changed -= FillAvailable;
+        _svc.SourceCopiesChanged += FillAvailable;
+        Closed += (_, _) => { _svc.Catalog.Changed -= FillAvailable; _svc.SourceCopiesChanged -= FillAvailable; };
     }
 
     private Control Build()
@@ -81,7 +82,7 @@ public sealed class IndicatorsWindow : Window
         libraryActions.Margin = new Thickness(0, 10, 0, 0);
         DockPanel.SetDock(libraryActions, Dock.Bottom);
         left.Children.Add(libraryActions);
-        _available.DoubleTapped += (_, _) => AddSelected();
+        ConfigureLibraryList();
         _available.Margin = new Thickness(0, 8, 0, 0);
         left.Children.Add(Ui.Card(_available, 4));
         grid.Children.Add(left);
@@ -147,35 +148,14 @@ public sealed class IndicatorsWindow : Window
         _onChart.SelectedItem = _onChart.Items.OfType<ListBoxItem>().FirstOrDefault(i => i.Tag == s);
     }
 
-    private void FillAvailable()
+    /// <summary>Adds or removes a library indicator from the favorites the chart toolbar star offers.</summary>
+    private void ToggleFavorite(IndicatorInfo info)
     {
-        var q = (_search.Text ?? "").Trim();
-        _available.Items.Clear();
-        var items = _svc.Catalog.Items.Where(i => q.Length == 0 || i.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || i.Category.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
-        _count.Text = $"{items.Count}";
-        foreach (var g in items.GroupBy(i => i.Source == UserScripts.Source ? "★ " + TradingHub.Common.EnglishText.Of(UserScripts.Source) : i.Category).OrderBy(g => g.Key.StartsWith('★') ? 0 : 1).ThenBy(g => g.Key))
-        {
-            _available.Items.Add(new ListBoxItem { Content = g.Key.ToUpperInvariant(), IsEnabled = false }.Classes("header"));
-            foreach (var i in g)
-            {
-                var row = new DockPanel();
-                // sin etiqueta de origen para los de la biblioteca (Trading Hub y los técnicos); solo los tuyos y los extra
-                if (i.Source != "Trading Hub" && i.Source != "Técnicos")
-                {
-                    string tag = i.Source == UserScripts.Source ? "custom" : "extra";
-                    var badge = new Border { Child = new TextBlock { Text = tag, FontSize = 10 }, Classes = { "pill" }, Padding = new Thickness(6, 1) };
-                    DockPanel.SetDock(badge, Dock.Right);
-                    row.Children.Add(badge);
-                }
-
-                row.Children.Add(new TextBlock { Text = i.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
-                var item = new ListBoxItem { Content = row, Tag = i };
-                if (!string.IsNullOrWhiteSpace(i.Description)) ToolTip.SetTip(item, i.Description);
-                _available.Items.Add(item);
-            }
-        }
+        var list = _svc.Settings.FavoriteIndicators;
+        if (!list.Remove(info.Type.FullName!)) list.Add(info.Type.FullName!);
+        _svc.Settings.Save();
+        FillAvailable();
     }
-
     private void FillOnChart()
     {
         _onChart.Items.Clear();
@@ -202,7 +182,11 @@ public sealed class IndicatorsWindow : Window
 
     private async Task SourceSelectedAsync()
     {
-        if (_available.SelectedItem is not ListBoxItem { Tag: IndicatorInfo info }) return;
+        if (_available.SelectedItem is ListBoxItem { Tag: IndicatorInfo info }) await SourceAsync(info);
+    }
+
+    private async Task SourceAsync(IndicatorInfo info)
+    {
         try
         {
             if (info.Source == UserScripts.Source)

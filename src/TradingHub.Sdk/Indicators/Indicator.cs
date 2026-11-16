@@ -52,7 +52,18 @@ namespace TradingHub.Indicators
         /// <summary>Recorded received depth in this bar's causal time interval, including explicit gaps.</summary>
         DepthHistoryQuery GetDepthHistory(int bar) => new(DateTime.MinValue, DateTime.MinValue,
             Array.Empty<DepthSample>(), null, DepthCoverage.Missing, "Recorded depth is unavailable.");
+
+        /// <summary>
+        /// Replaces <paramref name="destination"/> with the trades applied to a bar, in order, with their provenance
+        /// (source venue, quality). Volume is the part applied to this bar when a volume/tick bar boundary splits one
+        /// event. Empty when the bar was built from provider candles or the host has no tape. The caller owns and
+        /// reuses the buffer, so no per-bar allocation is needed.
+        /// </summary>
+        void CopyBarTrades(int bar, List<BarTrade> destination) => destination.Clear();
     }
+
+    /// <summary>One trade applied to a bar (see <see cref="IIndicatorHost.CopyBarTrades"/>).</summary>
+    public readonly record struct BarTrade(DateTime Time, decimal Price, decimal Volume, TradeSide Side, TradeProvenance Provenance);
 
     /// <summary>Argumento de RedrawChart.</summary>
     public class RedrawArg
@@ -77,7 +88,7 @@ namespace TradingHub.Indicators
     /// Clase base de todos los indicadores. API compatible con la de ATAS: OnCalculate(bar, value),
     /// DataSeries, OnRender(RenderContext, DrawingLayouts), GetCandle(bar), etc.
     /// </summary>
-    public abstract class Indicator : INotifyPropertyChanged, IDisposable
+    public abstract partial class Indicator : INotifyPropertyChanged, IDisposable
     {
         private IIndicatorHost _host;
         private Indicator _parent;
@@ -113,15 +124,29 @@ namespace TradingHub.Indicators
         [JsonIgnore]
         public string Name
         {
-            get => TradingHub.Common.EnglishText.Of(_name ??= DefaultName(GetType()));
+            // not cached: a library rename (display alias) also relabels indicators already on charts
+            get => _name != null ? TradingHub.Common.EnglishText.Of(_name) : DisplayName(GetType());
             set => _name = value;
         }
 
-        public static string DefaultName(Type t)
+        /// <summary>The factory display name (DisplayName attribute, else the type name). Never affected by aliases.</summary>
+        public static string DefaultName(Type t) => DefaultNames.GetValue(t, static type =>
         {
-            var dn = t.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName;
-            return TradingHub.Common.EnglishText.Of(string.IsNullOrWhiteSpace(dn) ? t.Name : dn);
-        }
+            var dn = type.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName;
+            return TradingHub.Common.EnglishText.Of(string.IsNullOrWhiteSpace(dn) ? type.Name : dn);
+        });
+
+        // weak: compiled user indicators live in collectible load contexts that must stay unloadable after a recompile
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Type, string> DefaultNames = new();
+
+        /// <summary>
+        /// Host-installed display alias per indicator type (the library's Rename). Display only: type names, saved chart
+        /// identities, series ids and settings keys never change. Null or empty means the factory name.
+        /// </summary>
+        public static Func<Type, string?>? DisplayAlias { get; set; }
+
+        /// <summary>The name shown for a type: its alias when one is set, otherwise <see cref="DefaultName"/>.</summary>
+        public static string DisplayName(Type t) => DisplayAlias?.Invoke(t) is { Length: > 0 } alias ? alias : DefaultName(t);
 
         [Browsable(false)]
         [JsonIgnore]
@@ -237,6 +262,13 @@ namespace TradingHub.Indicators
             new(DateTime.MinValue, DateTime.MinValue, Array.Empty<DepthSample>(), null, DepthCoverage.Missing, "Recorded depth is unavailable.");
 
         protected IReadOnlyList<DepthSample> GetDepthSamples(int bar) => GetDepthHistory(bar).Samples;
+
+        /// <summary>Trades applied to a bar with their provenance (see <see cref="IIndicatorHost.CopyBarTrades"/>).</summary>
+        protected void GetBarTrades(int bar, List<BarTrade> destination)
+        {
+            if (Host is { } host) host.CopyBarTrades(bar, destination);
+            else destination.Clear();
+        }
 
         [Browsable(false)]
         [JsonIgnore]

@@ -45,6 +45,8 @@ void Extract(string src, string output)
         if (rel.Contains("/bin/") || rel.Contains("/obj/") || rel.Contains("/Atas/") || rel.Contains("/Localization/") || rel.EndsWith(".g.cs")) continue;
         // Machine-facing MCP protocol and assistant prompts are not display catalogs.
         if (rel.EndsWith("Lab/LabServer.cs")) continue;
+        // Generated KVS/C# source text; the script diagnostics it reports live in KvsTranslator.cs and are extracted.
+        if (rel.EndsWith("Scripting/KvsTranslator.Generation.cs")) continue;
         var root = CSharpSyntaxTree.ParseText(File.ReadAllText(file)).GetRoot();
         foreach (var node in root.DescendantNodes())
         {

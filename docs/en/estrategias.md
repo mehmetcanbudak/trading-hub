@@ -41,12 +41,12 @@ Property identifiers—not translated labels—are used in saved parameter dicti
 | `OnBar(Bar bar)` | After each completed bar; usual decision point. |
 | `OnTick(Trade trade)` | Every market trade; slower. `Trade` is in TradingHub.Market and has Time, Price, Volume and Side. |
 | `OnOrderFilled(StrategyOrder order)` | After a fill. Backtests include automatic stops/targets; live callbacks reflect the strategy's submitted orders. |
-| `OnSessionStart(DateOnly session)` | At subsequent session starts, not the first session in the dataset. |
+| `OnSessionStart(DateOnly session)` | At subsequent session starts, not the first session in the dataset. `session` is the trading date: a session starting at or after 12:00 local (for example CME 18:00 New York) belongs to the next day, so Sunday 18:00 is Monday's session. |
 | `OnStop()` | At backtest end or when stopped. |
 
 Context and indicators update before OnBar. The first trade of the next bar closes the previous bar; an OnBar market order fills against that trade, whereas an OnTick submission waits for the next trade.
 
-LocalTime, TimeBetween and session-day calculations use the backtest's session time zone/start. Live strategies inherit their last backtest settings. Chart strategies use the configured chart time zone and midnight session start; when that setting is the Mac's local time, the chart-strategy fallback is UTC.
+LocalTime, TimeBetween and session-day calculations use the backtest's session time zone/start. A session that starts at or after 12:00 local time belongs to the next calendar day's trading date (CME convention): Sunday 18:00 New York opens Monday, the new week and Monday's range, and the session opening on the last evening of a month belongs to the next month. Morning and midnight starts (crypto UTC) are unchanged. Live strategies inherit their last backtest settings. Chart strategies use the configured chart time zone and midnight session start; when that setting is the Mac's local time, the chart-strategy fallback is UTC.
 
 ## Bar and market data
 

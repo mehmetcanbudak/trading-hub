@@ -8,12 +8,36 @@
     "reason": "Avalonia Grid RowDefinitions syntax for the walk-forward result layout, not a display label. Translating the comma-separated sizing grammar would alter layout parsing."
   },
   "Binance": {
-    "locations": "TradingHub.App/Services/AppServices.cs:653 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:644 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:892 TradingHub.Core/Trading/OrderContext.cs:1165 TradingHub.Core/Trading/OrderContext.cs:160 TradingHub.Core/Trading/OrderContext.cs:749",
+    "locations": "TradingHub.App/Services/AppServices.cs:663 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:710 TradingHub.Core/Feeds/Binance/BinanceAccount.cs:956 TradingHub.Core/Feeds/Binance/BinanceFeed.Venue.cs:5 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:17 TradingHub.Core/Feeds/Venues/CryptoVenues.cs:24 TradingHub.Core/Trading/OrderContext.cs:1171 TradingHub.Core/Trading/OrderContext.cs:162 TradingHub.Core/Trading/OrderContext.cs:755 TradingHub.Indicators.Native/DerivativesPane.cs:32",
     "reason": "Stable provider identity in account descriptors, execution availability and native-context validation. Translating it would change routing and recovery identity."
   },
+  "Edited": {
+    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:327",
+    "reason": "Suffix of the default C# class name for an editable indicator copy. Generated identifiers stay English in every UI language."
+  },
+  "ExecutionBenchmarks.{0}.VsArrival": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:822",
+    "reason": "Stable persisted DataSeries id of the execution-benchmark arrival series (strategy/workspace identity), not a display label."
+  },
+  "ExecutionBenchmarks.{0}.VsVwap": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:821",
+    "reason": "Stable persisted DataSeries id of the execution-benchmark window-VWAP series (strategy/workspace identity), not a display label."
+  },
   "Fee": {
-    "locations": "TradingHub.Strategies/LivePortfolio.cs:1560 TradingHub.Strategies/LivePortfolio.cs:1565",
+    "locations": "TradingHub.Strategies/LivePortfolio.cs:1540 TradingHub.Strategies/LivePortfolio.cs:1545",
     "reason": "Existing imported-execution JSON property name, validated and decoded without renaming persisted records."
+  },
+  "Indicator copy backups": {
+    "locations": "TradingHub.App/Services/IndicatorSourceCopies.cs:59",
+    "reason": "Stable on-disk folder name for preserved previous copies, shown verbatim as a path. Translating it would scatter backups across language-specific folders."
+  },
+  "KeyLevels.{0}.PriorClose": {
+    "locations": "TradingHub.Indicators.Native/SessionStudies.cs:136",
+    "reason": "Stable persisted DataSeries id of the Key levels prior-close series, not a display label."
+  },
+  "MultiVwap.{0}.{1}": {
+    "locations": "TradingHub.Indicators.Native/VwapStudies.cs:48",
+    "reason": "Stable persisted DataSeries id of the Multi-period VWAP band series (horizon and band), not a display label."
   },
   "PORTFOLIO (closed trades; {0} accounting): net {1} · {2} trades · PF {3} · max drawdown {4} · ": {
     "locations": "TradingHub.App/Services/LiveRiskAgent.cs:242",
@@ -23,12 +47,24 @@
     "locations": "TradingHub.App/Services/LiveRiskAgent.cs:242",
     "reason": "Complete concatenated model-input template in BuildPrompt. Assistant response language is selected separately from canonical input instructions."
   },
+  "ProfileLevels.Poc.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:424",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
+  },
+  "ProfileLevels.Vah.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:425",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
+  },
+  "ProfileLevels.Val.{0}@{1}": {
+    "locations": "TradingHub.Indicators.Native/Library/ProfileLibraryStudies.cs:426",
+    "reason": "Stable alert-level id (period kind and period start ticks) used to keep alerts attached across recalculation, not a display label."
+  },
   "State": {
     "locations": "TradingHub.Core/Data/IbHistoryCoordinator.cs:115",
     "reason": "Persisted IB recovery-journal JSON property. Renaming it would invalidate existing transactions."
   },
   "Symbol": {
-    "locations": "TradingHub.Strategies/LivePortfolio.cs:1574",
+    "locations": "TradingHub.Strategies/LivePortfolio.cs:1554",
     "reason": "Existing imported-execution JSON property, not a column label. Preserve its stored schema."
   },
   "Version": {
@@ -36,11 +72,11 @@
     "reason": "Persisted IB recovery-journal schema-version property. It is not user-facing prose."
   },
   "local simulation": {
-    "locations": "TradingHub.Core/Trading/OrderContext.cs:1297 TradingHub.Core/Trading/OrderContext.cs:167",
+    "locations": "TradingHub.Core/Trading/OrderContext.cs:1303 TradingHub.Core/Trading/OrderContext.cs:169",
     "reason": "Simulation account-context environment identity. Preserve it rather than translating routing metadata."
   },
   "rithmic-position|{0}|{1}|{2}": {
-    "locations": "TradingHub.App/Services/AppServices.Rithmic.cs:74",
+    "locations": "TradingHub.App/Services/AppServices.Rithmic.cs:75",
     "reason": "Internal exact native-account-context, symbol and exchange broker-cache key. Preserve its stable partition prefix and separators rather than translating routing identity."
   },
   "session:{0}|{1}": {
@@ -48,11 +84,367 @@
     "reason": "Private per-session fallback native-account admission partition when proven native account identity is unavailable. It is not a display label and must not merge unproven sessions by translation."
   },
   "symbol={0}&fromId={1}&limit=1000": {
-    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:256",
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:258",
     "reason": "Signed Binance trade-history query template. Payload keys and interpolation positions are broker protocol, not display text."
   },
+  "{0}&fromId={1}&limit=1000": {
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:288",
+    "reason": "Signed Binance Spot per-order trade-history page query (symbol and orderId prefix plus fromId) used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
+  },
+  "{0}&startTime={1}&endTime={2}&limit=1000": {
+    "locations": "TradingHub.Core/Feeds/Binance/BinanceAccount.cs:300",
+    "reason": "Signed Binance USD-M per-order trade-history window query (symbol and orderId prefix plus a time range) used to read an order's executions before adoption. Payload keys and interpolation positions are broker protocol, not display text."
+  },
   "unresolved endpoint": {
-    "locations": "TradingHub.App/Services/AppServices.cs:701",
+    "locations": "TradingHub.App/Services/AppServices.cs:711",
     "reason": "Sentinel for an unresolved account-context endpoint identity, not a runtime display label."
+  },
+  "{0}Edited": {
+    "locations": "TradingHub.App/Windows/IndicatorsWindow.Library.cs:327",
+    "reason": "Default C# class name of an editable indicator copy (original type name + English suffix), not a display label."
+  },
+  "\r\nVary: Origin\r\n": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:940",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  " must be Unix milliseconds.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:649",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  " must be an integer.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:634",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "A Host header is required.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:288",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Access-Control-Allow-Methods": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:347",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Access-Control-Max-Age": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:347",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Allow": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:353",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Bad Gateway": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:965",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Bad Request": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:954",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:939",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Content Too Large": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:959",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Content-Length": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:318 TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:435",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Content-Type: application/json; charset=utf-8\r\n": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:936",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Cross-site requests are not allowed.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:309",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Duplicate ": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:436",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Duplicate {0} header.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:436",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Forbidden": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:955",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:725",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {0}\r\n\r\n": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:725",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Internal Server Error": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:967",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Invalid Content-Length.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:322",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Invalid Sec-WebSocket-Key.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:686",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Local market-data API request failed": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:232",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Local market-data API: stream subscription failed: {0}": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:712",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Local market-data API: {0} failed: {1}": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:576",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Malformed header.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:430",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Malformed request line.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:422",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Method Not Allowed": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:957",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Misdirected Request": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:961",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "No Content": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:953",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "No enabled market-data connection has that id.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataSource.cs:167",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Not Found": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:956",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Only WebSocket version 13 is supported.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:678",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Origin": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:298 TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:434",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Preflight requests need an allowed Origin.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:343",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Request Header Fields Too Large": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:964",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Request Timeout": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:958",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Request bodies are not accepted.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:315 TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:327",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Retry-After": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:335",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Sec-Fetch-Site": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:307",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Server stopping": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:758",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Service Unavailable": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:966",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "That connection does not list that symbol.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataSource.cs:172",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "That connection does not provide candle history.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataSource.cs:169",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "That instrument is not open in Trading Hub. Open it in a chart first; the API never opens market subscriptions.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataSource.cs:268",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "The Host header must be 127.0.0.1 or localhost with this port.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:293",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "The local market-data API is already running.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:125",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "The market-data request failed.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:577 TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:713",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "The request headers are too large.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:400 TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:403",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "The request headers were not received in time.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:412",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "The request line is too long.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:392",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "The source returned no value.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:659",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "This API is read-only; only GET is supported.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:352",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "This endpoint requires a WebSocket upgrade.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:672",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "This origin is not in the allowed origins list.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:302",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Too Many Requests": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:963",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Too many connections.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:219",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Too many open streams.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:697",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Too many request headers.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:424",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Too many requests.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:334",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Trading Hub is shutting down.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataSource.cs:128",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Transfer-Encoding": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:313",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "URI Too Long": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:960",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Unknown endpoint.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:570",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Upgrade": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:668 TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:673",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "Upgrade Required": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:962",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "conn and symbol are required.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:619",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "from must be before to.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:593",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "tf must be one of 1m, 5m, 15m, 1h, 4h, 1d.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:587",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "{0} must be Unix milliseconds.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:649",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "{0} must be an integer.": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:634",
+    "reason": "Local market-data API protocol text (HTTP status phrases, header names, JSON error messages and log text for external tools); not shown in the Trading Hub UI."
+  },
+  "{0}/api/v2/mix/market/account-long-short?symbol={1}&productType=USDT-FUTURES&period={2}": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:537",
+    "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "{0}/api/v2/mix/market/current-fund-rate?symbol={1}&productType=USDT-FUTURES": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:464",
+    "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "{0}/api/v2/mix/market/history-fund-rate?symbol={1}&productType=USDT-FUTURES&pageSize=100&pageNo={2}": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:296",
+    "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "{0}/api/v2/mix/market/open-interest?symbol={1}&productType=USDT-FUTURES": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:374",
+    "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "{0}/api/v2/mix/market/ticker?symbol={1}&productType=USDT-FUTURES": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:463",
+    "reason": "Bitget public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "{0}/api/v5/public/funding-rate-history?instId={1}&limit=400": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:282",
+    "reason": "OKX public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "{0}/api/v5/public/funding-rate-history?instId={1}&limit=400{2}": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:282",
+    "reason": "OKX public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "{0}/api/v5/rubik/stat/contracts/long-short-account-ratio-contract?instId={1}&period={2}&begin={3}&end={4}&limit=100": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:529",
+    "reason": "OKX public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "{0}/api/v5/rubik/stat/contracts/open-interest-history?instId={1}&period={2}&begin={3}&end={4}&limit=100": {
+    "locations": "TradingHub.Core/Feeds/Derivatives/DerivativesData.Venues.cs:365",
+    "reason": "OKX public REST request URL (path and query parameters); protocol text, never shown in the Trading Hub UI."
+  },
+  "Software": {
+    "locations": "TradingHub.App/Controls/SkiaView.cs:92",
+    "reason": "Rendering backend identifier written into the opt-in TRADINGHUB_FRAME_LOG diagnostic CSV (matches Avalonia's backend name), not a display label."
+  },
+  "cpu,{0},,,,,,,{1},{2}": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:153",
+    "reason": "CSV record format of the opt-in frame-timing diagnostic file; column grammar must stay stable for the analysis scripts. Not shown in the UI."
+  },
+  "note,{0},\"{1}\"": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:109",
+    "reason": "CSV record format of the opt-in frame-timing diagnostic file; column grammar must stay stable for the analysis scripts. Not shown in the UI."
+  },
+  "os={0};cores={1};continuous={2}": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:85",
+    "reason": "Machine-readable environment header of the opt-in frame-timing diagnostic CSV. Not shown in the UI."
+  },
+  "{0}:{1}x{2}@{3};window={4}x{5}": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:121",
+    "reason": "Machine-readable screen/window note in the opt-in frame-timing diagnostic CSV. Not shown in the UI."
+  },
+  "{0}='{1}' ignored: use metal, opengl or software. The default rendering order is kept.": {
+    "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:32",
+    "reason": "Startup diagnostic log line for an invalid TRADINGHUB_RENDERING developer override; written to the app log, never shown in the UI. Names environment values that are not translatable."
   }
 }

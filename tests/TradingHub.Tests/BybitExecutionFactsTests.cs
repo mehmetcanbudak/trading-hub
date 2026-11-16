@@ -33,7 +33,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
         var source = Assert.IsAssignableFrom<IAccountExecutionSource>(broker);
         await session.RefreshAsync();
         var order = broker.Limit(OrderDirections.Buy, 1, 100);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         await session.RefreshAsync();
         Assert.True(source.GetExecutions(order).CompleteCoverage);
         Assert.Empty(source.GetExecutions(order).Executions);
@@ -98,7 +98,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
         var source = (IAccountExecutionSource)broker;
         await session.RefreshAsync();
         var order = broker.Limit(OrderDirections.Buy, 1, 100);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         decimal? fee = feeText == null ? null : decimal.Parse(feeText, CultureInfo.InvariantCulture);
         protocol.Fill("fee-correction", .25m, 102.75m, fee, executionAt: FakeBybitProtocol.Now.AddSeconds(-45), feeCurrency: currency);
 
@@ -200,7 +200,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
         var source = (IAccountExecutionSource)broker;
         await session.RefreshAsync();
         var order = broker.Limit(OrderDirections.Buy, 1, 105);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         await session.RefreshAsync();
         protocol.Fill("actual-before-rejection", .25m, 101, .01m, closedQuantity: 0);
         protocol.NetPosition = .25m;
@@ -245,10 +245,10 @@ public sealed class BybitExecutionFactsTests : IDisposable
         var source = (IAccountExecutionSource)broker;
         await session.RefreshAsync();
         var first = broker.Limit(OrderDirections.Buy, 1, 100);
-        await Observe(session, () => first.ExchangeOrderId.Length > 0);
+        await Placed(session, first);
         await session.RefreshAsync();
         var second = broker.Limit(OrderDirections.Sell, .5m, 110);
-        await Observe(session, () => second.ExchangeOrderId.Length > 0);
+        await Placed(session, second);
         protocol.Fill("same-native-id", .2m, 101.5m, .01m, orderId: first.ExchangeOrderId);
         protocol.Fill("same-native-id", .3m, 109.5m, .03m, orderId: second.ExchangeOrderId);
         await session.RefreshAsync();
@@ -300,7 +300,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
         using var broker = new BybitBroker(data, session, "Bybit fake");
         await session.RefreshAsync();
         var order = broker.Limit(OrderDirections.Buy, 1, 100);
-        await Observe(session, () => order.ExchangeOrderId.Length > 0);
+        await Placed(session, order);
         await session.RefreshAsync();
         broker.Cancel(order);
         await protocol.CancelReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -353,7 +353,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
                 Assert.Equal(persistentAccount, first.PersistentAccountIdentity);
                 Assert.Equal(emptyRevision, first.ExecutionRevision);
                 var order = broker.Limit(OrderDirections.Buy, 1, 100);
-                await Observe(first, () => order.ExchangeOrderId.Length > 0);
+                await Placed(first, order);
                 protocol.Fill("restart-native", .4m, 103.25m, .021m, executionAt: FakeBybitProtocol.Now.AddSeconds(-30));
                 await first.RefreshAsync();
                 original = Assert.Single(broker.GetExecutions(order).Executions);
@@ -420,7 +420,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
         session.FillReceived += _ => { };
         await session.RefreshAsync();
         var opening = broker.Limit(OrderDirections.Buy, 1, 99);
-        await Observe(session, () => opening.ExchangeOrderId.Length > 0);
+        await Placed(session, opening);
         await session.RefreshAsync();
         var cancelEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cancelRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -452,7 +452,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
             protocol.ConfirmCancel();
             await session.RefreshAsync();
             await Observe(session, () => session.Orders.Count == 2 && session.Orders.Any(order =>
-                !ReferenceEquals(order, opening) && order.ExchangeOrderId.Length > 0));
+                !ReferenceEquals(order, opening) && order.ExchangeOrderId.Length > 0 && !session.IsSending(order)));
             var close = Assert.Single(session.Orders, order => !ReferenceEquals(order, opening));
             var creates = protocol.Requests.Where(request => request.Path == "/v5/order/create").ToArray();
             Assert.Equal(2, creates.Length);
@@ -482,7 +482,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
         session.FillReceived += _ => { };
         await session.RefreshAsync();
         var protection = broker.Exit(OrderTypes.Stop, OrderDirections.Sell, 1, 90);
-        await Observe(session, () => protection.ExchangeOrderId.Length > 0);
+        await Placed(session, protection);
         await session.RefreshAsync();
         var cancelEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cancelRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -515,8 +515,8 @@ public sealed class BybitExecutionFactsTests : IDisposable
             await session.RefreshAsync();
             await Observe(session, () => session.Orders.Count == 2);
             var close = session.Orders.Single(order => !ReferenceEquals(order, protection));
-            await Observe(session, () => close.ExchangeOrderId.Length > 0 ||
-                session.LastError?.Contains("placement outcome", StringComparison.Ordinal) == true);
+            await Observe(session, () => !session.IsSending(close) && (close.ExchangeOrderId.Length > 0 ||
+                session.LastError?.Contains("placement outcome", StringComparison.Ordinal) == true));
             protocol.HideOrders = ambiguousClose;
             broker.Flatten();
             await session.RefreshAsync();
@@ -576,7 +576,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
                 using var broker = new BybitBroker(data, first, "Original");
                 await first.RefreshAsync();
                 var protection = broker.Exit(OrderTypes.Limit, OrderDirections.Sell, 1, 110);
-                await Observe(first, () => protection.ExchangeOrderId.Length > 0);
+                await Placed(first, protection);
                 protectionId = protection.ExchangeOrderId;
                 await first.RefreshAsync();
                 broker.Flatten();
@@ -635,7 +635,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
         using var broker = new BybitBroker(data, session, "Bybit fake");
         await session.RefreshAsync();
         var protection = broker.Exit(OrderTypes.Stop, OrderDirections.Sell, 1, 90);
-        await Observe(session, () => protection.ExchangeOrderId.Length > 0);
+        await Placed(session, protection);
         await session.RefreshAsync();
         var metadataEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var metadataRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -870,7 +870,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
         string? verified = source.PersistentAccountIdentity;
         Assert.NotNull(verified);
         var protection = broker.Exit(OrderTypes.Limit, OrderDirections.Sell, 1, 110);
-        await Observe(session, () => protection.ExchangeOrderId.Length > 0);
+        await Placed(session, protection);
         await session.RefreshAsync();
         var metadataEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var metadataRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -925,7 +925,7 @@ public sealed class BybitExecutionFactsTests : IDisposable
             {
                 await original.RefreshAsync();
                 var order = original.Place(Btc, 100, OrderDirections.Buy, OrderTypes.Limit, 1, 99);
-                await Observe(original, () => order.ExchangeOrderId.Length > 0);
+                await Placed(original, order);
                 protocol.Fill("actual-native-partial", .4m, 99, .02m);
                 await original.RefreshAsync();
                 Assert.Equal(.4m, order.Filled);
@@ -968,6 +968,10 @@ public sealed class BybitExecutionFactsTests : IDisposable
         try { Changed(); await completion.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
         finally { session.Changed -= Changed; }
     }
+
+    // An exchange id appears before the placement settles; refreshing in that window leaves working orders unknown.
+    private static Task Placed(BybitTradingSession session, Order order) =>
+        Observe(session, () => order.ExchangeOrderId.Length > 0 && !session.IsSending(order));
 
     private static string ClientLink(FakeBybitProtocol protocol) => JsonNode.Parse(
         Assert.Single(protocol.Requests, request => request.Path == "/v5/order/create").Body)!["orderLinkId"]!.GetValue<string>();

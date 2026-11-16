@@ -34,7 +34,7 @@ dotnet test tests/TradingHub.Tests -c Release
 ./build-app.sh --install  # Replace the Applications bundle
 ```
 
-Packaging publishes self-contained osx-arm64, staging outside Desktop to avoid iCloud extended attributes interfering with signing. Git-ignored build.local.env can set BUNDLE_ID and SIGN_IDENTITY; TH_OUT and TH_STAGE override output/staging. See [Installation](./instalacion.md).
+Packaging publishes a self-contained build for the Mac's hardware architecture (`osx-arm64` or `osx-x64`; override with `TH_RID`), staging outside Desktop to avoid iCloud extended attributes interfering with signing. Git-ignored build.local.env can set BUNDLE_ID, SIGN_IDENTITY and TH_RID; a caller-supplied TH_RID wins. TH_OUT and TH_STAGE override output/staging. See [Installation](./instalacion.md).
 
 Windows packaging is implemented for both `win-x64` and `win-arm64`: `.\build-windows.ps1` on Windows with .NET SDK 10/NSIS, or `./build-windows.sh` on macOS with .NET SDK 10/NSIS. It produces per-user installers under `dist`; see [Windows](./portar-a-windows.md). Packaging and shared tests do not certify native installer, Credential Manager, CLI/shim, tray/DPI, power or brokerage behavior.
 
@@ -65,6 +65,8 @@ EnglishLocalizationTests additionally checks SDK defaults/overrides, legacy disp
 
 Execution regressions cover native client-ID reuse, accepted-versus-unsent replacement lineage, current-child adoption, interrupted first native-index publication, corrected prices/fees, durable deduplication and restart projection. `AccountSnapshot` captures fills, analysis and `HistoryRevision` from one journal snapshot; view caches must use that revision rather than execution count. An inactive runner with no close/order work uses the committed ledger for display without replacing an active runner's book. Fake-venue and owned-filesystem proofs are not authenticated provider or physical power-loss certification.
 
+**Storage durability.** Safety-critical state goes through `TradingHub.Common.DurableFile`: order ownership (`execution-state` intents, receipts, projections, native indexes, including bounded closes), account execution journals, live ledgers with their `.wal`, `.id` and `.executions` authorities, runner/portfolio/proposal state, Bybit order state, connection profiles and the isolated test credential file, alert state, settings, workspace and drawings, storage-location control files and relocation copies, and replay results. Whole-file state is written to a unique same-directory `*.tmp`, flushed to the drive (one Darwin `F_FULLFSYNC`, `FlushFileBuffers` on Windows, `fsync` elsewhere), atomically renamed over the target (write-through `MoveFileEx` on Windows, `File.Move` elsewhere), and only then is the parent directory synchronized (macOS/Linux) before the write is acknowledged. `DurableFile.EnsureDirectory` persists every directory it creates in its parent, and confirms an already existing directory once per process, before the first durable write inside it. Append journals flush after every committed record and synchronize the parent directory once a new name appears. Failing live runner/portfolio saves keep retrying, expose `LiveStore.StateSaveError` and raise `LiveStore.StateSaveFailed` once per failure episode; the app logs a warning and raises a local system alert. Market-data caches keep their own policies. `DurableStateWriterTests` installs an observing `DurabilityOperations` through the flow-scoped `DurableFile.Use` seam to prove file flush before rename and directory sync after it for each writer, and models a power cut by undoing renames whose directory was never synchronized. The Windows rename branch is tested on every platform through an injected native mover. `TRADINGHUB_DURABILITY_BENCHMARK=1 dotnet test tests/TradingHub.Tests --filter FullyQualifiedName~DurabilityLatencyBenchmark --logger "console;verbosity=detailed"` reports writer latency on the temp volume. These are simulated power cuts, not a physical power-cut test, and do not certify drive firmware.
+
 ```bash
 dotnet test tests/TradingHub.Tests --filter FullyQualifiedName~SmartWalkForward
 python3 tools/check_english_translation.py
@@ -88,7 +90,7 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 |---|---|
 | trading, accounts, strategies, live, data, connections, settings | Navigate and capture the section. |
 | english | English windows/dialogs, safety copy and related localization assertions using isolated fixtures. |
-| safety | Financial-safety and protection-aware quit scenarios, including pending close/cancel acknowledgment and changed Tradovate contexts; fake providers only. |
+| safety | Financial-safety and protection-aware quit scenarios, including pending close/cancel acknowledgment and changed Tradovate contexts; fake providers only. Ends with the opt-in local market-data API on: loopback-only binding, Host/Origin refusal, read-only surface, no keys in `/connections`, a live stream closed by the owned shutdown drain, the port refusing afterwards and no restart after shutdown. |
 | ib-excursions, ib-excursions-import | Actual live excursion consumer after a corrected entry price or same-length/preserved-mtime IB history replacement; owned synthetic bars only. |
 | ib-data-refresh | Actual Data refresh remains responsive while an owned public import holds publication; the UI releases the import and displays the complete new day index. |
 | ib-live-trades | Actual rendered live trade table refresh after a same-length/preserved-mtime IB replacement; its MAE/MFE must match the validated service, not an older per-view result. |
@@ -100,7 +102,10 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 | account-journal-revision | Same execution correction with two effective fills: Account analysis, summary, Trades, Statistics and chart marks/links must change from net 500 to 400. Requires a fresh explicit application-store override. |
 | live-excursions | Actual excursion service recalculates MAE/MFE from owned raw history after correcting the same entry execution; no broker data or model calls. |
 | conexiones | Fake provider setup, tests, downloads, Databento estimates, Tradovate accounts and OANDA quotes. |
+| venues | Public crypto market and aggregate connection setup against a loopback fake (OKX listing test, spot/perpetual filter, composite-book option), and a fixture aggregate chart with CVD by market and the derivatives pane. |
+| workbench | Every Workbench panel through the real page on offline fixtures (three-venue fake aggregate with prints and recorded depth, in-process derivatives HTTP for all five venues and liquidation sockets with a deliberately failing Bybit long/short request, third-party levels fixture, fixture options sources with and without DVOL, an unconfigured options hub): multi-venue tape with thresholds, highlights, partial-venue coverage and observed/unobserved liquidations; recorded-depth heat map and the recording-off state; liquidation map estimate, third-party levels and leverage grid; five-venue derivatives table with dash gaps and "not published" metrics, cross-coin funding board, price/CVD and liquidation feed; options connect state, GEX/walls/max pain/expected move and DVOL gaps; toolbox position size, liquidation price and structure summary with a confirmed closed-bar break; a detached panel window. In `TRADINGHUB_LANG=es` and `zh-CN` runs it also fails on any English fragment in visible texts, tooltips, window titles or canvas labels. |
 | panel | Right Chart Trader/DOM/tape layout, scrolling and detached windows. |
+| dom-book | DOM book-reading features (auto tick, notional, size/total/changes/recent columns, marks, stats, mirror), the DOM trading lock and the tape notional filter; restores defaults. |
 | footprint | Footprint text colors and editor. |
 | mercado | Regime analysis and condition-filtered reruns. |
 | theme | Dark/light themes and chart settings. |
@@ -114,11 +119,13 @@ Unknown scene names, actions and extra selector components return a nonzero exit
 | kvp-proxy | Actual settings policy, parsed provider HTTP history and authenticated WebSocket/chart consumers, captured reconnect contexts and failed-proxy no-fallback. |
 | kvp-chart, kvp-chart-accounts | Actual typed text/keyboard/IME/navigation/drawing controls; different-provider/composite account preservation and actual workspace restore without implicit routing. |
 | kvp-studies | Complete approved study groups through real catalog/settings/renderer consumers and independent numerical examples; repeat with `TRADINGHUB_LANG=es` and `zh-CN`. |
+| profiles-vwap | Unified Volume profile and VWAP suite through the real catalog, settings window (row sizing, view, merge options, nested VWAP part settings/toggles), chart frame, right-click head-to-tail merge/split actions and saved settings; repeat with `TRADINGHUB_LANG=es` and `zh-CN`. |
+| library-structure | Every closed-bar structure, sessions, volume-profile and VWAP library study through the real catalog and library groups, an actual chart frame on a fixture crossing the 2026 US/UK DST changes, completed-bar-only processing, source-before-availability drawing and unique alert-level ids; repeat with `TRADINGHUB_LANG=es` and `zh-CN`. |
 | kvp-authoring | Built-in source resources/fork/edit/rename/delete/real compilation, recursive content monitoring and explicitly approved fake Pine drafting. |
 | kvp-depth-history | Real archive/cache/provenance and depth sink/writer/selected-reader/heatmap/Orderbook Delta consumers, corrections, gaps, stale/quota/I/O coverage. |
 | kvp-providers | Actual Longbridge/aggregate/Bybit configured consumers against loopback/injected fakes, truthful account fields, owned ACKs and credential retirement. |
 | kvp-replay-alerts | Actual practice/reveal/end/result and compiled-strategy consumers, isolated run journals, causal availability, notification consent/persistence/retry/revocation. |
-| kvp-shutdown, kvp-shutdown-platform | **Standalone processes only:** real default terminal drains held Bybit, cached Longbridge requests/PKCE loopback/browser callbacks, Pine/compiler/pending-start and global private-store work; new requests/second red-close cannot force replacement/desktop exit early. |
+| kvp-shutdown, kvp-shutdown-platform | **Standalone processes only:** real default terminal drains held Bybit, cached Longbridge requests/PKCE loopback/browser callbacks, Pine/compiler/pending-start and global private-store work; new requests/second red-close cannot force replacement/desktop exit early. The opt-in local market-data API is on when the quit starts and must be closed (port refusing) once the shared shutdown completes. |
 | ordinary-shutdown | **Standalone, macOS/POSIX fixture:** actual ordinary assistant, held fake CLI and redirected stream. Protected Quit cannot replace or exit before its final save and callback. |
 | research-freshness | Actual strategy view and market-context consumers after same-metadata price corrections, middle-day deletion and combined-source changes. |
 | research-accounting | Real compiled strategy and local history through walk-forward, saved history, reports and MCP standard IO. Exact commissions, complete/partial/unavailable money and captured input evidence. |
@@ -179,6 +186,38 @@ Diagnostics: TRADINGHUB_SNAP_INDICATORS="Name|Other" adds selected studies; TRAD
 | TRADINGHUB_TRADOVATE_REST / _TRADOVATE_WS / _TRADOVATE_MD | Tradovate test endpoints. |
 | TRADINGHUB_CTRADER_URL / TRADINGHUB_DATABENTO_URL | cTrader/Databento test endpoints. |
 | TRADINGHUB_BYBIT_REST / _BYBIT_MARKET_REST / _BYBIT_MARKET_WS | Isolated Bybit account/public-data endpoints; never point acceptance at a real account. |
+| TRADINGHUB_RENDERING | Diagnostic macOS rendering backend: `metal`, `opengl` or `software` (a pinned GPU backend keeps Software as last resort). Unset keeps the default; other values are ignored with a warning. See [Rendering backend diagnostics](#rendering-backend-diagnostics). |
+| TRADINGHUB_FRAME_LOG / _FRAME_LOG_REDRAW | Opt-in frame-timing CSV path; `TRADINGHUB_FRAME_LOG_REDRAW=continuous` re-invalidates charts every frame for sustained-throughput measurement. |
+
+## Rendering backend diagnostics
+
+On macOS, Avalonia.Native 11.3 renders through its default order, OpenGL then Software; charts are Skia pictures replayed into that backend's canvas. `TRADINGHUB_RENDERING=metal|opengl|software` pins a backend for measurement only (macOS; ignored elsewhere). A pinned GPU backend keeps Software as last resort, so check the logged backend. Without the variable, startup is unchanged.
+
+`TRADINGHUB_FRAME_LOG=<file.csv>` enables a frame probe; without it no probe is created. Each Skia view logs `record` rows (UI-thread picture recording) and `draw` rows (render-thread replay, with the actual `Metal`, `OpenGL` or `Software` backend). It also logs one process CPU/RSS sample per second and notes for the request, screen and window activation. `TRADINGHUB_FRAME_LOG_REDRAW=continuous` re-invalidates every chart after each frame, so frame intervals measure sustained throughput instead of tick arrival. `draw` time is CPU-side command encoding/replay, not GPU completion; compare delivered intervals and process CPU across backends.
+
+```bash
+open -n --env TRADINGHUB_DATA_DIR="$fixture/data" … --env TRADINGHUB_RENDERING=metal \
+  --env TRADINGHUB_FRAME_LOG="$fixture/frames.csv" --env TRADINGHUB_FRAME_LOG_REDRAW=continuous "$TH_STAGE/Trading Hub.app"
+```
+
+**Measured result (2026-11-15, M4 Max, macOS 27.0.1, 120 Hz built-in Retina, 1512 × 949 pt window).** Packaged Release app via LaunchServices, isolated simulator profile, SIM-BTC 1-minute footprint, liquidity heatmap, value area and nine studies: Big Trades, Delta, VWAP, moving average, Bollinger, session profile, naked POCs, volume and CVD. The DOM and tape were visible. Four modes ran three times each in rotating order. Each run measured 15–45 s after launch, excluding warm-up, and medians of per-run values are shown. Dropped frames are missed 120 Hz vsyncs. Screen and activation notes confirmed every run stayed on the built-in display.
+
+| Scenario | Mode (backend used) | Frames/s | Interval median / p95 ms | Dropped | Replay median / p95 ms | UI record median ms | Process CPU | Max RSS MB |
+|---|---|---|---|---|---|---|---|---|
+| One chart, continuous redraw | default (OpenGL) | 120.0 | 8.33 / 9.09 | 0.03% | 2.91 / 4.00 | 0.94 | 88% | 652 |
+| | opengl (OpenGL) | 119.6 | 8.33 / 9.22 | 0.28% | 2.45 / 4.12 | 1.10 | 82% | 741 |
+| | metal (Metal) | 118.5 | 8.33 / 9.54 | 1.41% | 2.07 / 3.15 | 2.57 | 86% | 551 |
+| | software (Software) | 80.3 | 11.23 / 18.32 | 27.2% | 1.90 / 3.60 | 1.35 | 122% | 454 |
+| Four charts, continuous redraw | default (OpenGL) | 116.6 | 8.33 / 10.43 | 2.86% | 0.56 / 0.72 | 0.51 | 132% | 969 |
+| | opengl (OpenGL) | 113.9 | 8.33 / 12.24 | 4.34% | 0.26 / 0.36 | 0.49 | 122% | 855 |
+| | metal (Metal) | 114.2 | 8.33 / 12.04 | 4.86% | 0.16 / 0.31 | 0.56 | 89% | 952 |
+| | software (Software) | 71.6 | 13.74 / 17.29 | 45.9% | 0.77 / 0.98 | 0.41 | 141% | 1098 |
+| One chart, simulator ticks only | default (OpenGL) | 20.7 | n/a (tick-driven) | n/a | 3.53 / 7.08 | 2.70 | 31% | 569 |
+| | opengl (OpenGL) | 24.2 | n/a | n/a | 3.51 / 9.33 | 1.44 | 33% | 605 |
+| | metal (Metal) | 21.2 | n/a | n/a | 1.91 / 3.72 | 3.29 | 34% | 532 |
+| | software (Software) | 20.7 | n/a | n/a | 1.81 / 5.21 | 1.18 | 42% | 748 |
+
+Metal cut process CPU by about 30% only under saturated four-chart redraw: 85–92% across runs versus 120–135% for OpenGL. Frame rate was the same, and dropped frames did not improve: 4.4–4.9% versus 2.6–6.3%. With one chart, Metal dropped more vsyncs: 0.3–1.9% versus 0–0.8%. In normal tick-driven use it saved no CPU: 34–36% versus 28–40%. Its UI-thread recording was mostly slower in one-chart and tick-driven runs. Software was clearly worse. Every screenshot rendered correctly; one OpenGL four-chart capture showed only the Stage Manager thumbnail after another app took focus. The fixed tool rail was pixel-identical for OpenGL and Metal. Software differed only in faint antialiasing, at most 0.14% of tool-rail pixels with channel delta ≤ 32. No run logged a crash or rendering error. **Decision: keep the platform default (OpenGL, then Software).** Metal was not better for delivered frames or ordinary use, so it remains a diagnostic override. Only an inactive window covered by other windows or Stage Manager is throttled to about 5 Hz. Measurements stop at that point, because it reflects macOS rather than the backend. No Apple GPU compute (ILGPU/CUDA/Metal kernels) is used.
 
 ## Add a provider
 
@@ -253,6 +292,7 @@ LiveStrategyRunner.Guard accepts ILiveOrderGuard to inspect exposure-increasing 
 - Validate provider work with fake servers and simulation first.
 - New built-in user-facing text is English. Keep persisted IDs, parser aliases, JSON/CSV contracts, filenames and generated localization keys stable. SDK English overrides belong in Strings.English.cs, not generated Strings.g.cs.
 - Review every non-text change; do not update validation baselines merely to silence a failure. Check the [localization dashboard](./TRANSLATION_STATUS.md) and report untested real-broker/hardware behavior explicitly.
+- Write safety-critical state only through `DurableFile`; never `File.WriteAllText` or a hand-rolled temporary/rename for order, account, ledger, connection, alert, settings or workspace state.
 
 ## Selected non-KVP reproduction
 

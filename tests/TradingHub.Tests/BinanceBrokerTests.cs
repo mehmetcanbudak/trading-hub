@@ -16,7 +16,7 @@ namespace TradingHub.Tests;
 /// stops are conditional orders, which Binance takes only through its Algo Order API; scenarios that concern both kinds
 /// run once with a regular take-profit limit and once with a stop.
 /// </summary>
-public class BinanceBrokerTests : IDisposable
+public partial class BinanceBrokerTests : IDisposable
 {
     private readonly NativeOrderTestFixture _orders = new();
     public void Dispose() => _orders.Dispose();
@@ -71,12 +71,13 @@ public class BinanceBrokerTests : IDisposable
     private static long IdOf(Order o) => long.Parse(o.ExchangeOrderId, Inv);
 
     /// <summary>
-    /// Waits until Binance accepted the order (it has an exchange id) or refused it; a refusal fails the test with what
-    /// Binance answered.
+    /// Waits until Binance accepted the order and the broker finished binding it, or refused it; a refusal fails the
+    /// test with what Binance answered. The exchange id is assigned first inside the broker's acceptance section and the
+    /// native identity last, after its ownership binding is durable: only then is the acceptance complete.
     /// </summary>
     private static async Task Accepted(FakeBinance fake, Order o)
     {
-        await Until(() => o.State != OrderStates.Active || o.ExchangeOrderId.Length > 0);
+        await Until(() => o.State != OrderStates.Active || o.ExchangeOrderId.Length > 0 && o.NativeIdentity != null);
         Assert.True(o.State == OrderStates.Active && o.ExchangeOrderId.Length > 0, $"not accepted: {o.State}/{o.Status}; refused by Binance: {string.Join(" | ", fake.Refused)}");
     }
 
@@ -363,7 +364,7 @@ public class BinanceBrokerTests : IDisposable
         var order = Exit(broker, conditional, 2m, 59000m);
         await Accepted(fake, order);
         fake.UnknownPosts = 1;
-        fake.HideOwnedOrders = true;
+        fake.HideOwnedOrdersFromUnknownPost = true;
         OrderActions.Reprice(broker, order, 59500m);
         await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
         OrderActions.Reprice(broker, order, 59700m);
@@ -422,6 +423,27 @@ public class BinanceBrokerTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task Submission_and_replacement_follow_completed_native_replays_when_polls_run_back_to_back(bool conditional)
+    {
+        // A loaded host can leave no idle gap between polls. Each completed replay still authorizes the waiting
+        // dispatch; sampling the between-poll flag would miss every such window and starve the order indefinitely.
+        using var fake = new FakeBinance(true);
+        var settings = fake.Settings;
+        settings.PollInterval = TimeSpan.Zero;
+        using var broker = _orders.Binance(new InstrumentData(BtcUsdt, new SimulatedFeed()), settings, "Binance back-to-back polls");
+        var order = Exit(broker, conditional, 2m, 59000m);
+        await Accepted(fake, order);
+        OrderActions.Reprice(broker, order, 59500m);
+        await Observed(broker, fake, () => fake.Sent.Count == 2 && !broker.IsReplacementPending(order) && order.ExchangeOrderId.Length > 0);
+        Assert.Equal(59500m, Level(order));
+        Assert.Equal(59500m, fake.Sent[1].Level);
+        Assert.Same(order, Assert.Single(broker.ActiveOrders));
+        Assert.Empty(fake.Refused);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task Queued_trailing_modify_waits_for_exact_unknown_submission_recovery(bool conditional)
     {
         using var fake = new FakeBinance(true);
@@ -429,7 +451,7 @@ public class BinanceBrokerTests : IDisposable
         var order = Exit(broker, conditional, 2m, 59000m);
         await Accepted(fake, order);
         fake.UnknownPosts = 1;
-        fake.HideOwnedOrders = true;
+        fake.HideOwnedOrdersFromUnknownPost = true;
         OrderActions.Reprice(broker, order, 59500m);
         await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
         OrderActions.Reprice(broker, order, 59700m);
@@ -455,7 +477,7 @@ public class BinanceBrokerTests : IDisposable
         var order = Exit(broker, conditional, 2m, 59000m);
         await Accepted(fake, order);
         fake.UnknownPosts = 1;
-        fake.HideOwnedOrders = true;
+        fake.HideOwnedOrdersFromUnknownPost = true;
         OrderActions.Reprice(broker, order, 59500m);
         await Until(() => fake.Sent.Count == 2 && order.ExchangeOrderId.Length == 0);
         OrderActions.Reprice(broker, order, 59700m);
@@ -1791,11 +1813,17 @@ public class BinanceBrokerTests : IDisposable
         Assert.Equal(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
     }
 
-    [Fact]
-    public async Task Manual_triggered_limit_adopted_by_a_refused_modify_finishes_without_an_ownership_fault()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Manual_triggered_limit_adopted_by_a_refused_modify_finishes_without_an_ownership_fault(bool pollInFlight)
     {
-        // A website stop-limit's LIMIT fills just before the user drags it: the drag adopts the limit, its cancel is
-        // refused (-2011, already filled), and the next poll books the fill on the adopted LIMIT handle.
+        // A website stop-limit's LIMIT fills just before the user's drag reaches Binance: the drag adopts the partly
+        // filled limit from Binance's own executions, its cancel is refused (-2011, already filled), and the next poll
+        // books the fill on the adopted LIMIT handle.
+        // The fill happens at the cancel itself, so no poll has to be held to keep it unobserved. Holding polls until the
+        // cancel was refused deadlocked whenever a poll was already in flight: a replacement waits for the in-flight poll's
+        // native replay before it cancels. pollInFlight forces that interleaving.
         using var fake = new FakeBinance(futures: true);
         long algoId = fake.AddExternalAlgo("BUY", "STOP", 3m, triggerPrice: 61000m, price: 61100m);
         using var broker = Broker(fake);
@@ -1805,24 +1833,38 @@ public class BinanceBrokerTests : IDisposable
         broker.Changed += () => { if (broker.LastError is { } e) errors.Enqueue(e); };
         long childId = fake.Trigger(algoId, fill: 1m);
         await Observed(broker, fake, () => order.ExchangeOrderId == childId.ToString(Inv) &&
-            order.Type == OrderTypes.Limit && order.Filled == 1m && order.Unfilled == 2m);
+            order.Type == OrderTypes.Limit && order.Filled == 1m && order.Unfilled == 2m && Ready(broker));
         await Polls(fake, 2);
         Assert.True(string.IsNullOrEmpty(order.OwnerId));
+        var websiteFill = Assert.Single(fake.FuturesTradeHistory, trade => trade.OrderId == childId);
 
-        var releaseOrders = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.FillWhenCanceled(childId.ToString(Inv));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePoll = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            // Polls cannot observe the fill until the drag's cancel has been refused.
-            fake.BeforeGetReply = (request, ct) => request.Route is "/fapi/v1/openOrders" or "/fapi/v1/openAlgoOrders"
-                ? releaseOrders.Task.WaitAsync(ct) : Task.CompletedTask;
-            fake.Fill(childId, 2m);
+            if (pollInFlight)
+            {
+                fake.BeforeGetReply = (request, ct) =>
+                {
+                    if (request.Route != "/fapi/v2/positionRisk") return Task.CompletedTask;
+                    entered.TrySetResult();
+                    return releasePoll.Task.WaitAsync(ct);
+                };
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(12));
+            }
             OrderActions.Reprice(broker, order, 61200m);
-            Assert.False(string.IsNullOrEmpty(order.OwnerId)); // the drag adopted the limit
+            await Observed(broker, fake, () => !string.IsNullOrEmpty(order.OwnerId)); // the drag adopted the limit
+            if (pollInFlight)
+            {
+                Assert.DoesNotContain("DELETE /fapi/v1/order", fake.Calls); // the replacement waits for the held poll
+                releasePoll.TrySetResult();
+            }
             await Until(() => fake.Refused.Any(refused => refused.StartsWith("DELETE /fapi/v1/order", StringComparison.Ordinal)));
         }
         finally
         {
-            releaseOrders.TrySetResult();
+            releasePoll.TrySetResult();
             fake.BeforeGetReply = null;
         }
 
@@ -1832,10 +1874,11 @@ public class BinanceBrokerTests : IDisposable
         Assert.Empty(fake.Sent);
         Assert.Empty(fake.PlacedAlgo);
         Assert.False(broker.OrderContext.HasStorageFault);
-        // No ownership fault makes the producer unavailable. (It stays Synchronizing: the drag adopted the partly filled
-        // limit with an unknown execution baseline, which this scenario does not resolve; a plain website limit does the same.)
-        await Polls(fake, 2);
-        Assert.NotEqual(ExecutionAvailability.Unavailable, broker.Executions.Capture(ExecutionCursor.Start).Availability);
+        // The website's fill stays excluded; the fill after adoption is owned and priced, so new exposure resumes.
+        var adopted = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.LogicalOrderId));
+        Assert.Equal((true, 1m), (adopted.BaselineKnown, adopted.QuantityBaseline));
+        Assert.Equal(new[] { websiteFill.Id.ToString(Inv) }, adopted.PriorExecutions!.Select(prior => prior.Id));
+        await Observed(broker, fake, () => Ready(broker));
         Assert.DoesNotContain(errors, e => e.Contains("working order type", StringComparison.Ordinal) ||
             e.Contains("could not be restored", StringComparison.Ordinal) || e.Contains("terminal ownership", StringComparison.Ordinal));
         var bound = Assert.IsType<OwnedOrderIntent>(broker.OrderContext.Find(order.IntentId!));
@@ -2048,6 +2091,11 @@ internal sealed record FakeBinanceOrder(long Id, string Symbol, string Side, str
     /// <summary>The conditional (algo) order that placed it when it triggered; 0 if it was sent as it is.</summary>
     public long PlacedBy { get; init; }
     public string ClientId { get; init; } = "";
+
+    /// <summary>Creation time (Binance's "time"); its last change, such as a fill, is "updateTime".</summary>
+    public long Time { get; init; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    public long UpdateTime { get => _updateTime ?? Time; set => _updateTime = value; }
+    private long? _updateTime;
 }
 
 /// <summary>
@@ -2178,9 +2226,40 @@ internal sealed class FakeBinance : IDisposable
     }
 
     public bool HoldFuturesTradeHistory { get; set; }
+
+    /// <summary>
+    /// Listings stop changing: the open orders and the account's trade pages (fromId or time range, without orderId)
+    /// answer as they did now, while single-order reads stay current. Models a drag before the next poll shows a fill.
+    /// </summary>
+    public void FreezeListings()
+    {
+        lock (_gate)
+        {
+            _frozenOpenOrders = OpenOrdersBody("BTCUSDT");
+            _frozenTradeId = _nextTradeId;
+        }
+    }
+
+    public void ThawListings()
+    {
+        lock (_gate)
+        {
+            _frozenOpenOrders = null;
+            _frozenTradeId = null;
+        }
+    }
+
+    private string? _frozenOpenOrders;
+    private long? _frozenTradeId;
     public int FuturesTradeReplies
     {
         get { lock (_gate) return _futuresTradeReplies; }
+    }
+
+    /// <summary>The USD-M fills the fake matching engine and fixtures recorded, by native trade ID.</summary>
+    public List<FakeBinanceFuturesTrade> FuturesTradeHistory
+    {
+        get { lock (_gate) return _futuresTrades.OrderBy(trade => trade.Id).ToList(); }
     }
 
     /// <summary>Nonempty signed history replies, used only as an asynchronous replay barrier.</summary>
@@ -2217,6 +2296,12 @@ internal sealed class FakeBinance : IDisposable
     public int UnknownPostStatus { get; set; } = 503;
     public int UnknownPostCode { get; set; } = -1007;
     public bool HideOwnedOrders { get; set; }
+
+    /// <summary>
+    /// Start <see cref="HideOwnedOrders"/> exactly when the next unknown-outcome POST places its order: that order is
+    /// never visible, while the accepted order it replaces stays listed until its cancel instead of looking dropped.
+    /// </summary>
+    public bool HideOwnedOrdersFromUnknownPost { get; set; }
 
     /// <summary>The next open-order request waits this long before answering (a network stall).</summary>
     public int StallOpenOrdersOnceMs { get; set; }
@@ -2347,12 +2432,16 @@ internal sealed class FakeBinance : IDisposable
         lock (_gate) return TryAlgo(exchangeId, out var a) ? ViewOf(a) : ViewOf(_orders[long.Parse(exchangeId, Inv)]);
     }
 
-    /// <summary>An order placed outside Trading Hub (website, another app).</summary>
-    public long AddExternal(string side, string type, decimal qty, decimal price, decimal stopPrice = 0, string clientId = "")
+    /// <summary>An order placed outside Trading Hub (website, another app), optionally long ago.</summary>
+    public long AddExternal(string side, string type, decimal qty, decimal price, decimal stopPrice = 0, string clientId = "",
+        DateTimeOffset? placedAt = null)
     {
         lock (_gate)
         {
-            var o = new FakeBinanceOrder(++_nextId, "BTCUSDT", side, type, qty, price, stopPrice, false, External: true) { ClientId = clientId };
+            var o = new FakeBinanceOrder(++_nextId, "BTCUSDT", side, type, qty, price, stopPrice, false, External: true)
+            {
+                ClientId = clientId, Time = (placedAt ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds(),
+            };
             _orders[o.Id] = o;
             return o.Id;
         }
@@ -2372,6 +2461,12 @@ internal sealed class FakeBinance : IDisposable
     public void Fill(long id, decimal qty)
     {
         lock (_gate) FillLocked(_orders[id], qty);
+    }
+
+    /// <summary>A fill that happened at <paramref name="at"/> (in the past), with its trade time.</summary>
+    public void Fill(long id, decimal qty, DateTimeOffset at)
+    {
+        lock (_gate) FillLocked(_orders[id], qty, at.ToUnixTimeMilliseconds());
     }
 
     /// <summary>Fills an order of either kind; a conditional one that has not triggered triggers first.</summary>
@@ -2436,8 +2531,10 @@ internal sealed class FakeBinance : IDisposable
     private static FakeOrderView ViewOf(FakeBinanceAlgoOrder a) =>
         new(AlgoPrefix + a.AlgoId.ToString(Inv), a.Type, a.Status, a.Qty, a.TriggerPrice, a.ReduceOnly);
 
-    private void FillLocked(FakeBinanceOrder o, decimal qty)
+    private void FillLocked(FakeBinanceOrder o, decimal qty, long? at = null)
     {
+        long time = at ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        o.UpdateTime = time;
         if (!Futures && o.Symbol == SpotSymbol && _spotBalances.TryGetValue(SpotBaseAsset, out var balance))
             _spotBalances[SpotBaseAsset] = (balance.Free + (o.Side == "BUY" ? qty : -qty), balance.Locked);
         if (Futures)
@@ -2451,7 +2548,7 @@ internal sealed class FakeBinance : IDisposable
             decimal realized = previous.Quantity != 0 && Math.Sign(previous.Quantity) != Math.Sign(signed)
                 ? (price - previous.Average) * Math.Min(qty, Math.Abs(previous.Quantity)) * Math.Sign(previous.Quantity) : 0m;
             _futuresTrades.Add(new FakeBinanceFuturesTrade(++_nextTradeId, o.Id, o.Symbol,
-                o.Side == "BUY", qty, price, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), RealizedPnl: realized));
+                o.Side == "BUY", qty, price, time, RealizedPnl: realized));
             decimal average = previous.Average;
             if (previous.Quantity == 0 || Math.Sign(previous.Quantity) == Math.Sign(signed))
                 average = (Math.Abs(previous.Quantity) * average + qty * price) / Math.Abs(next);
@@ -2488,7 +2585,10 @@ internal sealed class FakeBinance : IDisposable
     private static string Num(decimal v) => v.ToString("0.########", Inv);
 
     private static string Json(FakeBinanceOrder o) => string.Create(Inv,
-        $"{{\"orderId\":{o.Id},\"clientOrderId\":\"{o.ClientId}\",\"symbol\":\"{o.Symbol}\",\"status\":\"{o.Status}\",\"side\":\"{o.Side}\",\"type\":\"{o.Type}\",\"price\":\"{Num(o.Price)}\",\"stopPrice\":\"{Num(o.StopPrice)}\",\"origQty\":\"{Num(o.Qty)}\",\"executedQty\":\"{Num(o.Executed)}\",\"reduceOnly\":{(o.ReduceOnly ? "true" : "false")},\"time\":1790000000000,\"updateTime\":1790000000000}}");
+        $"{{\"orderId\":{o.Id},\"clientOrderId\":\"{o.ClientId}\",\"symbol\":\"{o.Symbol}\",\"status\":\"{o.Status}\",\"side\":\"{o.Side}\",\"type\":\"{o.Type}\",\"price\":\"{Num(o.Price)}\",\"stopPrice\":\"{Num(o.StopPrice)}\",\"origQty\":\"{Num(o.Qty)}\",\"executedQty\":\"{Num(o.Executed)}\",\"reduceOnly\":{(o.ReduceOnly ? "true" : "false")},\"time\":{o.Time},\"updateTime\":{o.UpdateTime}}}");
+
+    private string OpenOrdersBody(string symbol) =>
+        "[" + string.Join(",", _orders.Values.Where(o => o.IsOpen && o.Symbol == symbol && (!HideOwnedOrders || o.External)).OrderBy(o => o.Id).Select(Json)) + "]";
 
     private static string Json(FakeBinanceSpotTrade trade)
     {
@@ -2532,24 +2632,31 @@ internal sealed class FakeBinance : IDisposable
 
     private (int Status, string Body) FuturesTrades(FakeRequest request)
     {
-        // Official USD-M accountTradeList: inclusive fromId, no orderId, and a seven-day time range.
-        if (Undocumented(request, new[] { "symbol", "startTime", "endTime", "fromId", "limit" }) is { } extra)
+        // Official USD-M accountTradeList (developers.binance.com, Account Trade List): symbol is mandatory, orderId
+        // must be used together with symbol, fromId cannot be sent with time filters, and without startTime/endTime
+        // the last seven days are returned.
+        if (Undocumented(request, new[] { "symbol", "orderId", "startTime", "endTime", "fromId", "limit" }) is { } extra)
             return Error(-1104, "Not all sent parameters were read; undocumented: " + extra);
         string symbol = request.Query("symbol");
         if (symbol.Length == 0) return Error(-1102, "symbol is mandatory.");
-        bool hasFrom = request.Query("fromId").Length > 0;
+        bool hasFrom = request.Query("fromId").Length > 0, hasOrder = request.Query("orderId").Length > 0;
         bool hasStart = request.Query("startTime").Length > 0, hasEnd = request.Query("endTime").Length > 0;
         if (hasFrom && (hasStart || hasEnd)) return Error(-1102, "fromId cannot be combined with time filters.");
         int limit = request.Query("limit").Length == 0 ? 500 : int.Parse(request.Query("limit"), Inv);
         if (limit is < 1 or > 1000) return Error(-1102, "limit is outside the documented bounds.");
         long from = hasFrom ? long.Parse(request.Query("fromId"), Inv) : 0;
-        long start = hasStart ? long.Parse(request.Query("startTime"), Inv) : long.MinValue;
+        long order = hasOrder ? long.Parse(request.Query("orderId"), Inv) : 0;
+        long start = hasStart ? long.Parse(request.Query("startTime"), Inv)
+            : hasOrder && !hasFrom && !hasEnd ? DateTimeOffset.UtcNow.AddDays(-7).ToUnixTimeMilliseconds() : long.MinValue;
         long end = hasEnd ? long.Parse(request.Query("endTime"), Inv) : long.MaxValue;
         if (hasStart && hasEnd && (end < start || end - start > 604_800_000L))
             return Error(-1127, "userTrades range exceeds seven days.");
         if (HoldFuturesTradeHistory) return (200, "[]");
-        var selected = _futuresTrades.Where(trade => trade.Symbol == symbol && trade.Id >= from &&
-            trade.Time >= start && trade.Time <= end).OrderBy(trade => trade.Id);
+        // "Only support querying trade in the past 3 months."
+        long queryable = DateTimeOffset.UtcNow.AddMonths(-3).ToUnixTimeMilliseconds();
+        long newest = !hasOrder && _frozenTradeId is { } frozen ? frozen : long.MaxValue;
+        var selected = _futuresTrades.Where(trade => trade.Symbol == symbol && trade.Id >= from && trade.Id <= newest &&
+            (!hasOrder || trade.OrderId == order) && trade.Time >= start && trade.Time <= end && trade.Time >= queryable).OrderBy(trade => trade.Id);
         var page = hasFrom || hasStart ? selected.Take(limit) : selected.TakeLast(limit);
         string rows = string.Join(",", page.Select(trade => System.Text.Json.JsonSerializer.Serialize(new
         {
@@ -2618,6 +2725,11 @@ internal sealed class FakeBinance : IDisposable
 
     private async ValueTask<(int Status, string Body)> Handle(FakeRequest r, CancellationToken ct)
     {
+        if (r.Method == "POST" && UnknownPosts > 0 && HideOwnedOrdersFromUnknownPost)
+        {
+            HideOwnedOrdersFromUnknownPost = false;
+            HideOwnedOrders = true;
+        }
         var answer = Answer(r);
         if (r.Method == "GET" && r.Route is "/api/v3/myTrades" or "/fapi/v1/userTrades" && BeforeTradeReply is { } beforeTradeReply)
             await beforeTradeReply(ct).ConfigureAwait(false);
@@ -2708,7 +2820,7 @@ internal sealed class FakeBinance : IDisposable
                     return SpotTrades(r);
                 case ("GET", "/fapi/v1/openOrders" or "/api/v3/openOrders"):
                     _openOrderPolls++;
-                    return (200, "[" + string.Join(",", _orders.Values.Where(o => o.IsOpen && o.Symbol == r.Query("symbol") && (!HideOwnedOrders || o.External)).OrderBy(o => o.Id).Select(Json)) + "]");
+                    return (200, _frozenOpenOrders ?? OpenOrdersBody(r.Query("symbol")));
                 case ("POST", "/fapi/v1/order" or "/api/v3/order"):
                     return Place(r);
                 case ("DELETE", "/fapi/v1/order" or "/api/v3/order"):
@@ -2724,6 +2836,8 @@ internal sealed class FakeBinance : IDisposable
                     }
 
                     if (!_orders.TryGetValue(id, out var o) || _forgotten.Contains(id.ToString(Inv)) || (HideOwnedOrders && !o.External)) return Error(-2013, "Order does not exist.");
+                    // USD-M Query Order: an order is not found once "order create time + 90 days < current time".
+                    if (Futures && o.Time + 90L * 86_400_000L < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return Error(-2013, "Order does not exist.");
                     return (200, Json(o));
                 }
                 case ("GET", "/fapi/v2/positionRisk"):

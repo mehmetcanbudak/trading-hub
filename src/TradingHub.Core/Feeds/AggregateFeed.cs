@@ -24,20 +24,31 @@ public enum AggregateOperation
 public sealed record AggregateConstituentStatus(string FeedId, string DisplayName, FeedStatus Status,
     string? Message = null, bool IsPartial = false);
 
+/// <summary>How the composite DOM is formed. Neither mode is an executable book.</summary>
+public enum AggregateBookMode
+{
+    /// <summary>The first configured venue's book only; other venue books are never substituted.</summary>
+    FirstVenue,
+    /// <summary>Sizes of every available venue book summed at each price; missing venues are disclosed as partial.</summary>
+    Consolidated,
+}
+
 /// <summary>A request/session coverage snapshot, not a guarantee of event-complete exchange data.</summary>
 public sealed record AggregateCoverage(string Symbol, AggregateOperation Operation,
     IReadOnlyList<AggregateConstituentStatus> Constituents, string BookFeedId,
-    DateTime? RequestedFromUtc = null, DateTime? RequestedToUtc = null)
+    DateTime? RequestedFromUtc = null, DateTime? RequestedToUtc = null, bool IsBookConsolidated = false)
 {
     public bool IsPartial => Constituents.Any(c => c.Status != FeedStatus.Connected || c.IsPartial);
     public bool IsExecutable => false;
-    public bool IsBookConsolidated => false;
 }
 
 /// <summary>
 /// Data-only composite tape and candles. Constituent prints retain their venue and quality;
 /// candle volume is summed, extremes are combined, and open/close prefer the first venue.
-/// The DOM is exclusively the first configured venue, including when that venue is unavailable.
+/// Venues are matched by base asset; USDT, USD and USDC quotes form one unconverted USD family.
+/// A venue whose price deviates more than <see cref="MaximumPriceDeviation"/> from the reference venue is
+/// omitted as a probable different asset and reported partial. The DOM is the first configured venue's book or,
+/// when <see cref="AggregateBookMode.Consolidated"/>, the sum of available venue books; neither is executable.
 /// No instrument or price published by this feed is an executable quote.
 /// </summary>
 public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryFeed, ITickerStatsProvider, IDataScopeFeed
@@ -61,7 +72,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
     private int _disposed;
 
     public AggregateFeed(IReadOnlyList<IMarketDataFeed> sources, bool ownsSources = false, string? dataScopeKey = null,
-        TimeProvider? timeProvider = null, TimeSpan? liveReorderWindow = null)
+        TimeProvider? timeProvider = null, TimeSpan? liveReorderWindow = null, AggregateBookMode bookMode = AggregateBookMode.FirstVenue)
     {
         ArgumentNullException.ThrowIfNull(sources);
         if (sources.Count is < 1 or > 64) throw new ArgumentException("An aggregate needs between one and 64 venues.", nameof(sources));
@@ -72,6 +83,8 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
         _timeProvider = timeProvider ?? TimeProvider.System;
         _liveReorderWindow = liveReorderWindow ?? TimeSpan.FromMilliseconds(250);
         if (_liveReorderWindow < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(liveReorderWindow));
+        if (!Enum.IsDefined(bookMode)) throw new ArgumentOutOfRangeException(nameof(bookMode));
+        BookMode = bookMode;
         _catalogs = _sources.Select(_ => new Dictionary<string, Instrument>(StringComparer.OrdinalIgnoreCase)).ToArray();
         Sources = Array.AsReadOnly(_sources);
         DataScopeKey = dataScopeKey ?? "aggregate:" + string.Join("+", _sources.Select(s => s is IDataScopeFeed scoped ? scoped.DataScopeKey : s.Id));
@@ -84,10 +97,42 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
     public bool SupportsHistory => _sources.Any(s => s.SupportsHistory);
     public bool IsLive => _sources.Any(s => s.IsLive);
     public bool IsExecutable => false;
-    public bool IsBookConsolidated => false;
-    public string BookFeedId => _sources[0].Id;
+    public AggregateBookMode BookMode { get; }
+    public bool IsBookConsolidated => BookMode == AggregateBookMode.Consolidated;
+    /// <summary>The DOM source: the first venue, or this composite feed when books are consolidated.</summary>
+    public string BookFeedId => IsBookConsolidated ? FeedId : _sources[0].Id;
     public DateTime Now => _timeProvider.GetUtcNow().UtcDateTime;
-    public string CacheTag => "aggregate-provenance-v1:" + DataScopeKey + ":" + string.Join("+", _sources.Select(s => (s as IKlineHistory)?.CacheTag ?? "no-candles"));
+    public string CacheTag => "aggregate-provenance-v2:" + DataScopeKey + ":" + string.Join("+", _sources.Select(s => (s as IKlineHistory)?.CacheTag ?? "no-candles"));
+
+    /// <summary>Relative price distance beyond which a venue is treated as a different asset with the same ticker.</summary>
+    public const decimal MaximumPriceDeviation = 0.03m;
+
+    /// <summary>
+    /// The composite symbol of a venue instrument: base asset plus quote, where the USD family (USDT, USD, USDC) is
+    /// written USDT so BTC-USDT-SWAP (OKX), BTC-USD (Coinbase), BTC (Hyperliquid) and BTCUSDT (Binance) align.
+    /// Instruments without asset metadata keep their own symbol.
+    /// </summary>
+    public static string CompositeSymbol(Instrument instrument)
+    {
+        string baseAsset = instrument.BaseAsset.Trim().ToUpperInvariant(), quote = instrument.QuoteAsset.Trim().ToUpperInvariant();
+        if (baseAsset.Length == 0 || quote.Length == 0) return instrument.Symbol;
+        return baseAsset + (IsUsdFamily(quote) ? "USDT" : quote);
+    }
+
+    public static bool IsUsdFamily(string quote) => quote.ToUpperInvariant() is "USDT" or "USD" or "USDC";
+
+    private static string QuoteFamily(string quote) => IsUsdFamily(quote) ? "USD" : quote.ToUpperInvariant();
+
+    /// <summary>When one venue lists a base in several USD-family quotes, its preferred quote wins, then USDT, USD, USDC.</summary>
+    private static int QuoteRank(IMarketDataFeed feed, Instrument instrument)
+    {
+        string quote = instrument.QuoteAsset.ToUpperInvariant();
+        if (feed is Venues.ICryptoVenue venue && string.Equals(quote, venue.PreferredQuote, StringComparison.OrdinalIgnoreCase)) return 0;
+        return quote switch { "USDT" => 1, "USD" => 2, "USDC" => 3, _ => 4 };
+    }
+
+    public static bool Deviates(decimal price, decimal reference) =>
+        price > 0 && reference > 0 && Math.Abs(price / reference - 1) > MaximumPriceDeviation;
     public event Action<AggregateCoverage>? CoverageChanged;
 
     public AggregateCoverage GetCoverage(Instrument instrument, AggregateOperation operation)
@@ -135,11 +180,13 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                 for (int i = 0; i < _sources.Length; i++)
                     foreach (var instrument in _catalogs[i].Values)
                     {
-                        if (!bySymbol.TryGetValue(instrument.Symbol, out var parts)) bySymbol[instrument.Symbol] = parts = new Part?[_sources.Length];
-                        var first = parts.FirstOrDefault(p => p != null)?.Instrument;
+                        string key = CompositeSymbol(instrument);
+                        if (!bySymbol.TryGetValue(key, out var parts)) bySymbol[key] = parts = new Part?[_sources.Length];
+                        var first = parts.FirstOrDefault(p => p != null && p.Source != i)?.Instrument;
                         if (first != null && (!string.Equals(first.BaseAsset, instrument.BaseAsset, StringComparison.OrdinalIgnoreCase)
-                            || !string.Equals(first.QuoteAsset, instrument.QuoteAsset, StringComparison.OrdinalIgnoreCase) || first.PointValue != instrument.PointValue))
+                            || QuoteFamily(first.QuoteAsset) != QuoteFamily(instrument.QuoteAsset) || first.PointValue != instrument.PointValue))
                             continue; // Unlike units cannot be added as if they were the same instrument.
+                        if (parts[i] is { } listed && QuoteRank(_sources[i], listed.Instrument) <= QuoteRank(_sources[i], instrument)) continue;
                         parts[i] = new Part(i, _sources[i], instrument);
                     }
                 foreach (var previous in _parts.Keys) _coverage.Remove((previous, AggregateOperation.Instruments));
@@ -185,8 +232,28 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             PointValue = first.PointValue,
             BaseAsset = first.BaseAsset,
             QuoteAsset = first.QuoteAsset,
-            Description = $"{symbol} aggregate — DATA ONLY, non-executable; DOM: {_sources[0].DisplayName} only, not consolidated",
+            Description = $"{symbol} aggregate — DATA ONLY, non-executable; " + (IsBookConsolidated
+                ? "DOM: composite of available venue books, not executable"
+                : $"DOM: {_sources[0].DisplayName} only, not consolidated")
+                + (available.Select(p => p.Instrument.QuoteAsset.ToUpperInvariant()).Distinct().Count() > 1
+                    ? "; " + string.Join(", ", available.Select(p => p.Instrument.QuoteAsset.ToUpperInvariant()).Distinct()) + " quotes combined without conversion"
+                    : ""),
         };
+    }
+
+    /// <summary>Sums venue book sizes at each price (already in composite ticks). Crossed venue books stay crossed.</summary>
+    public static DepthSnapshot MergeBooks(IEnumerable<DepthSnapshot> books, DateTime time)
+    {
+        var bids = new Dictionary<long, decimal>();
+        var asks = new Dictionary<long, decimal>();
+        foreach (var book in books)
+        {
+            foreach (var level in book.Bids) bids[level.PriceTicks] = bids.GetValueOrDefault(level.PriceTicks) + level.Size;
+            foreach (var level in book.Asks) asks[level.PriceTicks] = asks.GetValueOrDefault(level.PriceTicks) + level.Size;
+        }
+        var bidLevels = bids.Where(kv => kv.Value > 0).Select(kv => new BookLevel(kv.Key, kv.Value)).OrderByDescending(l => l.PriceTicks).ToArray();
+        var askLevels = asks.Where(kv => kv.Value > 0).Select(kv => new BookLevel(kv.Key, kv.Value)).OrderBy(l => l.PriceTicks).ToArray();
+        return new DepthSnapshot(bidLevels, askLevels, time);
     }
 
     private static decimal CommonStep(decimal left, decimal right)
@@ -254,6 +321,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                 }
             }
             ct.ThrowIfCancellationRequested();
+            OmitDeviatingVenues(collected, states);
             Accumulate(overall, states);
             Publish(instrument.Symbol, AggregateOperation.Trades, overall, fromUtc, end);
             if (!states.Any(s => s.Status == FeedStatus.Connected) && collected.Count == 0)
@@ -283,6 +351,52 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             progress?.Report((cursor - fromUtc).Ticks / totalTicks);
         }
         progress?.Report(1);
+    }
+
+    private string DeviationMessage(int reference) =>
+        $"Price deviates more than 3% from {_sources[reference].DisplayName}; omitted as a probable different asset.";
+
+    /// <summary>True when <paramref name="price"/> lies more than the tolerance outside the reference [low, high] range.</summary>
+    private static bool OutsideRange(decimal price, decimal low, decimal high) =>
+        price > 0 && low > 0 && (price < low * (1 - MaximumPriceDeviation) || price > high * (1 + MaximumPriceDeviation));
+
+    /// <summary>
+    /// A venue whose median print lies far outside the reference venue's traded range is a different asset with the same
+    /// ticker, not a constituent. Ordinary intraperiod moves stay inside the reference range and are kept.
+    /// </summary>
+    private void OmitDeviatingVenues(List<SourcedTrade> collected, AggregateConstituentStatus[] states)
+    {
+        if (collected.Count == 0) return;
+        var ranges = new (decimal Median, decimal Low, decimal High)?[_sources.Length];
+        foreach (var group in collected.GroupBy(t => t.Source))
+        {
+            var prices = group.Select(t => t.Trade.Price).Order().ToArray();
+            ranges[group.Key] = (prices[prices.Length / 2], prices[0], prices[^1]);
+        }
+        int reference = Array.FindIndex(ranges, m => m.HasValue);
+        var (_, low, high) = ranges[reference]!.Value;
+        bool any = false;
+        var omitted = new bool[_sources.Length];
+        for (int i = reference + 1; i < ranges.Length; i++)
+        {
+            if (ranges[i] is not { } range || !OutsideRange(range.Median, low, high)) continue;
+            omitted[i] = any = true;
+            states[i] = states[i] with { IsPartial = true, Message = DeviationMessage(reference) };
+        }
+        if (any) collected.RemoveAll(t => omitted[t.Source]);
+    }
+
+    private void OmitDeviatingCandles(Kline?[] values, AggregateConstituentStatus[] states)
+    {
+        int reference = Array.FindIndex(values, v => v.HasValue);
+        if (reference < 0) return;
+        var anchor = values[reference]!.Value;
+        for (int i = reference + 1; i < values.Length; i++)
+        {
+            if (values[i] is not { } candle || !OutsideRange(candle.Close, anchor.Low, anchor.High)) continue;
+            values[i] = null;
+            states[i] = states[i] with { IsPartial = true, Message = DeviationMessage(reference) };
+        }
     }
 
     private Trade MapTrade(Trade trade, int source, bool partial)
@@ -351,6 +465,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                 for (int i = 0; i < values.Length; i++)
                     if (!values[i].HasValue && states[i].Status == FeedStatus.Connected)
                         states[i] = states[i] with { IsPartial = true, Message = "A constituent candle is missing in the requested range." };
+                OmitDeviatingCandles(values, states);
                 output.Add(MergeCandle(time, values, step, failed));
             }
             Accumulate(overall, states);
@@ -497,7 +612,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
 
     private AggregateCoverage Snapshot(string symbol, AggregateOperation operation, AggregateConstituentStatus[] states,
         DateTime? requestedFromUtc = null, DateTime? requestedToUtc = null) =>
-        new(symbol, operation, Array.AsReadOnly((AggregateConstituentStatus[])states.Clone()), BookFeedId, requestedFromUtc, requestedToUtc);
+        new(symbol, operation, Array.AsReadOnly((AggregateConstituentStatus[])states.Clone()), BookFeedId, requestedFromUtc, requestedToUtc, IsBookConsolidated);
 
     private AggregateCoverage Publish(string symbol, AggregateOperation operation, AggregateConstituentStatus[] states,
         DateTime? requestedFromUtc = null, DateTime? requestedToUtc = null)
@@ -594,6 +709,14 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
         private bool _firstVenueStatusOutage;
         private bool _bookReconnectIssued;
         private long _bookBaselineRevision;
+        private Part?[]? _parts;
+        private readonly decimal[] _lastPrice;
+        private readonly bool[] _priceRejected;
+        private readonly DepthSnapshot?[] _books;
+        private readonly DepthCoverage[] _bookCoverage;
+        private bool _compositeDirty;
+        private bool _compositePublished;
+        private long _lastCompositeEmit;
 
         public Live(AggregateFeed owner, Instrument instrument, IMarketDataSink sink)
         {
@@ -601,6 +724,10 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             _instrument = instrument;
             _sink = sink;
             _states = owner.InitialStates();
+            _lastPrice = new decimal[owner._sources.Length];
+            _priceRejected = new bool[owner._sources.Length];
+            _books = new DepthSnapshot?[owner._sources.Length];
+            _bookCoverage = new DepthCoverage[owner._sources.Length];
             _lifetime = CancellationTokenSource.CreateLinkedTokenSource(owner._lifetime.Token);
             var period = owner._liveReorderWindow > TimeSpan.Zero ? owner._liveReorderWindow : TimeSpan.FromMilliseconds(1);
             _timer = owner._timeProvider.CreateTimer(_ => Flush(), null, period, period);
@@ -615,6 +742,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                 {
                     if (_disposed) return;
                     _primary = parts[0];
+                    _parts = parts;
                 }
                 for (int i = 0; i < parts.Length; i++)
                 {
@@ -630,7 +758,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                             if (!late)
                             {
                                 _inner.Add(subscription);
-                                if (i == 0)
+                                if (i == 0 && !_owner.IsBookConsolidated)
                                 {
                                     _firstReconnect = subscription as IReconnectable;
                                     RequestBookBaselineLocked();
@@ -661,6 +789,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             lock (_gate)
             {
                 if (_disposed || trades.Count == 0) return;
+                if (!AcceptPrice(source, trades[^1].Price)) return;
                 bool partial = _states.Any(s => s.Status != FeedStatus.Connected || s.IsPartial);
                 long received = _owner._timeProvider.GetTimestamp();
                 foreach (var trade in trades)
@@ -680,6 +809,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             {
                 if (_disposed) return;
                 FlushLocked();
+                if (!_disposed && _compositeDirty) EmitCompositeLocked(force: false);
             }
         }
 
@@ -721,7 +851,13 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
         {
             lock (_gate)
             {
-                if (_disposed || source != 0 || _primary == null) return;
+                if (_disposed) return;
+                if (_owner.IsBookConsolidated)
+                {
+                    CompositeDepthLocked(source, update);
+                    return;
+                }
+                if (source != 0 || _primary == null) return;
                 _bookVenue = update.Venue ?? _primary.Feed.DisplayName;
                 if (update.IsFullRefresh && update.IsUsable)
                 {
@@ -778,6 +914,90 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             }
         }
 
+        /// <summary>
+        /// Live guard against a same-ticker different asset: prints far from the first trading, non-rejected venue
+        /// are omitted and the venue is reported partial until its price converges again.
+        /// </summary>
+        private bool AcceptPrice(int source, decimal price)
+        {
+            _lastPrice[source] = price;
+            int reference = -1;
+            for (int i = 0; i < _lastPrice.Length; i++)
+                if (i != source && _lastPrice[i] > 0 && !_priceRejected[i]) { reference = i; break; }
+            bool deviates = reference >= 0 && reference < source && Deviates(price, _lastPrice[reference]);
+            if (deviates && !_priceRejected[source])
+            {
+                _priceRejected[source] = true;
+                _states[source] = _states[source] with { IsPartial = true, Message = _owner.DeviationMessage(reference) };
+                if (_owner.IsBookConsolidated && _books[source] != null)
+                {
+                    _books[source] = null;
+                    _compositeDirty = true;
+                }
+                PublishStatus();
+            }
+            else if (!deviates) _priceRejected[source] = false;
+            return !deviates;
+        }
+
+        private void CompositeDepthLocked(int source, DepthUpdate update)
+        {
+            if (_parts?[source] is not { } part || _priceRejected[source]) return;
+            if (update.IsUsable && (update.IsFullRefresh || _books[source] != null))
+            {
+                bool convert = part.Instrument.TickSize != _instrument.TickSize;
+                _books[source] = convert
+                    ? new DepthSnapshot(RemapLevels(update.Snapshot.Bids, part.Instrument), RemapLevels(update.Snapshot.Asks, part.Instrument), update.Snapshot.Time)
+                    : update.Snapshot;
+                _bookCoverage[source] = update.Coverage;
+            }
+            else if (!update.IsUsable)
+            {
+                // A venue without a valid baseline is excluded until its next full refresh, never kept stale.
+                _books[source] = null;
+            }
+            _compositeDirty = true;
+            EmitCompositeLocked(force: false);
+        }
+
+        /// <summary>Sums the available venue books at most every 200 ms; the reorder timer flushes a throttled change.</summary>
+        private void EmitCompositeLocked(bool force)
+        {
+            long now = _owner._timeProvider.GetTimestamp();
+            if (!force && _compositePublished && _owner._timeProvider.GetElapsedTime(_lastCompositeEmit, now) < TimeSpan.FromMilliseconds(200)) return;
+            _compositeDirty = false;
+            _lastCompositeEmit = now;
+            var available = new List<int>();
+            for (int i = 0; i < _books.Length; i++) if (_books[i] != null) available.Add(i);
+            var missing = _owner._sources.Where((_, i) => _books[i] == null).Select(s => s.DisplayName).ToArray();
+            if (available.Count == 0)
+            {
+                if (!_compositePublished) return;
+                _compositePublished = false;
+                _sink.OnDepth(_instrument, new DepthUpdate
+                {
+                    Snapshot = DepthSnapshot.Empty, ProviderId = FeedId, Venue = "Composite", ReceivedAt = _owner.Now,
+                    Coverage = DepthCoverage.Missing | DepthCoverage.SequenceGap | DepthCoverage.Disconnected,
+                    GapBefore = DepthGapReason.Disconnected,
+                    Message = "Composite book unavailable: no venue currently has a valid book.",
+                });
+                return;
+            }
+            var merged = MergeBooks(available.Select(i => _books[i]!), _owner.Now);
+            var coverage = DepthCoverage.PartialBook;
+            foreach (int i in available) coverage |= _bookCoverage[i] & DepthCoverage.Truncated;
+            string message = $"Composite non-executable book: sizes of {available.Count} of {_books.Length} venue books summed at each price"
+                + (missing.Length > 0 ? "; missing: " + string.Join(", ", missing) : "") + ".";
+            if (merged.HasBid && merged.HasAsk && merged.BestBidTicks >= merged.BestAskTicks)
+                message += " Venue books cross; the composite bid and ask are not a tradable spread.";
+            _compositePublished = true;
+            _sink.OnDepth(_instrument, new DepthUpdate
+            {
+                Snapshot = merged, IsFullRefresh = true, ProviderId = FeedId, Venue = "Composite",
+                ReceivedAt = _owner.Now, Coverage = coverage, Message = message,
+            });
+        }
+
         private BookLevel[] RemapLevels(BookLevel[] levels, Instrument source)
         {
             if (levels.Length == 0) return Array.Empty<BookLevel>();
@@ -789,6 +1009,12 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
 
         private void InvalidateBook(string? message)
         {
+            if (_owner.IsBookConsolidated)
+            {
+                Array.Clear(_books);
+                EmitCompositeLocked(force: true);
+                return;
+            }
             _bookNeedsBaseline = true;
             _bookDisconnected = true;
             _sink.OnDepth(_instrument, new DepthUpdate
@@ -835,7 +1061,18 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             {
                 if (_disposed) return;
                 _states[source] = _owner.State(source, status, message);
-                if (source == 0)
+                if (_priceRejected[source])
+                    _states[source] = _states[source] with { IsPartial = true, Message = (message == null ? "" : message + " ") + "Prints are omitted while the price deviates from the reference venue." };
+                if (_owner.IsBookConsolidated)
+                {
+                    if (status != FeedStatus.Connected && _books[source] != null)
+                    {
+                        _books[source] = null;
+                        EmitCompositeLocked(force: true);
+                        if (_disposed) return;
+                    }
+                }
+                else if (source == 0)
                 {
                     if (status == FeedStatus.Connected) _firstVenueStatusOutage = false;
                     else if (!_firstVenueStatusOutage && (status is FeedStatus.Reconnecting or FeedStatus.Error or FeedStatus.Disconnected))
@@ -864,7 +1101,8 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             string prefix = coverage.IsPartial ? "Partial aggregate coverage. " : "Aggregate data. ";
             string details = string.Join("; ", _states.Where(s => s.Status != FeedStatus.Connected || s.IsPartial)
                 .Select(s => $"{s.DisplayName}: {s.Status}{(s.Message == null ? "" : " — " + s.Message)}"));
-            _sink.OnStatus(_instrument, status, prefix + $"Data only; non-executable. DOM: {_owner.BookFeedId} only, not consolidated. " + details);
+            string book = _owner.IsBookConsolidated ? "DOM: composite of available venue books, not executable. " : $"DOM: {_owner.BookFeedId} only, not consolidated. ";
+            _sink.OnStatus(_instrument, status, prefix + "Data only; non-executable. " + book + details);
         }
 
         public void Dispose()

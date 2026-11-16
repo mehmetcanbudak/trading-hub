@@ -139,7 +139,7 @@ namespace TradingHub.Indicators
     }
 
     /// <summary>Información del instrumento para los indicadores.</summary>
-    public class InstrumentInfo
+    public partial class InstrumentInfo
     {
         public string Instrument { get; set; } = "";
         public string Exchange { get; set; } = "";

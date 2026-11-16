@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TradingHub.Common;
 
 namespace TradingHub.Trading;
 
@@ -126,6 +127,8 @@ public sealed class AccountJournal
         private IReadOnlyList<AccountFill>? _snapshot;
         public List<AccountFill> Fills { get; } = new();
         public Dictionary<string, int> Indices { get; } = new();
+        /// <summary>The journal's name is durable in its directory; appends then need only the file flush.</summary>
+        public bool NameDurable { get; set; }
         public long Revision { get; private set; }
         public IReadOnlyList<AccountFill> Snapshot =>
             _snapshot ??= Fills.Count == 0 ? Array.Empty<AccountFill>() : Array.AsReadOnly(Fills.ToArray());
@@ -149,6 +152,7 @@ public sealed class AccountJournal
 
         public bool Clear()
         {
+            NameDurable = false;
             if (Fills.Count == 0) return false;
             Fills.Clear();
             Indices.Clear();
@@ -162,8 +166,8 @@ public sealed class AccountJournal
     {
         _dir = dir;
         _openAppend = openAppend ?? (static path => new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite,
-            FileShare.Read, 4096, FileOptions.WriteThrough));
-        Directory.CreateDirectory(dir);
+            FileShare.Read, 4096));
+        DurableFile.EnsureDirectory(dir);
     }
 
     /// <summary>Cambió el historial de una cuenta (id de la cuenta). Puede llegar desde otros hilos.</summary>
@@ -223,7 +227,8 @@ public sealed class AccountJournal
         lock (_gate) return Load(account).Snapshot;
     }
 
-    /// <summary>Durably appends new or corrected executions; exact duplicates are ignored.</summary>
+    /// <summary>Durably appends new or corrected executions; exact duplicates are ignored. A record is acknowledged only
+    /// after its drive flush and, once per journal name in this process, its directory synchronization.</summary>
     public bool Add(string account, AccountFill fill)
     {
         lock (_gate)
@@ -243,9 +248,14 @@ public sealed class AccountJournal
                 if (needsBoundary) stream.WriteByte((byte)'\n');
                 JsonSerializer.Serialize(stream, fill);
                 stream.WriteByte((byte)'\n');
-                if (stream is FileStream file) Common.StorageSync.Flush(file); else stream.Flush();
+                DurableFile.Flush(stream);
             }
-            Common.StorageSync.SyncDirectory(_dir);
+            // The file flush persists the appended bytes and length; only a (possibly) new name needs the directory.
+            if (!history.NameDurable)
+            {
+                DurableFile.SyncDirectory(_dir);
+                history.NameDurable = true;
+            }
             // A failed append never acknowledges delivery or supersedes the last confirmed correction.
             history.Accept(fill);
         }
@@ -255,9 +265,7 @@ public sealed class AccountJournal
     }
 
     /// <summary>Empieza de cero (el archivo anterior queda guardado aparte, no se borra).</summary>
-    public void Restart(string account) => Restart(account, static directory => Common.StorageSync.SyncDirectory(directory));
-
-    internal void Restart(string account, Action<string> syncDirectory)
+    public void Restart(string account)
     {
         bool changed;
         lock (_gate)
@@ -267,11 +275,11 @@ public sealed class AccountJournal
             bool renamed = File.Exists(path);
             if (renamed)
             {
-                File.Move(path, path + $".{DateTime.Now:yyyyMMdd-HHmmss}.bak");
+                DurableFile.Rename(path, path + $".{DateTime.Now:yyyyMMdd-HHmmss}.bak", overwrite: false);
             }
             changed = history.Clear();
             // The active namespace is already empty after rename, even if durability confirmation fails.
-            if (renamed) syncDirectory(_dir);
+            if (renamed) DurableFile.SyncDirectory(_dir);
         }
 
         if (changed) Changed?.Invoke(account);

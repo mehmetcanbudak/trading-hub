@@ -39,7 +39,10 @@ For Bybit strategy ownership, a profile/display name is not an account identity.
 | Databento | Historical CME ticks, including long ranges. | Paid-by-usage API key. | No live data or orders. |
 | Interactive Brokers | Selected index-futures live/tick/bar data and stored/offline history. | API-enabled TWS or IB Gateway, compatible wire version and data entitlements; offline mode needs local data only. | Not implemented. |
 | Longbridge | Configured quotes, recent tape, candles and partial depth. | Client ID, explicit OAuth grant and instrument/session metadata. | Data only; no Longbridge order route. |
-| Aggregate crypto | Composite Binance/Bybit trade/candle data with constituent coverage. | Public constituent data or configured source profiles. | None: the composite price is not an executable venue, including ordinary simulation. |
+| Aggregate crypto | Composite trade/candle data from the selected crypto markets (Binance, Bybit, OKX, Bitget, Hyperliquid, Deribit, MEXC, Coinbase; spot and/or perpetual) with constituent coverage. | Public constituent data; no keys. | None: the composite price is not an executable venue, including ordinary simulation. |
+| Public crypto market | OKX (swaps or spot), Bitget (USDT futures or spot), Hyperliquid, Deribit and MEXC perpetuals, Coinbase spot: live trades, book and candles. | None (public data). | Simulated account only; no venue order route. |
+| Options data | Option chain, option trades and daily option history for the options studies. | Deribit: none (public BTC/ETH data). Custom JSON API: your provider's URL and, if required, its key. | None: study data only, never a chart market or order route. |
+| ETF flows | Daily spot ETF net flows for the **Spot ETF flows** study. | Your provider's URL and, if required, its key. | None: study data only. |
 
 Individual supported market-data sources can feed ordinary simulation; practice uses its isolated run account. The aggregate composite intentionally exposes **no order route**. Provider eligibility, subscriptions, API approval, retention, free tiers and prices can change; verify them with the provider rather than assuming the original project's advertised allowances still apply.
 
@@ -57,6 +60,10 @@ Public charts, DOM, tape and history need no account. For trading:
 2. Enter API key and secret. Grant trading permissions only; **do not grant withdrawals**. The API-key help link follows the selected testnet/live environment. Futures testnet orders go to Binance's demo trading service (`demo-fapi.binance.com`), so create those keys in [demo trading API management](https://demo.binance.com/en/my/settings/api-management); Spot testnet uses `testnet.binance.vision` and its own keys.
 3. For real trading, enable **Allow REAL orders from Trading Hub**. Otherwise it stays read-only and is not offered as a trading destination.
 4. Review per-real-order confirmation, enabled by default, and maximum order quantity. **0 means unlimited.**
+
+Orders placed on Binance's website or by another app appear unowned. Dragging one to a new price or size makes Trading Hub cancel and replace it as a manual order. Before adopting it, Trading Hub always reads the order from Binance, because it may have filled since the last poll. If it has executed, Trading Hub also reads that order's executions (`userTrades`/`myTrades` with its `orderId`) and then the order again. Those earlier fills stay the website's and only later fills count as yours. An unfilled order or an untriggered conditional order is adopted with no earlier fills; a stop that has already triggered is not modified.
+
+Binance limits these reads. USD-M futures return an order's executions only in windows of up to seven days and only for the past three months, so Trading Hub reads them in seven-day windows from the time the order was placed. It refuses a partly filled futures order placed more than 89 days ago (the shortest three calendar months). USD-M also stops returning any order 90 days after it was placed. Spot returns at most 1,000 executions per page, so Trading Hub reads every page. The drag is refused with a "Not modified" message, and the order stays unowned and unchanged, in any of these cases: Binance does not return the order, its executions are beyond the three-month limit, the two order reads disagree (for example the order filled again in between), the executions do not add up exactly to the executed quantity, or a read fails. Drag again to retry.
 
 ## Bybit
 
@@ -80,7 +87,13 @@ Connect uses an owned loopback callback, PKCE and bounded matching state; cancel
 
 The aggregate retains available constituent trade/candle data when another venue fails and exposes provider/time-specific partial coverage. Unknown buy-side volume is not silently treated as observed aggression. Stored/cached results keep source and correction identity.
 
-The DOM/heatmap is explicitly the **designated first venue only**. It is not consolidated and does not fail over to another venue as though the venue were unchanged. Neither the composite instrument nor its first-venue book authorizes Binance, Bybit, Rithmic or Tradovate orders; choose a separate executable individual-source chart and account.
+By default the DOM/heatmap is the **designated first venue only**; it does not fail over to another venue as though the venue were unchanged. Choosing **Composite of all market books** sums the sizes of every market with a valid book at each price instead. That composite is labelled partial whenever a market is missing, keeps crossed venue quotes visible rather than hiding them, drops a market's book when it disconnects or loses its baseline, and is never an executable quote. Neither the composite instrument nor any book mode authorizes Binance, Bybit, Rithmic or Tradovate orders; choose a separate executable individual-source chart and account.
+
+Markets are matched by **base asset**: BTC-USDT-SWAP (OKX), BTC-USD (Coinbase), BTC (Hyperliquid) and BTCUSDT (Binance) all join `BTCUSDT`. USDT, USD and USDC are one USD family and are combined **without conversion**; the instrument description says when quotes were mixed. A market listing several USD-family quotes contributes one (its preferred quote, then USDT, USD, USDC). A market whose price lies more than 3% outside the first market's is treated as a different asset with the same ticker: its prints, candles and book are omitted and it is reported as partial coverage. The **Spot / perpetual** filter keeps only spot or only perpetual markets without unticking them; a filter that leaves no market is a configuration error, not a silent fallback. The default selection remains Binance Futures + Bybit, so saved aggregate connections keep their data scope.
+
+## Public crypto markets
+
+One credential-free market per connection: OKX swaps/spot, Bitget USDT futures/spot, Hyperliquid, Deribit and MEXC perpetuals, or Coinbase spot (Bybit spot is available as an aggregate constituent). Instrument lists carry the venue's exact tick and lot metadata; contract sizes are converted to coins (contracts × contract value; Deribit inverse USD contracts ÷ price), and the feed refuses to stream before that metadata is listed. Trades keep the venue trade id as their source event identity; MEXC deals have none and are marked as partial, distinct observations. Book sequence gaps (OKX, Bitget, Deribit) invalidate the book and reconnect for a fresh snapshot. Hyperliquid and MEXC publish only the best 20 levels and OKX 400, so those books are labelled partial. Public trade endpoints only expose a recent window: chart history comes from venue candles (unknown aggressor side, so delta is not measured) and from the tape Trading Hub records while charts are open. These connections have no order route.
 
 ## Rithmic
 
@@ -115,6 +128,7 @@ Uses the Rithmic credentials supplied by AMP. A new profile starts disabled with
 3. Enter API **CID** and **Secret**, obtained through Tradovate Settings → API Access.
 4. Review instrument-search product roots; each resolves to the active monthly contract.
 5. Explicitly allow real Tradovate orders if needed and set a maximum order size.
+6. Optionally switch on **Exchange-side protection (Tradovate OCO)** under **Stops and targets**. It is off by default. When on, a whole-position stop and target are sent as one Tradovate OCO, so Tradovate cancels the other leg when one fills even if Trading Hub is closed. Partial targets and lone stops stay app-managed, and a refused OCO falls back to separate orders with a visible reason. See [Exchange-side protection](./operar.md#exchange-side-protection) and its [demo checklist](./native-protection-demo-checklist.md).
 
 Accounts appear in Chart Trader and Accounts. CME futures charts from Rithmic or Tradovate can use them. API market data requires the appropriate separate CME/API entitlement; without it, an entitled data connection can supply the chart while Tradovate handles execution. Tradovate Trader using the same username can interrupt the app's data session.
 
@@ -151,6 +165,23 @@ Historical CME ticks, including aggressor side and long history beyond Rithmic r
 - Enter the `db-…` API key; signup/pricing links are provided.
 - **Test connection** reports date availability and estimates a day of NQ tick data without downloading it.
 - No live feed or instrument-search entry: use **Data → CME futures with Databento**. See [Data](./datos.md#databento).
+
+## Options data
+
+Supplies the options studies (dealer gamma, walls, max pain, IV rank, skew, premium flow, options dashboard and the rest of the **Options** library group). Until an enabled **Options data** connection exists, every options study shows *Waiting for an options data connection* and makes no request; saving and enabling one configures open charts without a restart, and disabling it returns them to waiting. Only the first enabled options connection is used. The chart's base asset selects the underlying (BTCUSDT → BTC).
+
+- **Deribit (public, BTC and ETH)** needs no account or key. Trading Hub reads `get_book_summary_by_currency` for the chain (coin prices converted to USD with Deribit's index; the index, Deribit's estimated delivery price, is the spot reference and greeks use each expiry's forward), `get_last_trades_by_currency_and_time` for trades (aggressor side from `direction`) and `get_volatility_index_data` for daily history (DVOL, a 30-day implied-volatility index). Deribit applies credit-based rate limits; Trading Hub requests the chain at most once a minute per underlying (every 5–10 minutes for most chain studies), daily history hourly and new trades about once a minute, in pages of 1,000 trades and at most 50 pages per window.
+- **Custom JSON API** is your own paid or self-hosted provider. Trading Hub requests `GET {base}/chain?underlying=BTC`, `GET {base}/trades?underlying=BTC&from=…&to=…` and `GET {base}/daily?underlying=BTC&from=…&to=…` (ISO UTC times) and sends the optional key as a Bearer token or in the header you name. IV is a fraction (0.55 = 55 %), prices are USD per unit of the underlying and `contractSize` is the multiplier (default 1; 100 for US equity options). Missing greeks are computed from IV; other missing values stay unknown rather than zero. The **Underlyings** list limits which charts use it. The exact JSON fields are shown under the connection.
+- **Test connection** reads one chain and reports its contracts, expiries, spot and snapshot time.
+- Option trades are loaded one day at a time back to five days by default (up to 30 when **Options at price** asks for more). Bars outside the loaded trade range are gaps in the flow panes.
+- A Deribit request window stops after 50 pages (50,000 trades). Coverage then ends at the last complete millisecond; the rest of that window is recorded as a gap, never as zero trades. Trade studies say so (*Partial: trades capped at 50000 per request; 2026-11-05 10:00–14:30 UTC not loaded yet* in an overlay's card or at the top of a pane), the affected bars stay empty, and later refreshes continue paging from where the window stopped until the gap closes.
+- While an options study requests the chain, Trading Hub records at most one per-strike snapshot every 30 minutes (kept a week) and one daily summary per day under the market-data folder in `Options/`. Snapshot studies (gamma map by bar, open-interest changes, wall history) and the daily history use these recordings; the past is never reconstructed.
+
+## ETF flows
+
+Supplies the **Spot ETF flows** study. Without an enabled **ETF flows** connection it waits and makes no request. Trading Hub requests `GET {base}/flows?asset=BTC&from=YYYY-MM-DD&to=YYYY-MM-DD`, expecting `[{"date":"2026-11-03","net":-123400000,"funds":{"IBIT":-80000000}}]` in USD (or `netMillions` in millions; `{"data":[…]}` is also accepted) and sends the optional key as a Bearer token or in the header you name. Days without a net value are skipped, not treated as zero. The cache refreshes hourly. **Test connection** reads the last two weeks of the first listed asset (BTC by default).
+
+API keys for both connections are stored in the private credential store, never in `connections.json`. A custom API is called only while its connection is enabled; check your provider's rate limits, terms and prices.
 
 ## Interactive Brokers
 

@@ -502,6 +502,155 @@ public class LiveRunnerTests : IDisposable
     }
 
     [Fact]
+    public void An_opted_in_account_receives_the_runners_stop_and_take_profit_as_one_linked_pair()
+    {
+        var account = new LinkingAccount(InheritedLong());
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, account, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+
+        Assert.Equal(1, account.LinkedPairs);
+        var stop = Assert.Single(account.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        var target = Assert.Single(account.ActiveOrders, o => o.Type == OrderTypes.Limit);
+        Assert.Equal(95m, stop.TriggerPrice);
+        Assert.Equal(110m, target.Price);
+        Assert.Equal(1m, stop.Unfilled);
+        Assert.Equal(1m, target.Unfilled);
+        Assert.NotNull(account.ProtectionGroupOf(stop));
+        Assert.Equal(account.ProtectionGroupOf(stop), account.ProtectionGroupOf(target));
+    }
+
+    [Fact]
+    public void A_switched_off_account_receives_the_runners_protection_as_separate_orders()
+    {
+        var account = new LinkingAccount(InheritedLong()) { Enabled = false };
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, account, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+
+        Assert.Equal(0, account.LinkedPairs);
+        Assert.Equal(0, account.Scopes);
+        Assert.Equal(2, r.ActiveOrders.Count(o => o.IsProtective));
+        Assert.All(account.ActiveOrders, o => Assert.Null(account.ProtectionGroupOf(o)));
+    }
+
+    [Fact]
+    public void A_stop_only_strategy_never_opens_a_linked_pair()
+    {
+        var account = new LinkingAccount(InheritedLong());
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5 }, _data, account, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+
+        Assert.Equal(0, account.Scopes);
+        Assert.Single(account.ActiveOrders, o => o.Type == OrderTypes.Stop);
+    }
+
+    [Fact]
+    public void A_refused_linked_pair_is_replaced_at_once_by_separate_app_managed_protection()
+    {
+        var account = new LinkingAccount(InheritedLong());
+        var r = new LiveStrategyRunner(new Scripted { StopLossTicks = 5, TakeProfitTicks = 10 }, _data, account, ChartPeriod.M1) { ProtectOnStart = true };
+        r.Start();
+        var refused = account.ActiveOrders.ToList();
+
+        account.RefuseLinkedPair();
+
+        Assert.All(refused, o => Assert.Equal(OrderStatus.Rejected, o.Status));
+        var stop = Assert.Single(account.ActiveOrders, o => o.Type == OrderTypes.Stop);
+        var target = Assert.Single(account.ActiveOrders, o => o.Type == OrderTypes.Limit);
+        Assert.DoesNotContain(stop, refused);
+        Assert.DoesNotContain(target, refused);
+        Assert.Null(account.ProtectionGroupOf(stop));
+        Assert.Null(account.ProtectionGroupOf(target));
+        Assert.Equal(95m, stop.TriggerPrice);
+        Assert.Equal(1m, stop.Unfilled);
+        Assert.Equal(1, account.LinkedPairs);
+        Assert.Contains(r.LogLines, l => l.Contains("Exchange-side protection was refused", StringComparison.Ordinal));
+    }
+
+    /// <summary>A simulated account offering a linked stop/target contract: legs submitted in one link scope form a group.</summary>
+    private sealed class LinkingAccount : ITradingAccount, ITrackedOrderReplacement, INativeProtection
+    {
+        private readonly SimBroker _inner;
+        private readonly Dictionary<Order, string> _groups = new();
+        private List<Order>? _scope;
+        private bool _muted;
+        public LinkingAccount(SimBroker inner)
+        {
+            _inner = inner;
+            inner.Changed += () => { if (!_muted) Changed?.Invoke(); };
+        }
+        public bool Enabled { get; init; } = true;
+        public int LinkedPairs { get; private set; }
+        public int Scopes { get; private set; }
+        public string Name => _inner.Name;
+        public bool IsReal => _inner.IsReal;
+        public Instrument Instrument => _inner.Instrument;
+        public Position Position => _inner.Position!;
+        public IEnumerable<Order> ActiveOrders => _inner.ActiveOrders;
+        public bool PositionReady => ((ITradingAccount)_inner).PositionReady;
+        public bool OrdersReady => ((ITradingAccount)_inner).OrdersReady;
+        public string? LastError => _inner.LastError;
+        public decimal LastPrice => _inner.LastPrice;
+        public event Action? Changed;
+        public OrderContext OrderContext => _inner.OrderContext;
+        public IExecutionSource Executions => _inner.Executions;
+        public NativeProtectionFeatures NativeProtection => Enabled && NativeProtectionFault == null
+            ? NativeProtectionFeatures.LinkedStopAndTarget | NativeProtectionFeatures.NativeAmendment : NativeProtectionFeatures.None;
+        public string? NativeProtectionFault { get; private set; }
+        public IDisposable LinkProtection(OrderOwner owner)
+        {
+            Scopes++;
+            var scope = _scope = new List<Order>();
+            return new Scope(() =>
+            {
+                _scope = null;
+                if (scope.Count != 2) return;
+                LinkedPairs++;
+                foreach (var leg in scope) _groups[leg] = "pair-" + LinkedPairs;
+            });
+        }
+        public string? ProtectionGroupOf(Order order) => _groups.GetValueOrDefault(order);
+
+        /// <summary>The venue refuses the linked pair it was sent: both legs end rejected.</summary>
+        public void RefuseLinkedPair()
+        {
+            NativeProtectionFault = "Fixture venue refused the linked pair.";
+            _muted = true; // one venue report: the legs are rejected, never seen as cancelled first
+            foreach (var leg in _groups.Keys.ToList())
+            {
+                _inner.Cancel(leg);
+                leg.State = OrderStates.Failed;
+                leg.Status = OrderStatus.Rejected;
+                _groups.Remove(leg);
+            }
+            _muted = false;
+            Changed?.Invoke();
+        }
+
+        public Order Submit(PreparedOrderIntent intent)
+        {
+            var order = _inner.Submit(intent);
+            _scope?.Add(order);
+            return order;
+        }
+        public Order Replace(Order order, PreparedOrderIntent intent) => _inner.Replace(order, intent);
+        public bool IsReplacementPending(Order order) => _inner.IsReplacementPending(order);
+        private readonly HashSet<Order> _cancelRequested = new();
+        public void Cancel(Order order)
+        {
+            _cancelRequested.Add(order);
+            _inner.Cancel(order);
+        }
+        public bool CancelRequested(Order order) => _cancelRequested.Contains(order);
+        public bool PositionReflects(Order order) => true; // the simulator reports fills and position together
+        public void CancelAt(decimal price) => _inner.CancelAt(price);
+        public void CancelAll() => _inner.CancelAll();
+        private sealed class Scope(Action close) : IDisposable
+        {
+            public void Dispose() => close();
+        }
+    }
+
+    [Fact]
     public void An_unsaved_execution_recovers_once_in_order_after_storage_repair()
     {
         var (s, _, r) = Setup();

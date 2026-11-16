@@ -11,7 +11,7 @@ namespace TradingHub.Indicators.Native;
 /// </summary>
 [DisplayName("Session volume profile")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
-public class SessionVolumeProfile : Indicator
+public partial class SessionVolumeProfile : Indicator
 {
     public enum ProfilePeriod
     {

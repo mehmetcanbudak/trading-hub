@@ -61,6 +61,15 @@ public sealed class ChartTab
     /// <summary>Barra de dibujos propia del gráfico (a la izquierda).</summary>
     internal DrawingToolStrip? Tools { get; set; }
 
+    /// <summary>Floating bar of the selected drawing.</summary>
+    internal SelectedDrawingBar? DrawingBar { get; set; }
+
+    /// <summary>Chip shown after a gesture (switch type, delete, undo).</summary>
+    internal InkChip? InkChip { get; set; }
+
+    /// <summary>Indicators hidden with "hide indicators" (shown again when unhidden).</summary>
+    internal List<IndicatorSlot>? HiddenIndicators { get; set; }
+
     internal ChartPage? Page { get; set; }
     internal ChartWindow? Window { get; set; }
 
@@ -476,37 +485,21 @@ public sealed partial class TradingView : UserControl
         var body = new DockPanel();
         DockPanel.SetDock(headerBorder, Dock.Top);
         body.Children.Add(headerBorder);
-        body.Children.Add(view);
+        // the chart with the selected-drawing bar and the gesture chip floating over it
+        var viewHost = new Panel { ClipToBounds = true };
+        viewHost.Children.Add(view);
+        body.Children.Add(viewHost);
         // el contenido se recorta con el radio de adentro del borde: el gráfico acompaña la curva de la esquina (sin puntas)
         var inner = new Border { Child = body, CornerRadius = new CornerRadius(7), ClipToBounds = true };
         var frame = new Border { Child = inner, ClipToBounds = true, CornerRadius = new CornerRadius(8), Background = Ui.Bg0, BorderBrush = Ui.Line, BorderThickness = new Thickness(1) };
         var chart = new ChartTab { View = view, Frame = frame, Header = headerBorder, Title = title, FeedId = feedId, Symbol = symbol, AccountId = accountId, HistoryHours = historyHours };
 
-        // cada gráfico con su barra de dibujos (izquierda) y su Chart Trader (derecha), como en ATAS
-        var tools = new DrawingToolStrip();
-        chart.Tools = tools;
-        DockPanel.SetDock(tools, Dock.Left);
-        body.Children.Insert(body.Children.IndexOf(view), tools);
-        tools.ToolSelected += kind =>
-        {
-            Activate(chart);
-            if (chart.View.Controller is { } ctl)
-            {
-                ctl.ActiveTool = kind;
-                chart.View.Focus();
-            }
-        };
-        tools.ClearRequested += () =>
-        {
-            if (chart.Model == null) return;
-            chart.Model.Drawings.Clear();
-            chart.Model.Invalidate();
-            DrawingsTouched(chart);
-        };
+        // each chart with its drawing bar (left) and its Chart Trader (right)
+        InitializeDrawingTools(chart, body, viewHost);
         var trader = new ChartTraderPanel(this, chart);
         chart.Trader = trader;
         DockPanel.SetDock(trader, Dock.Right);
-        body.Children.Insert(body.Children.IndexOf(view), trader);
+        body.Children.Insert(body.Children.IndexOf(viewHost), trader);
 
         // color de vinculación en la esquina de la barrita del gráfico
         var link = new LinkButton(this, () => chart) { Margin = new Thickness(0, 0, 6, 0) };
@@ -534,7 +527,6 @@ public sealed partial class TradingView : UserControl
 
         // clic en cualquier parte del gráfico: pasa a ser el activo
         frame.AddHandler(PointerPressedEvent, (_, _) => Activate(chart), RoutingStrategies.Tunnel, handledEventsToo: true);
-        view.ToolFinished += () => chart.Tools?.Check(null);
         view.DrawingsChanged += () => DrawingsTouched(chart);
         view.DrawingDefaults = k => _svc.Settings.DrawingDefaults.TryGetValue(k.ToString(), out var d) ? d : null;
         view.MenuRequested += (_, p) => ShowChartMenu(chart, p);
@@ -1324,6 +1316,7 @@ public sealed partial class TradingView : UserControl
                 t.Model.Update();
                 CheckAlerts(t);
                 if (t.Model.IsDirty && visible.Contains(t)) t.View.InvalidateVisual();
+                if (visible.Contains(t)) t.DrawingBar?.Refresh();
             }
         }
 
@@ -1334,6 +1327,7 @@ public sealed partial class TradingView : UserControl
             t.Model.Update();
             CheckAlerts(t);
             if (t.Model.IsDirty) t.View.InvalidateVisual();
+            t.DrawingBar?.Refresh();
             if (slowFrame) w.Toolbar.UpdateQuote();
         }
 
@@ -1367,6 +1361,7 @@ public sealed partial class TradingView : UserControl
     private void CheckAlerts(ChartTab t)
     {
         var m = t.Model!;
+        CheckChartAlerts(t);
         decimal last = m.Data.LastPrice;
         if (last == 0) return;
         foreach (var d in m.Drawings.Where(d => d.IsAlert && d.Points.Count > 0).ToList())

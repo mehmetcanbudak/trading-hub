@@ -33,6 +33,7 @@ Navigation is integrated into the title bar, with platform-specific window contr
 | Accounts | ⌘5 | Balance, positions, orders, fills, trades and statistics. |
 | Backtesting | ⌘2 | C# strategies, backtests, optimization and Claude chat. |
 | Live | ⌘7 | Running strategies, portfolios and **Stop all**. |
+| Workbench | ⌘6 | Aggregated trades, depth heat map, liquidation map, derivatives, options and calculators for one instrument; read-only. See [Workbench](./workbench.md). |
 | Data | ⌘3 | Stored history, downloads, imports, Databento and replay. |
 | Connections | ⌘4 | Markets, brokers and accounts. |
 | Settings | ⌘, | Appearance, time zone, hotkeys, sleep prevention and folders. |

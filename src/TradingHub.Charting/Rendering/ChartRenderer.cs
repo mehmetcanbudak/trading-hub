@@ -12,7 +12,7 @@ using Rectangle = System.Drawing.Rectangle;
 namespace TradingHub.Charting.Rendering;
 
 /// <summary>Estado de interacción que afecta al dibujo (mouse, objeto en construcción, mensajes).</summary>
-public sealed class ChartRenderState
+public sealed partial class ChartRenderState
 {
     public float? MouseX { get; set; }
     public float? MouseY { get; set; }
@@ -100,7 +100,7 @@ public sealed record BracketDrag(Order? Entry, BracketRole Role, PendingBracket?
 public sealed record BracketHandle(SKRect Rect, BracketDrag Drag, bool IsButton);
 
 /// <summary>Dibuja un gráfico completo sobre un SKCanvas (sin depender de la UI).</summary>
-public sealed class ChartRenderer
+public sealed partial class ChartRenderer
 {
     private readonly FootprintRenderer _footprint = new();
     private readonly CandleRenderer _candles = new();
@@ -149,6 +149,7 @@ public sealed class ChartRenderer
         var t = model.Theme;
         var layout = ComputeLayout(model, width, height);
         model.LastLayout = layout;
+        BeginLineCapture(model);
         model.ChartInfo.Region = new Rectangle(0, 0, (int)width, (int)height);
 
         // fondo
@@ -173,6 +174,7 @@ public sealed class ChartRenderer
             // renders personalizados de indicadores (pueden pintar sobre el eje)
             DrawCustomRenders(canvas, model, layout, panel, width, height, above: true);
         }
+        EndLineCapture(model, layout);
         state.EndDrawingFrame();
 
         // separadores de paneles
@@ -189,6 +191,7 @@ public sealed class ChartRenderer
         DrawTimeAxis(canvas, model, layout, timeTicks);
         DrawPanelTitles(canvas, model, layout, state);
         if (model.Settings.ShowInfoPanel) DrawInfo(canvas, model, layout, state);
+        if (model.HighlightedLine != null) DrawHighlightedLine(canvas, model, layout);
         if (state.Crosshair) DrawCrosshair(canvas, model, layout, state);
         DrawOverlay(canvas, model, layout, state);
         DrawGoLatest(canvas, model, layout, state);
@@ -200,6 +203,7 @@ public sealed class ChartRenderer
             canvas.DrawRect(rectangle, _fill);
             canvas.DrawRect(rectangle, _stroke);
         }
+        DrawInk(canvas, model, layout, state);
         model.ClearDirty();
         return layout;
     }
@@ -380,11 +384,21 @@ public sealed class ChartRenderer
         _series.RenderDrawingObjects(canvas, model, layout, main, slots);
 
         int decimals = Instrument_Decimals(model);
-        foreach (var d in model.Drawings)
+        if (!model.Settings.HideDrawings)
         {
-            var runtime = d.Kind is DrawingKind.AnchoredVwap or DrawingKind.FixedRangeProfile ? state.DrawingRuntimeFor(d) : null;
-            d.Render(canvas, layout, model.Series, model.Theme, decimals, runtime, model.Data.Trades, model.DataGeneration, model.Settings.BlindReplay);
+            using var faded = state.InkVictims is { Count: > 0 } ? new SKPaint { Color = SKColors.White.WithAlpha(60) } : null;
+            foreach (var d in model.Drawings)
+            {
+                var runtime = d.Kind is DrawingKind.AnchoredVwap or DrawingKind.FixedRangeProfile ? state.DrawingRuntimeFor(d) : null;
+                // what a scribble in progress would erase is shown faded
+                bool victim = faded != null && state.InkVictims!.Contains(d);
+                if (victim) canvas.SaveLayer(faded);
+                d.Render(canvas, layout, model.Series, model.Theme, decimals, runtime, model.Data.Trades, model.DataGeneration, model.Settings.BlindReplay);
+                if (victim) canvas.Restore();
+            }
         }
+
+        state.Measure?.Render(canvas, layout, model.Series, model.Theme, decimals, null);
 
         if (model.Settings.ShowLastPriceLine && model.Series.Count > 0)
         {
@@ -427,6 +441,10 @@ public sealed class ChartRenderer
             canvas.Save();
             canvas.ClipRect(new SKRect(panel.Rect.Left, panel.Rect.Top, layout.PriceAxis.Right, panel.Rect.Bottom));
             var ctx = new RenderContext(canvas, new Rectangle(0, 0, (int)layout.Bounds.Width, (int)layout.Bounds.Height));
+            // on the price chart every line it draws is recorded: any line of any indicator can carry an alert
+            var capture = panel.IsPrice ? slot.LineCapture : null;
+            ctx.Capture = capture;
+            panel.Capture = capture;
             try
             {
                 foreach (var l in new[] { DrawingLayouts.Historical, DrawingLayouts.LatestBar, DrawingLayouts.Final })
@@ -440,6 +458,10 @@ public sealed class ChartRenderer
             {
                 if (slot.Error == null) this.LogError($"Error drawing {ind.Name}: {ex.Message}", ex);
                 slot.Error = ex.Message;
+            }
+            finally
+            {
+                panel.Capture = null;
             }
 
             canvas.Restore();

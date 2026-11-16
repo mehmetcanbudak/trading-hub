@@ -6,6 +6,7 @@ using Newtonsoft.Json.Serialization;
 using TradingHub.App.Views;
 using TradingHub.Charting;
 using TradingHub.Charting.Drawings;
+using TradingHub.Common;
 using TradingHub.Common.Logging;
 using TradingHub.Data;
 using TradingHub.Indicators;
@@ -59,6 +60,9 @@ internal static partial class Workspace
         public bool TraderVisible { get; set; } = true;
         public List<IndicatorDto> Indicators { get; set; } = new();
         public List<StrategyDto> Strategies { get; set; } = new();
+
+        /// <summary>Chart alerts (absent in workspaces saved before they existed).</summary>
+        public List<ChartAlert>? ChartAlerts { get; set; }
     }
 
     /// <summary>Una estrategia puesta en un gráfico.</summary>
@@ -100,9 +104,16 @@ internal static partial class Workspace
             var props = base.CreateProperties(type, memberSerialization);
             return props.Where(p =>
             {
-                if (!p.Writable || !p.Readable) return false;
+                if (!p.Readable) return false;
                 var pi = type.GetProperty(p.UnderlyingName!, BindingFlags.Public | BindingFlags.Instance);
                 if (pi == null || pi.GetIndexParameters().Length > 0) return false;
+                // Read-only parts of a composite indicator (for example the VWAP suite) keep their own settings;
+                // loading fills the existing part instead of replacing it.
+                if (!p.Writable)
+                {
+                    if (!typeof(Indicator).IsAssignableFrom(pi.PropertyType)) return false;
+                    p.ObjectCreationHandling = ObjectCreationHandling.Reuse;
+                }
                 if (pi.GetCustomAttribute<BrowsableAttribute>() is { Browsable: false }) return false;
                 if (typeof(Indicator).IsAssignableFrom(type) && pi.DeclaringType == typeof(Indicator) && pi.Name != nameof(Indicator.IsVisible)) return false;
                 return true;
@@ -215,6 +226,7 @@ internal static partial class Workspace
             CrossSymbol = t.CrossSymbol,
             TraderVisible = t.TraderVisible,
             Settings = JObject.FromObject(t.Model.Settings, Serializer),
+            ChartAlerts = t.Model.Alerts.Count > 0 ? t.Model.Alerts.ToList() : null,
         };
         foreach (var slot in t.Model.Indicators) td.Indicators.Add(ToIndicatorDto(slot));
         foreach (var cs in t.Strategies)
@@ -264,6 +276,19 @@ internal static partial class Workspace
 
     private static bool Saveable(ChartTab t) => t.Model != null && !t.IsReplay;
 
+    // A durable replacement costs drive flushes on the UI thread; content this process already committed is not rewritten.
+    private static readonly Dictionary<string, string> Committed = new();
+
+    private static void ReplaceIfChanged(string path, string text)
+    {
+        lock (Committed)
+        {
+            if (Committed.TryGetValue(path, out var last) && last == text && File.Exists(path)) return;
+            DurableFile.ReplaceAtomically(path, text);
+            Committed[path] = text;
+        }
+    }
+
     public static void Save(TradingView w)
     {
         try
@@ -291,8 +316,8 @@ internal static partial class Workspace
                 });
             }
 
-            Directory.CreateDirectory(AppPaths.Root);
-            File.WriteAllText(AppPaths.WorkspaceFile, JsonConvert.SerializeObject(dto, Formatting.Indented, Settings));
+            DurableFile.EnsureDirectory(AppPaths.Root);
+            ReplaceIfChanged(AppPaths.WorkspaceFile, JsonConvert.SerializeObject(dto, Formatting.Indented, Settings));
             foreach (var t in w.Tabs.Where(Saveable)) SaveDrawings(t);
         }
         catch (Exception ex)
@@ -325,6 +350,7 @@ internal static partial class Workspace
         if (tab.Model == null) return;
         if (td.BarWidth > 0) tab.Model.Viewport.BarWidth = td.BarWidth;
         AddIndicators(w, tab.Model, td.Indicators);
+        RestoreChartAlerts(tab.Model, td.ChartAlerts);
 
         // estrategias: las visuales vuelven a correr; las que ejecutaban quedan pausadas hasta que las reanudes
         foreach (var sd in td.Strategies)
@@ -416,8 +442,8 @@ internal static partial class Workspace
         if (t.Model == null) return;
         try
         {
-            Directory.CreateDirectory(AppPaths.Drawings);
-            File.WriteAllText(DrawingsFile(t), System.Text.Json.JsonSerializer.Serialize(t.Model.Drawings));
+            DurableFile.EnsureDirectory(AppPaths.Drawings);
+            ReplaceIfChanged(DrawingsFile(t), System.Text.Json.JsonSerializer.Serialize(t.Model.Drawings));
         }
         catch (Exception ex)
         {

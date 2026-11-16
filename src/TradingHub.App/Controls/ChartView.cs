@@ -83,6 +83,15 @@ public sealed class ChartView : SkiaView
             if (_controller != null) _controller.BracketDropped += (d, p) => BracketDropped?.Invoke(d, p);
             if (_controller != null) _controller.DrawingDoubleClicked += d => DrawingDoubleClicked?.Invoke(d);
             if (_controller != null) _controller.DrawingDefaults = k => DrawingDefaults?.Invoke(k);
+            if (_controller != null)
+            {
+                _controller.Magnet = _magnet;
+                _controller.StickyTool = _sticky;
+                _controller.InkGestures = _ink;
+                _controller.InkFinished += r => InkFinished?.Invoke(r);
+                _controller.DrawingSelected += d => DrawingSelected?.Invoke(d);
+            }
+
             if (_controller != null) _controller.IndicatorsChanged += () => IndicatorsChanged?.Invoke();
             if (_controller != null) _controller.IndicatorSettingsRequested += slot => IndicatorSettingsRequested?.Invoke(slot);
             if (_controller != null) _controller.StrategySettingsRequested += st => StrategySettingsRequested?.Invoke(st);
@@ -93,6 +102,72 @@ public sealed class ChartView : SkiaView
     }
 
     public ChartController? Controller => _controller;
+
+    private MagnetMode _magnet;
+    private bool _sticky, _ink;
+    private DispatcherTimer? _inkTimer;
+
+    /// <summary>Drawing magnet (kept for models opened later).</summary>
+    public MagnetMode Magnet
+    {
+        get => _magnet;
+        set
+        {
+            _magnet = value;
+            if (_controller != null) _controller.Magnet = value;
+        }
+    }
+
+    /// <summary>Keep drawing: the tool stays active after each drawing.</summary>
+    public bool StickyTool
+    {
+        get => _sticky;
+        set
+        {
+            _sticky = value;
+            if (_controller != null) _controller.StickyTool = value;
+        }
+    }
+
+    /// <summary>Gesture drawing (hold still, then trace a shape).</summary>
+    public bool InkGestures
+    {
+        get => _ink;
+        set
+        {
+            _ink = value;
+            if (_controller != null) _controller.InkGestures = value;
+        }
+    }
+
+    /// <summary>A gesture finished (the drawing it left or what it erased).</summary>
+    public event Action<TradingHub.Charting.Drawings.InkResult>? InkFinished;
+
+    /// <summary>A drawing was selected with a click.</summary>
+    public event Action<TradingHub.Charting.Drawings.ChartDrawing>? DrawingSelected;
+
+    /// <summary>While the button is held still the ring fills; the controller starts the gesture on time.</summary>
+    private void StartInkTimer()
+    {
+        if (_controller?.InkPending != true) return;
+        _inkTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) =>
+        {
+            if (_controller == null || !_controller.InkPending)
+            {
+                _inkTimer?.Stop();
+                _controller?.InkTick();
+                InvalidateVisual();
+                return;
+            }
+
+            if (_controller.InkTick())
+            {
+                UpdateCursor();
+                InvalidateVisual();
+            }
+        });
+        _inkTimer.Start();
+    }
 
     public event Action? ToolFinished;
     public event Action? DrawingsChanged;
@@ -333,12 +408,14 @@ public sealed class ChartView : SkiaView
         var mods = Mods(e.KeyModifiers);
         if (props.IsRightButtonPressed)
         {
+            // a context menu (which can place orders) never opens over a half-made gesture
+            if (_controller.InkPending) _controller.CancelInteraction();
             MenuRequested?.Invoke(this, p);
             e.Handled = true;
             return;
         }
 
-        if (_controller.TryCompletePending((float)p.X, (float)p.Y, mods))
+        if (_controller.TryCompletePending((float)p.X, (float)p.Y, mods, e.ClickCount))
         {
             InvalidateVisual();
             return;
@@ -347,6 +424,7 @@ public sealed class ChartView : SkiaView
         var button = props.IsMiddleButtonPressed ? PointerButton.Middle : PointerButton.Left;
         _controller.MouseDown((float)p.X, (float)p.Y, button, e.ClickCount, mods);
         e.Pointer.Capture(this);
+        StartInkTimer();
         UpdateCursor();
         InvalidateVisual();
     }
@@ -394,6 +472,7 @@ public sealed class ChartView : SkiaView
         if (_controller == null) return;
         var p = e.GetPosition(this);
         _controller.MouseUp((float)p.X, (float)p.Y, e.InitialPressMouseButton == MouseButton.Right ? PointerButton.Right : PointerButton.Left, Mods(e.KeyModifiers));
+        _inkTimer?.Stop();
         e.Pointer.Capture(null);
         InvalidateVisual();
     }

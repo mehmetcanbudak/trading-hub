@@ -74,7 +74,9 @@ public sealed class AccountJournalPersistenceTests
             var time = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
             journal.Add(account, new AccountFill("entry", time, "TEST", true, 2m, 100m, 10m, 3m));
             journal.Add(account, new AccountFill("exit", time.AddMinutes(1), "TEST", false, 2m, 105m, 10m, 3m));
-            Assert.Throws<IOException>(() => journal.Restart(account, _ => throw new IOException("Owned post-rename namespace failure.")));
+            var recorder = new DurabilityRecorder { FailWhen = step => step.StartsWith("sync:", StringComparison.Ordinal) };
+            using (recorder.Install())
+                Assert.Throws<IOException>(() => journal.Restart(account));
             Assert.Equal(0m, RoundTrips.Analyze(journal.FillsOf(account)).RealizedNet);
             var entry = new AccountFill("entry", time.AddHours(1), "TEST", true, 1m, 200m, 10m, 1m);
             var exit = new AccountFill("exit", time.AddHours(1).AddMinutes(1), "TEST", false, 1m, 210m, 10m, 1m);

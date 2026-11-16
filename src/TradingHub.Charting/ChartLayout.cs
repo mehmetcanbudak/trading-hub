@@ -139,8 +139,13 @@ public sealed class PanelLayout : IChartContainer
         // los precios de nivel (múltiplos del paso de fila) se ubican en el centro visual de su fila
         float y = RowCenterOf != null && price % main.RowSize == 0 ? main.Y(RowCenterOf(price)) : main.Y(price);
         if (isStartOfPrice) y -= (float)(main.RowHeight / 2);
-        return (int)Math.Round(y);
+        int r = (int)Math.Round(y);
+        Capture?.Convert(r, price);
+        return r;
     }
+
+    /// <summary>While an indicator draws on this panel: records each price it converts to Y (the exact price of its lines).</summary>
+    internal DrawnLineCapture? Capture;
 
     /// <summary>Convierte un precio de nivel al centro de su fila (lo asigna el renderer).</summary>
     public Func<decimal, decimal>? RowCenterOf { get; set; }
@@ -149,7 +154,12 @@ public sealed class PanelLayout : IChartContainer
 
     public int GetBarByX(int x) => Chart.BarAt(x);
 
-    public int GetYByValue(decimal value) => (int)Math.Round(Y(value));
+    public int GetYByValue(decimal value)
+    {
+        int r = (int)Math.Round(Y(value));
+        Capture?.Convert(r, value);
+        return r;
+    }
 
     public decimal GetValueByY(int y) => (decimal)ValueAt(y);
 }

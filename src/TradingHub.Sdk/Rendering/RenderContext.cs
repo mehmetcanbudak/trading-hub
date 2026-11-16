@@ -33,6 +33,12 @@ namespace TradingHub.Rendering.Context
         /// <summary>Canvas de Skia subyacente (para dibujo avanzado).</summary>
         public SKCanvas Canvas => _canvas;
 
+        /// <summary>
+        /// Set by the chart while an indicator draws on the price panel: it records the lines and texts drawn so any line of
+        /// any indicator can carry an alert without the indicator declaring it. Null records nothing.
+        /// </summary>
+        internal IRenderCapture? Capture;
+
         public Rectangle ClipBounds => _clip;
 
         public RenderTextRenderingHint TextRenderingHint { get; private set; } = RenderTextRenderingHint.AntiAlias;
@@ -160,6 +166,7 @@ namespace TradingHub.Rendering.Context
                     _ => rect.Left,
                 };
                 float baseline = y0 + i * lineH - f.Metrics.Ascent;
+                Capture?.Text(line, new RectangleF(x, y0 + i * lineH, w, lineH));
                 _canvas.DrawUiText(line, x, baseline, f, _text);
             }
 
@@ -185,6 +192,8 @@ namespace TradingHub.Rendering.Context
             _text.Color = color.ToSkColor();
             if (text.IndexOf('\n') < 0)
             {
+                // an approximate width is enough to tell which line a text names; measuring every label costs
+                Capture?.Text(text, new RectangleF(x, y, text.Length * f.Size * 0.58f, f.Spacing));
                 _canvas.DrawUiText(text, x, y - f.Metrics.Ascent, f, _text);
                 return;
             }
@@ -227,6 +236,7 @@ namespace TradingHub.Rendering.Context
         public void DrawLine(RenderPen pen, float x1, float y1, float x2, float y2)
         {
             if (pen == null || pen.Color.A == 0) return;
+            Capture?.Line(x1, y1, x2, y2, pen.Color);
             var p = Stroke(pen);
             if (x1 == x2)
             {
@@ -248,6 +258,7 @@ namespace TradingHub.Rendering.Context
         public void DrawLines(RenderPen pen, Point[] points)
         {
             if (pen == null || points == null || points.Length < 2) return;
+            Capture?.Lines(points, pen.Color);
             using var path = new SKPath();
             path.MoveTo(points[0].X, points[0].Y);
             for (int i = 1; i < points.Length; i++) path.LineTo(points[i].X, points[i].Y);
@@ -257,6 +268,7 @@ namespace TradingHub.Rendering.Context
         public void DrawLines(RenderPen pen, PointF[] points)
         {
             if (pen == null || points == null || points.Length < 2) return;
+            Capture?.Lines(points, pen.Color);
             using var path = new SKPath();
             path.MoveTo(points[0].X, points[0].Y);
             for (int i = 1; i < points.Length; i++) path.LineTo(points[i].X, points[i].Y);
@@ -303,6 +315,13 @@ namespace TradingHub.Rendering.Context
         public void DrawRectangle(RenderPen pen, Rectangle rect)
         {
             if (pen == null || pen.Color.A == 0) return;
+            if (Capture != null)
+            {
+                // the top and bottom edges of a box (zones, gaps, blocks) are price lines
+                Capture.Line(rect.Left, rect.Top, rect.Right, rect.Top, pen.Color);
+                Capture.Line(rect.Left, rect.Bottom, rect.Right, rect.Bottom, pen.Color);
+            }
+
             var p = Stroke(pen);
             float l = Crisp(rect.Left, p.StrokeWidth), t = Crisp(rect.Top, p.StrokeWidth);
             float r = Crisp(rect.Right, p.StrokeWidth), b = Crisp(rect.Bottom, p.StrokeWidth);

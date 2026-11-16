@@ -330,14 +330,9 @@ internal sealed class FileSecretStore(string path) : IAsyncSecretStore, IAsyncDi
             var all = await LoadAsync(operation.Token).ConfigureAwait(false);
             if (string.IsNullOrEmpty(secret)) all.Remove(account);
             else all[account] = secret;
-            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            try
-            {
-                await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(all), operation.Token).ConfigureAwait(false);
-                operation.Token.ThrowIfCancellationRequested();
-                File.Move(temporary, path, overwrite: true);
-            }
-            finally { File.Delete(temporary); }
+            string json = JsonSerializer.Serialize(all);
+            await DurableFile.ReplaceAtomicallyAsync(path,
+                (stream, token) => stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json), token).AsTask(), operation.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (operation.Token.IsCancellationRequested)
         {
@@ -374,11 +369,14 @@ public enum ConnectionKind
     [Display(Name = "Alpaca")] Alpaca,
     [Display(Name = "Databento")] Databento,
     [Display(Name = "Longbridge (data only)")] Longbridge,
-    [Display(Name = "Aggregate Binance + Bybit (data only)")] AggregateCrypto,
+    [Display(Name = "Aggregate crypto (data only)")] AggregateCrypto,
+    [Display(Name = "Public crypto market (data only)")] PublicCrypto,
+    [Display(Name = "Options data")] OptionsData,
+    [Display(Name = "ETF flows")] EtfFlows,
 }
 
 /// <summary>Una conexión configurada (los secretos van al llavero, no a este archivo).</summary>
-public sealed class ConnectionProfile
+public sealed partial class ConnectionProfile
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
     /// <summary>Opaque local trading namespace and cooperating configuration generation, not a native account ID.</summary>
@@ -403,6 +401,9 @@ public sealed class ConnectionProfile
     public bool AllowRealOrders { get; set; }
     public bool ConfirmOrders { get; set; } = true;
     public decimal MaxOrderQuantity { get; set; }
+
+    /// <summary>Opt-in venue-native linked stop/target (Tradovate OCO). Off by default: protection stays app-managed.</summary>
+    public bool ExchangeSideProtection { get; set; }
 
     // Rithmic
     public string RithmicUri { get; set; } = RithmicGateways.TestUri;
@@ -455,6 +456,7 @@ public sealed class ConnectionProfile
         ConnectionKind.Bybit => BybitEnvironment == BybitEnvironment.Testnet ? BybitFeed.TestnetId : BybitFeed.LinearId,
         ConnectionKind.Longbridge => "longbridge-" + Id,
         ConnectionKind.AggregateCrypto => AggregateFeed.FeedId,
+        ConnectionKind.PublicCrypto => PublicVenueId,
         ConnectionKind.Rithmic or ConnectionKind.AmpFutures => RithmicFeed.FeedId,
         ConnectionKind.Tradovate => TradingHub.Feeds.Tradovate.TradovateFeed.FeedId,
         // cada broker de cTrader tiene sus propios precios: el primero usa «ctrader» y los demás su propio id
@@ -462,11 +464,13 @@ public sealed class ConnectionProfile
         ConnectionKind.Oanda => TradingHub.Feeds.Oanda.OandaFeed.FeedId,
         ConnectionKind.Alpaca => TradingHub.Feeds.Alpaca.AlpacaFeed.FeedId,
         ConnectionKind.Databento => "databento",
+        // Study data only: an id no chart feed or stored history ever uses.
+        ConnectionKind.OptionsData or ConnectionKind.EtfFlows => "external-" + Id,
         _ => "ib",
     };
 
-    /// <summary>Chart market-data capability; IB remains strictly data-only.</summary>
-    [JsonIgnore] public bool HasMarketData => Kind != ConnectionKind.Databento;
+    /// <summary>Chart market-data capability; IB remains strictly data-only; options and ETF data feed studies only.</summary>
+    [JsonIgnore] public bool HasMarketData => Kind is not (ConnectionKind.Databento or ConnectionKind.OptionsData or ConnectionKind.EtfFlows);
 
     /// <summary>Id por defecto del primer perfil de cada tipo (el mismo de sus datos).</summary>
     public static string DefaultId(ConnectionKind kind) => kind switch
@@ -476,6 +480,8 @@ public sealed class ConnectionProfile
         ConnectionKind.Oanda => TradingHub.Feeds.Oanda.OandaFeed.FeedId,
         ConnectionKind.Alpaca => TradingHub.Feeds.Alpaca.AlpacaFeed.FeedId,
         ConnectionKind.Databento => "databento",
+        ConnectionKind.OptionsData => "options-data",
+        ConnectionKind.EtfFlows => "etf-flows",
         _ => Guid.NewGuid().ToString("N")[..8],
     };
 
@@ -488,7 +494,7 @@ public sealed class ConnectionProfile
 }
 
 /// <summary>Administra las conexiones: las guarda, crea sus feeds y las prueba.</summary>
-public sealed class ConnectionManager
+public sealed partial class ConnectionManager
 {
     private readonly string _filePath;
     private readonly ISecretStore _secretStore;
@@ -581,19 +587,11 @@ public sealed class ConnectionManager
             SetSecret(p, "apikey", p.ApiKey);
             p.ApiKey = "";
         }
-        string directory = Path.GetDirectoryName(Path.GetFullPath(_filePath))!;
-        Directory.CreateDirectory(directory);
         foreach (var profile in Profiles) RefreshTradingIdentity(profile);
-        string temporary = _filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                JsonSerializer.Serialize(file, Profiles, Json);
-                StorageSync.Flush(file);
-            }
-            File.Move(temporary, _filePath, overwrite: true);
-            StorageSync.SyncDirectory(directory);
+            DurableFile.EnsureDirectory(Path.GetDirectoryName(Path.GetFullPath(_filePath))!);
+            DurableFile.ReplaceAtomically(_filePath, file => JsonSerializer.Serialize(file, Profiles, Json));
             _tradingPersistenceError = null;
         }
         catch (Exception ex)
@@ -601,7 +599,6 @@ public sealed class ConnectionManager
             _tradingPersistenceError = "Trading configuration namespace is not committed: " + ex.Message;
             throw;
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
         Changed?.Invoke();
     }
 
@@ -759,17 +756,15 @@ public sealed class ConnectionManager
             ConnectionKind.BinanceFutures => BinanceFeedOf(futures: true),
             ConnectionKind.BinanceSpot => BinanceFeedOf(futures: false),
             ConnectionKind.Bybit => BybitFeedOf(p),
-            ConnectionKind.AggregateCrypto => new AggregateFeed(new IMarketDataFeed[]
-            {
-                BinanceFeedOf(futures: true),
-                new BybitFeed(_networkFactory().CreateHttpClient(TimeSpan.FromSeconds(20)), configureSocket: _networkFactory().Configure, ownsHttpClient: true),
-            }, ownsSources: true),
+            ConnectionKind.AggregateCrypto => AggregateFeedOf(p),
+            ConnectionKind.PublicCrypto => PublicVenueFeedOf(p.PublicVenueId),
             ConnectionKind.Rithmic or ConnectionKind.AmpFutures => new RithmicFeed(RithmicSettingsOf(p), network: _networkFactory()),
             ConnectionKind.Tradovate => TradovateFeedOf(p),
             ConnectionKind.CTrader => CTraderFeedOf(p),
             ConnectionKind.Oanda => new TradingHub.Feeds.Oanda.OandaFeed(OandaSettingsOf(p), network: _networkFactory()),
             ConnectionKind.Alpaca => new TradingHub.Feeds.Alpaca.AlpacaFeed(AlpacaSettingsOf(p), network: _networkFactory()),
             ConnectionKind.Databento => throw new NotSupportedException("Databento does not provide live data here: use Data to download futures history."),
+            ConnectionKind.OptionsData or ConnectionKind.EtfFlows => throw new NotSupportedException("This connection supplies data to studies (options or ETF flows), not a chart market."),
             _ => throw new NotSupportedException("This connection has no integrated market-data feed."),
         };
         _feeds[p.Id] = f;
@@ -1063,8 +1058,15 @@ public sealed class ConnectionManager
                 }
                 case ConnectionKind.AggregateCrypto:
                 {
+                    var aggregate = (AggregateFeed)GetFeed(p.Id);
+                    var instruments = await aggregate.GetInstrumentsAsync(ct);
+                    string book = aggregate.IsBookConsolidated ? "DOM is a composite of venue books, not executable" : $"DOM is {aggregate.Sources[0].DisplayName} only";
+                    return (true, $"{instruments.Count} composite instruments from {aggregate.Sources.Count} markets. Non-executable prices; {book}. Constituent failures remain visible in coverage.");
+                }
+                case ConnectionKind.PublicCrypto:
+                {
                     var instruments = await GetFeed(p.Id).GetInstrumentsAsync(ct);
-                    return (true, $"{instruments.Count} composite instruments. Non-executable prices; DOM is Binance Futures only. Constituent failures remain visible in coverage.");
+                    return (true, $"{instruments.Count} instruments available. Public data only; no account or orders.");
                 }
                 case ConnectionKind.Rithmic:
                 case ConnectionKind.AmpFutures:
@@ -1091,6 +1093,9 @@ public sealed class ConnectionManager
                     return await ((TradingHub.Feeds.Oanda.OandaFeed)GetFeed(p.Id)).TestAsync(ct);
                 case ConnectionKind.Alpaca:
                     return await ((TradingHub.Feeds.Alpaca.AlpacaFeed)GetFeed(p.Id)).TestAsync(ct);
+                case ConnectionKind.OptionsData:
+                case ConnectionKind.EtfFlows:
+                    return await TestExternalAsync(p, ct);
                 case ConnectionKind.Databento:
                 {
                     if (string.IsNullOrWhiteSpace(GetSecret(p))) return (false, "Databento API key is missing.");

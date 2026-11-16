@@ -64,7 +64,8 @@ public partial class CompositeVolumeProfile
     private StudyTimeFrame ProfileFrame => _period switch
     {
         ProfilePeriod.Week => StudyTimeFrame.Week, ProfilePeriod.Month => StudyTimeFrame.Month,
-        ProfilePeriod.Quarter => StudyTimeFrame.Quarter, ProfilePeriod.Year => StudyTimeFrame.Year, _ => StudyTimeFrame.Day
+        ProfilePeriod.Quarter => StudyTimeFrame.Quarter, ProfilePeriod.Year => StudyTimeFrame.Year,
+        ProfilePeriod.AllHistory => StudyTimeFrame.Chart, _ => StudyTimeFrame.Day
     };
     private bool IsCalendarPeriodStart(IndicatorCandle candle) => StudyMath.IsPeriodOpening(candle, ProfileFrame);
     private static void CountExtraCoverage(Profile p, StudyCoverage coverage, int change)
@@ -168,7 +169,7 @@ public partial class CompositeVolumeProfile
         decimal median = StudyMath.Median(volumes), width = profile.ValueAreaHigh - profile.ValueAreaLow;
         var result = new ExtraResult(profile.Poc, profile.ValueAreaHigh, profile.ValueAreaLow, profile.MaximumVolume, profile.Total,
             askPoc, bidPoc, askMax > 0, bidMax > 0, outer.High, outer.Low, width == 0 ? null : (outer.High - outer.Low) / width, median);
-        if (completed) _resultCache.Store(key, JsonSerializer.SerializeToUtf8Bytes(result));
+        if (completed) { _resultCache.Store(key, JsonSerializer.SerializeToUtf8Bytes(result)); PublishClosedRows(profile, result); }
         ApplyExtras(profile, result);
     }
     private void ApplyExtras(Profile profile, ExtraResult result)

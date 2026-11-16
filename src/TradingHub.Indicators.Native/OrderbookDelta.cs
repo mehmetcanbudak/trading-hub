@@ -22,6 +22,18 @@ public sealed class OrderbookDelta : Indicator
         [Display(Name = "Book delta change from previous bar")] Change,
     }
 
+    /// <summary>How far the book is summed: ticks from each side's best price, or a mid-relative percentage band.</summary>
+    public enum DepthRange
+    {
+        [Display(Name = "Ticks from each side's best price")] Ticks,
+        [Display(Name = "0 – 0.5 % of mid")] Percent0_5,
+        [Display(Name = "0 – 1 % of mid")] Percent1,
+        [Display(Name = "0 – 2.5 % of mid")] Percent2_5,
+        [Display(Name = "0 – 5 % of mid")] Percent5,
+        [Display(Name = "0 – 10 % of mid")] Percent10,
+        [Display(Name = "0 – 25 % of mid")] Percent25,
+    }
+
     private readonly OptionalValueDataSeries _main = new("Delta", "Book delta") { Width = 2, VisualType = VisualMode.Histogram };
     private readonly OptionalValueDataSeries _bid = new("Bid", "Resting bid size") { Width = 2, Color = Color.FromArgb(60, 200, 120) };
     private readonly OptionalValueDataSeries _ask = new("Ask", "Resting ask size") { Width = 2, Color = Color.FromArgb(240, 80, 80) };
@@ -29,6 +41,7 @@ public sealed class OrderbookDelta : Indicator
     private BookView _view;
     private DepthAggregation _aggregation = DepthAggregation.SampleAverage;
     private int _within = 20, _maxAge = 10;
+    private DepthRange _range;
     private bool _allowPartial = true;
 
     public OrderbookDelta() : base(true)
@@ -42,6 +55,22 @@ public sealed class OrderbookDelta : Indicator
 
     [Display(Name = "View", GroupName = "Display", Order = 10)]
     public BookView View { get => _view; set { _view = value; RecalculateValues(); } }
+
+    [Display(Name = "Book range", GroupName = "Calculation", Order = 15)]
+    [Description("Percentage bands are measured from the mid price; when the provider book is shallower than the band, only the recorded levels are summed and the status says so.")]
+    public DepthRange Range { get => _range; set { _range = value; RecalculateValues(); } }
+
+    /// <summary>Band percentage for <see cref="Range"/>; zero means tick distance.</summary>
+    public static decimal PercentOf(DepthRange range) => range switch
+    {
+        DepthRange.Percent0_5 => 0.5m,
+        DepthRange.Percent1 => 1m,
+        DepthRange.Percent2_5 => 2.5m,
+        DepthRange.Percent5 => 5m,
+        DepthRange.Percent10 => 10m,
+        DepthRange.Percent25 => 25m,
+        _ => 0m,
+    };
 
     [Display(Name = "Ticks from each side's best price (inclusive)", GroupName = "Calculation", Order = 20)]
     [Range(0, 10_000)]
@@ -84,7 +113,8 @@ public sealed class OrderbookDelta : Indicator
     {
         if (bar >= _measurements.Length) Array.Resize(ref _measurements, Math.Max(bar + 1, Math.Max(16, _measurements.Length * 2)));
         var query = GetDepthHistory(bar);
-        var measurement = DepthStatistics.Measure(query, _within, _aggregation, TimeSpan.FromSeconds(_maxAge), _allowPartial);
+        decimal percent = PercentOf(_range);
+        var measurement = DepthStatistics.Measure(query, _within, _aggregation, TimeSpan.FromSeconds(_maxAge), _allowPartial, percent);
         _measurements[bar] = measurement;
         bool available = measurement.IsAvailable;
         decimal result = _view == BookView.Imbalance ? measurement.Imbalance : measurement.Delta;
@@ -95,7 +125,7 @@ public sealed class OrderbookDelta : Indicator
             else
             {
                 var previousQuery = GetDepthHistory(bar - 1);
-                var previous = DepthStatistics.Measure(previousQuery, _within, _aggregation, TimeSpan.FromSeconds(_maxAge), _allowPartial);
+                var previous = DepthStatistics.Measure(previousQuery, _within, _aggregation, TimeSpan.FromSeconds(_maxAge), _allowPartial, percent);
                 var currentSource = LastSource(query);
                 var previousSource = LastSource(previousQuery);
                 if (!previous.IsAvailable || currentSource == null || currentSource != previousSource ||
@@ -119,8 +149,10 @@ public sealed class OrderbookDelta : Indicator
             Coverage = available ? StudyCoverage.Observed : StudyCoverage.Missing;
             if ((measurement.Coverage & (DepthCoverage.PartialBook | DepthCoverage.Truncated | DepthCoverage.SequenceGap | DepthCoverage.Missing)) != 0)
                 Coverage |= StudyCoverage.Incomplete;
-            Status = $"Resting L2 · {_aggregation} · {measurement.Samples} snapshots · {measurement.CoveredDuration.TotalSeconds:0.###} covered seconds";
+            string range = percent > 0 ? $"0–{percent:0.##}% of mid" : $"{_within} ticks";
+            Status = $"Resting L2 · {range} · {_aggregation} · {measurement.Samples} snapshots · {measurement.CoveredDuration.TotalSeconds:0.###} covered seconds";
             if ((measurement.Coverage & (DepthCoverage.PartialBook | DepthCoverage.Truncated)) != 0) Status += " · partial recorded depth";
+            if (percent > 0 && BandExceedsBook(query, percent)) Status += " · band is deeper than the recorded levels; only recorded levels are summed";
             if (reason != null) Status += " · " + reason;
             var source = LastSource(query);
             if (source != null) Status += " · " + source;
@@ -137,5 +169,15 @@ public sealed class OrderbookDelta : Indicator
     {
         var sample = query.Samples.LastOrDefault(s => s.IsUsable) ?? query.Preceding;
         return sample?.IsUsable == true ? sample.ProviderId + "/" + sample.Venue : null;
+    }
+
+    /// <summary>True when the latest usable book does not reach the band edge on either side (a shallow provider book).</summary>
+    public static bool BandExceedsBook(DepthHistoryQuery query, decimal percent)
+    {
+        var sample = query.Samples.LastOrDefault(s => s.IsUsable) ?? query.Preceding;
+        if (sample?.IsUsable != true) return false;
+        var book = sample.Snapshot;
+        decimal mid = ((decimal)book.BestBidTicks + book.BestAskTicks) / 2, distance = Math.Abs(mid) * percent / 100;
+        return book.Bids[^1].PriceTicks > mid - distance || book.Asks[^1].PriceTicks < mid + distance;
     }
 }

@@ -20,7 +20,7 @@ namespace TradingHub.App.Views;
 /// Conexiones: perfiles de datos y cuentas (Rithmic, Binance, Bybit, Interactive Brokers y simulador).
 /// Las contraseñas y API secrets se guardan en el Llavero de macOS, nunca en archivos.
 /// </summary>
-internal sealed class ConnectionsView : UserControl, IPage
+internal sealed partial class ConnectionsView : UserControl, IPage
 {
     private readonly AppServices _svc;
     private readonly Action<string> _status;
@@ -52,6 +52,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot => MaterialIconKind.Bitcoin,
         ConnectionKind.Bybit => MaterialIconKind.CurrencyUsd,
         ConnectionKind.AggregateCrypto => MaterialIconKind.ChartLineVariant,
+        ConnectionKind.PublicCrypto => MaterialIconKind.Bitcoin,
         ConnectionKind.Longbridge => MaterialIconKind.Earth,
         ConnectionKind.Rithmic => MaterialIconKind.ChartTimelineVariant,
         ConnectionKind.AmpFutures => MaterialIconKind.ChartBellCurveCumulative,
@@ -60,6 +61,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         ConnectionKind.Oanda => MaterialIconKind.Earth,
         ConnectionKind.Alpaca => MaterialIconKind.Finance,
         ConnectionKind.Databento => MaterialIconKind.DatabaseArrowDownOutline,
+        ConnectionKind.OptionsData => MaterialIconKind.ChartBellCurve,
+        ConnectionKind.EtfFlows => MaterialIconKind.SwapVerticalBold,
         _ => MaterialIconKind.Bank,
     };
 
@@ -81,7 +84,10 @@ internal sealed class ConnectionsView : UserControl, IPage
                 ConnectionKind.Alpaca => "Free US stocks and ETFs (SPY, QQQ)",
                 ConnectionKind.Databento => "CME futures history since 2010",
                 ConnectionKind.Longbridge => "OAuth market data only; configured stock metadata",
-                ConnectionKind.AggregateCrypto => "non-executable composite data; Binance-only DOM",
+                ConnectionKind.AggregateCrypto => "non-executable composite of selected crypto markets",
+                ConnectionKind.PublicCrypto => "OKX, Bitget, Hyperliquid, Deribit, MEXC, Coinbase: public data, no account",
+                ConnectionKind.OptionsData => "chain, trades and history for the options studies",
+                ConnectionKind.EtfFlows => "daily spot ETF flows (BTC, ETH…) from your API",
                 _ => null,
             };
             object itemHeader = hint == null ? Ui.EnumName(kind) : Ui.V(1, new TextBlock { Text = Ui.EnumName(kind) }, new TextBlock { Text = hint, Classes = { "faint", "small" } });
@@ -156,13 +162,15 @@ internal sealed class ConnectionsView : UserControl, IPage
                 : p.BybitEnvironment == BybitEnvironment.Real ? p.AllowRealOrders ? "data + REAL UTA account" : "data + real UTA account (read-only)"
                 : $"data + {p.BybitEnvironment.ToString().ToLowerInvariant()} UTA account",
             ConnectionKind.Longbridge => "data only · OAuth · configured markets",
-            ConnectionKind.AggregateCrypto => "composite data · not executable · Binance DOM",
+            ConnectionKind.AggregateCrypto => $"{p.EffectiveAggregateSources.Count} markets · composite data · not executable",
+            ConnectionKind.PublicCrypto => (TradingHub.Feeds.Venues.CryptoVenues.Find(p.PublicVenueId)?.Name ?? p.PublicVenueId) + " · public data · no account",
             ConnectionKind.Rithmic or ConnectionKind.AmpFutures => string.IsNullOrWhiteSpace(p.RithmicUser) ? "no username configured" : $"{p.RithmicUser} · {p.RithmicSystem}",
             ConnectionKind.Tradovate => string.IsNullOrWhiteSpace(p.TradovateUser) ? "no username configured" : $"{p.TradovateUser} · {(p.Testnet ? "demo" : p.AllowRealOrders ? "REAL" : "real (read-only)")}",
             ConnectionKind.CTrader => string.IsNullOrWhiteSpace(p.CTraderClientId) ? "no app configured" : $"{(p.Testnet ? "demo" : "real")}{(p.CTraderLogin > 0 ? " · account " + p.CTraderLogin : "")}",
             ConnectionKind.Oanda => (p.Testnet ? "demo" : "real") + (string.IsNullOrWhiteSpace(p.OandaAccount) ? "" : " · " + p.OandaAccount),
             ConnectionKind.Alpaca => string.IsNullOrWhiteSpace(p.ApiKey) ? "no credentials" : $"SIP history · live {p.AlpacaLiveFeed.ToUpperInvariant()}",
             ConnectionKind.Databento => "CME futures history (pay as you go)",
+            ConnectionKind.OptionsData or ConnectionKind.EtfFlows => DescribeExternal(p),
             _ => $"{p.IbHost}:{p.IbPort}",
         };
         return prefix + detail;
@@ -178,6 +186,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         // el primero de cada tipo usa el id de sus datos (así los archivos de ticks quedan con un nombre claro)
         string defaultId = ConnectionProfile.DefaultId(kind);
         if (kind is ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento
+                or ConnectionKind.OptionsData or ConnectionKind.EtfFlows
             && _svc.Connections.Profiles.All(x => x.Id != defaultId))
             p.Id = defaultId;
         if (kind == ConnectionKind.Simulator) p.HistoryHours = 6;
@@ -230,7 +239,9 @@ internal sealed class ConnectionsView : UserControl, IPage
         var dataSection = Ui.V(14,
             Ui.H2("Market data"),
             Ui.Field("History when opening a chart", history, "Saved or downloaded data loads immediately; missing history comes from the connection."));
-        sections.Children.Add(Ui.Card(dataSection));
+        // Data-only connections without chart data hide the whole card, not just its contents.
+        var dataCard = Ui.Card(dataSection);
+        sections.Children.Add(dataCard);
         apply.Add(() => p.HistoryHours = (double)((ComboBoxItem)history.SelectedItem!).Tag!);
 
         switch (p.Kind)
@@ -252,7 +263,12 @@ internal sealed class ConnectionsView : UserControl, IPage
                 sections.Children.Add(Ui.Card(LongbridgeSection(p, apply)));
                 break;
             case ConnectionKind.AggregateCrypto:
-                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Binance Futures + Bybit composite trades and candles. Prices are not executable. DOM and depth history are explicitly Binance Futures only. Missing constituents remain marked as partial coverage."));
+                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Composite trades and candles of the selected markets. Prices are not executable. Missing or deviating constituents remain marked as partial coverage."));
+                sections.Children.Add(Ui.Card(AggregateSection(p, apply)));
+                break;
+            case ConnectionKind.PublicCrypto:
+                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Public market data: trades, order book and candles without an account. Trade history before a chart opened comes from candles; Trading Hub records the live tape."));
+                sections.Children.Add(Ui.Card(PublicVenueSection(p, apply)));
                 break;
             case ConnectionKind.Rithmic:
             case ConnectionKind.AmpFutures:
@@ -276,8 +292,16 @@ internal sealed class ConnectionsView : UserControl, IPage
                 sections.Children.Add(Ui.Card(AlpacaSection(p, apply)));
                 break;
             case ConnectionKind.Databento:
-                dataSection.IsVisible = false;
+                dataCard.IsVisible = false;
                 sections.Children.Add(Ui.Card(DatabentoSection(p, apply)));
+                break;
+            case ConnectionKind.OptionsData:
+                dataCard.IsVisible = false;
+                sections.Children.Add(Ui.Card(OptionsDataSection(p, apply)));
+                break;
+            case ConnectionKind.EtfFlows:
+                dataCard.IsVisible = false;
+                sections.Children.Add(Ui.Card(EtfFlowsSection(p, apply)));
                 break;
         }
 
@@ -287,7 +311,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         var delete = Ui.Button("Remove", MaterialIconKind.DeleteOutline, () => { }, "ghost");
         delete.IsVisible = _svc.Connections.Profiles.Count(x => x.Kind == p.Kind) > 1 || p.Kind is ConnectionKind.InteractiveBrokers or ConnectionKind.AmpFutures
             or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento
-            or ConnectionKind.Longbridge or ConnectionKind.AggregateCrypto;
+            or ConnectionKind.Longbridge or ConnectionKind.AggregateCrypto or ConnectionKind.PublicCrypto or ConnectionKind.OptionsData or ConnectionKind.EtfFlows;
 
         bool Save()
         {
@@ -362,6 +386,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         };
 
         var kindBadge = new Border { Child = Ui.H(6, Ui.Icon(IconOf(p.Kind), 14, Ui.Accent), new TextBlock { Text = Ui.EnumName(p.Kind), FontSize = 12 }), Classes = { "pill" } };
+        // A badge repeating the name adds nothing and crowds long names.
+        kindBadge.IsVisible = p.Name != Ui.EnumName(p.Kind);
         var titleRow = new DockPanel();
         // el interruptor va con las acciones: en ventanas angostas no se superpone con «Eliminar»
         enabled.VerticalAlignment = VerticalAlignment.Center;
@@ -458,7 +484,8 @@ internal sealed class ConnectionsView : UserControl, IPage
             allowReal,
             confirm,
             Ui.Field("Maximum order quantity (0 = no limit)", maxQty),
-            warn);
+            warn,
+            AppManagedProtectionNote());
     }
 
     private Control BybitAccount(ConnectionProfile p, List<Action> apply)
@@ -502,8 +529,13 @@ internal sealed class ConnectionsView : UserControl, IPage
             Note(MaterialIconKind.ShieldKeyOutline, $"Both API credentials are stored in {Os.SecretStore}. Use contract-trading permission without withdrawals. Keys must belong to the selected environment."),
             Ui.Field("Environment", environment), TwoColumns(Ui.Field("API key", key), Ui.Field("API secret", secret)), forget,
             allow, confirm, Ui.Field("Maximum new order quantity (0 = no local limit)", maximum),
-            Note(MaterialIconKind.AlertOutline, "REAL orders use actual money. Native reduce-only applies account-wide, not to one strategy; local sibling cancellation is not atomic OCO. Market orders can partially fill or cancel without a fill."));
+            Note(MaterialIconKind.AlertOutline, "REAL orders use actual money. Native reduce-only applies account-wide, not to one strategy; local sibling cancellation is not atomic OCO. Market orders can partially fill or cancel without a fill."),
+            AppManagedProtectionNote());
     }
+
+    /// <summary>Venues without an adopted linked stop/target contract (see Trading → Stops and targets in the guide).</summary>
+    private static Control AppManagedProtectionNote() =>
+        Note(MaterialIconKind.ShieldSyncOutline, "Stops and targets on this connection are app-managed: Trading Hub does not use a venue-linked stop/target contract here.");
 
     private Control LongbridgeSection(ConnectionProfile p, List<Action> apply)
     {
@@ -766,6 +798,7 @@ internal sealed class ConnectionsView : UserControl, IPage
             Note(MaterialIconKind.ShieldCheckOutline, "Rithmic accounts appear in Chart Trader when the connection is active. Paper accounts trade directly; real accounts need this authorization and request confirmation."),
             allowReal,
             TwoColumns(confirm, Ui.Field("Maximum order quantity (0 = no limit)", maxQty)),
+            AppManagedProtectionNote(),
             Ui.H3("Advanced"),
             TwoColumns(Ui.Field("Application name", app, "Some systems require an approved application name."), Ui.Field("Products available in search", products, "Search the active monthly contract for each product (e.g. ES → ESZ6).")));
     }
@@ -794,6 +827,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         var allowReal = new CheckBox { Content = "Allow orders on real Tradovate accounts", IsChecked = p.AllowRealOrders };
         var confirm = new CheckBox { Content = "Confirm each real-money order", IsChecked = p.ConfirmOrders };
         var maxQty = new NumericUpDown { Value = p.MaxOrderQuantity, Minimum = 0, Maximum = 10000, Increment = 1, FormatString = "0", Width = 140 };
+        var exchangeSide = new CheckBox { Content = "Exchange-side protection (Tradovate OCO)", IsChecked = p.ExchangeSideProtection };
         void Update()
         {
             allowReal.IsEnabled = demo.IsChecked != true;
@@ -816,6 +850,7 @@ internal sealed class ConnectionsView : UserControl, IPage
             p.AllowRealOrders = !p.Testnet && allowReal.IsChecked == true;
             p.ConfirmOrders = confirm.IsChecked != false;
             p.MaxOrderQuantity = maxQty.Value ?? 0;
+            p.ExchangeSideProtection = exchangeSide.IsChecked == true;
         });
         return Ui.V(14,
             Ui.H2("Tradovate account"),
@@ -830,6 +865,9 @@ internal sealed class ConnectionsView : UserControl, IPage
             allowReal,
             confirm,
             Ui.Field("Maximum order quantity (0 = no limit)", maxQty),
+            Ui.H3("Stops and targets"),
+            exchangeSide,
+            Note(MaterialIconKind.ShieldLinkVariantOutline, "Off by default. When on, a stop and a target that together cover the whole position are sent as one Tradovate OCO: when one fills, Tradovate cancels the other even if Trading Hub is closed. Partial targets, a lone stop or a refused OCO stay app-managed. Tradovate documents neither reduce-only orders nor how OCO legs follow partial fills, so keep Trading Hub running to resize the remaining leg."),
             Note(MaterialIconKind.ShieldCheckOutline, "Tradovate allows one data session per user. Opening Tradovate Trader with the same user can disconnect Trading Hub, and vice versa."));
     }
 

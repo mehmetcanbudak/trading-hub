@@ -12,6 +12,7 @@ internal static class Program
     {
         try
         {
+            if (args is ["--echo-stdin"]) return await EchoStdinAsync();
             if (args.Length < 2) throw new InvalidOperationException("A fixture mode and owned expectation file are required.");
             return args[0] switch
             {
@@ -22,6 +23,15 @@ internal static class Program
             };
         }
         catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+    }
+
+    /// <summary>A byte-exact stdin consumer with .NET's startup cost, never a shell's: copies raw input to output.</summary>
+    private static async Task<int> EchoStdinAsync()
+    {
+        await using var input = Console.OpenStandardInput();
+        await using var output = Console.OpenStandardOutput();
+        await input.CopyToAsync(output);
+        return 0;
     }
 
     private static async Task<int> CodexAsync(string expectedPath, string[] args)

@@ -63,10 +63,12 @@ Bindings apply to the active chart in Trading or detached windows. While typing,
 | Group | Actions / defaults |
 |---|---|
 | Trading | Buy/sell market, buy bid, sell ask, close, reverse, cancel all, close 25%/50%, breakeven, apply brackets, next/previous quick quantity. Intentionally unassigned. |
-| Chart | 1m/5m/15m/1h/4h/daily (⌥1–⌥6), Candles/Footprint/Heikin Ashi, auto scale, latest price, horizontal line (⌥H), cursor; configurable rectangle zoom/reset/session/clock/help/quick-entry navigation. |
+| Chart | 1m/5m/15m/1h/4h/daily (⌥1–⌥6), Candles/Footprint/Heikin Ashi, auto scale, latest price, cursor and drawing tools: horizontal line (⌥H), horizontal ray (⌥J), vertical line (⌥V), cross line (⌥C), Fibonacci (⌥F), rectangle (⌥⇧R), brush (⌥B), text (⌥N), trend line (⌥⇧T); configurable rectangle zoom/reset/session/clock/help/quick-entry navigation. |
 | Windows | One/four-chart layouts, next/previous tab (⌃Tab / ⌃⇧Tab), detach chart, toggle DOM, chart Chart Trader (⌥T), right panel. |
 
 Click a binding and press keys. Esc cancels; Delete clears it. Reusing a combination unassigns its previous action and displays a notice. **Restore defaults** resets bindings. Real-order confirmations still apply to hotkey actions when enabled.
+
+Drawing preferences live on each chart's drawing bar rather than in Settings: magnet (off/weak/strong), keep drawing, draw with a gesture (off by default), the selected-drawing bar after drawing and favorite tools are shared by all charts; lock and hide drawings are saved per chart. Whole-chart wheel zoom is a per-chart option in **Chart settings → Axes** (off by default). See [Charts](./graficos.md#drawings).
 
 Committed text on a focused chart opens explicit symbol/period entry; numeric-symbol ambiguity remains visible. IME preedit, popup focus and stale searches cannot become trading hotkeys. These navigation controls add no keyboard order submission or new confirmation gestures. See [Charts](./graficos.md#instrument-and-history).
 
@@ -96,6 +98,10 @@ Choose **Use system proxy**, **Direct connection** or **Custom proxy**. Custom a
 Policy is captured when each app-owned HTTP/WebSocket consumer is constructed: public/private provider requests, discovery/history/archive downloads, OAuth/refresh/revocation, research and notification delivery use explicit factories. Active contexts are not changed through process-global network defaults, including while an old context owns a pending broker acknowledgment. Credential-bearing transports reject redirects. New consumers/reconnects use their captured policy; use protection-aware Quit/restart when a new policy must replace an active context. A failed explicit proxy does not authorize silent direct fallback.
 
 Native Interactive Brokers TCP and external assistant/browser processes have their own networking; they are not advertised as app-proxy-covered.
+
+## Local market-data API
+
+**Off by default.** When on, Trading Hub serves read-only market data (candles, trades, order book and recorded depth of instruments already open) on `127.0.0.1` only, for tools you run yourself on this computer. Choose the port (1024–65535, default 48231) and, only for browser-based tools served from your own local web server, the exact **Allowed browser origins** (`scheme://host[:port]`); every other web page is refused, and invalid entries are listed and ignored. The status line shows the address it listens on or why it could not start (for example a port already in use). It never exposes credentials, accounts, orders or positions and cannot change anything; quitting closes it. Routes, limits and examples: [Workbench → Local market-data API](./workbench.md#local-market-data-api).
 
 ## Local and external alerts
 

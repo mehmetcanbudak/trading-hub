@@ -177,7 +177,7 @@ namespace TradingHub.Indicators
     }
 
     /// <summary>Categorías de indicadores (para el listado de la UI).</summary>
-    public static class IndicatorCategories
+    public static partial class IndicatorCategories
     {
         public const string VolumeOrderFlow = "Volume / Order flow";
         public const string OrderBook = "Order book";

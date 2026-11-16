@@ -29,6 +29,8 @@ internal sealed class ChartTraderPanel : UserControl
     private readonly WrapPanel _presets = new() { ItemSpacing = 4, LineSpacing = 4 };
     private readonly TextBlock _pnl = new() { FontSize = 18, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _position = new() { Classes = { "muted", "small" }, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
+    // Fixed height: the status never moves the controls below it.
+    private readonly TextBlock _protection = new() { FontSize = 11, Height = 30, MaxLines = 2, TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center };
     // alto fijo (un renglón; el texto entero en el tooltip): que cambie con el precio nunca corre los botones de abajo
     private readonly TextBlock _target = new() { FontSize = 11, Height = 16, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Ui.Accent };
     private readonly TextBlock _buyAsk = new() { FontSize = 10.5, HorizontalAlignment = HorizontalAlignment.Center, Opacity = 0.85 };
@@ -209,6 +211,7 @@ internal sealed class ChartTraderPanel : UserControl
         body.Children.Add(new Border { Height = 1, Background = Ui.Line, Margin = new Thickness(0, 2) });
         body.Children.Add(_pnl);
         body.Children.Add(_position);
+        body.Children.Add(_protection);
         body.Children.Add(new Border { Height = 1, Background = Ui.Line, Margin = new Thickness(0, 2) });
         body.Children.Add(_bracketBox);
 
@@ -523,6 +526,7 @@ internal sealed class ChartTraderPanel : UserControl
             _pnl.Foreground = Ui.Text2;
             _pnl.FontSize = 13;
             _position.Text = "No executable account";
+            _protection.Text = "";
             return;
         }
         if (!acc.PositionReady || !acc.OrdersReady)
@@ -531,6 +535,7 @@ internal sealed class ChartTraderPanel : UserControl
             _pnl.Foreground = Ui.Warn;
             _pnl.FontSize = 13;
             _position.Text = acc.LastError ?? "Awaiting complete account snapshots";
+            _protection.Text = "";
             return;
         }
         if (pos == null || pos.IsFlat)
@@ -550,5 +555,24 @@ internal sealed class ChartTraderPanel : UserControl
             int orders = acc!.ActiveOrders.Count();
             _position.Text = $"{(pos.Volume > 0 ? "LONG" : "SHORT")} {Math.Abs(pos.Volume).ToString("0.########", CultureInfo.InvariantCulture)} @ {inst.FormatPrice(pos.AveragePrice)}" + (orders > 0 ? $" · {orders} order(s)" : "");
         }
+        ShowProtection(model.Brackets);
+    }
+
+    /// <summary>Whether the position's stop/target are linked at the venue or coordinated by Trading Hub, and why an
+    /// opted-in exchange-side link fell back.</summary>
+    private void ShowProtection(BracketManager? brackets)
+    {
+        var mode = brackets?.Mode ?? ProtectionMode.None;
+        string? note = brackets?.ProtectionNote;
+        // A fallback note already states that protection is app-managed and why.
+        _protection.Text = mode == ProtectionMode.ExchangeSide ? "Exchange-side protection"
+            : note ?? (mode == ProtectionMode.AppManaged ? "App-managed protection" : "");
+        _protection.Foreground = mode == ProtectionMode.ExchangeSide ? Ui.Up : note != null ? Ui.Warn : Ui.Text2;
+        ToolTip.SetTip(_protection, mode switch
+        {
+            ProtectionMode.ExchangeSide => "Linked at the venue: when one leg fills, the venue cancels the other even if Trading Hub is closed.",
+            ProtectionMode.AppManaged => note ?? "Trading Hub cancels and resizes the remaining stop and target while it runs.",
+            _ => note,
+        });
     }
 }

@@ -120,6 +120,10 @@ namespace TradingHub.Indicators
         public long Revision => _c.Revision;
         public long CorrectionRevision => _c.CorrectionRevision;
         public Guid SeriesIdentity => _series.Identity;
+        /// <summary>Identity of the trade history this candle was aggregated from; shared by every timeframe of that history.</summary>
+        public Guid HistoryIdentity => _series.StoreIdentity;
+        /// <summary>Changes on any history correction/replacement (appends keep it). Pair with <see cref="HistoryIdentity"/>.</summary>
+        public long HistoryCorrectionRevision => _series.StoreCorrectionRevision;
         public int ObservedTrades => _c.ObservedTrades;
         public long AggregatedTrades => _c.AggregatedTrades;
         public DateOnly SessionDate => _series.Session.SessionDate(_c.Time);

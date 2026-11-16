@@ -103,11 +103,12 @@ public sealed partial class OrderContext
     private readonly Dictionary<OrderOwner, Dictionary<string, OwnedOrderQuantity>> _unprojectedQuantities = new();
     private IReadOnlyList<OwnedOrderQuantity>? _pendingQuantities;
     private long _dispatchCount;
-    private string? _projectionError;
-    private string? _lastError;
+    private volatile string? _projectionError;
+    private volatile string? _lastError;
     private bool _storageFault, _identityFault;
     private bool _configurationFrozen;
     private readonly Dictionary<string, string> _bindingFailures = new(StringComparer.Ordinal);
+    private volatile string? _firstBindingFailure; // _bindingFailures' first value, republished under _gate on each change
     private readonly Dictionary<string, string> _releasedCloseDenials = new(StringComparer.Ordinal);
     private OrderOwnershipJournal? _journal;
     private Func<OrderRequest, string?>? _permission;
@@ -115,19 +116,20 @@ public sealed partial class OrderContext
     public AccountContextDescriptor Descriptor { get; private set; }
     public IExecutionSource Executions { get; }
     public string? StorageRoot { get; private set; }
+    /// <summary>Never waits on the context gate, which order entry holds across durable journal writes: a reader (the UI
+    /// thread among them) sees the error state committed before the write in progress.</summary>
     public string? LastError
     {
-        get
-        {
-            lock (_gate)
-            {
-                if (_projectionError != null) return _projectionError;
-                foreach (var error in _bindingFailures.Values) return error;
-                return _lastError;
-            }
-        }
+        get => _projectionError ?? _firstBindingFailure ?? _lastError;
         private set => _lastError = value;
     }
+    // Under _gate.
+    private void SetBindingFailure(string intentId, string error)
+    {
+        _bindingFailures[intentId] = error;
+        PublishBindingFailures();
+    }
+    private void PublishBindingFailures() => _firstBindingFailure = _bindingFailures.Values.FirstOrDefault();
     public bool HasStorageFault { get { lock (_gate) return _storageFault || _identityFault || _projectionError != null || _bindingFailures.Count > 0; } }
     /// <summary>Exact in-process captured quantities awaiting durable projection; never queries a provider or order history.</summary>
     public bool HasUnprojectedQuantity(OrderOwner owner)
@@ -658,12 +660,16 @@ public sealed partial class OrderContext
                     if (!_ephemeralNative.TryGetValue(key, out var ids)) _ephemeralNative[key] = ids = new();
                     if (!ids.Contains(data.Id)) ids.Add(data.Id);
                 }
-                if (_bindingFailures.Remove(intent.Id, out var previousError) && _lastError == previousError) _lastError = null;
+                if (_bindingFailures.Remove(intent.Id, out var previousError))
+                {
+                    if (_lastError == previousError) _lastError = null;
+                    PublishBindingFailures();
+                }
             }
             catch (Exception ex)
             {
                 string error = LastError = "Native order accepted or unknown; could not persist binding: " + ex.Message;
-                _bindingFailures[intent.Id] = error;
+                SetBindingFailure(intent.Id, error);
                 return error;
             }
         }
@@ -791,13 +797,13 @@ public sealed partial class OrderContext
                     throw new InvalidOperationException("An accepted native amendment requires its exact durable routing context.");
                 var accepted = _journal.AcceptNativeAmendment(intent.Id, new(native, clientOrderId, totalQuantity, price));
                 Remember(accepted);
-                _bindingFailures.Remove(intent.Id);
+                if (_bindingFailures.Remove(intent.Id)) PublishBindingFailures();
                 return null;
             }
             catch (Exception ex)
             {
                 string error = LastError = "Could not persist accepted native amendment: " + ex.Message;
-                _bindingFailures[intent.Id] = error;
+                SetBindingFailure(intent.Id, error);
                 return error;
             }
         }
@@ -836,7 +842,7 @@ public sealed partial class OrderContext
             catch (Exception ex)
             {
                 string error = LastError = "Could not persist broker working-type evidence: " + ex.Message;
-                if (!string.IsNullOrEmpty(order.IntentId)) _bindingFailures[order.IntentId] = error;
+                if (!string.IsNullOrEmpty(order.IntentId)) SetBindingFailure(order.IntentId, error);
                 return error;
             }
         }
@@ -1381,7 +1387,7 @@ internal sealed partial class OrderOwnershipJournal
         lease.ReleaseFile();
         File.Delete(Path.Combine(candidate, ".lease"));
         Directory.Delete(candidate);
-        StorageSync.SyncDirectory(Path.GetDirectoryName(candidate)!);
+        DurableFile.SyncDirectory(Path.GetDirectoryName(candidate)!);
     }
 
     public OwnedOrderIntent SaveIntent(OwnedOrderIntent intent)
@@ -1653,9 +1659,7 @@ internal sealed partial class OrderOwnershipJournal
     public void Acknowledge(ExecutionReceipt receipt)
     {
         using var lease = Acquire();
-        string path = ReceiptPath(receipt.Id);
-        File.Delete(path);
-        StorageSync.SyncDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.Delete(ReceiptPath(receipt.Id));
     }
     public ExecutionProjectionCheckpoint? Projected(ExecutionIdentity identity)
     {
@@ -1694,7 +1698,7 @@ internal sealed partial class OrderOwnershipJournal
             try { mutex.WaitOne(); }
             catch (AbandonedMutexException) { }
             owned = true;
-            if (create) EnsureDirectory(root);
+            if (create) DurableFile.EnsureDirectory(root);
             return new(mutex, new FileStream(Path.Combine(root, ".lease"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
         }
         catch
@@ -1719,22 +1723,6 @@ internal sealed partial class OrderOwnershipJournal
             finally { mutex.ReleaseMutex(); mutex.Dispose(); }
         }
     }
-    private static void EnsureDirectory(string directory)
-    {
-        var missing = new Stack<string>();
-        string? parent = directory;
-        while (parent != null && !Directory.Exists(parent))
-        {
-            missing.Push(parent);
-            parent = Path.GetDirectoryName(parent);
-        }
-        while (missing.Count > 0)
-        {
-            string path = missing.Pop();
-            Directory.CreateDirectory(path);
-            if (Path.GetDirectoryName(path) is { } existingParent) StorageSync.SyncDirectory(existingParent);
-        }
-    }
     private string ProjectionPath(ExecutionIdentity identity) => Path.Combine(_root, "projected",
         OrderContext.Hash(JsonSerializer.Serialize(identity)) + ".json");
     private string IntentPath(string id) => Path.Combine(_root, "intent", OrderContext.Hash(id) + ".json");
@@ -1750,20 +1738,9 @@ internal sealed partial class OrderOwnershipJournal
     }
     private static void Write<T>(string path, T value)
     {
-        string directory = Path.GetDirectoryName(path)!;
-        EnsureDirectory(directory);
-        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                JsonSerializer.Serialize(file, new Envelope<T>(1, value, OrderContext.Hash(JsonSerializer.Serialize(value))));
-                StorageSync.Flush(file);
-            }
-            File.Move(temporary, path, overwrite: true);
-            StorageSync.SyncDirectory(directory);
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        DurableFile.EnsureDirectory(Path.GetDirectoryName(path)!);
+        DurableFile.ReplaceAtomically(path, file =>
+            JsonSerializer.Serialize(file, new Envelope<T>(1, value, OrderContext.Hash(JsonSerializer.Serialize(value)))));
     }
 }
 
@@ -1785,9 +1762,11 @@ public static class OrderActions
             protective: reducing, maximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(after)));
     }
     public static Order Replace(ITradingAccount account, Order order, decimal price, decimal quantity) =>
-        account.Replace(order, account.OrderContext.PrepareReplacement(order, price, quantity));
+        account is IAuthoritativeAdoption venue && venue.TryAdoptAndReplace(order, price, quantity) ? order
+            : account.Replace(order, account.OrderContext.PrepareReplacement(order, price, quantity));
     public static Order Reprice(ITradingAccount account, Order order, decimal price) =>
-        account.Replace(order, account.OrderContext.PreparePriceUpdate(order, price));
+        account is IAuthoritativeAdoption venue && venue.TryAdoptAndReplace(order, price, null) ? order
+            : account.Replace(order, account.OrderContext.PreparePriceUpdate(order, price));
     public static void Flatten(ITradingAccount account)
     {
         if (account is ICoordinatedPositionClose coordinated)

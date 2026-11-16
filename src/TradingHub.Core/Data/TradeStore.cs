@@ -31,7 +31,17 @@ public sealed class TradeStore
     }
 
     public Instrument Instrument => _instrument;
-    public int Count { get; private set; }
+    private int _count;
+
+    /// <summary>
+    /// Published after each row is written. Background aggregation captures it first and then reads only rows below it;
+    /// in-place corrections still require <see cref="CorrectionRevision"/> validation by the reader.
+    /// </summary>
+    public int Count
+    {
+        get => Volatile.Read(ref _count);
+        private set => Volatile.Write(ref _count, value);
+    }
     public long LastId { get; private set; } = -1;
     public DateTime FirstTime => Count > 0 ? GetTime(0) : DateTime.MinValue;
     public DateTime LastTime => Count > 0 ? GetTime(Count - 1) : DateTime.MinValue;
