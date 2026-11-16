@@ -27,7 +27,7 @@ Never paste API secrets into a chat or a repository file. Enter them only in **C
 
 ## Network-dependent public data
 
-These public endpoints were unreachable from the development network (TLS handshakes timed out or returned a block page), so only their documented payload shapes are tested. Run the app from an unrestricted network and open a chart that uses each source:
+These public endpoints were unreachable from the development network (TLS handshakes timed out or returned a block page; rechecked 2026-11-16), so only their documented payload shapes are tested. Run the app from an unrestricted network and open a chart that uses each source:
 
 | Source | Used by |
 |---|---|
