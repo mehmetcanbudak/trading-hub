@@ -65,16 +65,20 @@ public sealed class RithmicSendTurnTests : IDisposable
         var confirmation = broker.CapturePositionClose(2m);
         Task<string?> close = session.ClosePositionAsync(confirmation);
 
-        // The buy's admission resolves first, while the close still reserves the contract.
+        // The buy's admission resolves first, while the close still reserves the contract. Releasing the buy's turn
+        // and sending the close are the same completion, so the venue can already hold the close's tag by the time
+        // the rejection is observable. The post-conditions below are the ordering guarantee: one send, the close's,
+        // and the buy never reaches the venue.
         contractGate.TrySetResult();
         await Until(() => buy.State == OrderStates.Failed && buy.Status == OrderStatus.Rejected, () => buyBroker.LastError ?? "buy not rejected");
         Assert.Contains("new exposure is disabled", buyBroker.LastError, StringComparison.Ordinal);
-        Assert.Empty(server.Tags);
 
-        // Only then is the close sent, and it closes the whole long 2.
+        // The close is sent only after that admission, and it closes the whole long 2.
         await Until(() => Requests(server, "312") == 1, () => $"sends: {string.Join(", ", server.Tags)}");
         await Until(() => server.Position == 0 && !session.HasUnresolvedPositionClose, () => broker.LastError ?? "close pending");
         Assert.Null(await close.WaitAsync(Deadline));
+        Assert.Equal(OrderStates.Failed, buy.State);
+        Assert.Equal(0, buy.ExchangeOrderId.Length);
         Assert.Single(server.Tags); // only the close's tag; the buy never reached the venue
         Assert.Equal(1, Requests(server, "312"));
     }
