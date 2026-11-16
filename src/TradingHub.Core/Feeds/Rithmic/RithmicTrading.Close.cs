@@ -156,6 +156,7 @@ public sealed partial class RithmicTradingSession
     public Task<string?> ClosePositionAsync(RithmicCloseConfirmation confirmation)
     {
         CloseOperation operation;
+        NativeSendTurns.Turn sendTurn;
         lock (NativeAdmissionGate)
         {
             if (!ReferenceEquals(confirmation.Session, this)) return Task.FromResult<string?>("The original Rithmic close session is unavailable.");
@@ -191,18 +192,20 @@ public sealed partial class RithmicTradingSession
             if (operation.Result.Task.IsCompleted) return Task.FromResult(CloseOutcome(operation));
             if (operation.Running) return operation.Result.Task;
             operation.Running = true;
+            sendTurn = SendTurns(confirmation.State.Account).Take();
         }
-        _ = operation.Session.RunCloseAsync(operation);
+        _ = operation.Session.RunCloseAsync(operation, sendTurn);
         return operation.Result.Task;
     }
 
-    private async Task RunCloseAsync(CloseOperation operation)
+    private async Task RunCloseAsync(CloseOperation operation, NativeSendTurns.Turn sendTurn)
     {
         var context = operation.Context;
         var intent = operation.Intent;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
         bool committedHere = false;
+        bool inOrder = true;
         try
         {
             bool alreadyDispatched = (context.Find(intent.Id) ?? intent.Data).DispatchUncertain;
@@ -218,6 +221,13 @@ public sealed partial class RithmicTradingSession
                 operation.Result.TrySetResult(close.Outcome);
                 return;
             }
+            // The close is a reducing request: it waits for the account's earlier sends at most the reducing bound,
+            // once, then is sent anyway with the unsettled note. While it prepares (its protection cancellations and
+            // the reservation's admission evidence) the turn is released: later requests are admitted against the
+            // close's reservation meanwhile, and the close's own cancellations below ride this already-paid turn and
+            // never wait a second bound.
+            inOrder = await sendTurn.WaitAsync(bounded: true, timeout.Token).ConfigureAwait(false);
+            sendTurn.Release();
             var cancellations = new HashSet<string>(StringComparer.Ordinal);
             while (true)
             {
@@ -267,7 +277,8 @@ public sealed partial class RithmicTradingSession
                         cancellations.Add(basket);
                         RithmicTradingSession cancellationSession;
                         lock (NativeAdmissionGate) cancellationSession = CancellationSession(close, basket);
-                        try { await cancellationSession.CancelAsync(close.Account, basket, timeout.Token).ConfigureAwait(false); }
+                        try { await cancellationSession.CancelAsync(close.Account, basket, timeout.Token,
+                            ReferenceEquals(cancellationSession, this) ? sendTurn : null).ConfigureAwait(false); }
                         catch (RithmicRejectedException) { /* Current native observations, not a command response, resolve cancellation. */ }
                     }
                     await Task.Delay(20, timeout.Token).ConfigureAwait(false);
@@ -324,7 +335,7 @@ public sealed partial class RithmicTradingSession
                 if (close.Phase == PositionClosePhase.Dispatching)
                     context.UpdatePositionClose(intent, close with { Phase = PositionClosePhase.Working });
             }
-            operation.Result.TrySetResult(null);
+            operation.Result.TrySetResult(inOrder ? null : NativeSendTurns.UnsettledMessage);
         }
         catch (Exception ex)
         {
@@ -342,6 +353,7 @@ public sealed partial class RithmicTradingSession
                 operation.Result.TrySetResult(operation.Fault ?? CloseOutcome(operation));
             }
         }
+        finally { sendTurn.Release(); }
     }
 
     private string? CloseOutcome(CloseOperation operation)

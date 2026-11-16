@@ -491,7 +491,20 @@ internal sealed class FakeRithmicServer : IDisposable
             await ws.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Fixture lost modify response", _cts.Token);
             return;
         }
-        if (ModifyResponseRelease != null) await ModifyResponseRelease.Task.WaitAsync(_cts.Token);
+        // A held modify response must not stall the connection's read loop: later requests (a close cancelling the
+        // amended order) still need service while the response waits.
+        if (ModifyResponseRelease is { } release)
+        {
+            _ = FinishModifyAsync(ws, m, basket, o, rejection, rejectByNotification, release.Task);
+            return;
+        }
+        await FinishModifyAsync(ws, m, basket, o, rejection, rejectByNotification, Task.CompletedTask);
+    }
+
+    private async Task FinishModifyAsync(WebSocket ws, ProtoMessage m, string basket,
+        (bool Buy, int Qty, double Price, int Type, string Tag) o, string? rejection, bool rejectByNotification, Task release)
+    {
+        await release.WaitAsync(_cts.Token);
         if (rejection != null)
             await Send(ws, Msg(315, m).String(132766, "1").String(132766, rejection));
         else

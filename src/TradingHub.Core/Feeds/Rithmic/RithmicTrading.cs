@@ -124,6 +124,38 @@ public sealed partial class RithmicTradingSession : IDisposable
     private RithmicSettings _settings;
     private readonly ProxyHandlerFactory _network;
     private readonly CancellationTokenSource _cts = new();
+    private readonly Dictionary<string, NativeSendTurns> _sendTurns = new(StringComparer.Ordinal);
+
+    /// <summary>How long a reducing request (close, cancel, protective or amended order) waits for earlier sends
+    /// before it is sent anyway; tests shorten it.</summary>
+    internal TimeSpan SendTurnWait { get; set; } = NativeSendTurns.ReducingWait;
+
+    /// <summary>The send-turn queue identity of one account: the native account evidence identity when known, else the
+    /// session-scoped account, matching the close reservation's contract key. One queue per native account.</summary>
+    internal string SendTurnKey(string account) =>
+        NativeAccountOf(account) is { Length: > 0 } native ? native : "session:" + _closeSessionNamespace + "|" + account;
+
+    /// <summary>
+    /// The send turns of one native account, shared by every broker (instrument) and the bounded close: each order,
+    /// change, cancel or close request takes its turn where it is issued and is sent only after earlier requests of
+    /// that native account were answered.
+    /// </summary>
+    internal NativeSendTurns SendTurns(string account)
+    {
+        lock (_sendTurns)
+        {
+            string key = SendTurnKey(account);
+            if (!_sendTurns.TryGetValue(key, out var turns)) _sendTurns[key] = turns = new NativeSendTurns(SendTurnWait);
+            return turns;
+        }
+    }
+
+    /// <summary>Completes once every send turn already taken on this session was released: the requests already issued
+    /// were answered, refused or failed. Quit awaits it before connections close. Never faults.</summary>
+    public Task SendsIdle
+    {
+        get { lock (_sendTurns) return Task.WhenAll(_sendTurns.Values.Select(turns => turns.WhenIdle).ToArray()); }
+    }
     private CancellationTokenSource? _connCts;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ProtoMessage>> _pending = new();
     private readonly ConcurrentDictionary<string, RithmicOrderState> _orders = new();
@@ -788,11 +820,28 @@ public sealed partial class RithmicTradingSession : IDisposable
         }
     }
 
-    public async Task CancelAsync(string accountId, string basketId, CancellationToken ct)
+    /// <summary>Cancels an order in the account's send-turn order: after earlier requests were answered, or after
+    /// <see cref="NativeSendTurns.ReducingWait"/>, then sent anyway. A caller that already paid the account's
+    /// send-turn wait (a bounded close cancelling its own reserved protections) passes its turn and no turn is
+    /// taken or waited. A cancellation while waiting (the bounded close's protection cancels wait with its 15 s
+    /// timeout token) still releases the taken turn.</summary>
+    public async Task<string?> CancelAsync(string accountId, string basketId, CancellationToken ct, NativeSendTurns.Turn? heldTurn = null)
     {
         var a = AccountOf(accountId);
-        await RequestAsync(Account(new ProtoWriter().Int(Rp.TemplateId, RpO.RequestCancelOrder), a)
-            .String(RpO.WindowName, "TradingHub").String(RpO.BasketId, basketId).Int(RpO.ManualOrAuto, 1), ct).ConfigureAwait(false);
+        var turn = heldTurn;
+        bool inOrder = true;
+        try
+        {
+            if (turn == null)
+            {
+                turn = SendTurns(accountId).Take();
+                inOrder = await turn.WaitAsync(bounded: true, ct).ConfigureAwait(false);
+            }
+            await RequestAsync(Account(new ProtoWriter().Int(Rp.TemplateId, RpO.RequestCancelOrder), a)
+                .String(RpO.WindowName, "TradingHub").String(RpO.BasketId, basketId).Int(RpO.ManualOrAuto, 1), ct).ConfigureAwait(false);
+            return inOrder ? null : NativeSendTurns.UnsettledMessage;
+        }
+        finally { if (heldTurn == null && turn != null) turn.Release(); }
     }
 
     public Task ModifyAsync(string accountId, RithmicOrderState order, int quantity, decimal priceOrTrigger, CancellationToken ct) =>

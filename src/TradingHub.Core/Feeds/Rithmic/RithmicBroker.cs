@@ -351,11 +351,18 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
         }
 
         Sync();
+        // The turn is taken synchronously where the request is issued, so turns follow issue order; the dispatch below
+        // waits for every earlier send of this native account before its admission, and releases the turn in a finally
+        // on every path. A new-exposure order waits without a bound; a reducing request waits the reducing bound.
+        bool boundedSend = request.ReduceOnly || request.Protective;
+        var sendTurn = _session.SendTurns(_account).Take();
+        bool inOrder = true;
         _ = Task.Run(async () =>
         {
             bool submissionStarted = false;
             try
             {
+                inOrder = await sendTurn.WaitAsync(boundedSend, _cts.Token).ConfigureAwait(false);
                 var (sym, exch) = await ContractAsync().ConfigureAwait(false);
                 await WaitForNativeReplayAsync(sym, exch).ConfigureAwait(false);
                 int priceType = type == OrderTypes.Market ? 2 : type == OrderTypes.Stop ? 4 : 1;
@@ -376,6 +383,9 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
                         return q;
                     }
                 }).ConfigureAwait(false);
+                // The venue answered: release the turn before the local ownership publication, so a slow journal
+                // write never holds later requests of the account.
+                sendTurn.Release();
                 lock (_gate)
                 {
                     if (_disposed) return;
@@ -387,7 +397,7 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
                     }
                 }
 
-                LastError = null;
+                LastError = inOrder ? null : NativeSendTurns.UnsettledMessage;
             }
             catch (Exception ex)
             {
@@ -406,6 +416,7 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
                     }
                 }
             }
+            finally { sendTurn.Release(); }
 
             Sync();
         });
@@ -454,9 +465,14 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
 
     private async Task CancelBoundAsync(Order order)
     {
+        // Cancels are reducing requests: they wait for earlier sends at most the reducing bound, then are sent anyway.
+        var sendTurn = _session.SendTurns(_account).Take();
         try
         {
-            await _session.CancelAsync(_account, order.ExchangeOrderId, CancellationToken.None).ConfigureAwait(false);
+            bool inOrder = await sendTurn.WaitAsync(bounded: true, CancellationToken.None).ConfigureAwait(false);
+            string? note = await _session.CancelAsync(_account, order.ExchangeOrderId, CancellationToken.None, sendTurn).ConfigureAwait(false);
+            if (note != null) LastError = note;
+            else if (!inOrder) LastError = NativeSendTurns.UnsettledMessage;
         }
         catch (Exception ex)
         {
@@ -464,6 +480,7 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
         }
         finally
         {
+            sendTurn.Release();
             // Keep intent until terminal confirmation. Retry only on an explicit cancel or a new connection,
             // never on every order/PnL callback when a cancel response is missing or rejected.
             lock (_gate) _cancelInFlight.Remove(order);
@@ -550,7 +567,10 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
         var replacement = new Replacement(intent, totalQuantity,
             Instrument.RoundPrice(intent.Request.Price), native.RejectionRevision);
         _replacements.Add(order, replacement);
-        _ = Task.Run(() => ReplaceAsync(order, state, replacement));
+        // The turn is taken synchronously where the amendment is issued: an amendment of a protective or reduce-only
+        // order waits for earlier sends at most the reducing bound; an entry-order amendment waits without a bound.
+        var sendTurn = _session.SendTurns(_account).Take();
+        _ = Task.Run(() => ReplaceAsync(order, state, replacement, sendTurn));
     }
 
     private void RejectQueuedReprice(Order order, string reason)
@@ -558,10 +578,13 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
         if (_queuedReprices.Remove(order, out var intent)) RecordRejected(intent, reason);
     }
 
-    private async Task ReplaceAsync(Order order, RithmicOrderState state, Replacement replacement)
+    private async Task ReplaceAsync(Order order, RithmicOrderState state, Replacement replacement, NativeSendTurns.Turn sendTurn)
     {
+        bool inOrder = true;
         try
         {
+            inOrder = await sendTurn.WaitAsync(replacement.Intent.Request.Protective || replacement.Intent.Request.ReduceOnly,
+                _cts.Token).ConfigureAwait(false);
             var (symbol, exchange) = await ContractAsync().ConfigureAwait(false);
             await WaitForNativeReplayAsync(symbol, exchange).ConfigureAwait(false);
             await _session.ModifyOwnedAsync(_account, state, replacement.TotalQuantity, replacement.Price, _cts.Token, () =>
@@ -585,11 +608,15 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
                     replacement.CommittedWorkingRevision = _session.ReplacementState(state).WorkingRevision;
                 }
             }).ConfigureAwait(false);
+            // The venue answered: release the turn before the local ownership publication, so a slow journal
+            // write never holds later requests of the account.
+            sendTurn.Release();
             lock (_gate)
             {
                 if (_disposed) return;
                 BindNative(order, state.BasketId);
             }
+            if (!inOrder) LastError = NativeSendTurns.UnsettledMessage;
         }
         catch (Exception ex)
         {
@@ -614,6 +641,7 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
                 }
             }
         }
+        finally { sendTurn.Release(); }
         // A successful command receipt is not a working-order acknowledgment. Sync restores native values;
         // only an exact later working report, a terminal state, or a definite rejection clears pending intent.
         Sync();

@@ -992,6 +992,7 @@ public sealed partial class AppServices
         var idle = new List<Task>();
         foreach (var session in _tradovateSessions.Values.Concat(_retiredTradovateSessions)) idle.Add(session.SendsIdle);
         foreach (var broker in _realBrokers.Values.Concat(_replacedBrokers).OfType<BinanceBroker>().Distinct()) idle.Add(broker.SendsIdle);
+        foreach (var session in _rithmicSessions.Values.Concat(_retiredRithmicSessions)) idle.Add(session.SendsIdle);
         var all = Task.WhenAll(idle);
         var deadline = _nativeDrainDeadline ??= DateTime.UtcNow + NativeSendDrainLimit;
         if (all.IsCompleted) return;

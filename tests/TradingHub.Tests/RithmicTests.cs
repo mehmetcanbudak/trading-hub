@@ -94,6 +94,7 @@ public class RithmicTests : IDisposable
         using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
+        session.SendTurnWait = TimeSpan.FromMilliseconds(500); // the cancel behind the held amendment sends after one short bound
         await Until(() => broker.OrdersReady && broker.PositionReady);
         var order = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 2m, 4990m);
         await Until(() => order.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(order));
