@@ -762,14 +762,14 @@ public sealed partial class RithmicTradingSession : IDisposable
     /// <param name="priceType">1 límite, 2 mercado, 4 stop mercado.</param>
     public Task<string> PlaceAsync(string accountId, string symbol, string exchange, bool buy, int priceType, int quantity,
         decimal price, decimal trigger, string userTag, CancellationToken ct) =>
-        PlaceCoreAsync(accountId, symbol, exchange, buy, priceType, quantity, price, trigger, userTag, ct, null);
+        PlaceCoreAsync(accountId, symbol, exchange, buy, priceType, quantity, price, trigger, userTag, ct, null, null);
 
     internal Task<string> PlaceOwnedAsync(string accountId, string symbol, string exchange, bool buy, int priceType, int quantity,
-        decimal price, decimal trigger, string userTag, CancellationToken ct, Func<int> finalAdmission) =>
-        PlaceCoreAsync(accountId, symbol, exchange, buy, priceType, quantity, price, trigger, userTag, ct, finalAdmission);
+        decimal price, decimal trigger, string userTag, CancellationToken ct, Func<int> finalAdmission, Action? releaseBeforePublish = null) =>
+        PlaceCoreAsync(accountId, symbol, exchange, buy, priceType, quantity, price, trigger, userTag, ct, finalAdmission, releaseBeforePublish);
 
     private async Task<string> PlaceCoreAsync(string accountId, string symbol, string exchange, bool buy, int priceType, int quantity,
-        decimal price, decimal trigger, string userTag, CancellationToken ct, Func<int>? finalAdmission)
+        decimal price, decimal trigger, string userTag, CancellationToken ct, Func<int>? finalAdmission, Action? releaseBeforePublish)
     {
         if (!NativeFuturesQuantity.TryConvert(quantity, out _)) throw new RithmicRejectedException(NativeFuturesQuantity.Error);
         var a = AccountOf(accountId);
@@ -810,6 +810,9 @@ public sealed partial class RithmicTradingSession : IDisposable
                 }
             }
             ObservePositionCloses(changedContract: ContractKey(accountId, symbol, exchange));
+            // A caller that still holds the account's send turn releases it before this publication. Changed runs the
+            // broker's sync on this same call, and that sync raises ownership before PlaceOwnedAsync returns.
+            releaseBeforePublish?.Invoke();
             Changed?.Invoke();
             return basket;
         }

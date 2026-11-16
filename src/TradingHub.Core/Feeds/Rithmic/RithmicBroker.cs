@@ -382,9 +382,9 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
                         submissionStarted = true;
                         return q;
                     }
-                }).ConfigureAwait(false);
-                // The venue answered: release the turn before the local ownership publication, so a slow journal
-                // write never holds later requests of the account.
+                }, () => sendTurn.Release()).ConfigureAwait(false);
+                // Released inside PlaceOwnedAsync, before that call publishes the session change and raises ownership.
+                // A second release is idempotent.
                 sendTurn.Release();
                 lock (_gate)
                 {
