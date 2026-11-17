@@ -1002,6 +1002,8 @@ public sealed partial class AppServices
             _live?.Notify("Sending queued order requests before quitting…");
             // The caller's context is kept: shutdown continues on it and reads UI-owned broker maps afterwards.
             if (await Task.WhenAny(all, Task.Delay(left)) == all) return;
+            // A timer can complete before the stored instant. Mark the deadline reached so shutdown does not start another wait.
+            _nativeDrainDeadline = DateTime.UtcNow;
         }
         this.LogWarn("Order requests were still waiting to be sent or answered when Trading Hub quit; check orders and positions at the broker.");
     }
