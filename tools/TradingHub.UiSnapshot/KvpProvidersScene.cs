@@ -1375,11 +1375,27 @@ internal static class KvpProvidersScene
                 }
             }
         }
+        /// <summary>Reads a store file the application may be rewriting at this moment. Windows refuses a read while the
+        /// account's own writer holds the file, so a sharing violation is retried; every file is still read in full.</summary>
+        private static string ReadStore(string file)
+        {
+            var until = DateTime.UtcNow.AddSeconds(10);
+            while (true)
+            {
+                try
+                {
+                    using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var reader = new StreamReader(stream);
+                    return reader.ReadToEnd();
+                }
+                catch (IOException ex) when (ex is not FileNotFoundException and not DirectoryNotFoundException && DateTime.UtcNow < until) { Thread.Sleep(25); }
+            }
+        }
         private void CheckOrdinaryStores()
         {
             string[] files = new[] { Path.Combine(AppPaths.Root, "connections.json"), Path.Combine(AppPaths.Root, "settings.json"), AppPaths.WorkspaceFile }
                 .Concat(Directory.Exists(Path.Combine(AppPaths.Accounts, "Bybit")) ? Directory.EnumerateFiles(Path.Combine(AppPaths.Accounts, "Bybit"), "*.json", SearchOption.AllDirectories) : Array.Empty<string>()).Where(File.Exists).ToArray();
-            Check(files.Length > 0 && files.All(file => { string text = File.ReadAllText(file); return _secrets.All(secret => !text.Contains(secret, StringComparison.Ordinal)); }),
+            Check(files.Length > 0 && files.All(file => { string text = ReadStore(file); return _secrets.All(secret => !text.Contains(secret, StringComparison.Ordinal)); }),
                 "ordinary settings and provider intent state contain no API keys, signing secrets or OAuth tokens", new { filesInspected = files.Length });
         }
     }
