@@ -9,6 +9,7 @@ using TradingHub.Networking;
 
 namespace TradingHub.Tests;
 
+[Collection("LiveStore")] // static Rithmic close reservations: never in parallel with other native sessions
 public sealed class KvpRithmicProxyTests
 {
     private static readonly Instrument Es = new()

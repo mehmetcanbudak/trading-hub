@@ -762,14 +762,14 @@ public sealed partial class RithmicTradingSession : IDisposable
     /// <param name="priceType">1 límite, 2 mercado, 4 stop mercado.</param>
     public Task<string> PlaceAsync(string accountId, string symbol, string exchange, bool buy, int priceType, int quantity,
         decimal price, decimal trigger, string userTag, CancellationToken ct) =>
-        PlaceCoreAsync(accountId, symbol, exchange, buy, priceType, quantity, price, trigger, userTag, ct, null);
+        PlaceCoreAsync(accountId, symbol, exchange, buy, priceType, quantity, price, trigger, userTag, ct, null, null);
 
     internal Task<string> PlaceOwnedAsync(string accountId, string symbol, string exchange, bool buy, int priceType, int quantity,
-        decimal price, decimal trigger, string userTag, CancellationToken ct, Func<int> finalAdmission) =>
-        PlaceCoreAsync(accountId, symbol, exchange, buy, priceType, quantity, price, trigger, userTag, ct, finalAdmission);
+        decimal price, decimal trigger, string userTag, CancellationToken ct, Func<int> finalAdmission, Action? releaseBeforePublish = null) =>
+        PlaceCoreAsync(accountId, symbol, exchange, buy, priceType, quantity, price, trigger, userTag, ct, finalAdmission, releaseBeforePublish);
 
     private async Task<string> PlaceCoreAsync(string accountId, string symbol, string exchange, bool buy, int priceType, int quantity,
-        decimal price, decimal trigger, string userTag, CancellationToken ct, Func<int>? finalAdmission)
+        decimal price, decimal trigger, string userTag, CancellationToken ct, Func<int>? finalAdmission, Action? releaseBeforePublish)
     {
         if (!NativeFuturesQuantity.TryConvert(quantity, out _)) throw new RithmicRejectedException(NativeFuturesQuantity.Error);
         var a = AccountOf(accountId);
@@ -810,6 +810,9 @@ public sealed partial class RithmicTradingSession : IDisposable
                 }
             }
             ObservePositionCloses(changedContract: ContractKey(accountId, symbol, exchange));
+            // A caller that still holds the account's send turn releases it before this publication. Changed runs the
+            // broker's sync on this same call, and that sync raises ownership before PlaceOwnedAsync returns.
+            releaseBeforePublish?.Invoke();
             Changed?.Invoke();
             return basket;
         }
@@ -845,13 +848,21 @@ public sealed partial class RithmicTradingSession : IDisposable
     }
 
     public Task ModifyAsync(string accountId, RithmicOrderState order, int quantity, decimal priceOrTrigger, CancellationToken ct) =>
-        ModifyCoreAsync(accountId, order, quantity, priceOrTrigger, ct, null);
+        ModifyCoreAsync(accountId, order, quantity, priceOrTrigger, ct, null, joinSendTurn: true);
 
     internal Task ModifyOwnedAsync(string accountId, RithmicOrderState order, int quantity, decimal priceOrTrigger,
-        CancellationToken ct, Action finalAdmission) => ModifyCoreAsync(accountId, order, quantity, priceOrTrigger, ct, finalAdmission);
+        CancellationToken ct, Action finalAdmission) =>
+        ModifyCoreAsync(accountId, order, quantity, priceOrTrigger, ct, finalAdmission, joinSendTurn: false);
 
+    /// <summary>
+    /// Amends a working order. The public path takes the account's send turn synchronously, before any wait, and holds
+    /// it until the venue answers, refuses, or the call fails, so a close or cancel issued after this amendment cannot
+    /// reach the venue first. A broker that already waited on its own turn passes <paramref name="joinSendTurn"/> false
+    /// and must not take a second turn (that would deadlock behind the turn it still holds). A session-level amendment
+    /// waits at most the reducing bound, then is sent anyway, matching cancel.
+    /// </summary>
     private async Task ModifyCoreAsync(string accountId, RithmicOrderState o, int quantity, decimal priceOrTrigger, CancellationToken ct,
-        Action? finalAdmission)
+        Action? finalAdmission, bool joinSendTurn)
     {
         if (!NativeFuturesQuantity.TryConvert(quantity, out _)) throw new RithmicRejectedException(NativeFuturesQuantity.Error);
         var a = AccountOf(accountId);
@@ -861,9 +872,12 @@ public sealed partial class RithmicTradingSession : IDisposable
             .Int(RpO.Quantity, quantity).Int(RpO.PriceType, o.PriceType).Int(RpO.ManualOrAuto, 1);
         if (o.PriceType is 1 or 3) w.Double(RpO.Price, (double)(o.PriceType == 1 ? priceOrTrigger : o.Price));
         if (o.PriceType is 3 or 4) w.Double(RpO.TriggerPrice, (double)priceOrTrigger);
+        // Taken before the first await so the turn exists before the caller can issue the next request.
+        NativeSendTurns.Turn? turn = joinSendTurn ? SendTurns(accountId).Take() : null;
         bool admitted = false;
         try
         {
+            if (turn != null) await turn.WaitAsync(bounded: true, ct).ConfigureAwait(false);
             await RequestAsync(w, ct, request =>
             {
                 CheckRawCloseReservation(accountId, o.Symbol, o.Exchange, finalAdmission != null);
@@ -883,6 +897,7 @@ public sealed partial class RithmicTradingSession : IDisposable
             if (admitted) lock (_orderGate) o.PendingModifyQuantity = null;
             throw;
         }
+        finally { turn?.Release(); }
     }
 
     public void Dispose()

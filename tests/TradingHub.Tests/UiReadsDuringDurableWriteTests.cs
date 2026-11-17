@@ -18,6 +18,7 @@ namespace TradingHub.Tests;
 /// background flow whose durable flushes are held one at a time, and while each flush is held reads those members from
 /// the test thread under a bound.
 /// </summary>
+[Collection("LiveStore")] // static Rithmic close reservations: never in parallel with other native sessions
 public sealed class UiReadsDuringDurableWriteTests : IDisposable
 {
     private static readonly TimeSpan ReadBound = TimeSpan.FromSeconds(2);

@@ -9,6 +9,7 @@ using TradingHub.Trading;
 namespace TradingHub.Tests;
 
 /// <summary>Rithmic contra un servidor de mentira: historia paginada, velas, contrato del mes y órdenes.</summary>
+[Collection("LiveStore")] // static Rithmic close reservations: never in parallel with other native sessions
 public class RithmicTests : IDisposable
 {
     private readonly NativeOrderTestFixture _orders = new();

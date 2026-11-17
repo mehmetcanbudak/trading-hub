@@ -7,6 +7,7 @@ using TradingHub.Trading;
 namespace TradingHub.Tests;
 
 /// <summary>Historial de la cuenta: operaciones armadas desde las ejecuciones, guardado en disco y datos de Rithmic.</summary>
+[Collection("LiveStore")] // static Rithmic close reservations: never in parallel with other native sessions
 public class AccountTests
 {
     private static readonly DateTime T = new(2026, 10, 5, 14, 0, 0, DateTimeKind.Utc);
