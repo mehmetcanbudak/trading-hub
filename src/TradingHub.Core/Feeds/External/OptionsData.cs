@@ -41,6 +41,7 @@ public sealed class OptionsData : ExternalSeriesHub
     private readonly ConcurrentDictionary<string, List<StrikeSnapshot>> _snapshots = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastSnapshot = new();
     private readonly ConcurrentDictionary<string, DateTime> _tradeRetry = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _tradeLoads = new();
 
     /// <param name="root">Folder for recorded daily rows and strike snapshots; null keeps them in memory.</param>
     public OptionsData(string? root = null, Func<DateTime>? utcNow = null) : base(utcNow) => _root = root;
@@ -199,8 +200,18 @@ public sealed class OptionsData : ExternalSeriesHub
     private static List<(DateTime From, DateTime To)> AddGap(IEnumerable<(DateTime From, DateTime To)> gaps, DateTime from, DateTime to) =>
         from < to ? gaps.Append((From: from, To: to)).OrderBy(g => g.From).ToList() : gaps.ToList();
 
-    /// <summary>Loads trades until [from, to) is covered, one day per request window.</summary>
+    /// <summary>Loads trades until [from, to) is covered, one day per request window. Loads of one underlying run one
+    /// at a time: each reads the store, awaits the provider and writes the store back, so overlapping loads would let the
+    /// slower writer replace the faster one's progress.</summary>
     public async Task LoadTradesAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var gate = _tradeLoads.GetOrAdd(underlying, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try { await LoadTradesCoreAsync(underlying, from, to, ct).ConfigureAwait(false); }
+        finally { gate.Release(); }
+    }
+
+    private async Task LoadTradesCoreAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
     {
         var p = _provider;
         if (p == null || !p.Supports(underlying)) return;
