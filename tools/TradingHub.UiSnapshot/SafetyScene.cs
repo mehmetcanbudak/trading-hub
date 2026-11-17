@@ -869,9 +869,11 @@ internal static partial class SafetyScene
             TradovateUser = "demo",
             TradovateCid = "123",
         };
+        // Fixture readiness poll, not a product deadline: a loaded shared runner has been seen to confirm the native
+        // snapshots about 0.2 s after a six-second wait gave up, so the wait covers a slow connect, not a hang.
         static bool WaitFor(Func<bool> done)
         {
-            var until = DateTime.UtcNow.AddSeconds(6);
+            var until = DateTime.UtcNow.AddSeconds(30);
             while (!done() && DateTime.UtcNow < until) Thread.Sleep(10);
             return done();
         }

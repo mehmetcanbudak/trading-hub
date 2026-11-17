@@ -887,6 +887,9 @@ public partial class BinanceBrokerTests : IDisposable
             () => fake.Sent.Count == 1 && broker.LastError?.Contains("unknown", StringComparison.OrdinalIgnoreCase) == true,
             () => broker.Cancel(order));
         await Polls(fake, 12); // beyond the old bounded binding wait
+        // A poll can finish between the unknown-outcome error and the first exact-client lookup, so twelve polls are not
+        // always twelve lookups. Wait for the lookups themselves, which is what is asserted below.
+        await Until(() => fake.ClientLookups.Count >= 12);
         Assert.Equal(OrderStates.Active, order.State);
         Assert.Equal("", order.ExchangeOrderId);
         Assert.Single(fake.Sent);
@@ -2006,15 +2009,23 @@ public partial class BinanceBrokerTests : IDisposable
 
         var bound = NativeSendTurns.ReducingWait;
         var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var buyHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int holdNextPost = 1, measuring = 0;
         long sellArrived = 0;
         fake.BeforePostReply = async _ =>
         {
+            // The fake records an order before it runs this hook, so the held buy is recognised here, not by the order
+            // count: otherwise the buy's own hook can run after measuring starts and be mistaken for the close.
+            if (Interlocked.Exchange(ref holdNextPost, 0) == 1)
+            {
+                buyHeld.TrySetResult();
+                await buyReply.Task;
+                return;
+            }
             if (Volatile.Read(ref measuring) == 1) Interlocked.CompareExchange(ref sellArrived, DateTime.UtcNow.Ticks, 0);
-            if (Interlocked.Exchange(ref holdNextPost, 0) == 1) await buyReply.Task;
         };
         var buy = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
-        await Until(() => fake.Placed.Count(order => order.Side == "BUY") == 2); // the buy's POST arrived, its reply is held
+        await buyHeld.Task.WaitAsync(TimeSpan.FromSeconds(30)); // the buy's POST arrived, its reply is held
         try
         {
             Volatile.Write(ref measuring, 1);
