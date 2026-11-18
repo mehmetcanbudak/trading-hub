@@ -24302,5 +24302,161 @@
   "Rename refused: '{0}' is read-only.": {
     "es": "Cambio de nombre rechazado: '{0}' es de solo lectura.",
     "zh-CN": "重命名被拒绝：“{0}”为只读。"
+  },
+  "{0} added to the chart": {
+    "es": "{0} agregado al gráfico",
+    "zh-CN": "已将 {0} 添加到图表"
+  },
+  "{0} (spot)": {
+    "es": "{0} (spot)",
+    "zh-CN": "{0}（现货）"
+  },
+  "{0} (perpetuals)": {
+    "es": "{0} (perpetuos)",
+    "zh-CN": "{0}（永续合约）"
+  },
+  "All drawings are locked: unlock them with the lock on the left drawing bar": {
+    "es": "Todos los dibujos están bloqueados: desbloquéalos con el candado de la barra de dibujos de la izquierda",
+    "zh-CN": "所有绘图均已锁定：请使用左侧绘图栏上的锁来解锁"
+  },
+  "Enter a percent above 0.": {
+    "es": "Escribe un porcentaje mayor que 0.",
+    "zh-CN": "请输入大于 0 的百分比。"
+  },
+  "{0} chart alert(s) of {1} resumed": {
+    "es": "Se reanudaron {0} alerta(s) del gráfico de {1}",
+    "zh-CN": "已恢复 {1} 的 {0} 个图表提醒"
+  },
+  "{0} chart alert(s) of {1} are kept and resume when this chart shows it again": {
+    "es": "Se conservan {0} alerta(s) del gráfico de {1}: se reanudan cuando este gráfico vuelva a mostrarlo",
+    "zh-CN": "已保留 {1} 的 {0} 个图表提醒：此图表再次显示该品种时会恢复"
+  },
+  "Drawings of {0} could not be read: the file is kept and alerts on them are not removed": {
+    "es": "No se pudieron leer los dibujos de {0}: el archivo se conserva y sus alertas no se eliminan",
+    "zh-CN": "无法读取 {0} 的绘图：文件已保留，其上的提醒不会被删除"
+  },
+  "{0} chart alert(s) removed: their indicator could not be copied": {
+    "es": "Se quitaron {0} alerta(s) del gráfico: no se pudo copiar su indicador",
+    "zh-CN": "已移除 {0} 个图表提醒：无法复制其指标"
+  },
+  "out of order: {0} after {1}": {
+    "es": "fuera de orden: {0} después de {1}",
+    "zh-CN": "顺序错乱：{0} 在 {1} 之后"
+  },
+  "unparseable book frame": {
+    "es": "mensaje de libro ilegible",
+    "zh-CN": "无法解析的订单簿消息"
+  },
+  "{0} publishes {1} funding only from {2} UTC; earlier funding is unknown.": {
+    "es": "{0} publica la financiación de {1} solo desde {2} UTC; la financiación anterior es desconocida.",
+    "zh-CN": "{0} 仅提供自 {2} UTC 起的 {1} 资金费率；更早的资金费率未知。"
+  },
+  "{0} publishes the {1} long/short ratio only from {2} UTC; earlier values are unknown.": {
+    "es": "{0} publica la relación largos/cortos de {1} solo desde {2} UTC; los valores anteriores son desconocidos.",
+    "zh-CN": "{0} 仅提供自 {2} UTC 起的 {1} 多空比；更早的数值未知。"
+  },
+  "{0} does not list {1}; its liquidations are unknown.": {
+    "es": "{0} no lista {1}; sus liquidaciones son desconocidas.",
+    "zh-CN": "{0} 未上市 {1}；其爆仓情况未知。"
+  },
+  "the subscription was refused": {
+    "es": "la suscripción fue rechazada",
+    "zh-CN": "订阅被拒绝"
+  },
+  "Recorded liquidations could not be read; only live observations are shown: ": {
+    "es": "No se pudieron leer las liquidaciones grabadas; solo se muestran las observaciones en vivo: ",
+    "zh-CN": "无法读取已记录的爆仓数据；仅显示实时观测："
+  },
+  "The API base URL must use https:// (plain http only for localhost): the API key is sent with every request.": {
+    "es": "La URL base de la API debe usar https:// (http sin cifrar solo para localhost): la clave de la API se envía con cada solicitud.",
+    "zh-CN": "API 基础 URL 必须使用 https://（仅 localhost 可用明文 http）：每个请求都会发送 API 密钥。"
+  },
+  "Firmness ({0})": {
+    "es": "Firmeza ({0})",
+    "zh-CN": "坚挺度（{0}）"
+  },
+  "States known at each bar close": {
+    "es": "Estados conocidos en cada cierre de vela",
+    "zh-CN": "每根 K 线收盘时已知的状态"
+  },
+  "States known at each bar close; the last is forming": {
+    "es": "Estados conocidos en cada cierre de vela; el último está en formación",
+    "zh-CN": "每根 K 线收盘时已知的状态；最后一个正在形成"
+  },
+  "This text has no closing quote (\")": {
+    "es": "Este texto no tiene comillas de cierre (\")",
+    "zh-CN": "此文本缺少右引号 (\")"
+  },
+  "«{0}» is too large for a parameter (at most ±7.9e28)": {
+    "es": "«{0}» es demasiado grande para un parámetro (como máximo ±7.9e28)",
+    "zh-CN": "「{0}」对参数来说过大（最大 ±7.9e28）"
+  },
+  "«{0}» already compiles to the same indicator type; rename one of the two files": {
+    "es": "«{0}» ya se compila al mismo tipo de indicador; renombra uno de los dos archivos",
+    "zh-CN": "「{0}」已编译为相同的指标类型；请重命名其中一个文件"
+  },
+  "The script could not be translated: {0}": {
+    "es": "No se pudo traducir el script: {0}",
+    "zh-CN": "无法转换该脚本：{0}"
+  },
+  "Use the form {0}": {
+    "es": "Usa la forma {0}",
+    "zh-CN": "请使用以下形式：{0}"
+  },
+  "Renaming a KVS script renames its indicator type; charts and templates that use it will no longer load it": {
+    "es": "Renombrar un script KVS renombra su tipo de indicador; los gráficos y plantillas que lo usan ya no podrán cargarlo",
+    "zh-CN": "重命名 KVS 脚本会同时重命名其指标类型；使用它的图表和模板将无法再加载它"
+  },
+  "Another KVS script already compiles to that indicator type. Choose another name; nothing was changed.": {
+    "es": "Otro script KVS ya se compila a ese tipo de indicador. Elige otro nombre; no se cambió nada.",
+    "zh-CN": "另一个 KVS 脚本已编译为该指标类型。请选择其他名称；未做任何更改。"
+  },
+  "Saving recompiles custom C# and KVS scripts with the current Trading Hub compiler. Renaming a C# file never renames its types, series IDs, saved chart references or templates; renaming a KVS script renames its indicator type. Pine imports stay local text until you explicitly send the reviewed source.": {
+    "es": "Al guardar se recompilan el C# personalizado y los scripts KVS con el compilador actual de Trading Hub. Renombrar un archivo C# nunca cambia sus tipos, los ID de series, las referencias de gráficos guardados ni las plantillas; renombrar un script KVS renombra su tipo de indicador. Las importaciones de Pine quedan como texto local hasta que envíes explícitamente el código revisado.",
+    "zh-CN": "保存时会用当前的 Trading Hub 编译器重新编译自定义 C# 和 KVS 脚本。重命名 C# 文件不会改变其类型、序列 ID、已保存图表的引用或模板；重命名 KVS 脚本会重命名其指标类型。导入的 Pine 代码在你明确发送已审阅的源代码之前只作为本地文本保存。"
+  },
+  "The local market-data API stopped: {0}": {
+    "es": "La API local de datos de mercado se detuvo: {0}",
+    "zh-CN": "本地行情数据 API 已停止：{0}"
+  },
+  "Calculations run locally from the values entered; nothing is sent and no order is placed. Balance, risk, fee, leverage, margin and funding inputs are remembered; point value, quantity step and an empty entry price are filled in from the selected instrument.": {
+    "es": "Los cálculos se hacen localmente con los valores ingresados; no se envía nada ni se coloca ninguna orden. Se recuerdan el saldo, el riesgo, la comisión, el apalancamiento, el margen y los datos de financiación; el valor del punto, el paso de cantidad y un precio de entrada vacío se completan con el instrumento seleccionado.",
+    "zh-CN": "计算在本地根据输入值进行；不会发送任何数据，也不会下单。余额、风险、手续费、杠杆、保证金和资金费率输入会被保存；点值、数量步长以及空白的入场价会根据所选品种自动填入。"
+  },
+  "/api/v5/market/history-candles?instId={0}&bar={1}&after={2}&limit=100": {
+    "es": "/api/v5/market/history-candles?instId={0}&bar={1}&after={2}&limit=100",
+    "zh-CN": "/api/v5/market/history-candles?instId={0}&bar={1}&after={2}&limit=100"
+  },
+  "Min": {
+    "es": "Min",
+    "zh-CN": "Min"
+  },
+  "{0}Min": {
+    "es": "{0}Min",
+    "zh-CN": "{0}Min"
+  },
+  "{0}/v2/stocks/{1}/bars?timeframe={2}&start={3}&end={4}&limit=10000&feed=sip&adjustment=raw": {
+    "es": "{0}/v2/stocks/{1}/bars?timeframe={2}&start={3}&end={4}&limit=10000&feed=sip&adjustment=raw",
+    "zh-CN": "{0}/v2/stocks/{1}/bars?timeframe={2}&start={3}&end={4}&limit=10000&feed=sip&adjustment=raw"
+  },
+  "{0}/v2/stocks/{1}/bars?timeframe={2}&start={3}&end={4}&limit=10000&feed=sip&adjustment=raw{5}": {
+    "es": "{0}/v2/stocks/{1}/bars?timeframe={2}&start={3}&end={4}&limit=10000&feed=sip&adjustment=raw{5}",
+    "zh-CN": "{0}/v2/stocks/{1}/bars?timeframe={2}&start={3}&end={4}&limit=10000&feed=sip&adjustment=raw{5}"
+  },
+  "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}": {
+    "es": "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}",
+    "zh-CN": "{{{{\"type\":\"candleSnapshot\",\"req\":{{{{\"coin\":\"{0}\",\"interval\":\"{1}\",\"startTime\":{2},\"endTime\":{3}}}}}}}}}"
+  },
+  "Recorded liquidations could not be read; only live observations are shown: {0}": {
+    "es": "No se pudieron leer las liquidaciones grabadas; solo se muestran las observaciones en vivo: {0}",
+    "zh-CN": "无法读取已记录的爆仓数据；仅显示实时观测：{0}"
+  },
+  "The provider returned candles that do not match the requested {0}-minute resolution.": {
+    "es": "El proveedor devolvió velas que no coinciden con la resolución solicitada de {0} minutos.",
+    "zh-CN": "数据商返回的 K 线与请求的 {0} 分钟分辨率不符。"
+  },
+  "IB bar history supports 1, 5, 15 and 60 minute requests.": {
+    "es": "El historial de velas de IB admite solicitudes de 1, 5, 15 y 60 minutos.",
+    "zh-CN": "IB K 线历史支持 1、5、15 和 60 分钟请求。"
   }
 }

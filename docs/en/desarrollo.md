@@ -351,4 +351,16 @@ dotnet /absolute/staged/TradingHub.UiSnapshot.dll \
 
 The input maps each reviewed relative `src/...cs` path to its own rationale. Export calls the existing, unchanged Roslyn `Structure` algorithm, including recursive template treatment; it does not edit or auto-approve the manifest. Read/review actual source and preserve the historical audit baseline/checkpoint before merging exact hashes. Bilingual additions belong in reviewed `tools/TradingHub.I18n/overrides.json`; publish with the existing provenance/collision process, retain all original upstream aliases, and re-extract the final source before complete coverage/template checks.
 
+Two helpers wrap these steps after a Release build (both resolve the repository from their own location):
+
+```bash
+# Add reviewed translations ({"English": {"es": "...", "zh-CN": "..."}}), publish catalogs, move shifted
+# non-display exclusion locations, then run the es/zh-CN completeness checks and the English checker.
+python3 tools/TradingHub.I18n/gates.py [translations.json]
+# Record individually reviewed source paths ({"src/...cs": "reason"}) in tools/english-localization-review.json.
+python3 tools/TradingHub.I18n/approve_review.py reviews.json
+```
+
+`approve_review.py` uses the same `--source-fingerprints` export; read the changed source before approving it.
+
 Results belong in [the dashboard](./TRANSLATION_STATUS.md#kvp-capability-adoption-candidate--2026-11-04) only after observed receipt/UI evidence. Fake providers/CLIs do not certify real entitlements, OAuth/model access, installed/native Windows, physical power/thermal behavior, signatures/notarization, distribution or exchange-atomic protection.
