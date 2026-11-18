@@ -134,14 +134,18 @@ public static class StorageSync
         };
     }
 
-    // A read-only destination also reports access denied, but that refusal does not clear by waiting.
+    // A read-only file or a directory at the destination also reports access denied, but neither clears by waiting.
     private static bool TransientWindowsMoveError(int error, string destination) =>
-        error is SharingViolation or LockViolation || (error == AccessDenied && !IsReadOnly(destination));
+        error is SharingViolation or LockViolation || (error == AccessDenied && !PermanentRefusal(destination));
 
-    private static bool IsReadOnly(string path)
+    private static bool PermanentRefusal(string path)
     {
-        try { return File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly); }
-        catch (IOException) { return false; } // missing or itself contended: not a read-only refusal
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            return attributes.HasFlag(FileAttributes.ReadOnly) || attributes.HasFlag(FileAttributes.Directory);
+        }
+        catch (IOException) { return false; } // missing or itself contended: not a permanent refusal
         catch (UnauthorizedAccessException) { return false; }
     }
 

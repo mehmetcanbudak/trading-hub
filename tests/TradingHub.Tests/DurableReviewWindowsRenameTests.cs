@@ -101,4 +101,18 @@ public sealed class DurableReviewWindowsRenameTests : IDisposable
         Assert.Equal("previous", File.ReadAllText(destination));
         Assert.Equal("next", File.ReadAllText(source));
     }
+
+    /// <summary>A directory where the state file belongs (the KVP alert scene's injected disk fault) also reports access
+    /// denied on Windows; it never clears by waiting, so the failure is reported at once.</summary>
+    [Fact]
+    public void A_directory_at_the_destination_is_refused_without_retry()
+    {
+        string destination = PathFor("state.json");
+        Directory.CreateDirectory(destination);
+        var move = new ScriptedMove(5, 0);
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            StorageSync.Rename(PathFor("state.json.tmp"), destination, overwrite: true, windows: true, move.Move, move.Pause));
+        Assert.Equal(1, move.Attempts);
+        Assert.Empty(move.Pauses);
+    }
 }
