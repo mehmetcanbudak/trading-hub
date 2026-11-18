@@ -65,10 +65,11 @@ public class DayType : OptionsOverlay
     /// <summary>
     /// Classifies one window ending at sample <paramref name="k"/>: Volatile when range ≥ volatile × σ; Trending when
     /// efficiency (|net move| ÷ path) ≥ the threshold and range ≥ pinned × σ; Pinned when range &lt; pinned × σ.
-    /// σ = price × annual vol × √(window minutes ÷ minutes per year).
+    /// σ = price × annual vol × √(window minutes ÷ minutes per year), with <paramref name="sampleMinutes"/> per sample
+    /// (10, or the bar length on charts with longer bars, where each bar is one sample).
     /// </summary>
     internal static State Classify(IReadOnlyList<Sample> samples, int k, int window, double annualVol, double minutesPerYear,
-        double volatileRatio, double pinnedRatio, double trendEfficiency)
+        double volatileRatio, double pinnedRatio, double trendEfficiency, double sampleMinutes = 10)
     {
         double hi = double.MinValue, lo = double.MaxValue, path = 0;
         for (int j = k - window; j <= k; j++)
@@ -78,7 +79,7 @@ public class DayType : OptionsOverlay
             if (j > k - window) path += Math.Abs(samples[j].Price - samples[j - 1].Price);
         }
 
-        double sigma = samples[k].Price * annualVol * Math.Sqrt(window * 10 / minutesPerYear);
+        double sigma = samples[k].Price * annualVol * Math.Sqrt(window * sampleMinutes / minutesPerYear);
         double range = hi - lo, eff = path > 0 ? Math.Abs(samples[k].Price - samples[k - window].Price) / path : 0;
         return range >= volatileRatio * sigma ? State.Volatile
             : eff >= trendEfficiency && range >= pinnedRatio * sigma ? State.Trending
@@ -87,10 +88,10 @@ public class DayType : OptionsOverlay
     }
 
     /// <summary>
-    /// Annualized realized volatility of the 10-minute log returns in the 144 samples before <paramref name="k"/>
-    /// (about one day; excludes sample k so the state never uses its own move); NaN with fewer than 20 returns.
+    /// Annualized realized volatility of the sample log returns in the 144 samples before <paramref name="k"/> (one day
+    /// of 10-minute samples; excludes sample k so the state never uses its own move); NaN with fewer than 20 returns.
     /// </summary>
-    internal static double TrailingVol(IReadOnlyList<Sample> samples, int k, double minutesPerYear)
+    internal static double TrailingVol(IReadOnlyList<Sample> samples, int k, double minutesPerYear, double sampleMinutes = 10)
     {
         double sum = 0;
         int n = 0;
@@ -102,7 +103,15 @@ public class DayType : OptionsOverlay
             n++;
         }
 
-        return n >= 20 ? Math.Sqrt(sum / n * (minutesPerYear / 10)) : double.NaN;
+        return n >= 20 ? Math.Sqrt(sum / n * (minutesPerYear / sampleMinutes)) : double.NaN;
+    }
+
+    /// <summary>A horizon as the card prints it: 30 min, 1 h, 1 h 30, 2 h…</summary>
+    internal static string Span(double minutes)
+    {
+        int m = (int)Math.Round(minutes);
+        var ci = CultureInfo.InvariantCulture;
+        return m < 60 ? m.ToString(ci) + " min" : m % 60 == 0 ? (m / 60).ToString(ci) + " h" : (m / 60).ToString(ci) + " h " + (m % 60).ToString(ci);
     }
 
     internal override void BuildOptions(OptionsScene s, OptionsData? data)
@@ -115,6 +124,8 @@ public class DayType : OptionsOverlay
         string sym = (InstrumentInfo?.Instrument ?? "").ToUpperInvariant();
         bool crypto = Opt.Crypto(Underlying) || sym.EndsWith("USDT", StringComparison.Ordinal) || sym.EndsWith("USDC", StringComparison.Ordinal);
         double minutesYear = crypto ? 365 * 1440 : 252 * 390;
+        // Samples close every 10 minutes; on charts with longer bars each bar is one sample of the bar's length.
+        double sampleMinutes = Math.Max(10, BarLength.TotalMinutes);
 
         // 10-minute samples closed by the chart's bars; each is known at its last bar's close.
         var samples = new List<Sample>();
@@ -142,9 +153,9 @@ public class DayType : OptionsOverlay
             double iv = chain != null && samples[k].End >= chain.Time && chain.Time.Date == samples[k].End.Date && double.IsFinite(liveIv) ? liveIv
                 : Opt.KnownBefore(daily, samples[k].End) is { } row && row.Date.Date >= samples[k].End.Date.AddDays(-4) ? row.AtmIv : double.NaN;
             if (double.IsFinite(iv) && iv > 0) usedOptions = true;
-            else iv = TrailingVol(samples, k, minutesYear);
+            else iv = TrailingVol(samples, k, minutesYear, sampleMinutes);
             if (!double.IsFinite(iv) || iv <= 0) continue;
-            states[k] = Classify(samples, k, w, iv, minutesYear, (double)VolatileRatio, (double)PinnedRatio, (double)TrendEfficiency);
+            states[k] = Classify(samples, k, w, iv, minutesYear, (double)VolatileRatio, (double)PinnedRatio, (double)TrendEfficiency, sampleMinutes);
             _ribbon.Add((samples[k].Bar, states[k]!.Value));
         }
 
@@ -155,7 +166,8 @@ public class DayType : OptionsOverlay
             return;
         }
 
-        // How often the same state held 30, 60, 90 and 120 minutes later (counted on closed samples, not modelled).
+        // How often the same state held 3, 6, 9 and 12 samples later (30 minutes to 2 hours with 10-minute samples),
+        // counted on closed samples, not modelled.
         var horizons = new[] { 3, 6, 9, 12 };
         var odds = new double[4];
         var moves = new double[4];
@@ -181,7 +193,7 @@ public class DayType : OptionsOverlay
         if (longest >= 0)
         {
             double px = Close(n - 1), mv = moves[longest] / 100 * px;
-            int ahead = Math.Max(4, (int)(horizons[longest] * 10 / Math.Max(1, BarLength.TotalMinutes)));
+            int ahead = Math.Max(4, (int)(horizons[longest] * sampleMinutes / Math.Max(1, BarLength.TotalMinutes)));
             s.Boxes.Add(new OptionsScene.Box(n - 1, n - 1 + ahead, px + mv, px - mv, Color.FromArgb(35, 86, 160, 255), Color.FromArgb(120, 86, 160, 255), "typical range"));
         }
 
@@ -197,12 +209,13 @@ public class DayType : OptionsOverlay
         double strong = odds[1];
         string name = cur switch { State.Pinned => "Pinned", State.Trending => "Trending", State.Volatile => "Volatile", _ => "Unsettled" };
         s.Title = $"Day type: {UiText.Tr(name)}";
-        s.Row("Firmness (1 h)", !double.IsFinite(strong) ? "few cases" : strong >= 75 ? "firm" : strong >= 50 ? "medium" : "weak", strong >= 75 ? Opt.Call : default);
-        string[] hn = { "30 min", "1 h", "1 h 30", "2 h" };
+        s.Row($"Firmness ({Span(horizons[1] * sampleMinutes)})", !double.IsFinite(strong) ? "few cases" : strong >= 75 ? "firm" : strong >= 50 ? "medium" : "weak", strong >= 75 ? Opt.Call : default);
         for (int h = 0; h < 4; h++)
-            s.Row($"Holds after {hn[h]}", double.IsFinite(odds[h]) ? Opt.Pct(odds[h], "0") + " · ±" + Opt.Pct(moves[h], "0.00") : $"— ({counts[h]})");
+            s.Row($"Holds after {Span(horizons[h] * sampleMinutes)}", double.IsFinite(odds[h]) ? Opt.Pct(odds[h], "0") + " · ±" + Opt.Pct(moves[h], "0.00") : $"— ({counts[h]})");
         s.Row("Volatility", usedOptions ? "options IV" : "realized");
-        s.Footer = samples[last].Closed ? "States known at each 10-minute close" : "States known at each 10-minute close; the last is forming";
+        s.Footer = sampleMinutes > 10
+            ? samples[last].Closed ? "States known at each bar close" : "States known at each bar close; the last is forming"
+            : samples[last].Closed ? "States known at each 10-minute close" : "States known at each 10-minute close; the last is forming";
     }
 
     protected override void RenderBefore(RenderContext ctx, Rectangle region)

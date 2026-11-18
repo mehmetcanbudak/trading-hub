@@ -56,6 +56,9 @@ public sealed class FlowByExchange : Indicator
     }
 
     private readonly MarketFlowCache _cache = new();
+    // Net notional per market of the bars before the drawn range ("accumulate from the first bar"), kept between frames.
+    private decimal[] _before = Array.Empty<decimal>();
+    private int _beforeBars;
     private readonly RenderFont _font = new("Arial", 8), _bold = new("Arial", 8, FontStyle.Bold);
 
     public FlowByExchange() : base(true)
@@ -97,7 +100,12 @@ public sealed class FlowByExchange : Indicator
     [Browsable(false)]
     public IReadOnlyList<string> RankedExchanges { get; private set; } = Array.Empty<string>();
 
-    protected override void OnRecalculate() => _cache.Reset(InstrumentInfo?.Sources ?? Array.Empty<InstrumentSource>(), FlowFormat.PointValue(this));
+    protected override void OnRecalculate()
+    {
+        _cache.Reset(InstrumentInfo?.Sources ?? Array.Empty<InstrumentSource>(), FlowFormat.PointValue(this));
+        _before = Array.Empty<decimal>();
+        _beforeBars = 0;
+    }
 
     protected override void OnCalculate(int bar, decimal value)
     {
@@ -153,6 +161,8 @@ public sealed class FlowByExchange : Indicator
         }
 
         int rankFrom = RankStart(first);
+        _cache.Retain(rankFrom, CurrentBar - 1, first, last);
+        var before = SinceStart ? NetBefore(first) : null;
         var window = Enumerable.Range(rankFrom, CurrentBar - rankFrom).Select(Flow).ToList();
         var ranked = Rank(sources, window, Markets);
         decimal total = ranked.Sum(x => x.Gross);
@@ -176,13 +186,13 @@ public sealed class FlowByExchange : Indicator
             note = UiText.Tr(ns > 0 ? "Spot buying while perpetuals sell: they disagree" : "Spot selling while perpetuals buy: they disagree");
         else if (unattributed > 0)
             note = UiText.Tr($"Unattributed notional (unknown market): {FlowFormat.Compact(unattributed)}");
-        DrawRow(context, r, y, allHeight, first, last, allSpot, allPerpetual, UiText.Tr("ALL MARKETS"), ns + np, 1, windowText, note, true);
+        DrawRow(context, r, y, allHeight, first, last, allSpot, allPerpetual, UiText.Tr("ALL MARKETS"), ns + np, 1, windowText, note, true, before);
         y += allHeight;
         for (int k = 0; k < shown.Count; k++)
         {
             if (heights[k] < 10) break;
             var row = shown[k];
-            DrawRow(context, r, y, heights[k], first, last, row.Spot, row.Perpetual, $"#{k + 1} {row.Name.ToUpperInvariant()}", row.Net, total > 0 ? row.Gross / total : 0, windowText, "", false);
+            DrawRow(context, r, y, heights[k], first, last, row.Spot, row.Perpetual, $"#{k + 1} {row.Name.ToUpperInvariant()}", row.Net, total > 0 ? row.Gross / total : 0, windowText, "", false, before);
             y += heights[k];
         }
         if (hidden > 0) context.DrawString(UiText.Tr($"+{hidden} more exchanges (raise \"Exchange rows\")"), _font, FlowFormat.Dim, r.Left + 6, r.Bottom - 12);
@@ -213,8 +223,39 @@ public sealed class FlowByExchange : Indicator
         return result;
     }
 
+    /// <summary>
+    /// Net notional per market of bars [0, <paramref name="first"/>): closed bars are added (or, scrolling left, removed)
+    /// once and remembered, so accumulating from the first bar never re-walks the history on each frame.
+    /// </summary>
+    private decimal[] NetBefore(int first)
+    {
+        int markets = _cache.Sources.Count;
+        if (_before.Length != markets)
+        {
+            _before = new decimal[markets];
+            _beforeBars = 0;
+        }
+        while (_beforeBars > first)
+        {
+            var f = _cache.Compute(--_beforeBars, GetBarTrades);
+            for (int i = 0; i < markets; i++) _before[i] -= f.Net(i);
+        }
+        while (_beforeBars < first && GetCandle(_beforeBars).IsCandleFinished)
+        {
+            var f = _cache.Compute(_beforeBars++, GetBarTrades);
+            for (int i = 0; i < markets; i++) _before[i] += f.Net(i);
+        }
+        var sums = (decimal[])_before.Clone();
+        for (int b = _beforeBars; b < first; b++)
+        {
+            var f = Flow(b);
+            for (int i = 0; i < markets; i++) sums[i] += f.Net(i);
+        }
+        return sums;
+    }
+
     private void DrawRow(RenderContext ctx, Rectangle r, int top, int h, int first, int last, List<int> spot, List<int> perpetual,
-        string name, decimal net, decimal share, string windowText, string note, bool aggregate)
+        string name, decimal net, decimal share, string windowText, string note, bool aggregate, decimal[]? before)
     {
         var info = ChartInfo!;
         ctx.DrawLine(new RenderPen(Color.FromArgb(70, 140, 150, 170)), r.Left, top, r.Right, top);
@@ -225,12 +266,8 @@ public sealed class FlowByExchange : Indicator
             if (indexes.Count == 0) continue;
             var values = new decimal?[n];
             decimal acc = 0;
-            if (SinceStart)
-                for (int b = 0; b < first; b++)
-                {
-                    var f0 = Flow(b);
-                    foreach (int i in indexes) acc += f0.Net(i);
-                }
+            if (before != null)
+                foreach (int i in indexes) acc += before[i];
             bool any = false;
             for (int b = first; b <= last; b++)
             {
@@ -493,21 +530,22 @@ public sealed class BarStatsStrip : Indicator
     internal List<StatRow> BuildRows(int first, int last)
     {
         var rows = new List<StatRow>();
-        var cvd = new Dictionary<int, (decimal? All, decimal Retail, decimal Whales)>();
-        decimal? all = 0;
-        decimal retail = 0, whales = 0;
+        var cvd = new Dictionary<int, (decimal? All, decimal? Retail, decimal? Whales)>();
+        decimal? all = 0, retail = 0, whales = 0;
         for (int b = first; b <= last; b++)
         {
             if (CvdFrom == CvdAnchor.Session && b > first && IsNewSession(b)) { all = 0; retail = 0; whales = 0; }
             // An unmeasured delta breaks the CVD until the next reset: a gap, never an assumed zero.
             all = all is { } a && MeasuredDelta(b) is { } d ? a + d * Unit(b) : null;
+            // Likewise a bar without individual prints breaks the retail and whale CVDs.
             var f = Flow(b);
-            if (f.HasIndividualPrints)
+            if (f.HasIndividualPrints && retail is { } rs && whales is { } ws)
             {
                 var (rd, wd) = f.SizeDelta(RetailMaximum, WhaleMinimum);
-                retail += rd;
-                whales += wd;
+                retail = rs + rd;
+                whales = ws + wd;
             }
+            else retail = whales = null;
             cvd[b] = (all, retail, whales);
         }
         static string Percent(decimal v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "%";
@@ -595,6 +633,7 @@ public sealed class BarStatsStrip : Indicator
         var pc = ChartInfo.PriceChartContainer;
         int first = Math.Max(0, pc.FirstVisibleBarNumber), last = Math.Min(CurrentBar - 1, pc.LastVisibleBarNumber);
         if (last < first) return;
+        _cache.Retain(first, last);
         var rows = BuildRows(first, last);
         if (rows.Count == 0) return;
         int rh = Math.Max(10, Math.Min(18, (r.Height - 17) / rows.Count));
@@ -725,13 +764,14 @@ public sealed class PositioningNlNs : Indicator
     {
         _regimes.Clear();
         _line.VisualType = _showLine ? VisualMode.Line : VisualMode.Hide;
-        if (CurrentBar > 0) _derivatives.Ensure(Symbol, GetCandle(0).Time);
     }
 
     protected override void OnDispose() => _derivatives.Dispose();
 
     protected override void OnCalculate(int bar, decimal value)
     {
+        // Loads, then refreshes open interest as live time advances (a no-op while fresh).
+        if (bar == CurrentBar - 1) _derivatives.Ensure(Symbol, GetCandle(0).Time);
         var c = GetCandle(bar);
         decimal running = bar == 0 || _resetDaily && IsNewSession(bar) ? 0 : _line[bar - 1];
         var end = End(bar);

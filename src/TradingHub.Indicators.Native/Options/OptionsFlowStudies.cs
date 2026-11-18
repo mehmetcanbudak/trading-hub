@@ -133,8 +133,37 @@ public class PremiumByStrike : StrikeFootprint
 [Description("A profile of option premium stacked at the underlying price when each trade executed (1 to 30 days): where traders bet hardest. Green is the bullish part, red the bearish part; a line marks the price with the most premium.")]
 public class OptionsAtPrice : OptionsOverlay
 {
+    // Days each open study asked of a shared options hub: the hub keeps its own setting or the largest open request,
+    // and drops back when the asking studies are removed.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<OptionsData, TradeDayRequests> Requests = new();
     private double[] _bull = Array.Empty<double>(), _bear = Array.Empty<double>();
     private double _low, _row;
+    private OptionsData? _requested;
+
+    private sealed class TradeDayRequests(int baseline)
+    {
+        public readonly int Baseline = baseline;
+        public readonly Dictionary<OptionsAtPrice, int> Days = new();
+    }
+
+    /// <summary>Records (or with zero days withdraws) this study's request and applies the largest one to the hub.</summary>
+    private void RequestTradeDays(OptionsData data, int days)
+    {
+        lock (Requests)
+        {
+            var requests = Requests.GetValue(data, d => new TradeDayRequests(d.MaxTradeDays));
+            if (days > 0) requests.Days[this] = days;
+            else requests.Days.Remove(this);
+            data.MaxTradeDays = Math.Max(requests.Baseline, requests.Days.Count == 0 ? 0 : requests.Days.Values.Max());
+        }
+    }
+
+    protected override void OnDispose()
+    {
+        if (_requested != null) RequestTradeDays(_requested, 0);
+        _requested = null;
+        base.OnDispose();
+    }
 
     [Display(Name = "Days", GroupName = "Calculation", Order = 10)]
     [Range(1, 30)]
@@ -151,7 +180,12 @@ public class OptionsAtPrice : OptionsOverlay
     internal override void Build(OptionsScene s, OptionsData data)
     {
         int days = Math.Clamp(Days, 1, 30);
-        data.MaxTradeDays = Math.Max(data.MaxTradeDays, days);
+        if (!ReferenceEquals(_requested, data))
+        {
+            if (_requested != null) RequestTradeDays(_requested, 0);
+            _requested = data;
+        }
+        RequestTradeDays(data, days);
         var now = EndOf(LastBar);
         var from = now.AddDays(-days);
         var tr = TradesBetween(data, from, now).Where(t => t.Spot > 0).ToList();
@@ -172,7 +206,8 @@ public class OptionsAtPrice : OptionsOverlay
         foreach (var t in tr)
         {
             int k = Math.Clamp((int)((t.Spot - lo) / _row), 0, n - 1);
-            if (t.Bias >= 0) _bull[k] += t.Premium;
+            // Only a known buyer-side bias is bullish; unknown aggressors (bias 0) count with the bearish part, as labelled.
+            if (t.Bias > 0) _bull[k] += t.Premium;
             else _bear[k] += t.Premium;
         }
 
@@ -859,6 +894,8 @@ public class OptionsSentiment : OptionsPane
 {
     private readonly OptionalValueDataSeries _s = new("SENT", "Sentiment") { Color = Opt.Blue, Width = 2 };
     private readonly List<(double Bull, double Bear)?> _cum = new();
+    // Bars before this one are already hidden (earlier days are not drawn), so each live tick hides only what is new.
+    private int _hiddenBefore;
 
     public OptionsSentiment()
     {
@@ -868,11 +905,16 @@ public class OptionsSentiment : OptionsPane
         LineSeries.Add(new LineSeries("D", "−50") { Value = -50, Color = Color.FromArgb(60, 240, 82, 90), LineDashStyle = LineDashStyle.Dot });
     }
 
-    protected override void Reset() => _cum.Clear();
+    protected override void Reset()
+    {
+        _cum.Clear();
+        _hiddenBefore = 0;
+    }
 
     protected override void Calc(int bar, OptionsData data)
     {
         while (_cum.Count <= bar) _cum.Add(null);
+        if (bar < _hiddenBefore) _hiddenBefore = bar;
         var tr = TradesOf(data, bar);
         var prev = NewDay(bar) ? (0d, 0d) : _cum[bar - 1];
         if (tr == null || prev == null)
@@ -891,7 +933,8 @@ public class OptionsSentiment : OptionsPane
         // Today only: earlier days are not drawn.
         int start = bar;
         while (start > 0 && !NewDay(start)) start--;
-        for (int i = 0; i < start; i++) _s.SetUnavailable(i);
+        for (int i = _hiddenBefore; i < start; i++) _s.SetUnavailable(i);
+        _hiddenBefore = start;
     }
 
     protected override void Render(RenderContext ctx, IChartContainer box)

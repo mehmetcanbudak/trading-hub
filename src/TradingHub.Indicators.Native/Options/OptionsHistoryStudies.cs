@@ -71,6 +71,19 @@ public abstract class OptionsDailyPane : OptionsPane
     }
 
     protected OptionDaily? LastRow => CurrentBar > 0 ? KnownAt(CurrentBar - 1) : null;
+
+    /// <summary>
+    /// Keeps <paramref name="closes"/> as the last close of each day completed before bar <paramref name="bar"/>'s day.
+    /// Closes are keyed by bar, so recalculating a bar (every live tick of the forming bar) replaces its entry instead of
+    /// appending another; returns whether bar <paramref name="bar"/> added the previous day's close.
+    /// </summary>
+    protected bool DailyCloses(List<(int Bar, double Close)> closes, int bar)
+    {
+        while (closes.Count > 0 && closes[^1].Bar >= bar - 1) closes.RemoveAt(closes.Count - 1);
+        if (!NewDay(bar) || bar == 0) return false;
+        closes.Add((bar - 1, (double)GetCandle(bar - 1).Close));
+        return true;
+    }
 }
 
 [DisplayName("IV rank")]
@@ -292,7 +305,7 @@ public class VarianceRiskPremium : OptionsDailyPane
     private readonly OptionalValueDataSeries _vrp = new("VRP", "VRP") { VisualType = VisualMode.Histogram, Color = Opt.A(Opt.Muted, 160) };
     private readonly OptionalValueDataSeries _iv = new("IV", "IV") { Color = Opt.Violet, VisualType = VisualMode.Hide };
     private readonly OptionalValueDataSeries _rv = new("RV", "Realized") { Color = Opt.Flip, VisualType = VisualMode.Hide };
-    private readonly List<double> _closes = new();
+    private readonly List<(int Bar, double Close)> _closes = new();
 
     public VarianceRiskPremium()
     {
@@ -318,9 +331,9 @@ public class VarianceRiskPremium : OptionsDailyPane
 
     protected override void CalcDay(int bar, OptionDaily? d)
     {
-        if (NewDay(bar) && bar > 0) _closes.Add((double)GetCandle(bar - 1).Close);
+        DailyCloses(_closes, bar);
         // Completed daily closes plus this bar's close: only what is known when the bar closes.
-        var closes = _closes.Skip(Math.Max(0, _closes.Count - RealizedDays)).Append((double)GetCandle(bar).Close).ToList();
+        var closes = _closes.Skip(Math.Max(0, _closes.Count - RealizedDays)).Select(c => c.Close).Append((double)GetCandle(bar).Close).ToList();
         double rv = OptionsMath.RealizedVol(closes, Opt.Year(Underlying)) * 100;
         double iv = (d?.AtmIv ?? double.NaN) * 100, vrp = iv - rv;
         Set(_iv, bar, iv);
@@ -408,8 +421,9 @@ public class OptionsHistory : OptionsDailyPane
 public class OptionsSentimentGauge : OptionsDailyPane
 {
     private readonly OptionalValueDataSeries _g = new("G", "Fear and greed") { Color = Opt.Flip, Width = 2 };
-    private readonly List<double> _closes = new();
-    private readonly List<double> _mom = new();
+    private readonly List<(int Bar, double Close)> _closes = new();
+    // Momentum of each completed daily close (close ÷ mean of the 50 closes before it − 1), keyed like the closes.
+    private readonly List<(int Bar, double Momentum)> _mom = new();
     private int _signals;
 
     public OptionsSentimentGauge()
@@ -437,11 +451,9 @@ public class OptionsSentimentGauge : OptionsDailyPane
 
     protected override void CalcDay(int bar, OptionDaily? d)
     {
-        if (NewDay(bar) && bar > 0)
-        {
-            _closes.Add((double)GetCandle(bar - 1).Close);
-            if (_closes.Count > 50) _mom.Add(_closes[^1] / _closes.Skip(_closes.Count - 51).Take(50).Average() - 1);
-        }
+        while (_mom.Count > 0 && _mom[^1].Bar >= bar - 1) _mom.RemoveAt(_mom.Count - 1);
+        if (DailyCloses(_closes, bar) && _closes.Count > 50)
+            _mom.Add((bar - 1, _closes[^1].Close / _closes.Skip(_closes.Count - 51).Take(50).Average(c => c.Close) - 1));
 
         var parts = new List<double>();
         if (d != null)
@@ -461,8 +473,8 @@ public class OptionsSentimentGauge : OptionsDailyPane
 
         if (_mom.Count > 10 && _closes.Count >= 50)
         {
-            double now = (double)GetCandle(bar).Close / _closes.Skip(_closes.Count - 50).Average() - 1;
-            double p = OptionsMath.Percentile(_mom.Skip(Math.Max(0, _mom.Count - 365)), now);
+            double now = (double)GetCandle(bar).Close / _closes.Skip(_closes.Count - 50).Average(c => c.Close) - 1;
+            double p = OptionsMath.Percentile(_mom.Skip(Math.Max(0, _mom.Count - 365)).Select(m => m.Momentum), now);
             if (double.IsFinite(p)) parts.Add(p);
         }
 

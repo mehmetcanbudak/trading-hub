@@ -12,6 +12,7 @@ public partial class CompositeVolumeProfile
         if (CurrentBar == 0 || !CalculateDisplayProfiles) return levels;
         lock (_sync)
         {
+            RefreshDisplay();
             for (int i = Math.Max(0, _display.Count - _count); i < _display.Count; i++)
             {
                 var profile = _display[i]; if (profile.MaximumVolume == 0) continue;

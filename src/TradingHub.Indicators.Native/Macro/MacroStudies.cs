@@ -254,6 +254,8 @@ public class MarketHud : Indicator
     private double _rsiNow = double.NaN, _buyShare = double.NaN, _volRatio = double.NaN, _atrPct = double.NaN, _oiChange = double.NaN, _emaDist = double.NaN;
     private List<double> _oiLine = new();
     private readonly List<double> _emaRaw = new();
+    // Wilder averages after each bar, so a live tick of the last bar restarts from the previous bar's state.
+    private readonly List<(double Up, double Down)> _rsiState = new();
 
     public MarketHud() : base(true)
     {
@@ -298,23 +300,29 @@ public class MarketHud : Indicator
         {
             res[i] = double.NaN;
             if (i == 0) continue;
-            double d = c[i] - c[i - 1], u = Math.Max(0, d), w = Math.Max(0, -d);
-            if (i <= len)
-            {
-                up += u / len;
-                dn += w / len;
-                if (i < len) continue;
-            }
-            else
-            {
-                up = (up * (len - 1) + u) / len;
-                dn = (dn * (len - 1) + w) / len;
-            }
-
-            res[i] = dn <= 0 ? 100 : 100 - 100 / (1 + up / dn);
+            (up, dn, res[i]) = RsiStep(up, dn, i, c[i] - c[i - 1], len);
         }
 
         return res;
+    }
+
+    /// <summary>The Wilder averages after change <paramref name="i"/> (from those after change i − 1) and the RSI, NaN before <paramref name="len"/> changes.</summary>
+    private static (double Up, double Down, double Value) RsiStep(double up, double dn, int i, double change, int len)
+    {
+        double u = Math.Max(0, change), w = Math.Max(0, -change);
+        if (i <= len)
+        {
+            up += u / len;
+            dn += w / len;
+            if (i < len) return (up, dn, double.NaN);
+        }
+        else
+        {
+            up = (up * (len - 1) + u) / len;
+            dn = (dn * (len - 1) + w) / len;
+        }
+
+        return (up, dn, dn <= 0 ? 100 : 100 - 100 / (1 + up / dn));
     }
 
     protected override void OnCalculate(int bar, decimal value)
@@ -324,10 +332,17 @@ public class MarketHud : Indicator
         double ema = bar == 0 ? close : _emaRaw[bar - 1] + k * (close - _emaRaw[bar - 1]);
         MacroMath.Set(_emaRaw, bar, ema);
         _emaSeries.Set(bar, (decimal)ema, bar >= _ema - 1);
+        while (_rsiState.Count <= bar) _rsiState.Add(default);
+        double rsiNow = double.NaN;
+        if (bar == 0) _rsiState[0] = (0, 0);
+        else
+        {
+            var step = RsiStep(_rsiState[bar - 1].Up, _rsiState[bar - 1].Down, bar, close - (double)GetCandle(bar - 1).Close, _rsi);
+            _rsiState[bar] = (step.Up, step.Down);
+            rsiNow = step.Value;
+        }
         if (bar != CurrentBar - 1) return;
         int n = CurrentBar;
-        var closes = Enumerable.Range(0, n).Select(i => (double)GetCandle(i).Close).ToList();
-        var rsi = Rsi(closes, _rsi);
         double atr = 0;
         int atrN = 0;
         for (int i = Math.Max(1, n - _atr); i < n; i++)
@@ -338,7 +353,7 @@ public class MarketHud : Indicator
             atrN++;
         }
 
-        _rsiNow = rsi[n - 1];
+        _rsiNow = rsiNow;
         _emaDist = ema > 0 && bar >= _ema - 1 ? (close / ema - 1) * 100 : double.NaN;
         _atrPct = atrN > 0 && close > 0 ? atr / atrN / close * 100 : double.NaN;
         bool above = close > ema, hot = _rsiNow > (double)_mid;
@@ -471,6 +486,9 @@ public class SpotEtfFlow : Indicator
     [Browsable(false)]
     public string? Status => _message;
 
+    /// <summary>Each published day once, at the first bar where it is plotted (the card's sum, streak and large days).</summary>
+    internal IReadOnlyList<(int Bar, DateTime Day, double Flow)> PublishedDays => _days;
+
     private EtfFlows? Hub => Service ?? EtfFlows.Shared;
 
     protected override void OnDispose() => _watch.Detach();
@@ -502,6 +520,8 @@ public class SpotEtfFlow : Indicator
 
     protected override void OnCalculate(int bar, decimal value)
     {
+        // Recalculating a bar (every live tick of the forming bar) replaces its published day instead of adding another.
+        while (_days.Count > 0 && _days[^1].Bar >= bar) _days.RemoveAt(_days.Count - 1);
         if (bar == 0 || bar == CurrentBar - 1) _flows = _message == null ? Hub!.Daily(_asset, GetCandle(0).Time.AddDays(-1)) : null;
         var flows = _flows;
         if (flows == null)

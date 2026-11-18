@@ -325,6 +325,9 @@ public sealed class EstimatedLiquidationMap : Indicator
     private readonly RenderFont _font = new("Arial", 8), _bold = new("Arial", 8, FontStyle.Bold);
     private Map? _map;
     private decimal _price;
+    // Inputs of the closed bars of the window, kept until the window, the bars or the open interest change.
+    private readonly List<Entry> _entries = new();
+    private (int From, int Closed, DateTime First, long Previous, long OpenInterest) _entriesKey = (-1, -1, default, -1, -1);
 
     public EstimatedLiquidationMap() : base(true)
     {
@@ -350,7 +353,8 @@ public sealed class EstimatedLiquidationMap : Indicator
 
     /// <summary>
     /// Builds the map at <paramref name="price"/>: rows smaller than 10 % of the largest are dropped. A long level counts only
-    /// while every later bar stayed above it (and a short level below it).
+    /// while every later bar stayed above it (and a short level below it). A leverage tier whose initial margin does not
+    /// exceed the maintenance margin has no liquidation level away from entry and is skipped.
     /// </summary>
     public static Map Estimate(IReadOnlyList<Entry> bars, decimal price, decimal rangePercent, int rows, decimal maintenancePercent)
     {
@@ -379,6 +383,7 @@ public sealed class EstimatedLiquidationMap : Indicator
             decimal entry = (b.High + b.Low + b.Close) / 3;
             foreach (var (leverage, weight) in Tiers)
             {
+                if (mm >= 1 / leverage) continue;
                 decimal longLiquidation = entry * (1 - 1 / leverage + mm), shortLiquidation = entry * (1 + 1 / leverage - mm);
                 if (minAfter[i] > longLiquidation) Add(longLiquidation, opened * buyShare * weight * entry);
                 if (maxAfter[i] < shortLiquidation) Add(shortLiquidation, opened * (1 - buyShare) * weight * entry);
@@ -398,24 +403,40 @@ public sealed class EstimatedLiquidationMap : Indicator
 
     protected override void OnDispose() => _derivatives.Dispose();
 
-    protected override void OnRecalculate() => _map = null;
+    protected override void OnRecalculate()
+    {
+        _map = null;
+        _entries.Clear();
+        _entriesKey = (-1, -1, default, -1, -1);
+    }
+
+    private Entry EntryOf(int i)
+    {
+        var c = GetCandle(i);
+        var end = i + 1 < CurrentBar ? GetCandle(i + 1).Time : DateTime.UtcNow;
+        decimal? opened = _derivatives.OpenInterestAt(end - TimeSpan.FromTicks(1)) - _derivatives.OpenInterestAt(c.Time - TimeSpan.FromTicks(1));
+        decimal? delta = StudyMath.TryDelta(c, false, out var d, out _) ? d : null;
+        return new Entry(c.High, c.Low, c.Close, c.Volume, delta, opened);
+    }
 
     protected override void OnCalculate(int bar, decimal value)
     {
         if (bar != CurrentBar - 1) return;
         int from = Math.Max(0, CurrentBar - Lookback);
         _derivatives.Ensure(DerivativesPane.DerivedSymbol(InstrumentInfo?.Instrument ?? "", InstrumentInfo?.BaseAsset ?? "", InstrumentInfo?.QuoteAsset ?? ""), GetCandle(from).Time);
-        var entries = new List<Entry>(CurrentBar - from);
-        for (int i = from; i < CurrentBar; i++)
+        // Each live tick rebuilds only the forming bar's input; closed bars are rebuilt when a bar is added or new open
+        // interest arrives.
+        var key = (from, bar, GetCandle(from).Time, bar > 0 ? GetCandle(bar - 1).Revision : 0, _derivatives.OpenInterestVersion);
+        if (key != _entriesKey)
         {
-            var c = GetCandle(i);
-            var end = i + 1 < CurrentBar ? GetCandle(i + 1).Time : DateTime.UtcNow;
-            decimal? opened = _derivatives.OpenInterestAt(end - TimeSpan.FromTicks(1)) - _derivatives.OpenInterestAt(c.Time - TimeSpan.FromTicks(1));
-            decimal? delta = StudyMath.TryDelta(c, false, out var d, out _) ? d : null;
-            entries.Add(new Entry(c.High, c.Low, c.Close, c.Volume, delta, opened));
+            _entries.Clear();
+            for (int i = from; i < bar; i++) _entries.Add(EntryOf(i));
+            _entriesKey = key;
         }
+        _entries.Add(EntryOf(bar));
         _price = GetCandle(bar).Close;
-        _map = _derivatives.HasOpenInterest ? Estimate(entries, _price, RangePercent, RowCount, MaintenanceMargin) : null;
+        _map = _derivatives.HasOpenInterest ? Estimate(_entries, _price, RangePercent, RowCount, MaintenanceMargin) : null;
+        _entries.RemoveAt(_entries.Count - 1);
     }
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)

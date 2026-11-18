@@ -286,6 +286,8 @@ public abstract class OptionsOverlay : Indicator
     private DateTime _builtAt;
     private int[] _day = Array.Empty<int>();
     private CardCorner _corner = CardCorner.TopRight;
+    // Set while removed from a chart: a queued Changed or timer action must not rebuild or subscribe again.
+    private bool _disposed;
 
     internal OptionsScene Scene { get; private set; } = new();
 
@@ -298,11 +300,11 @@ public abstract class OptionsOverlay : Indicator
         SubscribeToDrawingEvents(DrawingLayouts.Final);
         _changed = () => DoActionInGuiThread(() =>
         {
-            if (Data is { } d && d.Generation != _built.Generation) Rebuild();
+            if (!_disposed && Data is { } d && d.Generation != _built.Generation) Rebuild();
         });
         _tick = () =>
         {
-            if (DateTime.UtcNow - _builtAt >= Refresh) Rebuild();
+            if (!_disposed && DateTime.UtcNow - _builtAt >= Refresh) Rebuild();
         };
     }
 
@@ -340,10 +342,15 @@ public abstract class OptionsOverlay : Indicator
 
     protected int LastBar => CurrentBar - 1;
 
-    protected override void OnInitialize() => SubscribeToTimer(TimeSpan.FromSeconds(5), _tick);
+    protected override void OnInitialize()
+    {
+        _disposed = false;
+        SubscribeToTimer(TimeSpan.FromSeconds(5), _tick);
+    }
 
     protected override void OnDispose()
     {
+        _disposed = true;
         UnsubscribeFromTimer(TimeSpan.FromSeconds(5), _tick);
         if (_subscribed != null) _subscribed.Changed -= _changed;
         _subscribed = null;
@@ -360,6 +367,7 @@ public abstract class OptionsOverlay : Indicator
 
     private void Rebuild()
     {
+        if (_disposed) return;
         var data = Data;
         if (!ReferenceEquals(data, _subscribed))
         {
@@ -560,6 +568,8 @@ public abstract class OptionsPane : Indicator
     private readonly Action _changed, _tick;
     private OptionsData? _subscribed;
     private long _generation = -1;
+    // Set while removed from a chart: a queued Changed action must not recalculate or subscribe again.
+    private bool _disposed;
 
     protected OptionsPane() : base(true)
     {
@@ -568,7 +578,7 @@ public abstract class OptionsPane : Indicator
         SubscribeToDrawingEvents(DrawingLayouts.Final);
         _changed = () => DoActionInGuiThread(() =>
         {
-            if (Data is { } d && d.Generation != _generation) RecalculateValues();
+            if (!_disposed && Data is { } d && d.Generation != _generation) RecalculateValues();
         });
         _tick = () =>
         {
@@ -600,10 +610,15 @@ public abstract class OptionsPane : Indicator
     /// <summary>False for studies that read their own list of underlyings instead of the chart's.</summary>
     protected virtual bool UsesChartUnderlying => true;
 
-    protected override void OnInitialize() => SubscribeToTimer(TimeSpan.FromSeconds(30), _tick);
+    protected override void OnInitialize()
+    {
+        _disposed = false;
+        SubscribeToTimer(TimeSpan.FromSeconds(30), _tick);
+    }
 
     protected override void OnDispose()
     {
+        _disposed = true;
         UnsubscribeFromTimer(TimeSpan.FromSeconds(30), _tick);
         if (_subscribed != null) _subscribed.Changed -= _changed;
         _subscribed = null;
@@ -612,7 +627,7 @@ public abstract class OptionsPane : Indicator
     protected sealed override void OnRecalculate()
     {
         var data = Data;
-        if (!ReferenceEquals(data, _subscribed))
+        if (!ReferenceEquals(data, _subscribed) && !_disposed)
         {
             if (_subscribed != null) _subscribed.Changed -= _changed;
             _subscribed = data;

@@ -917,10 +917,9 @@ public class StructureTrendPanel : ClosedBarStudy
             if (bull ? b.Low > g.Bottom : b.High < g.Top) continue;
             g.End(bar); _gaps.RemoveAt(i);
         }
-        if (bar < 2 || !AllCausal(bar - 2, bar)) return;
-        var a = Bars[bar - 2];
-        if (b.Low > a.High) _gaps.Add(Scene.Box(bar - 1, bar, b.Low, a.High, BullColor, "FVG", "Bullish FVG", 35));
-        else if (b.High < a.Low) _gaps.Add(Scene.Box(bar - 1, bar, a.Low, b.High, BearColor, "FVG", "Bearish FVG", 35));
+        if (SweepMath.Gap(Bars, bar, 0) is { } gap)
+            _gaps.Add(gap.Bull ? Scene.Box(bar - 1, bar, gap.Top, gap.Bottom, BullColor, "FVG", "Bullish FVG", 35)
+                               : Scene.Box(bar - 1, bar, gap.Top, gap.Bottom, BearColor, "FVG", "Bearish FVG", 35));
         while (_gaps.Count > FvgLimit) { _gaps[0].End(bar); _gaps[0].FillAlpha = 15; _gaps.RemoveAt(0); }
     }
 }
@@ -1023,7 +1022,8 @@ public class WaveExtensions : ClosedBarStudy
         {
             if (_zz.Count > 0 && _zz[^1].High == p.High)
             {
-                if (p.High ? p.Price >= _zz[^1].Price : p.Price <= _zz[^1].Price) { _zz[^1] = p; changed = true; }
+                // a more extreme swing on the same side replaces the last pivot: its wave-5 targets are projected again
+                if (p.High ? p.Price >= _zz[^1].Price : p.Price <= _zz[^1].Price) { _zz[^1] = p; changed = true; Project(bar); }
                 continue;
             }
             _zz.Add(p); changed = true;
