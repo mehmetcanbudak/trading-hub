@@ -12,19 +12,20 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 
 | # | Decision | Context | Options |
 |---|---|---|---|
-| D1 | Trading date of evening sessions | Since `3bbedbb` a session starting at or after 12:00 (CME Sunday 18:00) belongs to the next trading date. Strategies that filter by weekday see Monday instead of Sunday; daily-loss-limit days are unchanged. | Keep (CME convention) and document it in [Strategies](./estrategias.md); revert; make it a setting |
-| D2 | Explicit strategy reprice of a triggered stop | A strategy's own reprice may still cancel a triggered stop's executing MARKET child and send a replacement (by design); only the automatic bracket path is now blocked. | Keep; refuse every amendment of an executing child |
-| D3 | Binance Reverse confirmation | Reverse is refused when Binance's position `updateTime` is older than the earlier orders' last update, even by 1 ms. | Keep; allow a small tolerance |
-| D4 | Tradovate unreported amendment | An entry amendment of an order the venue never reports holds the account's send turn until it is cancelled or the session closes. | Keep; give it a bound |
-| D5 | Bybit saves on Windows | During a persistent sharing conflict each save, including the one before a reduce-only order, waits up to about 1 s. | Keep; shorter retry |
-| D6 | Lab runner P&L freshness | Open P&L-only runner saves are written at most once a minute, so the headless lab's estimate can be a minute old. | Keep; 10 s |
-| D7 | Pull requests | #16 only edits the dashboard header that #17 supersedes. | Close #16; take #17 out of draft and merge after review |
-| D8 | Install | The Mac runs `a03e15e`. | Install the merged build (backup first, same procedure as earlier receipts) |
-| D9 | Old handoff note | `FORK-PARITY-HANDOFF-2026-11-16.md` is untracked in the repository root and superseded by this page. | Delete; move to `docs/research/` as history |
-| D10 | KVS forming-bar semantics | After the review, a forming bar starts each live update fresh: a value the update does not assign is `na`, matching a full recalculation (Pine `var`-style carry-over is not implemented). | Keep; add an explicit carry-over keyword |
+| D1 | Trading date of evening sessions | Since `3bbedbb` a session starting at or after 12:00 (CME Sunday 18:00) belongs to the next trading date. Strategies that filter by weekday see Monday instead of Sunday; daily-loss-limit days are unchanged. | **Decided 2026-11-19: keep.** Already documented in [Strategies](./estrategias.md) and pinned by `SessionTradingDateTests`. |
+| D2 | Explicit strategy reprice of a triggered stop | A strategy's own reprice may still cancel a triggered stop's executing MARKET child and send a replacement (by design); only the automatic bracket path is now blocked. | **Decided 2026-11-19: refuse every amendment of an executing child** (order-path change; separate PR after #17). |
+| D3 | Binance Reverse confirmation | Reverse is refused when Binance's position `updateTime` is older than the earlier orders' last update, even by 1 ms. | **Decided 2026-11-19: keep strict.** |
+| D4 | Tradovate unreported amendment | An entry amendment of an order the venue never reports holds the account's send turn until it is cancelled or the session closes. | **Decided 2026-11-19: give it a bound** (release the send turn and reconcile from venue state; separate PR after #17). |
+| D5 | Bybit saves on Windows | During a persistent sharing conflict each save, including the one before a reduce-only order, waits up to about 1 s. | **Decided 2026-11-19: keep.** |
+| D6 | Lab runner P&L freshness | Open P&L-only runner saves are written at most once a minute, so the headless lab's estimate can be a minute old. | **Decided 2026-11-19: keep.** |
+| D7 | Pull requests | #16 only edits the dashboard header that #17 supersedes. | **Decided:** close #16; take #17 out of draft and merge once all three platforms are green on one tree. |
+| D8 | Install | The Mac runs `a03e15e`. | **Decided:** install the merged build after a byte-verified backup. |
+| D9 | Old handoff note | `FORK-PARITY-HANDOFF-2026-11-16.md` is untracked in the repository root and superseded by this page. | **Decided 2026-11-19: deleted.** |
+| D10 | KVS forming-bar semantics | After the review, a forming bar starts each live update fresh: a value the update does not assign is `na`, matching a full recalculation (Pine `var`-style carry-over is not implemented). | **Decided 2026-11-19: keep** (a carry-over keyword is a separate language-design item). |
 
 ## 2. Ship the current work (P0)
 
+0. The ARM64 run on `f027aef` failed `A_protection_manager_created_after_the_restarted_account_settled_adopts_its_working_oco_at_once`: the Tradovate test fake pushed to an aborted user WebSocket (fixture race, not product code). `FakeTradovate.Push` now retries on the current socket; confirm on the next CI run.
 1. Re-run the cancelled macOS CI job of PR #17 until a runner is acquired; all three platforms must be green on the same tree.
 2. Review and merge #17 into `memoshi` (D7); delete `fix/native-drain-deadline` and `docs/pr15-receipt`.
 3. Update the dashboard header (`**Canonical branch:**` line) with the merge commit and its CI run; it still names `e4f526c`/`a03e15e`.

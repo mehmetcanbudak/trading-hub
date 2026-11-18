@@ -505,7 +505,20 @@ internal sealed class FakeTradovate : IDisposable
     {
         for (int i = 0; i < 50 && _user == null; i++) await Task.Delay(20);
         if (_user == null) return;
-        await FakeHttpServer.SendText(_user, $"a[{{\"e\":\"props\",\"d\":{{\"entityType\":\"{entityType}\",\"eventType\":\"{eventType}\",\"entity\":{entity}}}}}]", CancellationToken.None);
+        string text = $"a[{{\"e\":\"props\",\"d\":{{\"entityType\":\"{entityType}\",\"eventType\":\"{eventType}\",\"entity\":{entity}}}}}]";
+        // A client that drops and reopens its user socket under load leaves the old one aborted until the new one authorizes.
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await FakeHttpServer.SendText(_user, text, CancellationToken.None);
+                return;
+            }
+            catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException && attempt < 250)
+            {
+                await Task.Delay(20);
+            }
+        }
     }
 
     /// <summary>Publishes an OCO leg's version and order (with its clOrdId and ocoId) and mirrors a working one into the
