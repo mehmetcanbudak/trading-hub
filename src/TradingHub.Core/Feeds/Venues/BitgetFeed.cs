@@ -4,7 +4,11 @@ using TradingHub.Market;
 
 namespace TradingHub.Feeds.Venues;
 
-/// <summary>Bitget public data: USDT futures or spot; full book chained by seq/pseq; sizes already in base currency.</summary>
+/// <summary>
+/// Bitget public data: USDT futures or spot; full books; sizes already in base currency. The futures book is chained by
+/// seq/pseq; the spot book carries only an increasing seq (no pseq, and the checksum was removed in May 2026), so lost
+/// spot updates cannot be detected and the spot book is disclosed as not event-complete.
+/// </summary>
 public sealed class BitgetFeed(bool spot, PublicVenueTransport? transport = null) : PublicVenueFeed(transport)
 {
     public const string FuturesId = "bitget-futures";
@@ -16,6 +20,8 @@ public sealed class BitgetFeed(bool spot, PublicVenueTransport? transport = null
     private string InstType => spot ? "SPOT" : "USDT-FUTURES";
     protected override Uri DefaultRestOrigin => new("https://api.bitget.com");
     protected override (TimeSpan Every, string Frame)? Keepalive => (TimeSpan.FromSeconds(25), "ping");
+    // https://www.bitget.com/docs/classic/websocket/spot/public/Depth-Channel: spot books push seq without pseq.
+    protected override DepthCoverage BookCoverage => spot ? DepthCoverage.PartialBook : DepthCoverage.None;
 
     protected override async Task<IReadOnlyList<VenueInstrument>> ListAsync(CancellationToken ct)
     {
@@ -75,11 +81,17 @@ public sealed class BitgetFeed(bool spot, PublicVenueTransport? transport = null
         if (channel != "books") return;
         foreach (var d in data.EnumerateArray())
         {
+            // Futures updates name the previous push (pseq); spot updates carry only an increasing seq.
             long seq = (long)D(d, "seq"), previous = (long)D(d, "pseq");
             if (snapshot) s.Clear();
             else if (s.Seq <= 0) continue;
-            else if (seq <= s.Seq) continue; // A replayed update already applied.
-            else if (previous != s.Seq) VenueSession.Resync($"{s.Seq} → {previous}");
+            else if (seq == s.Seq) continue; // A replayed update already applied.
+            else if (previous != 0)
+            {
+                if (seq < s.Seq) continue; // A replayed update already applied.
+                if (previous != s.Seq) VenueSession.Resync($"{s.Seq} → {previous}");
+            }
+            else if (seq < s.Seq) VenueSession.Resync($"out of order: {seq} after {s.Seq}");
             s.Seq = seq;
             s.Levels(BookSide.Bid, d.GetProperty("bids"));
             s.Levels(BookSide.Ask, d.GetProperty("asks"));
@@ -90,7 +102,8 @@ public sealed class BitgetFeed(bool spot, PublicVenueTransport? transport = null
     {
         var bars = new List<Kline>();
         long cursor = toMs;
-        string granularity = spot ? $"{minutes}min" : $"{minutes}m";
+        // Spot: 1min, 5min, 15min, 1h; futures: 1m, 5m, 15m, 1H.
+        string granularity = spot ? (minutes == 60 ? "1h" : $"{minutes}min") : (minutes == 60 ? "1H" : $"{minutes}m");
         for (int page = 0; page < 10_000 && cursor > fromMs; page++)
         {
             ct.ThrowIfCancellationRequested();

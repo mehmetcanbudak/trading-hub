@@ -113,6 +113,7 @@ internal sealed class HeatmapCanvas : WorkbenchCanvas
 {
     private readonly DepthHeatmapProjection _projection = new();
     private readonly SKPaint _paint = new() { IsAntialias = false };
+    private readonly TradePriceRange _range = new();
     private WorkbenchSelection? _selection;
     private DateTime _from, _to;
     private int _grouping = 1;
@@ -152,14 +153,9 @@ internal sealed class HeatmapCanvas : WorkbenchCanvas
         var store = sel.Data.Trades;
         int first = store.LowerBound(_from);
 
-        // price range: recent trades and the current book's inner levels, padded
+        // price range: the window's trades (kept per minute, so a frame scans only new rows) and the current book's inner levels, padded
         decimal lo = decimal.MaxValue, hi = decimal.MinValue;
-        for (int i = first; i < store.Count; i++)
-        {
-            decimal p = store.GetPrice(i);
-            if (p < lo) lo = p;
-            if (p > hi) hi = p;
-        }
+        if (_range.Of(store, _from) is { } traded) (lo, hi) = traded;
         foreach (var level in current.Bids.Take(50).Concat(current.Asks.Take(50)))
         {
             decimal p = instrument.FromTicks(level.PriceTicks);
@@ -219,8 +215,8 @@ internal sealed class HeatmapCanvas : WorkbenchCanvas
             }
         }
 
-        using var axis = new SKPaint { Color = Grid, StrokeWidth = 1 };
-        canvas.DrawRect(rect, new SKPaint { Color = Grid, Style = SKPaintStyle.Stroke });
+        using var border = new SKPaint { Color = Grid, Style = SKPaintStyle.Stroke };
+        canvas.DrawRect(rect, border);
         for (int k = 0; k <= 4; k++)
         {
             decimal p = lo + (hi - lo) * k / 4;
@@ -230,5 +226,47 @@ internal sealed class HeatmapCanvas : WorkbenchCanvas
         Label(canvas, _to.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture), rect.Right, height - 6, Text, 10, right: true);
         if (frame.Cells.Count == 0 && frame.Gaps.Count > 0)
             Label(canvas, "No recorded depth in this window", rect.Left + 10, rect.Top + 18, Warn, 11, true);
+    }
+}
+
+/// <summary>
+/// Trade price range of a sliding time window, kept per minute so each frame scans only rows appended since the last
+/// one. It is rebuilt when the store is replaced or corrected, or the window starts before the minutes already scanned.
+/// </summary>
+internal sealed class TradePriceRange
+{
+    private readonly SortedDictionary<long, (decimal Lo, decimal Hi)> _minutes = new();
+    private Guid _store;
+    private long _correction = -1;
+    private long _fromMinute = long.MaxValue;
+    private int _scanned;
+
+    /// <summary>Lowest and highest trade price from the minute of <paramref name="from"/> on, or null without trades.</summary>
+    public (decimal Lo, decimal Hi)? Of(TradeStore store, DateTime from)
+    {
+        long fromMinute = from.Ticks / TimeSpan.TicksPerMinute;
+        if (store.Identity != _store || store.CorrectionRevision != _correction || fromMinute < _fromMinute || store.Count < _scanned)
+        {
+            _minutes.Clear();
+            _store = store.Identity;
+            _correction = store.CorrectionRevision;
+            _scanned = store.LowerBound(new DateTime(fromMinute * TimeSpan.TicksPerMinute, DateTimeKind.Utc));
+        }
+        _fromMinute = fromMinute;
+        for (; _scanned < store.Count; _scanned++)
+        {
+            long minute = store.GetTimeTicks(_scanned) / TimeSpan.TicksPerMinute;
+            decimal price = store.GetPrice(_scanned);
+            _minutes[minute] = _minutes.TryGetValue(minute, out var range) ? (Math.Min(range.Lo, price), Math.Max(range.Hi, price)) : (price, price);
+        }
+        while (_minutes.Count > 0 && _minutes.Keys.First() < fromMinute) _minutes.Remove(_minutes.Keys.First());
+        if (_minutes.Count == 0) return null;
+        decimal lo = decimal.MaxValue, hi = decimal.MinValue;
+        foreach (var (minuteLo, minuteHi) in _minutes.Values)
+        {
+            if (minuteLo < lo) lo = minuteLo;
+            if (minuteHi > hi) hi = minuteHi;
+        }
+        return (lo, hi);
     }
 }

@@ -98,14 +98,18 @@ public sealed class DerivativesTests : IDisposable
             endpoints.Enqueue(endpoint);
             return Task.FromResult<System.Net.WebSockets.WebSocket>(endpoint.AbsolutePath.Contains("forceOrder") ? binanceStream : bybitStream);
         }
-        var transport = new DerivativesTransport(new HttpClient(new Http((_, _) => Json("{}"))), OwnsHttp: true, ConnectWebSocket: Connect,
-            UtcNow: () => clock, Delay: (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
+        // Binance's listing confirms the symbol before its silent-on-error stream is trusted.
+        const string listing = """{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","contractType":"PERPETUAL","baseAsset":"BTC","quoteAsset":"USDT","filters":[]}]}""";
+        var transport = new DerivativesTransport(new HttpClient(new Http((request, _) => Json(request.RequestUri!.AbsolutePath == "/fapi/v1/exchangeInfo" ? listing : "{}"))),
+            OwnsHttp: true, ConnectWebSocket: Connect, UtcNow: () => clock, Delay: (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
         using (var data = new DerivativesData(transport, _root))
         {
             using (data.WatchLiquidations("btcusdt"))
             {
                 await bybitStream.Subscribed.Task.WaitAsync(TimeSpan.FromSeconds(10));
                 Assert.Contains("allLiquidation.BTCUSDT", bybitStream.Sent.First());
+                // Bybit's topic is observed only once the venue accepts the subscription.
+                bybitStream.SendServer("""{"success":true,"ret_msg":"subscribe","conn_id":"fixture","op":"subscribe"}""");
                 await WaitUntilAsync(() => data.Liquidations("BTCUSDT", Start, clock.AddHours(1)).Windows.Count == 2);
                 Assert.Contains(endpoints, e => e.Host == "fstream.binance.com" && e.AbsolutePath == "/ws/btcusdt@forceOrder");
                 Assert.Contains(endpoints, e => e.Host == "stream.bybit.com" && e.AbsolutePath == "/v5/public/linear");

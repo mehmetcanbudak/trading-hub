@@ -341,6 +341,8 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
         }
 
         string tag = intent.ClientOrderId;
+        bool boundedSend = request.ReduceOnly || request.Protective;
+        NativeSendTurns.Turn sendTurn;
         lock (_gate)
         {
             if (_byTag.TryGetValue(tag, out var existing)) return existing;
@@ -348,14 +350,20 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
             _tracked = _byTag.Values.ToArray();
             _tagOf[order] = tag;
             _intents[order] = intent;
+            // The turn is taken where the request is issued, as the order registers and before any Sync can publish it:
+            // a request a Changed subscriber issues for this order, or a deferred cancel a Sync dispatches, comes after it.
+            sendTurn = _session.SendTurns(_account).Take();
         }
 
-        Sync();
-        // The turn is taken synchronously where the request is issued, so turns follow issue order; the dispatch below
-        // waits for every earlier send of this native account before its admission, and releases the turn in a finally
-        // on every path. A new-exposure order waits without a bound; a reducing request waits the reducing bound.
-        bool boundedSend = request.ReduceOnly || request.Protective;
-        var sendTurn = _session.SendTurns(_account).Take();
+        // The dispatch below waits for every earlier send of this native account before its admission, and releases the
+        // turn in a finally on every path. A new-exposure order waits without a bound; a reducing request waits the
+        // reducing bound.
+        try { Sync(); }
+        catch
+        {
+            sendTurn.Release();
+            throw;
+        }
         bool inOrder = true;
         _ = Task.Run(async () =>
         {

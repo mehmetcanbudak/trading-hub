@@ -99,10 +99,17 @@ public sealed partial class DerivativesData
             rows = ParseBybitLongShort(doc.RootElement).ToArray();
         }
         else throw new ArgumentException("Unknown derivatives venue.", nameof(venue));
-        var values = rows.Where(r => r.Time >= from && r.Time <= to).OrderBy(r => r.Time).ToArray();
-        return values.Length == 0
-            ? new(values, OpenInterestAvailability.Unavailable, $"{VenueName(venue)} reports no long/short ratio for {symbol} in this range.")
-            : new(values, OpenInterestAvailability.Available);
+        return LongShortResultOf(venue, symbol, rows.Where(r => r.Time >= from && r.Time <= to).OrderBy(r => r.Time).ToArray(), from);
+    }
+
+    /// <summary>Ratio samples in time order; a history that starts inside the range (Binance keeps 30 days) is partial.</summary>
+    private static LongShortResult LongShortResultOf(string venue, string symbol, LongShortSample[] values, DateTime from)
+    {
+        if (values.Length == 0)
+            return new(values, OpenInterestAvailability.Unavailable, $"{VenueName(venue)} reports no long/short ratio for {symbol} in this range.");
+        if (!StartsLate(values.Select(v => v.Time).ToArray(), from, TimeSpan.FromDays(1))) return new(values, OpenInterestAvailability.Available);
+        return new(values, OpenInterestAvailability.Partial, string.Create(CultureInfo.InvariantCulture,
+            $"{VenueName(venue)} publishes the {symbol} long/short ratio only from {values[0].Time:yyyy-MM-dd HH:mm} UTC; earlier values are unknown."));
     }
 
     /// <summary>Binance rows {longAccount, shortAccount (fractions), timestamp}.</summary>

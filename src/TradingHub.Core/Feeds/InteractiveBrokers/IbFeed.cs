@@ -321,7 +321,7 @@ public sealed class IbFeed : IMarketDataFeed, IBarHistoryFeed, IDataScopeFeed, I
     {
         int generation = ConfigurationGeneration;
         ct.ThrowIfCancellationRequested();
-        if (minutes is not (1 or 5 or 15)) throw new ArgumentOutOfRangeException(nameof(minutes), "IB bar history supports 1, 5 and 15 minute requests.");
+        if (minutes is not (1 or 5 or 15 or 60)) throw new ArgumentOutOfRangeException(nameof(minutes), "IB bar history supports 1, 5, 15 and 60 minute requests.");
         if (_settings.Offline)
         {
             var rows = IbBarStore.LoadRange(_root ?? throw new InvalidOperationException("IB storage root is required."), instrument.Symbol, fromUtc, toUtc, ct, instrument.TickSize);
@@ -370,7 +370,7 @@ public sealed class IbFeed : IMarketDataFeed, IBarHistoryFeed, IDataScopeFeed, I
         var now = DateTime.UtcNow;
         if (toUtc > now) toUtc = now;
         if (toUtc <= fromUtc) yield break;
-        string barSize = minutes switch { 1 => "1 min", 5 => "5 mins", 15 => "15 mins", _ => throw new ArgumentOutOfRangeException(nameof(minutes)) };
+        string barSize = minutes switch { 1 => "1 min", 5 => "5 mins", 15 => "15 mins", 60 => "1 hour", _ => throw new ArgumentOutOfRangeException(nameof(minutes)) };
         var chunk = minutes == 1 ? TimeSpan.FromDays(1) : TimeSpan.FromDays(7);
         double total = (toUtc - fromUtc).Ticks;
         foreach (var (_, segFrom, segTo) in FuturesRolls.Segments(instrument.Symbol, fromUtc, toUtc))

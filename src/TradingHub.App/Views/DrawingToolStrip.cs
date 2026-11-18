@@ -110,6 +110,11 @@ internal sealed class DrawingToolStrip : UserControl
                 var g = new Group { Button = new ToggleButton().Classes("dtool"), Kinds = kinds, Current = kinds[0] };
                 UpdateButton(g);
                 g.Button.Click += (_, _) => Clicked(g, g.Current);
+                // the shortcut can change in Settings while the bar exists
+                ToolTip.AddToolTipOpeningHandler(g.Button, (_, _) =>
+                {
+                    if (g.Current is { } current) ToolTip.SetTip(g.Button, GroupTip(current));
+                });
                 _groups.Add(g);
                 panel.Children.Add(Row(g.Button, kinds.Length > 1 ? more => ShowGroup(g, more) : null, "More tools in this group"));
             }
@@ -242,7 +247,7 @@ internal sealed class DrawingToolStrip : UserControl
     }
 
     /// <summary>Holding the button for half a second does something else; that press does not toggle the button.</summary>
-    private void AddHold(ToggleButton button, Action onHold)
+    private static void AddHold(ToggleButton button, Action onHold)
     {
         DispatcherTimer? timer = null;
         bool held = false;
@@ -259,17 +264,17 @@ internal sealed class DrawingToolStrip : UserControl
             });
             timer.Start();
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        button.AddHandler(PointerReleasedEvent, (_, _) => timer?.Stop(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        button.AddHandler(PointerCaptureLostEvent, (_, _) => timer?.Stop(), Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
-        button.IsCheckedChanged += (_, _) =>
+        button.AddHandler(PointerReleasedEvent, (_, e) =>
         {
-            if (!held || _syncing) return;
-            // it was a long press: the button returns to its previous state
+            timer?.Stop();
+            // a long press: handled before the button sees the release, so it raises no Click and does not toggle
+            if (held) e.Handled = true;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        button.AddHandler(PointerCaptureLostEvent, (_, _) =>
+        {
+            timer?.Stop();
             held = false;
-            _syncing = true;
-            button.IsChecked = !button.IsChecked;
-            _syncing = false;
-        };
+        }, Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
     }
 
     private ToggleButton Toggle(MaterialIconKind icon, string tip, Action<bool> changed)
@@ -457,6 +462,8 @@ internal sealed class DrawingToolStrip : UserControl
             var kind = k;
             var b = new ToggleButton { Content = Ui.Icon(Info[kind].Icon, 19) }.Classes("dtool");
             ToolTip.SetTip(b, Tip(kind));
+            // the shortcut can change in Settings while the bar exists
+            ToolTip.AddToolTipOpeningHandler(b, (_, _) => ToolTip.SetTip(b, Tip(kind)));
             Avalonia.Automation.AutomationProperties.SetName(b, Info[kind].Name);
             b.Click += (_, _) => Clicked(b, kind);
             _favButtons.Add((kind, b));
@@ -501,7 +508,7 @@ internal sealed class DrawingToolStrip : UserControl
             }
             else g.Button.Content = icon;
 
-            ToolTip.SetTip(g.Button, Tip(k) + "\n" + (_kept == k ? "Kept: stays active after each drawing (Esc releases it)" : "Double-click: keep it active"));
+            ToolTip.SetTip(g.Button, GroupTip(k));
             Avalonia.Automation.AutomationProperties.SetName(g.Button, Info[k].Name);
         }
         else
@@ -511,6 +518,9 @@ internal sealed class DrawingToolStrip : UserControl
             Avalonia.Automation.AutomationProperties.SetName(g.Button, "Cursor (Esc)");
         }
     }
+
+    private string GroupTip(DrawingKind k) =>
+        Tip(k) + "\n" + (_kept == k ? "Kept: stays active after each drawing (Esc releases it)" : "Double-click: keep it active");
 
     private void ShowGroup(Group g, Control anchor)
     {

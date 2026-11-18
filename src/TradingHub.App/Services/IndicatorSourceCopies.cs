@@ -141,15 +141,16 @@ public static class IndicatorSourceCopies
         try { generated = sources.Generate(manifest.OriginalType, manifest.ClassName, manifest.NamespacePrefix); }
         catch (NotSupportedException) { return new(directory, manifest, SourceCopyState.OriginalUnavailable); }
 
-        bool untouched = IsUntouched(directory, manifest);
-        if (untouched && SameFiles(generated.Manifest.Files, manifest.Files))
+        if (SameFiles(generated.Manifest.Files, manifest.Files))
         {
-            // the original changed in ways that do not alter the copy (for example an unrelated declaration)
-            WriteManifest(directory, generated.Manifest);
-            return new(directory, generated.Manifest, SourceCopyState.Current);
+            // the original changed in ways that do not alter the copy (for example an unrelated declaration in the same
+            // document): only the original hashes move on, so an edited copy is still recognised as edited later
+            manifest.Originals = new Dictionary<string, string>(generated.Manifest.Originals, StringComparer.Ordinal);
+            WriteManifest(directory, manifest);
+            return new(directory, manifest, SourceCopyState.Current);
         }
 
-        if (!untouched) return new(directory, manifest, SourceCopyState.OriginalUpdated);
+        if (!IsUntouched(directory, manifest)) return new(directory, manifest, SourceCopyState.OriginalUpdated);
         try
         {
             return Replace(root, directory, generated, manifest, requireUntouched: true)

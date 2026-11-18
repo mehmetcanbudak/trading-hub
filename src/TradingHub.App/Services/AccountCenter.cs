@@ -409,9 +409,9 @@ public sealed class AccountCenter
         // Native accounts: the same FIFO lane as the chart's gestures on this account, so the cancel starts only after
         // every gesture issued before it has been handed to the account.
         if (a.Kind == AccountKind.Rithmic && o.Ref is RithmicOrderTarget rithmic)
-            await InLaneAsync(rithmic.Context, "Cancel order",
+            return await InLaneAsync(rithmic.Context, "Cancel order",
                 () => rithmic.Session.CancelAsync(rithmic.Account, rithmic.Basket, CancellationToken.None)).ConfigureAwait(false);
-        else if (a.Kind == AccountKind.Tradovate && o.Ref is TradingHub.Feeds.Tradovate.TradovateOrderState tv)
+        if (a.Kind == AccountKind.Tradovate && o.Ref is TradingHub.Feeds.Tradovate.TradovateOrderState tv)
         {
             // Tradovate also sends it in the account's send-turn order, after earlier requests were answered.
             var session = _svc.TradovateSessionFor(a.Profile!);
@@ -426,9 +426,6 @@ public sealed class AccountCenter
     /// awaits the call it started (only the start is ordered: the lane does not wait for the broker's reply).
     /// </summary>
     private async Task<T> InLaneAsync<T>(OrderContext context, string label, Func<Task<T>> start) =>
-        await (await _svc.OrderLanes.RunAsync(context, label, start).ConfigureAwait(false)).ConfigureAwait(false);
-
-    private async Task InLaneAsync(OrderContext context, string label, Func<Task> start) =>
         await (await _svc.OrderLanes.RunAsync(context, label, start).ConfigureAwait(false)).ConfigureAwait(false);
 
     /// <summary>

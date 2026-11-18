@@ -23,7 +23,8 @@ public sealed class AggregateVenueTests
 
         var listed = await feed.GetInstrumentsAsync(CancellationToken.None);
 
-        Assert.Equal(new[] { "1000PEPEUSDT", "BTCEUR", "BTCUSDT", "ETHUSDT" }, listed.Select(i => i.Symbol));
+        // Contracts that lost their venue's composite slot stay listed under their own symbol (pre-fold identities).
+        Assert.Equal(new[] { "1000PEPEUSDT", "BTC-USDC-SWAP", "BTC-USDT", "BTCEUR", "BTCUSDT", "ETHUSDT" }, listed.Select(i => i.Symbol));
         var btc = listed.Single(i => i.Symbol == "BTCUSDT");
         Assert.Equal(0.01m, btc.TickSize);
         Assert.Contains("USDT, USD quotes combined without conversion", btc.Description);
@@ -94,6 +95,101 @@ public sealed class AggregateVenueTests
         second.Sink.OnTrades(second.Subscribed!, [new Trade(2, Start.AddSeconds(3), 101, 2, TradeSide.Sell)]);
         clock.Advance(TimeSpan.FromMilliseconds(250));
         Assert.Equal(new[] { 100m, 101m }, sink.Trades.Select(x => x.Price));
+    }
+
+    [Fact]
+    public async Task Venues_keep_streaming_through_a_move_while_the_reference_venue_reconnects()
+    {
+        var clock = new ManualClock(Start);
+        using var first = new Venue("first", "First", spot: false, 1m, ("ABCUSDT", "ABC", "USDT"));
+        using var second = new Venue("second", "Second", spot: false, 1m, ("ABCUSDT", "ABC", "USDT"));
+        using var feed = new AggregateFeed([first, second], timeProvider: clock);
+        var instrument = Assert.Single(await feed.GetInstrumentsAsync(CancellationToken.None));
+        var sink = new Sink();
+        using var live = feed.Subscribe(instrument, sink);
+        first.Sink!.OnTrades(first.Subscribed!, [new Trade(1, Start.AddSeconds(1), 100, 1, TradeSide.Buy)]);
+        second.Sink!.OnTrades(second.Subscribed!, [new Trade(1, Start.AddSeconds(1), 100, 1, TradeSide.Sell)]);
+
+        // The reference venue drops out, then the market moves 10 %: its last price must not reject the other venue.
+        first.Sink.OnStatus(first.Subscribed!, FeedStatus.Reconnecting, "fixture outage");
+        second.Sink.OnTrades(second.Subscribed!, [new Trade(2, Start.AddSeconds(2), 110, 1, TradeSide.Buy)]);
+        clock.Advance(TimeSpan.FromMilliseconds(250));
+
+        Assert.Equal(new[] { 100m, 100m, 110m }, sink.Trades.Select(x => x.Price));
+        Assert.DoesNotContain("probable different asset", feed.GetCoverage(instrument, AggregateOperation.Live).Constituents[1].Message ?? "");
+    }
+
+    [Fact]
+    public async Task A_quiet_reference_venue_stops_judging_the_others_after_the_freshness_window()
+    {
+        var clock = new ManualClock(Start);
+        using var first = new Venue("first", "First", spot: false, 1m, ("ABCUSDT", "ABC", "USDT"));
+        using var second = new Venue("second", "Second", spot: false, 1m, ("ABCUSDT", "ABC", "USDT"));
+        using var feed = new AggregateFeed([first, second], timeProvider: clock);
+        var instrument = Assert.Single(await feed.GetInstrumentsAsync(CancellationToken.None));
+        var sink = new Sink();
+        using var live = feed.Subscribe(instrument, sink);
+        first.Sink!.OnTrades(first.Subscribed!, [new Trade(1, Start.AddSeconds(1), 100, 1, TradeSide.Buy)]);
+        clock.Advance(AggregateFeed.ReferenceFreshness + TimeSpan.FromSeconds(1));
+
+        second.Sink!.OnTrades(second.Subscribed!, [new Trade(1, Start.AddSeconds(20), 110, 1, TradeSide.Sell)]);
+        clock.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.Equal(new[] { 100m, 110m }, sink.Trades.Select(x => x.Price));
+
+        // Once the first venue prints again it is the reference, and a fresh far print is still omitted.
+        first.Sink.OnTrades(first.Subscribed!, [new Trade(2, Start.AddSeconds(21), 110, 1, TradeSide.Buy)]);
+        second.Sink.OnTrades(second.Subscribed!, [new Trade(2, Start.AddSeconds(22), 150, 1, TradeSide.Buy)]);
+        clock.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.Equal(new[] { 100m, 110m, 110m }, sink.Trades.Select(x => x.Price));
+    }
+
+    [Fact]
+    public async Task A_converged_venue_is_no_longer_partial_and_later_prints_are_not_marked_partial()
+    {
+        var clock = new ManualClock(Start);
+        using var first = new Venue("first", "First", spot: false, 1m, ("ABCUSDT", "ABC", "USDT"));
+        using var second = new Venue("second", "Second", spot: false, 1m, ("ABCUSDT", "ABC", "USDT"));
+        using var feed = new AggregateFeed([first, second], timeProvider: clock);
+        var instrument = Assert.Single(await feed.GetInstrumentsAsync(CancellationToken.None));
+        var sink = new Sink();
+        using var live = feed.Subscribe(instrument, sink);
+        first.Sink!.OnStatus(first.Subscribed!, FeedStatus.Connected, null);
+        second.Sink!.OnStatus(second.Subscribed!, FeedStatus.Connected, null);
+        first.Sink.OnTrades(first.Subscribed!, [new Trade(1, Start.AddSeconds(1), 100, 1, TradeSide.Buy)]);
+        second.Sink.OnTrades(second.Subscribed!, [new Trade(1, Start.AddSeconds(2), 150, 1, TradeSide.Buy)]);
+        Assert.True(feed.GetCoverage(instrument, AggregateOperation.Live).Constituents[1].IsPartial);
+
+        second.Sink.OnTrades(second.Subscribed!, [new Trade(2, Start.AddSeconds(3), 101, 1, TradeSide.Sell)]);
+        clock.Advance(TimeSpan.FromMilliseconds(250));
+
+        var coverage = feed.GetCoverage(instrument, AggregateOperation.Live);
+        Assert.False(coverage.IsPartial);
+        Assert.Equal(new[] { 100m, 101m }, sink.Trades.Select(x => x.Price));
+        Assert.False(sink.Trades.Last().Provenance.IsPartial);
+    }
+
+    [Fact]
+    public async Task Folded_usd_quote_contracts_stay_reachable_under_their_pre_fold_aggregate_symbols()
+    {
+        using var binance = new Venue("binance-futures", "Binance Futures", spot: false, 0.1m,
+            ("BTCUSDT", "BTC", "USDT"), ("BTCUSDC", "BTC", "USDC"), ("XYZUSDC", "XYZ", "USDC"));
+        using var bybit = new Venue("bybit-linear", "Bybit", spot: false, 0.1m, ("BTCUSDT", "BTC", "USDT"), ("BTCPERP", "BTC", "USDC"));
+        using var feed = new AggregateFeed([binance, bybit]);
+
+        var listed = await feed.GetInstrumentsAsync(CancellationToken.None);
+
+        // BTCUSDT combines both venues' USDT contracts; the USDC contracts saved before the fold keep their symbols.
+        Assert.Equal(new[] { "BTCPERP", "BTCUSDC", "BTCUSDT", "XYZUSDC", "XYZUSDT" }, listed.Select(i => i.Symbol));
+        var sink = new Sink();
+        using (feed.Subscribe(listed.Single(i => i.Symbol == "BTCUSDC"), sink))
+        {
+            Assert.Equal("BTCUSDC", binance.Subscribed?.Symbol);
+            Assert.Null(bybit.Subscribed);
+        }
+        // A saved reference resolves without the picker: the symbol alone is enough.
+        var saved = new Instrument { Symbol = "BTCPERP", FeedId = AggregateFeed.FeedId, TickSize = 0.1m, VolumeStep = 0.001m };
+        using (feed.Subscribe(saved, sink)) Assert.Equal("BTCPERP", bybit.Subscribed?.Symbol);
+        using (feed.Subscribe(listed.Single(i => i.Symbol == "XYZUSDC"), sink)) Assert.Equal("XYZUSDC", binance.Subscribed?.Symbol);
     }
 
     [Fact]

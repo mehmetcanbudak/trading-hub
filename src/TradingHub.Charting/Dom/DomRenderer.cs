@@ -24,6 +24,13 @@ public sealed class DomModel
     private DateTime _changesAt = DateTime.MinValue;
     private int _changesWindow;
 
+    // Recently traded volume per tick: a window sliding over the trade store (each print enters and leaves it once).
+    private readonly Dictionary<long, (decimal Bid, decimal Ask)> _recent = new();
+    private int _recentFrom, _recentTo, _recentWindow;
+    private Guid _recentStore;
+    private long _recentCorrection = -1;
+    private DateTime _recentNow = DateTime.MinValue;
+
     public DomModel(InstrumentData data, DomSettings? settings = null)
     {
         Data = data;
@@ -155,23 +162,37 @@ public sealed class DomModel
         return RecentChanges;
     }
 
-    /// <summary>Recently traded volume per tick in the window (observed prints only).</summary>
-    public Dictionary<long, (decimal Bid, decimal Ask)> RecentTraded(DateTime now)
+    /// <summary>
+    /// Recently traded volume per tick in the window (observed prints only). The window slides over the trade store: each
+    /// call only adds the prints that entered it and removes those that left, never rescanning the whole window.
+    /// </summary>
+    public IReadOnlyDictionary<long, (decimal Bid, decimal Ask)> RecentTraded(DateTime now)
     {
-        var result = new Dictionary<long, (decimal Bid, decimal Ask)>();
         var store = Data.Trades;
-        var since = now - TimeSpan.FromSeconds(Math.Clamp(Settings.ChangeWindowSeconds, 5, 3600));
-        for (int i = store.Count - 1; i >= 0; i--)
+        int seconds = Math.Clamp(Settings.ChangeWindowSeconds, 5, 3600);
+        var since = now - TimeSpan.FromSeconds(seconds);
+        if (seconds != _recentWindow || now < _recentNow || store.Identity != _recentStore || store.CorrectionRevision != _recentCorrection || store.Count < _recentTo)
         {
-            var time = store.GetTime(i);
-            if (time < since) break;
-            if (time > now || store.GetId(i) < 0) continue;
-            long tick = store.GetPriceTicks(i);
-            result.TryGetValue(tick, out var v);
-            var vol = store.GetVolume(i);
-            result[tick] = store.GetSide(i) == TradeSide.Sell ? (v.Bid + vol, v.Ask) : (v.Bid, v.Ask + vol);
+            _recent.Clear();
+            (_recentWindow, _recentStore, _recentCorrection) = (seconds, store.Identity, store.CorrectionRevision);
+            _recentFrom = _recentTo = store.LowerBound(since);
         }
-        return result;
+
+        _recentNow = now;
+        for (; _recentTo < store.Count && store.GetTime(_recentTo) <= now; _recentTo++) AddRecent(store, _recentTo, 1);
+        for (; _recentFrom < _recentTo && store.GetTime(_recentFrom) < since; _recentFrom++) AddRecent(store, _recentFrom, -1);
+        return _recent;
+    }
+
+    private void AddRecent(TradeStore store, int i, int sign)
+    {
+        if (store.GetId(i) < 0) return; // candle-derived history: not observed prints
+        long tick = store.GetPriceTicks(i);
+        _recent.TryGetValue(tick, out var v);
+        decimal vol = store.GetVolume(i) * sign;
+        v = store.GetSide(i) == TradeSide.Sell ? (v.Bid + vol, v.Ask) : (v.Bid, v.Ask + vol);
+        if (v.Bid == 0 && v.Ask == 0) _recent.Remove(tick);
+        else _recent[tick] = v;
     }
 
     /// <summary>
@@ -366,14 +387,25 @@ public sealed class DomRenderer
         long bestAskRow = book.HasAsk ? dom.RowOf(book.BestAskTicks) : long.MaxValue;
         decimal mid = book.HasBid && book.HasAsk ? (inst.FromTicks(book.BestBidTicks) + inst.FromTicks(book.BestAskTicks)) / 2 : last;
 
-        // session volume per row (stored per tick)
+        // session volume per row (stored per tick): the visible ticks are looked up, unless the session traded fewer ticks
         var session = new Dictionary<long, (decimal Bid, decimal Ask)>();
-        foreach (var (tick, v) in dom.SessionVolume)
+        var traded = dom.SessionVolume;
+        void AddSession(long tick, (decimal Bid, decimal Ask) v)
         {
             long r = dom.RowOf(tick);
-            if (r < bottomRow || r > _topRow) continue;
+            if (r < bottomRow || r > _topRow) return;
             var cur = session.GetValueOrDefault(r);
             session[r] = (cur.Bid + v.Bid, cur.Ask + v.Ask);
+        }
+
+        if ((_topRow - bottomRow + 1) * dom.Step <= traded.Count)
+        {
+            for (long tick = bottomRow * dom.Step, end = (_topRow + 1) * dom.Step; tick < end; tick++)
+                if (traded.TryGetValue(tick, out var v)) AddSession(tick, v);
+        }
+        else
+        {
+            foreach (var (tick, v) in traded) AddSession(tick, v);
         }
 
         // optional columns: computed only when shown
@@ -815,7 +847,7 @@ public sealed class DomRenderer
 
     private void Text(SKCanvas canvas, string s, float x, float y, float w, SKFont f, SKColor color, int align)
     {
-        s = UiText.Tr(s);
+        // measuring and drawing translate it (once each)
         float tw = RenderContext.MeasureWidth(f, s);
         float tx = align < 0 ? x + 4 : align > 0 ? x + w - 4 - tw : x + (w - tw) / 2;
         float ty = y + _rowH / 2 - (f.Metrics.Ascent + f.Metrics.Descent) / 2;

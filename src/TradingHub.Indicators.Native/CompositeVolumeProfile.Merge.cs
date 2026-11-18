@@ -205,6 +205,7 @@ public partial class CompositeVolumeProfile
         var items = new List<IndicatorMenuItem>();
         lock (_sync)
         {
+            RefreshDisplay();
             int bar = ChartInfo.PriceChartContainer.GetBarByX(x);
             Profile? target = null;
             for (int i = Math.Max(0, _display.Count - _count); i < _display.Count; i++)

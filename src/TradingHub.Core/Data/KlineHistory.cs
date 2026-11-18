@@ -167,6 +167,12 @@ public static class KlineHistory
         return provenance;
     }
 
+    /// <summary>
+    /// Deduplicated chronological source bars of the requested resolution. A bar that declares no resolution claims the
+    /// requested one and must open on its grid; a source declaring its resolution also owns its phase (for example
+    /// session-anchored bars). A declared resolution may be coarser, never finer, and no two source windows may overlap.
+    /// A provider that answers with another resolution fails here instead of being cached under the requested one.
+    /// </summary>
     private static List<Kline> Normalize(IEnumerable<Kline> bars, DateTime from, DateTime to, int minutes, string sourceIdentity)
     {
         var latest = new Dictionary<long, Kline>();
@@ -177,11 +183,33 @@ public static class KlineHistory
             if (bar.OpenTimeMs < first || bar.OpenTimeMs >= last) continue;
             ValidateBar(bar);
             var provenance = SourceProvenance(bar, minutes, sourceIdentity);
+            if (bar.Provenance.ResolutionSeconds == 0 && provenance.ResolutionOffsetSeconds != 0) throw ResolutionMismatch(minutes);
             var identity = provenance.SourceIdentity!;
             if (!sources.TryGetValue(identity, out var shared)) sources.Add(identity, shared = identity);
             latest[bar.OpenTimeMs] = bar with { Provenance = provenance with { SourceIdentity = shared } };
         }
-        return latest.Values.OrderBy(k => k.OpenTimeMs).ToList();
+        var normalized = latest.Values.OrderBy(k => k.OpenTimeMs).ToList();
+        return MatchesResolution(normalized, minutes) ? normalized : throw ResolutionMismatch(minutes);
+    }
+
+    private static InvalidDataException ResolutionMismatch(int minutes) =>
+        new($"The provider returned candles that do not match the requested {minutes}-minute resolution.");
+
+    /// <summary>
+    /// Whether chronological normalized bars can be candles of the requested resolution: none is finer and no two source
+    /// windows overlap. Finer bars stored under a coarser resolution by earlier versions fail this and are refetched.
+    /// </summary>
+    private static bool MatchesResolution(List<Kline> bars, int minutes)
+    {
+        long previousEnd = long.MinValue;
+        foreach (var bar in bars)
+        {
+            if (bar.Provenance.ResolutionSeconds < minutes * 60) return false;
+            var (from, to) = bar.Provenance.SourceWindow(FromMs(bar.OpenTimeMs));
+            if (from.Ticks < previousEnd) return false;
+            previousEnd = to.Ticks;
+        }
+        return true;
     }
 
     private static string CachePath(Instrument inst, DateTime month, int minutes, string tag)
@@ -282,7 +310,8 @@ public static class KlineHistory
                 bars.Add(bar);
                 previous = time;
             }
-            return data.BaseStream.Position == data.BaseStream.Length ? new MonthCache(from, to, updated, bars) : null;
+            // Finer bars cached under this resolution before providers rejected unsupported ones are refetched, not served.
+            return data.BaseStream.Position == data.BaseStream.Length && MatchesResolution(bars, minutes) ? new MonthCache(from, to, updated, bars) : null;
         }
         catch (Exception error) when (error is IOException or InvalidDataException or ArgumentException or OverflowException) { return null; }
     }

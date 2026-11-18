@@ -41,6 +41,7 @@ public sealed class OptionsData : ExternalSeriesHub
     private readonly ConcurrentDictionary<string, List<StrikeSnapshot>> _snapshots = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastSnapshot = new();
     private readonly ConcurrentDictionary<string, DateTime> _tradeRetry = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _tradeLoads = new();
 
     /// <param name="root">Folder for recorded daily rows and strike snapshots; null keeps them in memory.</param>
     public OptionsData(string? root = null, Func<DateTime>? utcNow = null) : base(utcNow) => _root = root;
@@ -60,6 +61,8 @@ public sealed class OptionsData : ExternalSeriesHub
             _chains.Clear();
             _trades.Clear();
             _dailies.Clear();
+            _tradeRetry.Clear();
+            _lastSnapshot.Clear();
             LastError = null;
             Bump();
         }
@@ -128,6 +131,8 @@ public sealed class OptionsData : ExternalSeriesHub
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // A retired provider's failure (its client is disposed on a swap) must not reach the new provider's cache.
+            if (!ReferenceEquals(p, _provider)) return null;
             LastError = ex.Message;
             _chains[underlying] = new ChainEntry(Now, hit?.Chain, ex.Message);
             return hit?.Chain;
@@ -199,8 +204,18 @@ public sealed class OptionsData : ExternalSeriesHub
     private static List<(DateTime From, DateTime To)> AddGap(IEnumerable<(DateTime From, DateTime To)> gaps, DateTime from, DateTime to) =>
         from < to ? gaps.Append((From: from, To: to)).OrderBy(g => g.From).ToList() : gaps.ToList();
 
-    /// <summary>Loads trades until [from, to) is covered, one day per request window.</summary>
+    /// <summary>Loads trades until [from, to) is covered, one day per request window. Loads of one underlying run one
+    /// at a time: each reads the store, awaits the provider and writes the store back, so overlapping loads would let the
+    /// slower writer replace the faster one's progress.</summary>
     public async Task LoadTradesAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var gate = _tradeLoads.GetOrAdd(underlying, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try { await LoadTradesCoreAsync(underlying, from, to, ct).ConfigureAwait(false); }
+        finally { gate.Release(); }
+    }
+
+    private async Task LoadTradesCoreAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
     {
         var p = _provider;
         if (p == null || !p.Supports(underlying)) return;
@@ -251,6 +266,7 @@ public sealed class OptionsData : ExternalSeriesHub
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
+                if (!ReferenceEquals(p, _provider)) return;
                 LastError = ex.Message;
                 _tradeRetry[underlying] = Now + RetryAfterError;
                 Bump();
@@ -262,12 +278,37 @@ public sealed class OptionsData : ExternalSeriesHub
         }
     }
 
-    /// <summary>Existing trades plus newly fetched ones in [from, to), de-duplicated and in time order.</summary>
+    /// <summary>
+    /// Existing trades plus newly fetched ones in [from, to), in time order. A fetch that re-reads part of the held span
+    /// returns trades already held: those with a provider id are matched by id; without one, each fetched trade matches
+    /// at most one identical held trade, so identical fills of one order inside a fetch are all kept.
+    /// </summary>
     private static List<OptionTrade> Merge(List<OptionTrade> existing, IEnumerable<OptionTrade> got, DateTime from, DateTime to)
     {
-        var seen = new HashSet<(DateTime, string, double, double, int)>(existing.Where(t => t.Time >= from && t.Time < to).Select(t => (t.Time, t.Symbol, t.Price, t.Size, t.Aggressor)));
-        var fresh = got.Where(t => t.Time >= from && t.Time < to && seen.Add((t.Time, t.Symbol, t.Price, t.Size, t.Aggressor)));
-        var list = existing.Concat(fresh).ToList();
+        static (DateTime, string, double, double, int) Key(OptionTrade t) => (t.Time, t.Symbol, t.Price, t.Size, t.Aggressor);
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var held = new Dictionary<(DateTime, string, double, double, int), int>();
+        foreach (var t in existing)
+        {
+            if (t.Time < from || t.Time >= to) continue;
+            if (t.TradeId.Length > 0) ids.Add(t.TradeId);
+            else held[Key(t)] = held.GetValueOrDefault(Key(t)) + 1;
+        }
+        var list = new List<OptionTrade>(existing);
+        foreach (var t in got)
+        {
+            if (t.Time < from || t.Time >= to) continue;
+            if (t.TradeId.Length > 0)
+            {
+                if (!ids.Add(t.TradeId)) continue;
+            }
+            else if (held.TryGetValue(Key(t), out int count) && count > 0)
+            {
+                held[Key(t)] = count - 1;
+                continue;
+            }
+            list.Add(t);
+        }
         list.Sort((a, b) => a.Time.CompareTo(b.Time));
         return list;
     }
@@ -328,6 +369,7 @@ public sealed class OptionsData : ExternalSeriesHub
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            if (!ReferenceEquals(p, _provider)) return;
             LastError = ex.Message;
             _dailies.TryGetValue(underlying, out var hit);
             // Try again in about 15 minutes, keeping recorded rows meanwhile.

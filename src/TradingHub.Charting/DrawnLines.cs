@@ -40,11 +40,21 @@ public sealed class DrawnLine
 
     [System.Text.Json.Serialization.JsonIgnore, Newtonsoft.Json.JsonIgnore] public decimal LastPrice => Prices.Length > 0 ? Prices[^1] : 0;
 
+    // bar positions of a saved shape (no capture), kept while the bars they were computed on are unchanged
+    private double[]? _savedBars;
+    private DateTime[]? _savedBarsTimes;
+    private CandleSeries? _savedBarsSeries;
+    private int _savedBarsCount;
+    private long _savedBarsCorrection;
+
     internal double[] BarsIn(CandleSeries series)
     {
         if (Bars != null) return Bars;
+        if (_savedBars != null && ReferenceEquals(_savedBarsTimes, Times) && ReferenceEquals(_savedBarsSeries, series) &&
+            _savedBarsCount == series.Count && _savedBarsCorrection == series.CorrectionRevision) return _savedBars;
         var bars = new double[Times.Length];
         for (int i = 0; i < bars.Length; i++) bars[i] = ChartDrawing.BarPos(series, Times[i]);
+        (_savedBars, _savedBarsTimes, _savedBarsSeries, _savedBarsCount, _savedBarsCorrection) = (bars, Times, series, series.Count, series.CorrectionRevision);
         return bars;
     }
 

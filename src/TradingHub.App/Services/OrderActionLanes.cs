@@ -32,9 +32,6 @@ internal sealed class OrderActionLanes
     private readonly List<Entry> _pending = new();
     private bool _closed;
 
-    /// <summary>The pending set changed. Raised from any thread.</summary>
-    public event Action? Changed;
-
     /// <summary>Labels of handed-over gestures that have not finished, oldest first.</summary>
     public IReadOnlyList<string> Pending
     {
@@ -96,10 +93,8 @@ internal sealed class OrderActionLanes
                 lock (_gate) _pending.Remove(entry);
                 if (failure != null) completion.SetException(failure);
                 else completion.SetResult(result);
-                Changed?.Invoke();
             }, CancellationToken.None, TaskContinuationOptions.DenyChildAttach, TaskScheduler.Default);
         }
-        Changed?.Invoke();
         return completion.Task;
     }
 }

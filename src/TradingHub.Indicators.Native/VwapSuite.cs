@@ -28,7 +28,7 @@ public partial class VwapSuite : Indicator
         ((ValueDataSeries)DataSeries[0]).VisualType = VisualMode.Hide;
         EnableCustomDrawing = true;
         SubscribeToDrawingEvents(DrawingLayouts.Final);
-        PriorClosing.DrawLegend = false;
+        PriorClosing.DrawLegend = false; MultiPeriod.DrawLegend = false;
         _parts = new (Indicator, Func<bool>)[]
         {
             (Anchored, () => _anchored), (Claire, () => _claire), (MultiPeriod, () => _multi),
@@ -124,7 +124,8 @@ public partial class VwapSuite : Indicator
         // Each part's own status is a catalog entry; translate segment by segment before joining.
         string status = string.Join("; ", Segments().Select(s => UiText.Tr(s.Part) + ": " + UiText.Tr(s.Status)));
         if (status.Length > 0) FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, UiText.Tr("VWAP suite") + ": " + status, Color.LightSkyBlue);
-        // Only the prior/closing part draws chart geometry beyond its series.
+        // The prior/closing levels and the multi-period end-of-line prices are drawn beyond the parts' series.
+        if (_multi) RenderChild(MultiPeriod, context, layout);
         if (_prior) RenderChild(PriorClosing, context, layout);
     }
 

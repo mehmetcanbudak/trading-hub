@@ -24,6 +24,7 @@ public readonly record struct LiquidationEvent(DateTime Time, string VenueId, de
 /// <summary>A span during which a venue's liquidation stream was connected. Outside these spans liquidations are unknown, not zero.</summary>
 public readonly record struct ObservedWindow(string VenueId, DateTime From, DateTime To);
 
+/// <summary>Liquidations of a range in time order (readers may binary-search them) with the windows that observed it.</summary>
 public sealed record LiquidationSnapshot(IReadOnlyList<LiquidationEvent> Events, IReadOnlyList<ObservedWindow> Windows, string? Message);
 
 /// <summary>Caller-owned transport for derivatives data; overrides are isolated-run seams.</summary>
@@ -128,10 +129,29 @@ public sealed partial class DerivativesData : IDisposable
             }
         }
         else throw new ArgumentException("Unknown derivatives venue.", nameof(venue));
-        var values = samples.Values.Where(s => s.Time >= from && s.Time <= to).ToArray();
-        return values.Length == 0
-            ? new(values, OpenInterestAvailability.Unavailable, $"{VenueName(venue)} reports no funding for {symbol} in this range.")
-            : new(values, OpenInterestAvailability.Available);
+        return FundingResult(venue, symbol, samples.Values.Where(s => s.Time >= from && s.Time <= to).ToArray(), from);
+    }
+
+    /// <summary>Funding samples in time order; a history that starts inside the range is partial, not complete.</summary>
+    private static FundingHistoryResult FundingResult(string venue, string symbol, FundingSample[] values, DateTime from)
+    {
+        if (values.Length == 0)
+            return new(values, OpenInterestAvailability.Unavailable, $"{VenueName(venue)} reports no funding for {symbol} in this range.");
+        // No venue settles funding less often than every eight hours.
+        if (values[0].Time <= from + TimeSpan.FromHours(8)) return new(values, OpenInterestAvailability.Available);
+        return new(values, OpenInterestAvailability.Partial, string.Create(CultureInfo.InvariantCulture,
+            $"{VenueName(venue)} publishes {symbol} funding only from {values[0].Time:yyyy-MM-dd HH:mm} UTC; earlier funding is unknown."));
+    }
+
+    /// <summary>
+    /// True when the first of regularly spaced samples lies more than one sampling interval (their smallest gap, or
+    /// <paramref name="interval"/> for a single sample) after <paramref name="from"/>: the history begins inside the range.
+    /// </summary>
+    private static bool StartsLate(IReadOnlyList<DateTime> times, DateTime from, TimeSpan interval)
+    {
+        for (int i = 1; i < times.Count; i++)
+            if (times[i] - times[i - 1] is var gap && gap > TimeSpan.Zero && gap < interval) interval = gap;
+        return times.Count > 0 && times[0] > from + interval;
     }
 
     /// <summary>Binance /fapi/v1/fundingRate rows {fundingTime, fundingRate} (rate as a fraction).</summary>
@@ -194,8 +214,15 @@ public sealed partial class DerivativesData : IDisposable
 
     // ================================================================ liquidations
 
+    /// <summary>
+    /// How far back a watched symbol keeps liquidations in memory: the recorded days preloaded when its stream starts.
+    /// Older events are trimmed as the stream runs; they stay in the day files.
+    /// </summary>
+    public static readonly TimeSpan LiquidationRetention = TimeSpan.FromDays(7);
+
     private sealed class LiquidationStream
     {
+        /// <summary>In time order, so readers can binary-search a range.</summary>
         public readonly List<LiquidationEvent> Events = new();
         public readonly List<ObservedWindow> Windows = new();
         public readonly CancellationTokenSource Cancellation;
@@ -220,32 +247,56 @@ public sealed partial class DerivativesData : IDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         symbol = symbol.ToUpperInvariant();
         LiquidationStream stream;
+        CancellationToken? started = null;
         lock (_streams)
         {
             if (!_streams.TryGetValue(symbol, out stream!))
             {
                 stream = new LiquidationStream(_lifetime.Token);
-                var (events, windows) = LoadRecorded(symbol, 7);
-                stream.Events.AddRange(events);
-                stream.Windows.AddRange(windows);
                 _streams[symbol] = stream;
-                var token = stream.Cancellation.Token;
-                foreach (var venue in Venues) _ = Task.Run(() => RunAsync(symbol, venue, stream, token));
+                started = stream.Cancellation.Token;
             }
             stream.Users++;
         }
+        // Recorded days are read off the caller's thread and before the live streams append to the same day files.
+        if (started is { } token) _ = Task.Run(() => StartStreams(symbol, stream, token));
         return new Release(() =>
         {
             lock (_streams)
             {
                 if (--stream.Users > 0) return;
-                stream.Cancellation.Cancel();
-                _streams.Remove(symbol);
+                if (_streams.TryGetValue(symbol, out var current) && ReferenceEquals(current, stream)) _streams.Remove(symbol);
             }
+            stream.Cancellation.Cancel();
+            stream.Cancellation.Dispose(); // Unregisters it from the service lifetime.
         });
     }
 
-    /// <summary>Known liquidations and observed windows overlapping [from, to); without a live stream, recorded days are read.</summary>
+    private void StartStreams(string symbol, LiquidationStream stream, CancellationToken ct)
+    {
+        try
+        {
+            var (events, windows) = LoadRecorded(symbol, (int)LiquidationRetention.TotalDays);
+            lock (stream.Events)
+            {
+                stream.Events.AddRange(events);
+                stream.Windows.AddRange(windows);
+                TrimLocked(stream, _utcNow());
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            lock (stream.Events) stream.Message = "Recorded liquidations could not be read; only live observations are shown: " + ex.Message;
+        }
+        Interlocked.Increment(ref stream.Generation);
+        if (ct.IsCancellationRequested) return;
+        foreach (var venue in Venues) _ = Task.Run(() => RunAsync(symbol, venue, stream, ct));
+    }
+
+    /// <summary>
+    /// Known liquidations (in time order) and observed windows overlapping [from, to); without a live stream, recorded
+    /// days are read.
+    /// </summary>
     public LiquidationSnapshot Liquidations(string symbol, DateTime from, DateTime to)
     {
         symbol = symbol.ToUpperInvariant();
@@ -258,47 +309,110 @@ public sealed partial class DerivativesData : IDisposable
         }
         var now = _utcNow();
         lock (stream.Events)
-            return new(stream.Events.Where(e => e.Time >= from && e.Time < to).ToArray(),
+        {
+            int first = LowerBound(stream.Events, from), end = Math.Max(first, LowerBound(stream.Events, to));
+            var events = new LiquidationEvent[end - first];
+            stream.Events.CopyTo(first, events, 0, events.Length);
+            return new(events,
                 stream.Windows.Select(w => stream.Open.TryGetValue(w.VenueId, out var open) && open == w.From && now > w.To ? w with { To = now } : w)
                     .Where(w => w.To > from && w.From < to).ToArray(), stream.Message);
+        }
+    }
+
+    /// <summary>First index whose event time is at or after <paramref name="time"/>.</summary>
+    private static int LowerBound(List<LiquidationEvent> events, DateTime time)
+    {
+        int lo = 0, hi = events.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (events[mid].Time < time) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    /// <summary>Drops events and closed windows older than <see cref="LiquidationRetention"/> (caller holds the events lock).</summary>
+    private static void TrimLocked(LiquidationStream stream, DateTime now)
+    {
+        var cutoff = now - LiquidationRetention;
+        int stale = LowerBound(stream.Events, cutoff);
+        if (stale > 0) stream.Events.RemoveRange(0, stale);
+        stream.Windows.RemoveAll(w => w.To < cutoff && !(stream.Open.TryGetValue(w.VenueId, out var open) && open == w.From));
     }
 
     private async Task RunAsync(string symbol, string venue, LiquidationStream stream, CancellationToken ct)
     {
+        bool listed = venue != Binance;
         for (int attempt = 0; !ct.IsCancellationRequested; attempt++)
         {
             DateTime? connectedAt = null;
             try
             {
+                if (!listed)
+                {
+                    // Binance accepts any forceOrder stream name and then stays silent, so an unlisted symbol would look
+                    // observed with no liquidations.
+                    var instruments = await _binance.GetInstrumentsAsync(ct).ConfigureAwait(false);
+                    if (!instruments.Any(i => string.Equals(i.Symbol, symbol, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        lock (stream.Events) stream.Message = $"{VenueName(venue)} does not list {symbol}; its liquidations are unknown.";
+                        Interlocked.Increment(ref stream.Generation);
+                        return;
+                    }
+                    listed = true;
+                }
                 using var ws = await ConnectAsync(venue == Binance
                     ? new Uri((_transport.BinanceSocket?.GetLeftPart(UriPartial.Authority) ?? "wss://fstream.binance.com") + $"/ws/{symbol.ToLowerInvariant()}@forceOrder")
                     : _transport.BybitSocket ?? new Uri("wss://stream.bybit.com/v5/public/linear"), ct).ConfigureAwait(false);
-                if (venue == Bybit)
+                // Bybit answers the subscription (success:false for a topic it does not serve): only an accepted topic is
+                // observed, and an answer must arrive promptly.
+                bool observing = venue != Bybit;
+                using var acknowledgement = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                if (!observing)
+                {
+                    acknowledgement.CancelAfter(TimeSpan.FromSeconds(15));
                     await ws.SendAsync(Encoding.UTF8.GetBytes($"{{\"op\":\"subscribe\",\"args\":[\"allLiquidation.{symbol}\"]}}"), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
-                connectedAt = _utcNow();
-                attempt = 0;
-                OpenWindow(symbol, stream, venue, connectedAt.Value);
+                }
+                else
+                {
+                    connectedAt = _utcNow();
+                    attempt = 0;
+                    OpenWindow(symbol, stream, venue, connectedAt.Value);
+                }
                 using var ping = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 if (venue == Bybit) _ = PingAsync(ws, ping.Token);
                 var buffer = new byte[1 << 16];
                 using var message = new MemoryStream();
-                DateTime lastWindowWrite = connectedAt.Value;
+                DateTime lastWindowWrite = connectedAt ?? default;
                 while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
                 {
                     message.SetLength(0);
                     WebSocketReceiveResult received;
                     do
                     {
-                        received = await ws.ReceiveAsync(buffer, ct).ConfigureAwait(false);
+                        received = await ws.ReceiveAsync(buffer, observing ? ct : acknowledgement.Token).ConfigureAwait(false);
                         if (received.MessageType == WebSocketMessageType.Close) break;
                         message.Write(buffer, 0, received.Count);
                     } while (!received.EndOfMessage);
                     if (received.MessageType == WebSocketMessageType.Close) break;
-                    foreach (var liquidation in Parse(venue, message.ToArray())) Add(symbol, stream, liquidation);
+                    var frame = message.ToArray();
+                    if (!observing)
+                    {
+                        if (SubscribeAcknowledgement(frame) is not { } answer) continue;
+                        if (!answer.Success) throw new InvalidOperationException(answer.Message.Length > 0 ? answer.Message : "the subscription was refused");
+                        observing = true;
+                        connectedAt = _utcNow();
+                        attempt = 0;
+                        OpenWindow(symbol, stream, venue, connectedAt.Value);
+                        lastWindowWrite = connectedAt.Value;
+                        continue;
+                    }
+                    foreach (var liquidation in Parse(venue, frame)) Add(symbol, stream, liquidation);
                     var now = _utcNow();
                     if (now - lastWindowWrite >= TimeSpan.FromMinutes(1))
                     {
-                        ExtendWindow(symbol, stream, venue, connectedAt.Value, now);
+                        ExtendWindow(symbol, stream, venue, connectedAt!.Value, now);
                         lastWindowWrite = now;
                     }
                 }
@@ -343,7 +457,9 @@ public sealed partial class DerivativesData : IDisposable
         var socket = new ClientWebSocket();
         try
         {
+            // An unanswered ping ends a half-open socket, which would otherwise keep its observed window growing.
             socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+            socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(30);
             _transport.ConfigureSocket?.Invoke(socket.Options);
             using var connect = CancellationTokenSource.CreateLinkedTokenSource(ct);
             connect.CancelAfter(TimeSpan.FromSeconds(15));
@@ -385,9 +501,30 @@ public sealed partial class DerivativesData : IDisposable
         return result.Where(l => l.Price > 0 && l.Quantity > 0).ToArray();
     }
 
+    /// <summary>A Bybit subscription answer {"op":"subscribe","success":…,"ret_msg":…}, or null for any other frame.</summary>
+    internal static (bool Success, string Message)? SubscribeAcknowledgement(byte[] json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("op", out var op) || op.ValueKind != JsonValueKind.String || op.GetString() != "subscribe")
+                return null;
+            return (root.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.True,
+                root.TryGetProperty("ret_msg", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() ?? "" : "");
+        }
+        catch (JsonException) { return null; }
+    }
+
     private void Add(string symbol, LiquidationStream stream, LiquidationEvent liquidation)
     {
-        lock (stream.Events) stream.Events.Add(liquidation);
+        lock (stream.Events)
+        {
+            // Arrival is nearly time-ordered across venues; a late print moves back only past the few newer ones.
+            int index = stream.Events.Count;
+            while (index > 0 && stream.Events[index - 1].Time > liquidation.Time) index--;
+            stream.Events.Insert(index, liquidation);
+        }
         Interlocked.Increment(ref stream.Generation);
         Append(symbol, stream, liquidation.Time, string.Join(",", "E", liquidation.Time.Ticks.ToString(CultureInfo.InvariantCulture), liquidation.VenueId,
             liquidation.Price.ToString(CultureInfo.InvariantCulture), liquidation.Quantity.ToString(CultureInfo.InvariantCulture), liquidation.LongLiquidated ? "L" : "S"));
@@ -407,6 +544,7 @@ public sealed partial class DerivativesData : IDisposable
             var window = new ObservedWindow(venue, from, to);
             if (index >= 0) stream.Windows[index] = window;
             else stream.Windows.Add(window);
+            TrimLocked(stream, _utcNow());
         }
         Interlocked.Increment(ref stream.Generation);
         Append(symbol, stream, from, string.Join(",", "W", venue, from.Ticks.ToString(CultureInfo.InvariantCulture), to.Ticks.ToString(CultureInfo.InvariantCulture)));
@@ -460,7 +598,8 @@ public sealed partial class DerivativesData : IDisposable
                 catch (OverflowException) { }
             }
         }
-        return (events, windows.Select(w => new ObservedWindow(w.Key.Item1, w.Key.Item2, w.Value)).OrderBy(w => w.From).ToList());
+        // Records are in arrival order; venues deliver slightly out of time order, and readers binary-search by time.
+        return (events.OrderBy(e => e.Time).ToList(), windows.Select(w => new ObservedWindow(w.Key.Item1, w.Key.Item2, w.Value)).OrderBy(w => w.From).ToList());
     }
 
     /// <summary>Newline-terminated records of a recorded day. The file is opened with ReadWrite|Delete sharing so a live

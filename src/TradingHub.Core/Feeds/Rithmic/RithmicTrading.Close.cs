@@ -153,6 +153,10 @@ public sealed partial class RithmicTradingSession
             (PositionClosePhase.Completed or PositionClosePhase.NotSent or PositionClosePhase.Rejected);
     }
 
+    /// <summary>How long a bounded close may take to cancel its protections and send once its send turn came (or the
+    /// reducing bound passed); tests shorten it.</summary>
+    internal TimeSpan CloseBudget { get; set; } = TimeSpan.FromSeconds(15);
+
     public Task<string?> ClosePositionAsync(RithmicCloseConfirmation confirmation)
     {
         CloseOperation operation;
@@ -202,8 +206,9 @@ public sealed partial class RithmicTradingSession
     {
         var context = operation.Context;
         var intent = operation.Intent;
+        // The close's own budget starts once its send turn came: a close that waited out an earlier slow reply for the
+        // reducing bound still has its whole budget to cancel protection and send ("sent anyway", not "canceled").
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
         bool committedHere = false;
         bool inOrder = true;
         try
@@ -226,8 +231,9 @@ public sealed partial class RithmicTradingSession
             // the reservation's admission evidence) the turn is released: later requests are admitted against the
             // close's reservation meanwhile, and the close's own cancellations below ride this already-paid turn and
             // never wait a second bound.
-            inOrder = await sendTurn.WaitAsync(bounded: true, timeout.Token).ConfigureAwait(false);
+            inOrder = await sendTurn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false);
             sendTurn.Release();
+            timeout.CancelAfter(CloseBudget);
             var cancellations = new HashSet<string>(StringComparer.Ordinal);
             while (true)
             {

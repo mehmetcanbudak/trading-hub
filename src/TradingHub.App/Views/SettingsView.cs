@@ -296,7 +296,7 @@ internal sealed partial class SettingsView : UserControl, IPage
                         var gesture = Hotkeys.FromKey(e.Key, e.KeyModifiers);
                         if (gesture == null) return; // solo un modificador: sigue esperando
                         // si otra acción ya usaba ese atajo, se le saca
-                        foreach (var other in Hotkeys.All.Where(o => o.Id != def.Id && Hotkeys.GestureOf(s, o.Id) == gesture))
+                        foreach (var other in Hotkeys.All.Where(o => o.Id != def.Id && Hotkeys.SameGesture(Hotkeys.GestureOf(s, o.Id), gesture)))
                         {
                             s.Hotkeys[other.Id] = "";
                             RefreshHotkey(other.Id);
@@ -309,7 +309,8 @@ internal sealed partial class SettingsView : UserControl, IPage
                     capturing = false;
                     key.Classes.Remove("primary");
                     s.Save();
-                    RefreshHotkey(def.Id);
+                    // a default turns off while its keys are assigned elsewhere and comes back when they are freed
+                    foreach (var h in Hotkeys.All) RefreshHotkey(h.Id);
                 }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
                 RefreshHotkey(def.Id);
 

@@ -20,15 +20,7 @@ public partial class SessionVolumeProfile
             var source = GetCandle(p.StartBar);
             string key = StudyAlertNames.Key(source), date = StudyAlertNames.Day(source.SessionDate);
             int end = p.EndBar >= last ? int.MaxValue : p.EndBar, pocEnd = end;
-            if (ExtendPoc && end != int.MaxValue)
-            {
-                pocEnd = int.MaxValue;
-                for (int b = p.EndBar + 1; b <= last; b++)
-                {
-                    var c = GetCandle(b);
-                    if (c.Low <= p.Poc && c.High >= p.Poc) { pocEnd = b; break; }
-                }
-            }
+            if (ExtendPoc && end != int.MaxValue) { int touch = PocTouch(p, last); pocEnd = touch >= 0 ? touch : int.MaxValue; }
             levels.Add($"poc:{key}", $"POC {date}", p.Poc, p.StartBar, pocEnd);
             if (!ShowValueAreaLines) continue;
             levels.Add($"vah:{key}", $"VAH {date}", p.Vah, p.StartBar, end);

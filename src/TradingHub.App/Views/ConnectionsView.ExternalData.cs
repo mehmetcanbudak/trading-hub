@@ -11,7 +11,14 @@ internal sealed partial class ConnectionsView
     /// <summary>List summary of an options or ETF flows connection.</summary>
     private static string DescribeExternal(ConnectionProfile p) => p.Kind == ConnectionKind.OptionsData && p.OptionsSource == OptionsSource.Deribit
         ? "Deribit · BTC and ETH · public data"
-        : string.IsNullOrWhiteSpace(p.ExternalUrl) ? "no API URL configured" : $"custom API · {HostOf(p.ExternalUrl)}";
+        : string.IsNullOrWhiteSpace(p.ExternalUrl) ? "no API URL configured"
+        : ConnectionManager.ExternalUrlProblem(p.ExternalUrl) ?? $"custom API · {HostOf(p.ExternalUrl)}";
+
+    /// <summary>Refuses to save a custom API URL that would send the key in clear text (or is not a URL).</summary>
+    private static void RequireUsableExternalUrl(string url)
+    {
+        if (url.Length > 0 && ConnectionManager.ExternalUrlProblem(url) is { } problem) throw new InvalidOperationException(problem);
+    }
 
     /// <summary>Options data for the options studies: Deribit's public data or a custom API returning the documented JSON.</summary>
     private Control OptionsDataSection(ConnectionProfile p, List<Action> apply)
@@ -34,8 +41,11 @@ internal sealed partial class ConnectionsView
         Sync();
         apply.Add(() =>
         {
-            p.OptionsSource = (OptionsSource)((ComboBoxItem)source.SelectedItem!).Tag!;
-            p.ExternalUrl = url.Text?.Trim() ?? "";
+            var chosen = (OptionsSource)((ComboBoxItem)source.SelectedItem!).Tag!;
+            string address = url.Text?.Trim() ?? "";
+            if (chosen == OptionsSource.CustomJson) RequireUsableExternalUrl(address);
+            p.OptionsSource = chosen;
+            p.ExternalUrl = address;
             p.ExternalHeader = string.IsNullOrWhiteSpace(header.Text) ? "Authorization" : header.Text.Trim();
             p.ExternalUnderlyings = unders.Text?.Trim() ?? "";
             if (!string.IsNullOrWhiteSpace(key.Text)) _svc.Connections.SetSecret(p, key.Text.Trim());
@@ -58,7 +68,9 @@ internal sealed partial class ConnectionsView
         var assets = new TextBox { Text = p.ExternalUnderlyings, Watermark = "BTC, ETH (blank = all)" };
         apply.Add(() =>
         {
-            p.ExternalUrl = url.Text?.Trim() ?? "";
+            string address = url.Text?.Trim() ?? "";
+            RequireUsableExternalUrl(address);
+            p.ExternalUrl = address;
             p.ExternalHeader = string.IsNullOrWhiteSpace(header.Text) ? "Authorization" : header.Text.Trim();
             p.ExternalUnderlyings = assets.Text?.Trim() ?? "";
             if (!string.IsNullOrWhiteSpace(key.Text)) _svc.Connections.SetSecret(p, key.Text.Trim());

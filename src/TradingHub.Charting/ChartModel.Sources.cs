@@ -27,13 +27,15 @@ public sealed partial class ChartModel
         var store = Data.Trades;
         int first = candle.FirstTradeIndex, last = Math.Min(candle.LastTradeIndex, Math.Min(Series.ProcessedTrades, store.Count) - 1);
         if (first < 0 || last < first) return;
-        // Applied volume of an event shared with the previous bar is what remained after that bar.
-        decimal sharedPrevious = bar > 0 && Series[bar - 1].LastTradeIndex == first ? Series[bar - 1].LastTradeVolume : 0;
+        // An event shared with earlier bars (one large print can fill several volume bars): this bar has what remained
+        // after every earlier part, each bar's part of it being its LastTradeVolume.
+        decimal earlierParts = 0;
+        for (int j = bar - 1; j >= 0 && Series[j].LastTradeIndex == first; j--) earlierParts += Series[j].LastTradeVolume;
         for (int i = first; i <= last; i++)
         {
             decimal volume = store.GetVolume(i);
             if (i == candle.LastTradeIndex) volume = candle.LastTradeVolume;
-            else if (i == first && sharedPrevious > 0) volume -= sharedPrevious;
+            else if (i == first) volume -= earlierParts;
             if (volume <= 0) continue;
             destination.Add(new BarTrade(store.GetTime(i), store.GetPrice(i), volume, store.GetSide(i), store.GetProvenance(i)));
         }

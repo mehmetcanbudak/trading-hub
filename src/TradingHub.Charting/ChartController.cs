@@ -163,6 +163,9 @@ public sealed partial class ChartController
     public event Action<ChartDrawing>? DrawingDoubleClicked;
     public event Action? DrawingsChanged;
 
+    /// <summary>Drawing with a tool showed the hidden drawings again (as a gesture does).</summary>
+    public event Action? DrawingsShown;
+
     /// <summary>Se ocultó, mostró o quitó un indicador desde la leyenda del gráfico.</summary>
     public event Action? IndicatorsChanged;
 
@@ -346,6 +349,13 @@ public sealed partial class ChartController
 
         if (button == PointerButton.Left && ActiveTool is { } tool && l.Main.Rect.Contains(x, y))
         {
+            // hidden drawings are neither drawn nor hit: the new one would be invisible and could not be selected
+            if (_model.Settings.HideDrawings)
+            {
+                _model.Settings.HideDrawings = false;
+                DrawingsShown?.Invoke();
+            }
+
             if (tool is DrawingKind.Brush or DrawingKind.Highlighter)
             {
                 StartFreehand(l, tool, x, y);
@@ -533,7 +543,7 @@ public sealed partial class ChartController
             {
                 if (_activeHandle >= 0)
                 {
-                    _active.MoveHandle(_activeHandle, PointAt(x, y, mods));
+                    _active.MoveHandle(_activeHandle, PointAt(x, y, mods), _model.Series);
                 }
                 else
                 {

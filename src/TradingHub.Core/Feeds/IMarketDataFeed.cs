@@ -61,8 +61,10 @@ public interface IKlineHistory
     Task<DateTime?> FirstAvailableAsync(Instrument instrument, CancellationToken ct);
 
     /// <summary>
-    /// Velas de <paramref name="minutes"/> minutos (1, 5 o 15) en orden cronológico, en lotes.
-    /// <paramref name="endPrice"/> es el precio que sigue al rango (lo usa el simulador para empalmar).
+    /// Candles of <paramref name="minutes"/> minutes (candle maintenance asks for 1, 5, 15 and 60) in chronological order,
+    /// in batches. A source that cannot serve that exact resolution throws <see cref="ArgumentOutOfRangeException"/>; it never
+    /// returns a finer or coarser resolution in its place. <paramref name="endPrice"/> is the price that follows the range
+    /// (the simulator uses it to join the series).
     /// </summary>
     Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
         Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct);

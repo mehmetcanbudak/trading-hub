@@ -269,9 +269,10 @@ public abstract class ClosedBarStudy : Indicator
     // ------------------------------------------------------------------ alerts
 
     /// <summary>
-    /// Live alert-named horizontal lines and live box edges. Ids combine the name, the source bar time and the (immutable)
-    /// level price, so they survive recalculation and two levels started on the same bar stay distinct; identical live levels
-    /// (same name, source bar and price) are one alertable level.
+    /// Live alert-named horizontal lines and live box edges. Ids combine the name, the source bar time and the level price,
+    /// so they survive recalculation and two levels started on the same bar stay distinct; identical live levels (same name,
+    /// source bar and price) are one alertable level. A box redrawn as its level changes names its edges after
+    /// <see cref="AlertIdentity"/>, so an alert set on it keeps working while the edge moves.
     /// </summary>
     public override IEnumerable<IndicatorLevel> GetAlertLevels()
     {
@@ -283,11 +284,15 @@ public abstract class ClosedBarStudy : Indicator
         foreach (var box in _scene.Boxes)
         {
             if (box.Alert == null || !box.Live) continue;
-            Add(Id(box.Alert + ".top", box.From, box.Top), $"{box.Alert}: top edge", box.Top, box.From);
-            Add(Id(box.Alert + ".bottom", box.From, box.Bottom), $"{box.Alert}: bottom edge", box.Bottom, box.From);
+            var origin = AlertIdentity(box);
+            Add(Id(box.Alert + ".top", origin.From, origin.Top), $"{box.Alert}: top edge", box.Top, origin.From);
+            Add(Id(box.Alert + ".bottom", origin.From, origin.Bottom), $"{box.Alert}: bottom edge", box.Bottom, origin.From);
         }
         return levels;
     }
+
+    /// <summary>The box whose source bar and edges identify the alert levels of live <paramref name="box"/> (default: itself).</summary>
+    protected virtual StudyBox AlertIdentity(StudyBox box) => box;
 
     private string Id(string name, int from, decimal price) =>
         string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{name}@{_bars[from].Time.Ticks}@{price:G29}");

@@ -72,7 +72,8 @@ public sealed class EtfFlows : ExternalSeriesHub
 
     public const string NotConfigured = "Waiting for an ETF flows connection: add one in Connections → ETF flows.";
 
-    private sealed record Entry(DateTime FetchedAt, List<EtfFlowDay>? Days, string? Error);
+    /// <param name="CoveredFrom">Earliest date the last full request asked for: no flows before the first day means none were published.</param>
+    private sealed record Entry(DateTime FetchedAt, List<EtfFlowDay>? Days, string? Error, DateTime CoveredFrom);
 
     private IEtfFlowsProvider? _provider;
     private readonly ConcurrentDictionary<string, Entry> _cache = new();
@@ -103,13 +104,14 @@ public sealed class EtfFlows : ExternalSeriesHub
     /// <summary>Why the last request for <paramref name="asset"/> failed, or null.</summary>
     public string? Error(string asset) => _cache.TryGetValue(asset, out var e) ? e.Error : null;
 
-    /// <summary>Cached days in date order (null until the first answer); refreshed hourly and when <paramref name="from"/> is earlier than cached.</summary>
+    /// <summary>Cached days in date order (null until the first answer); refreshed hourly and when <paramref name="from"/> is earlier than requested before.</summary>
     public IReadOnlyList<EtfFlowDay>? Daily(string asset, DateTime from)
     {
         if (Unavailable(asset) != null) return null;
         _cache.TryGetValue(asset, out var hit);
         var age = UtcNow() - (hit?.FetchedAt ?? DateTime.MinValue);
-        bool earlier = hit?.Days is { Count: > 0 } d && d[0].Date > from.Date.AddDays(3) && hit.Error == null;
+        // A fund launched after `from` never has days back to it; only a request that started later is missing data.
+        bool earlier = hit is { Days: not null, Error: null } && hit.CoveredFrom > from.Date.AddDays(3);
         if (age > TimeSpan.FromHours(1) || (earlier && age > TimeSpan.FromMinutes(1)))
             Schedule(asset, () => RefreshAsync(asset, from, CancellationToken.None));
         return hit?.Days;
@@ -123,14 +125,15 @@ public sealed class EtfFlows : ExternalSeriesHub
         try
         {
             var start = hit?.Days is { Count: > 0 } d && d[0].Date < from ? d[0].Date : from.Date.AddDays(-5);
+            if (hit != null && hit.CoveredFrom < start) start = hit.CoveredFrom;
             var got = await p.DailyAsync(asset, start, UtcNow(), ct).ConfigureAwait(false);
             if (!ReferenceEquals(p, _provider)) return;
-            _cache[asset] = new Entry(UtcNow(), got.GroupBy(x => x.Date.Date).Select(g => g.Last() with { Date = g.Key }).OrderBy(x => x.Date).ToList(), null);
+            _cache[asset] = new Entry(UtcNow(), got.GroupBy(x => x.Date.Date).Select(g => g.Last() with { Date = g.Key }).OrderBy(x => x.Date).ToList(), null, start);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // Retried in about ten minutes.
-            _cache[asset] = new Entry(UtcNow().AddMinutes(-50), hit?.Days, ex.Message);
+            _cache[asset] = new Entry(UtcNow().AddMinutes(-50), hit?.Days, ex.Message, hit?.CoveredFrom ?? DateTime.MaxValue);
         }
         finally { Bump(); }
     }
@@ -286,7 +289,8 @@ public sealed class PolymarketOdds : ExternalSeriesHub
 
     public sealed record OddsState(PolymarketClient.MarketInfo? Info, IReadOnlyList<(DateTime T, double P)> History, string? Message);
 
-    private sealed record Entry(DateTime FetchedAt, PolymarketClient.MarketInfo? Info, List<(DateTime T, double P)> History, string? Error);
+    /// <param name="CoveredFrom">Start of the last request: a market created later has no earlier history to load.</param>
+    private sealed record Entry(DateTime FetchedAt, PolymarketClient.MarketInfo? Info, List<(DateTime T, double P)> History, string? Error, DateTime CoveredFrom);
 
     private readonly PolymarketClient _client;
     private readonly ConcurrentDictionary<string, Entry> _cache = new();
@@ -303,7 +307,7 @@ public sealed class PolymarketOdds : ExternalSeriesHub
         string key = Key(slug, outcome, fidelityMinutes);
         _cache.TryGetValue(key, out var hit);
         var age = UtcNow() - (hit?.FetchedAt ?? DateTime.MinValue);
-        bool covers = hit?.History is { Count: > 0 } h && h[0].T <= from.AddDays(1);
+        bool covers = hit != null && hit.CoveredFrom <= from.AddDays(1);
         if (age > TimeSpan.FromMinutes(2) || (!covers && hit?.Error == null && age > TimeSpan.FromSeconds(20)))
             Schedule(key, () => LoadAsync(slug, outcome, from, fidelityMinutes, CancellationToken.None));
         if (hit == null) return new OddsState(null, Array.Empty<(DateTime, double)>(), "Loading Polymarket odds…");
@@ -319,17 +323,17 @@ public sealed class PolymarketOdds : ExternalSeriesHub
             var info = hit?.Info ?? await _client.MarketAsync(slug, ct).ConfigureAwait(false);
             if (info == null)
             {
-                _cache[key] = new Entry(UtcNow(), null, new List<(DateTime, double)>(), "Polymarket has no market with that slug.");
+                _cache[key] = new Entry(UtcNow(), null, new List<(DateTime, double)>(), "Polymarket has no market with that slug.", from);
                 return;
             }
 
             int k = Math.Clamp(outcome, 0, info.TokenIds.Length - 1);
             var hist = await _client.HistoryAsync(info.TokenIds[k], from, UtcNow(), fidelityMinutes, ct).ConfigureAwait(false);
-            _cache[key] = new Entry(UtcNow(), info, hist, hist.Count == 0 ? "That market has no price history in this range." : null);
+            _cache[key] = new Entry(UtcNow(), info, hist, hist.Count == 0 ? "That market has no price history in this range." : null, from);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _cache[key] = new Entry(UtcNow(), hit?.Info, hit?.History ?? new List<(DateTime, double)>(), "Polymarket: " + ex.Message);
+            _cache[key] = new Entry(UtcNow(), hit?.Info, hit?.History ?? new List<(DateTime, double)>(), "Polymarket: " + ex.Message, hit?.CoveredFrom ?? DateTime.MaxValue);
         }
         finally { Bump(); }
     }
@@ -345,7 +349,8 @@ public sealed class ComparisonKlines : ExternalSeriesHub
 {
     public static ComparisonKlines? Shared { get; set; }
 
-    private sealed record Entry(DateTime FetchedAt, List<Kline>? Klines, string? Error);
+    /// <param name="CoveredFrom">Start of the last full load: a symbol listed later has no earlier candles to load.</param>
+    private sealed record Entry(DateTime FetchedAt, List<Kline>? Klines, string? Error, DateTime CoveredFrom);
 
     private readonly Func<bool, IKlineHistory> _source;
     private readonly ConcurrentDictionary<string, Entry> _cache = new();
@@ -364,8 +369,7 @@ public sealed class ComparisonKlines : ExternalSeriesHub
         if (symbol.Length == 0) return (Array.Empty<Kline>(), "Enter the symbol to compare.");
         string key = Key(symbol, futures, minutes);
         _cache.TryGetValue(key, out var hit);
-        long fromMs = new DateTimeOffset(DateTime.SpecifyKind(from, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-        bool covers = hit?.Klines is { Count: > 0 } k && k[0].OpenTimeMs <= fromMs + minutes * 120_000L;
+        bool covers = Covers(hit, from, minutes);
         var age = UtcNow() - (hit?.FetchedAt ?? DateTime.MinValue);
         if (age > TimeSpan.FromSeconds(10) && (!covers && hit?.Error == null || age > TimeSpan.FromSeconds(Math.Max(20, minutes * 20)) || hit?.Error != null && age > TimeSpan.FromMinutes(1)))
             Schedule(key, () => LoadAsync(symbol, futures, from, minutes, CancellationToken.None));
@@ -373,25 +377,32 @@ public sealed class ComparisonKlines : ExternalSeriesHub
         return (list, list.Count == 0 ? hit.Error ?? $"Binance has no candles for {symbol}." : null);
     }
 
+    /// <summary>Whether the cache holds every candle from <paramref name="from"/>: loaded from there, or starting there.</summary>
+    private static bool Covers(Entry? hit, DateTime from, int minutes) =>
+        hit?.Klines is { } k && (hit.CoveredFrom <= from.AddMinutes(2 * minutes)
+            || k.Count > 0 && k[0].OpenTimeMs <= new DateTimeOffset(DateTime.SpecifyKind(from, DateTimeKind.Utc)).ToUnixTimeMilliseconds() + minutes * 120_000L);
+
     public async Task LoadAsync(string symbol, bool futures, DateTime from, int minutes, CancellationToken ct)
     {
         string key = Key(symbol, futures, minutes);
         _cache.TryGetValue(key, out var hit);
         try
         {
-            long fromMs = new DateTimeOffset(DateTime.SpecifyKind(from, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-            bool covers = hit?.Klines is { Count: > 0 } k && k[0].OpenTimeMs <= fromMs + minutes * 120_000L;
-            var start = covers ? DateTimeOffset.FromUnixTimeMilliseconds(hit!.Klines![^1].OpenTimeMs).UtcDateTime : from;
+            bool covers = Covers(hit, from, minutes);
+            // Only the tail is fetched once the start is covered; a symbol listed after `from` starts at its listing.
+            bool tail = covers && hit!.Klines!.Count > 0;
+            var start = tail ? DateTimeOffset.FromUnixTimeMilliseconds(hit!.Klines![^1].OpenTimeMs).UtcDateTime : from;
             var instrument = new Instrument { Symbol = symbol, FeedId = futures ? "binance-futures" : "binance-spot", TickSize = 0.0001m };
             var got = new List<Kline>();
             await _source(futures).LoadKlinesAsync(instrument, start, UtcNow(), minutes, 0, batch => { got.AddRange(batch); return true; }, null, ct).ConfigureAwait(false);
             long firstNew = got.Count > 0 ? got[0].OpenTimeMs : long.MaxValue;
-            var list = covers ? hit!.Klines!.Where(x => x.OpenTimeMs < firstNew).Concat(got).ToList() : got;
-            _cache[key] = new Entry(UtcNow(), list, null);
+            var list = tail ? hit!.Klines!.Where(x => x.OpenTimeMs < firstNew).Concat(got).ToList() : got;
+            var coveredFrom = tail && hit!.CoveredFrom < from ? hit!.CoveredFrom : from;
+            _cache[key] = new Entry(UtcNow(), list, null, coveredFrom);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _cache[key] = new Entry(UtcNow(), hit?.Klines, $"{symbol}: {ex.Message}");
+            _cache[key] = new Entry(UtcNow(), hit?.Klines, $"{symbol}: {ex.Message}", hit?.CoveredFrom ?? DateTime.MaxValue);
         }
         finally { Bump(); }
     }

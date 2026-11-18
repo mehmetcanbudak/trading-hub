@@ -52,7 +52,11 @@ public class CoreTests
     [Fact]
     public void Archivo_de_ticks_guarda_y_lee_igual()
     {
-        var path = Path.Combine(Path.GetTempPath(), "tradinghub_test_" + Guid.NewGuid().ToString("N") + ".vtk");
+        // The writer takes history-ownership sidecars next to the file (<file>.write.lock and the directory's
+        // .history-write.lock): a directory of its own is removed with them.
+        var directory = Path.Combine(Path.GetTempPath(), "tradinghub_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "ticks.vtk");
         try
         {
             var trades = Enumerable.Range(0, 1000).Select(i => new Trade(10_000 + i, T0.AddMilliseconds(i * 37), 86000m + (i % 17) * 0.1m, 0.001m * (1 + i % 50), i % 3 == 0 ? TradeSide.Sell : TradeSide.Buy)).ToList();
@@ -71,7 +75,7 @@ public class CoreTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(directory, recursive: true);
         }
     }
 

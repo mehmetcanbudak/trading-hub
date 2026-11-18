@@ -36,14 +36,23 @@ internal interface IScriptDirectoryMonitor : IDisposable
 internal static class ScriptDirectoryFiles
 {
     internal static IEnumerable<string> Enumerate(string folder) =>
-        Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Where(IsIncluded);
+        Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Where(file => IsIncluded(folder, file));
 
-    /// <summary>C# indicator sources and KVS scripts compile together; bin/obj build output never does.</summary>
-    internal static bool IsIncluded(string file)
+    /// <summary>
+    /// C# indicator sources and KVS scripts compile together; bin/obj build output inside <paramref name="folder"/> never
+    /// does. Only the path below the folder is tested, so a folder that itself lies under a bin or obj directory still compiles.
+    /// </summary>
+    internal static bool IsIncluded(string folder, string file)
     {
         if (!file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !KvsTranslator.IsScript(file)) return false;
-        string path = file.Replace(Path.DirectorySeparatorChar, '/');
-        return !path.Contains("/bin/") && !path.Contains("/obj/");
+        return !InBuildOutput(folder, file);
+    }
+
+    /// <summary>True when a directory between <paramref name="folder"/> and <paramref name="path"/> is named bin or obj.</summary>
+    internal static bool InBuildOutput(string folder, string path)
+    {
+        string relative = "/" + Path.GetRelativePath(folder, path).Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/') + "/";
+        return relative.Contains("/bin/", StringComparison.Ordinal) || relative.Contains("/obj/", StringComparison.Ordinal);
     }
 
     internal static CapturedScriptSource[] Capture(string folder)
@@ -59,6 +68,11 @@ internal sealed class NativeScriptDirectoryMonitor : IScriptDirectoryMonitor
 {
     private readonly string _folder;
     private readonly FileSystemWatcher _watcher;
+    /// <summary>
+    /// Name filters apply to the changed entry itself, so moving, renaming or deleting a whole folder of sources (and the
+    /// directory swap that refreshes an editable copy) reports no source file. Directory names are watched separately.
+    /// </summary>
+    private readonly FileSystemWatcher _directories;
     private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _version;
     private int _stopping;
@@ -73,14 +87,36 @@ internal sealed class NativeScriptDirectoryMonitor : IScriptDirectoryMonitor
         _watcher.Created += Changed;
         _watcher.Deleted += Changed;
         _watcher.Renamed += Changed;
-        try { _watcher.EnableRaisingEvents = true; }
-        catch { _watcher.Dispose(); throw; }
+        _directories = new FileSystemWatcher(folder) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.DirectoryName };
+        _directories.Created += DirectoryChanged;
+        _directories.Deleted += DirectoryChanged;
+        _directories.Renamed += DirectoryChanged;
+        try
+        {
+            _watcher.EnableRaisingEvents = true;
+            _directories.EnableRaisingEvents = true;
+        }
+        catch
+        {
+            _watcher.Dispose();
+            _directories.Dispose();
+            throw;
+        }
 
         void Changed(object sender, FileSystemEventArgs args)
         {
             if (Volatile.Read(ref _stopping) != 0) return;
-            if (!ScriptDirectoryFiles.IsIncluded(args.FullPath) &&
-                (args is not RenamedEventArgs renamed || !ScriptDirectoryFiles.IsIncluded(renamed.OldFullPath))) return;
+            if (!ScriptDirectoryFiles.IsIncluded(folder, args.FullPath) &&
+                (args is not RenamedEventArgs renamed || !ScriptDirectoryFiles.IsIncluded(folder, renamed.OldFullPath))) return;
+            Interlocked.Increment(ref _version);
+            changed();
+        }
+
+        void DirectoryChanged(object sender, FileSystemEventArgs args)
+        {
+            if (Volatile.Read(ref _stopping) != 0) return;
+            if (ScriptDirectoryFiles.InBuildOutput(folder, args.FullPath) &&
+                (args is not RenamedEventArgs renamed || ScriptDirectoryFiles.InBuildOutput(folder, renamed.OldFullPath))) return;
             Interlocked.Increment(ref _version);
             changed();
         }
@@ -99,7 +135,15 @@ internal sealed class NativeScriptDirectoryMonitor : IScriptDirectoryMonitor
     }
     private async Task CompleteStopAsync()
     {
-        try { await Task.Run(_watcher.Dispose).ConfigureAwait(false); _drained.TrySetResult(); }
+        try
+        {
+            await Task.Run(() =>
+            {
+                _watcher.Dispose();
+                _directories.Dispose();
+            }).ConfigureAwait(false);
+            _drained.TrySetResult();
+        }
         catch (Exception error) { _drained.TrySetException(error); }
     }
     public void Dispose() => StopAsync().GetAwaiter().GetResult();

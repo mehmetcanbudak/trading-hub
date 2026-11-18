@@ -95,20 +95,30 @@ public sealed class HyperliquidFeed(PublicVenueTransport? transport = null) : Pu
             }
     }
 
+    /// <summary>Candles the venue keeps per interval; earlier ones are unavailable, not absent.</summary>
+    public const int CandleWindow = 5000;
+
     protected override async Task<IReadOnlyList<Kline>> FetchKlinesAsync(Instrument instrument, VenueSpec spec, long fromMs, long toMs, int minutes, CancellationToken ct)
     {
-        // The venue serves only its latest 5000 candles per interval; older requests return fewer bars.
+        // The venue serves only its latest 5000 candles per interval. A range that starts before that window is read
+        // from the window's start, and its bars are marked partial so caches and maintenance record the missing start
+        // as unknown rather than as a period without trading.
+        long step = minutes * 60_000L;
+        long horizon = (Clock.GetUtcNow().ToUnixTimeMilliseconds() / step - (CandleWindow - 1)) * step;
+        bool partial = fromMs < horizon;
+        string interval = minutes == 60 ? "1h" : $"{minutes}m";
         var bars = new List<Kline>();
-        long window = 5000 * minutes * 60_000L;
-        for (long start = fromMs; start < toMs; start += window)
+        long window = CandleWindow * step;
+        for (long start = Math.Max(fromMs, horizon); start < toMs; start += window)
         {
             ct.ThrowIfCancellationRequested();
             long end = Math.Min(toMs, start + window) - 1;
-            string body = $"{{\"type\":\"candleSnapshot\",\"req\":{{\"coin\":\"{spec.Native}\",\"interval\":\"{minutes}m\",\"startTime\":{start},\"endTime\":{end}}}}}";
+            string body = $"{{\"type\":\"candleSnapshot\",\"req\":{{\"coin\":\"{spec.Native}\",\"interval\":\"{interval}\",\"startTime\":{start},\"endTime\":{end}}}}}";
             using var doc = await PostJsonAsync("/info", body, ct).ConfigureAwait(false);
             bars.AddRange(ParseCandles(doc.RootElement));
         }
-        return bars;
+        if (!partial) return bars;
+        return bars.Select(b => b with { Provenance = b.Provenance with { Quality = b.Provenance.Quality | DataQuality.Partial } }).ToList();
     }
 
     /// <summary>Objects {t, o, h, l, c, v}; v is base-asset volume.</summary>

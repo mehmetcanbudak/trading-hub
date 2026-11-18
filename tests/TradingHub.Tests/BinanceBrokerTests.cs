@@ -887,12 +887,14 @@ public partial class BinanceBrokerTests : IDisposable
             () => fake.Sent.Count == 1 && broker.LastError?.Contains("unknown", StringComparison.OrdinalIgnoreCase) == true,
             () => broker.Cancel(order));
         await Polls(fake, 12); // beyond the old bounded binding wait
+        // A poll can finish between the unknown-outcome error and the first exact-client lookup, so twelve polls are not
+        // always twelve lookups. Wait for the lookups themselves, which is what is asserted below.
+        await Until(() => fake.ClientLookups.Count >= 12);
         Assert.Equal(OrderStates.Active, order.State);
         Assert.Equal("", order.ExchangeOrderId);
         Assert.Single(fake.Sent);
         string clientId = conditional ? Assert.Single(fake.PlacedAlgo).ClientId : Assert.Single(fake.Placed).ClientId;
         var hiddenLookups = fake.ClientLookups;
-        Assert.True(hiddenLookups.Count >= 12, $"Only {hiddenLookups.Count} exact-client lookups reached the fake provider.");
         Assert.All(hiddenLookups, lookup => Assert.Equal((clientId, 400), lookup));
         Assert.DoesNotContain(CancelRoute(conditional), fake.Calls);
         await Observed(broker, fake, () => order.Status == OrderStatus.Canceled, () => fake.HideOwnedOrders = false);
@@ -2004,34 +2006,126 @@ public partial class BinanceBrokerTests : IDisposable
         var opening = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
         await Until(() => broker.Position.Volume == 0.01m && opening.ExchangeOrderId.Length > 0);
 
-        var bound = NativeSendTurns.ReducingWait;
         var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int holdNextPost = 1, measuring = 0;
-        long sellArrived = 0;
+        var buyHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int holdNextPost = 1, measuring = 0, gaveUpAtSell = -1;
+        bool buyAnsweredAtSell = true;
         fake.BeforePostReply = async _ =>
         {
-            if (Volatile.Read(ref measuring) == 1) Interlocked.CompareExchange(ref sellArrived, DateTime.UtcNow.Ticks, 0);
-            if (Interlocked.Exchange(ref holdNextPost, 0) == 1) await buyReply.Task;
+            // The fake records an order before it runs this hook, so the held buy is recognised here, not by the order
+            // count: otherwise the buy's own hook can run after measuring starts and be mistaken for the close.
+            if (Interlocked.Exchange(ref holdNextPost, 0) == 1)
+            {
+                buyHeld.TrySetResult();
+                await buyReply.Task;
+                return;
+            }
+            if (Volatile.Read(ref measuring) == 1 && Volatile.Read(ref gaveUpAtSell) < 0)
+            {
+                buyAnsweredAtSell = buyReply.Task.IsCompleted;
+                Volatile.Write(ref gaveUpAtSell, broker.GaveUpSends);
+            }
         };
         var buy = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.01m);
-        await Until(() => fake.Placed.Count(order => order.Side == "BUY") == 2); // the buy's POST arrived, its reply is held
+        await buyHeld.Task.WaitAsync(TimeSpan.FromSeconds(30)); // the buy's POST arrived, its reply is held
         try
         {
+            Assert.Equal(0, broker.GaveUpSends);
             Volatile.Write(ref measuring, 1);
-            var issued = DateTime.UtcNow;
             OrderActions.Flatten(broker);
-            await Until(() => Interlocked.Read(ref sellArrived) != 0, 30000);
-            var waited = new DateTime(Interlocked.Read(ref sellArrived), DateTimeKind.Utc) - issued;
-            Assert.True(waited >= bound - TimeSpan.FromMilliseconds(500),
-                $"The close was sent after {waited.TotalMilliseconds} ms, before its bound. LastError: {broker.LastError}.");
-            Assert.True(waited < bound * 2 - TimeSpan.FromMilliseconds(3000),
-                $"The close waited {waited.TotalMilliseconds} ms: a second bound. LastError: {broker.LastError}.");
+            await Until(() => Volatile.Read(ref gaveUpAtSell) >= 0, 30000);
+            // Sent while the buy was unanswered, once the bounded waits behind it gave up: the cancel-all Flatten issues
+            // first and the close's own, each once (counted, not timed). A second bound would be a third give-up first.
+            Assert.False(buyAnsweredAtSell, $"The close waited for the buy's reply instead of its bound. LastError: {broker.LastError}.");
+            Assert.InRange(Volatile.Read(ref gaveUpAtSell), 1, 2);
         }
         finally { buyReply.TrySetResult(); }
 
         await Until(() => buy.ExchangeOrderId.Length > 0);
         Assert.Equal(new[] { ("BUY", false), ("SELL", true) }, fake.Placed.Skip(1).Select(order => (order.Side, order.ReduceOnly)));
         await broker.SendsIdle.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(2, broker.GaveUpSends);
+    }
+
+    /// <summary>
+    /// A reverse behind an earlier sell is sized only from a position read that includes that sell's fill, by Binance's
+    /// own update times. Here every position read stays the snapshot from before the sell (Binance does not document that
+    /// positionRisk follows an order read): the reverse sends nothing instead of selling twice the stale long 0.02, which
+    /// would end short 0.03 instead of short 0.01.
+    /// </summary>
+    [Fact]
+    public async Task Binance_reverse_is_not_sized_from_a_position_read_older_than_the_earlier_fill()
+    {
+        using var fake = new FakeBinance(futures: true);
+        using var broker = Broker(fake);
+        await Until(() => broker.PositionReady && broker.OrdersReady);
+        var opening = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.02m);
+        await Until(() => broker.Position.Volume == 0.02m && opening.ExchangeOrderId.Length > 0);
+        long beforeSell = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 60_000;
+        string stale = "[{\"symbol\":\"BTCUSDT\",\"positionAmt\":\"0.02\",\"entryPrice\":\"60000\",\"unRealizedProfit\":\"0\"," +
+            "\"leverage\":\"1\",\"updateTime\":" + beforeSell.ToString(Inv) + "}]";
+
+        var sellReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sellHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int holdNextPost = 1;
+        fake.BeforePostReply = async _ =>
+        {
+            if (Interlocked.Exchange(ref holdNextPost, 0) != 1) return;
+            sellHeld.TrySetResult();
+            await sellReply.Task;
+        };
+        try
+        {
+            OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 0.01m);
+            await sellHeld.Task.WaitAsync(TimeSpan.FromSeconds(30)); // the sell filled at the venue; its reply is held
+            fake.OverrideGetReply = request => request.Route == "/fapi/v2/positionRisk" ? (200, stale) : null;
+            OrderActions.Reverse(broker);
+            sellReply.TrySetResult();
+            // The reverse's turn is released once it decided: refused, or its order answered.
+            await broker.SendsIdle.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal(new[] { ("BUY", 0.02m), ("SELL", 0.01m) }, fake.Placed.Select(order => (order.Side, order.Qty)));
+        }
+        finally
+        {
+            sellReply.TrySetResult();
+            fake.OverrideGetReply = null;
+        }
+        await Until(() => broker.Position.Volume == 0.01m);
+    }
+
+    /// <summary>
+    /// A reverse whose earlier market order is still working looks that order up until it ends, backing off, and stops
+    /// at once when Binance rate-limits the lookup (429, then 418 IP bans): one lookup, then refused unconfirmed, instead
+    /// of signed lookups every 50 ms for the whole 10 s wait.
+    /// </summary>
+    [Fact]
+    public async Task Binance_position_order_stops_polling_once_binance_rate_limits_it()
+    {
+        using var fake = new FakeBinance(futures: true);
+        using var broker = Broker(fake);
+        await Until(() => broker.PositionReady && broker.OrdersReady);
+        var opening = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 0.02m);
+        await Until(() => broker.Position.Volume == 0.02m && opening.ExchangeOrderId.Length > 0);
+        fake.HoldMarketExecution = true;
+        var sell = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 0.01m);
+        await Until(() => sell.ExchangeOrderId.Length > 0);
+        await broker.SendsIdle.WaitAsync(TimeSpan.FromSeconds(30));
+        string sellId = sell.ExchangeOrderId;
+        int lookups = 0;
+        fake.OverrideGetReply = request =>
+        {
+            if (request.Route != "/fapi/v1/order" || request.Query("orderId") != sellId) return null;
+            Interlocked.Increment(ref lookups);
+            return (429, "{\"code\":-1003,\"msg\":\"Too many requests; current limit is 2400 request weight per 1 MINUTE.\"}");
+        };
+        try
+        {
+            OrderActions.Reverse(broker);
+            await broker.SendsIdle.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal(1, Volatile.Read(ref lookups));
+            Assert.Equal(new[] { ("BUY", 0.02m), ("SELL", 0.01m) }, fake.Placed.Select(order => (order.Side, order.Qty)));
+        }
+        finally { fake.OverrideGetReply = null; }
     }
 
     /// <summary>Submitting a planned close throws after its send turn was handed over (here, a Changed subscriber that
@@ -2229,11 +2323,15 @@ internal sealed class FakeBinance : IDisposable
     private FakeBinanceSpotTrade[] _spotTrades = Array.Empty<FakeBinanceSpotTrade>();
     private readonly List<FakeBinanceFuturesTrade> _futuresTrades = new();
     private readonly Dictionary<string, (decimal Quantity, decimal Average)> _futuresPositions = new(StringComparer.Ordinal);
+    // When each USD-M position and the Spot account last changed (Binance's "updateTime"): their latest fill.
+    private readonly Dictionary<string, long> _futuresPositionTimes = new(StringComparer.Ordinal);
+    private long _spotUpdateTime;
     private long _nextTradeId = 91000;
     private int _spotTradeReplies;
     private int _futuresTradeReplies;
     private readonly HashSet<string> _fillOnCancel = new();
     private readonly List<string> _calls = new();
+    private readonly List<string> _deletes = new();
     private readonly List<string> _refused = new();
     private readonly List<(string ClientId, int Status)> _clientLookups = new();
     private long _nextId = 7000, _nextAlgoId = 7000; // the same numbers on purpose: the two numberings must not be mixed up
@@ -2257,7 +2355,11 @@ internal sealed class FakeBinance : IDisposable
 
     public void SetSpotBalance(string asset, decimal free, decimal locked)
     {
-        lock (_gate) _spotBalances[asset] = (free, locked);
+        lock (_gate)
+        {
+            _spotBalances[asset] = (free, locked);
+            _spotUpdateTime = Math.Max(_spotUpdateTime, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        }
     }
 
     public (decimal Free, decimal Locked) SpotBalance(string asset)
@@ -2414,6 +2516,15 @@ internal sealed class FakeBinance : IDisposable
         get
         {
             lock (_gate) return _calls.ToList();
+        }
+    }
+
+    /// <summary>Cancel requests received, as "DELETE /route orderId=… algoId=…", naming the order each one targeted.</summary>
+    public List<string> Deletes
+    {
+        get
+        {
+            lock (_gate) return _deletes.ToList();
         }
     }
 
@@ -2602,8 +2713,12 @@ internal sealed class FakeBinance : IDisposable
     {
         long time = at ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         o.UpdateTime = time;
-        if (!Futures && o.Symbol == SpotSymbol && _spotBalances.TryGetValue(SpotBaseAsset, out var balance))
-            _spotBalances[SpotBaseAsset] = (balance.Free + (o.Side == "BUY" ? qty : -qty), balance.Locked);
+        if (!Futures)
+        {
+            _spotUpdateTime = Math.Max(_spotUpdateTime, time);
+            if (o.Symbol == SpotSymbol && _spotBalances.TryGetValue(SpotBaseAsset, out var balance))
+                _spotBalances[SpotBaseAsset] = (balance.Free + (o.Side == "BUY" ? qty : -qty), balance.Locked);
+        }
         if (Futures)
         {
             // This fake matching engine fills working limits at their limit and markets at 60000.
@@ -2623,6 +2738,7 @@ internal sealed class FakeBinance : IDisposable
                 average = price;
             if (next == 0) average = 0;
             _futuresPositions[o.Symbol] = (next, average);
+            _futuresPositionTimes[o.Symbol] = Math.Max(_futuresPositionTimes.GetValueOrDefault(o.Symbol), time);
         }
         o.Executed += qty;
         o.Status = o.Executed >= o.Qty ? "FILLED" : "PARTIALLY_FILLED";
@@ -2828,7 +2944,11 @@ internal sealed class FakeBinance : IDisposable
     private (int Status, string Body) Answer(FakeRequest r)
     {
         string route = r.Route;
-        lock (_gate) _calls.Add(r.Method + " " + route);
+        lock (_gate)
+        {
+            _calls.Add(r.Method + " " + route);
+            if (r.Method == "DELETE") _deletes.Add($"DELETE {route} orderId={r.Query("orderId")} algoId={r.Query("algoId")}");
+        }
         if (!route.StartsWith(Futures ? "/fapi/" : "/api/v3/", StringComparison.Ordinal)) return Error(-1, "Wrong market route.");
         if (route is "/fapi/v1/time" or "/api/v3/time") return (200, $"{{\"serverTime\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}}}");
         if (r.Method == "GET" && route == "/api/v3/exchangeInfo")
@@ -2910,12 +3030,12 @@ internal sealed class FakeBinance : IDisposable
                 case ("GET", "/fapi/v2/positionRisk"):
                     if (FailFuturesPositions) return (503, "{\"code\":-1001,\"msg\":\"Position snapshot unavailable.\"}");
                     return (200, "[" + string.Join(",", _futuresPositions.Select(position =>
-                        $"{{\"symbol\":\"{position.Key}\",\"positionAmt\":\"{Num(position.Value.Quantity)}\",\"entryPrice\":\"{Num(position.Value.Average)}\",\"unRealizedProfit\":\"0\",\"leverage\":\"1\"}}")) + "]");
+                        $"{{\"symbol\":\"{position.Key}\",\"positionAmt\":\"{Num(position.Value.Quantity)}\",\"entryPrice\":\"{Num(position.Value.Average)}\",\"unRealizedProfit\":\"0\",\"leverage\":\"1\",\"updateTime\":{_futuresPositionTimes.GetValueOrDefault(position.Key)}}}")) + "]");
                 case ("GET", "/fapi/v1/userTrades"):
                     return FuturesTrades(r);
                 case ("GET", "/api/v3/account"):
                     if (FailSpotBalances) return (503, "{\"code\":-1001,\"msg\":\"Wallet snapshot unavailable.\"}");
-                    return (200, "{\"canTrade\":true,\"balances\":[" + string.Join(",", _spotBalances.Where(b => b.Value.Free + b.Value.Locked != 0)
+                    return (200, "{\"canTrade\":true,\"updateTime\":" + _spotUpdateTime.ToString(Inv) + ",\"balances\":[" + string.Join(",", _spotBalances.Where(b => b.Value.Free + b.Value.Locked != 0)
                         .Select(b => $"{{\"asset\":\"{b.Key}\",\"free\":\"{Num(b.Value.Free)}\",\"locked\":\"{Num(b.Value.Locked)}\"}}")) + "]}");
                 case ("DELETE", "/fapi/v1/allOpenOrders" or "/api/v3/openOrders"):
                 {

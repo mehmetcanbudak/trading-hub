@@ -203,11 +203,15 @@ public sealed class OandaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     public async Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
         Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
     {
-        string granularity = minutes switch { >= 15 => "M15", >= 5 => "M5", _ => "M1" };
-        int m = minutes >= 15 ? 15 : minutes >= 5 ? 5 : 1;
+        // v20 CandlestickGranularity values aligned to the hour; any other resolution is rejected rather than substituted.
+        string granularity = minutes switch
+        {
+            1 => "M1", 2 => "M2", 4 => "M4", 5 => "M5", 10 => "M10", 15 => "M15", 30 => "M30", 60 => "H1",
+            _ => throw new ArgumentOutOfRangeException(nameof(minutes)),
+        };
         var provenance = new TradeProvenance(DataQuality.Synthetic | DataQuality.InferredSide | DataQuality.Partial,
-            ResolutionSeconds: m * 60, SourceIdentity: "oanda:midpoint-candles:quote-count", ObservedTradeCount: 0);
-        await CandlesAsync(instrument.Symbol, granularity, TimeSpan.FromMinutes(m), fromUtc, toUtc, batch =>
+            ResolutionSeconds: minutes * 60, SourceIdentity: "oanda:midpoint-candles:quote-count", ObservedTradeCount: 0);
+        await CandlesAsync(instrument.Symbol, granularity, TimeSpan.FromMinutes(minutes), fromUtc, toUtc, batch =>
             onBatch(batch.Where(c => c.Complete).Select(c => new Kline(new DateTimeOffset(c.Time).ToUnixTimeMilliseconds(), c.O, c.H, c.L, c.C, Math.Max(1, c.V), 0, false, provenance)).ToList()),
             progress, ct).ConfigureAwait(false);
     }

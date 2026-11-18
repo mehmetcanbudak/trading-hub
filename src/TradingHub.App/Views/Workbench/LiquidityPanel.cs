@@ -25,9 +25,10 @@ internal sealed class LiquidityPanel : WorkbenchPanel
     private List<Kline> _candles = new();
     private IReadOnlyList<EstimatedLiquidationMap.Entry> _entries = Array.Empty<EstimatedLiquidationMap.Entry>();
     private string? _estimateNote;
-    private DateTime _loadedAt = DateTime.MinValue;
+    private DateTime _loadedAt = DateTime.MinValue, _renderedAt;
     private int _generation;
     private bool _loading, _refreshingLevels;
+    private object? _renderKey;
 
     public LiquidityPanel(WorkbenchContext context) : base(context)
     {
@@ -71,8 +72,11 @@ internal sealed class LiquidityPanel : WorkbenchPanel
     {
         if (now - _loadedAt >= Reload) Load();
         RefreshLevels(now);
-        Render();
+        // Redrawn when its inputs changed, otherwise once a second for the moving price.
+        if (now - _renderedAt >= TimeSpan.FromSeconds(1) || !Equals(RenderKey(), _renderKey)) Render();
     }
+
+    private object RenderKey() => (_generation, _entries, _candles, _loading, _estimateNote, Context.Levels()?.Latest, Context.Settings.LiquidityRangePercent, Context.Settings.LiquidityMaintenancePercent);
 
     /// <summary>Loads 15-minute candles (7 days) and both venues' open interest, then recomputes the local estimate.</summary>
     private void Load()
@@ -97,6 +101,7 @@ internal sealed class LiquidityPanel : WorkbenchPanel
         var now = _loadedAt;
         var from = now.AddDays(-7);
         string symbol = sel.DerivativesSymbol;
+        var ct = ActivityToken;
         _ = Task.Run(async () =>
         {
             List<Kline> candles = new();
@@ -104,19 +109,22 @@ internal sealed class LiquidityPanel : WorkbenchPanel
             var notes = new List<string>();
             try
             {
-                candles = await KlineHistory.LoadAsync(source, sel.Instrument, from, now, 15, 0, null, CancellationToken.None, warning: notes.Add).ConfigureAwait(false);
+                candles = await KlineHistory.LoadAsync(source, sel.Instrument, from, now, 15, 0, null, ct, warning: notes.Add).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
             catch (Exception ex) { notes.Add($"Candles could not be loaded: {ex.Message}"); }
             if (derivatives == null) notes.Add("Derivatives data is unavailable in this session.");
             else
                 foreach (var venue in DerivativesData.Venues)
                 {
+                    if (ct.IsCancellationRequested) break;
                     try
                     {
-                        var r = await derivatives.LoadOpenInterestAsync(venue, symbol, from, now, CancellationToken.None).ConfigureAwait(false);
+                        var r = await derivatives.LoadOpenInterestAsync(venue, symbol, from, now, ct).ConfigureAwait(false);
                         oi.Add(r.Samples.Select(x => (x.Time, x.Quantity)).ToArray());
                         if (r.Message != null) notes.Add($"Open interest from {WorkbenchFormat.Venue(venue)}: {r.Message}");
                     }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
                     catch (Exception ex) { notes.Add($"Open interest from {WorkbenchFormat.Venue(venue)}: {ex.Message}"); }
                 }
             var entries = LiquidityMapModel.Entries(candles, TimeSpan.FromMinutes(15), oi.Count == DerivativesData.Venues.Count ? oi : Array.Empty<IReadOnlyList<(DateTime, decimal)>>(), now);
@@ -124,6 +132,12 @@ internal sealed class LiquidityPanel : WorkbenchPanel
             {
                 if (generation != _generation) return;
                 _loading = false;
+                // Hidden meanwhile: the requests were cancelled, so load again once the panel is visible.
+                if (ct.IsCancellationRequested)
+                {
+                    _loadedAt = DateTime.MinValue;
+                    return;
+                }
                 _candles = candles;
                 _entries = entries;
                 _estimateNote = notes.Count == 0 ? null : string.Join(" · ", notes.Distinct());
@@ -135,21 +149,25 @@ internal sealed class LiquidityPanel : WorkbenchPanel
     /// <summary>Asks the opt-in service for a snapshot at most once a minute (the service also rate-limits itself).</summary>
     private void RefreshLevels(DateTime now)
     {
-        if (_refreshingLevels || Selection is not { } sel || Context.Levels() is not { } service) return;
+        if (_refreshingLevels || Selection is not { IsSimulated: false } sel || Context.Levels() is not { } service) return;
         if (!LiquidationLevelsService.Supports(sel.Instrument.BaseAsset, sel.Instrument.Symbol)) return;
         if (now - (service.Latest.Snapshot?.FetchedUtc ?? DateTime.MinValue) < LiquidationLevelsService.MinimumRefresh) return;
         _refreshingLevels = true;
+        var ct = ActivityToken;
         _ = Task.Run(async () =>
         {
-            try { await service.RefreshAsync(CancellationToken.None).ConfigureAwait(false); }
+            try { await service.RefreshAsync(ct).ConfigureAwait(false); }
             catch (ObjectDisposedException) { }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException) { }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException) { }
             Dispatcher.UIThread.Post(() => { _refreshingLevels = false; Render(); });
         });
     }
 
     private void Render()
     {
+        _renderedAt = Context.Clock();
+        _renderKey = RenderKey();
         if (Selection is not { } sel)
         {
             _canvas.Set(null, "Choose an instrument");
@@ -168,6 +186,8 @@ internal sealed class LiquidityPanel : WorkbenchPanel
         string thirdParty;
         var service = Context.Levels();
         if (service == null) thirdParty = "Third-party levels: off. Enable Settings → Third-party data → Third-party liquidation levels to add the published Hyperliquid BTC estimate.";
+        // A simulated BTC is not the market the published levels describe.
+        else if (sel.IsSimulated) thirdParty = "Liquidation maps need a USD-quoted crypto perpetual.";
         else if (!LiquidationLevelsService.Supports(sel.Instrument.BaseAsset, sel.Instrument.Symbol)) thirdParty = "Third-party levels: the service publishes BTC only.";
         else
         {

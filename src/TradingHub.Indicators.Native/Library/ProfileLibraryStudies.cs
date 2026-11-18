@@ -291,8 +291,9 @@ public class ValueAreaReversion : ClosedBarStudy
         }
         if (bar - exit.Bar > _maxBars)
         {
-            // too late: re-entering after the limit is quiet
+            // too late: re-entering after the limit is quiet, but closing beyond the other side is a new exit
             if (!above && !below) exit.Side = 0;
+            else if (above != (exit.Side > 0)) exit = new Exit { Side = above ? 1 : -1, Bar = bar };
             return 0;
         }
         if (above || below)
@@ -577,7 +578,8 @@ public abstract class RollingProfileStudy : ClosedBarStudy
     public override IEnumerable<IndicatorLevel> GetAlertLevels()
     {
         foreach (var level in base.GetAlertLevels()) yield return level;
-        if (_levels is not { } v || _profile.BarCount < _length) yield break;
+        // like the strategy series: no levels while a bar of unknown availability is in the window
+        if (_levels is not { } v || _profile.BarCount < _length || Bars.Count - 1 <= _uncertainUntil) yield break;
         yield return new IndicatorLevel($"{_prefix}.Poc", "Rolling profile POC", v.Poc, _windowStart);
         yield return new IndicatorLevel($"{_prefix}.Vah", "Rolling profile VAH", v.ValueAreaHigh, _windowStart);
         yield return new IndicatorLevel($"{_prefix}.Val", "Rolling profile VAL", v.ValueAreaLow, _windowStart);
@@ -900,10 +902,15 @@ public class ExecutionBenchmarks : ClosedBarStudy
         if (_history.Count == 0) return w;
         int length = _scheduleBars > 0 ? _scheduleBars : _history.Max(h => h.Length);
         if (length <= 0) return w;
-        var shape = new decimal[length]; decimal total = 0;
+        // the parent is a share of whole earlier windows; only the schedule is cut to its length
+        var shape = new decimal[length]; decimal total = 0, shapeSum = 0;
         foreach (var volumes in _history)
-            for (int k = 0; k < Math.Min(length, volumes.Length); k++) { shape[k] += volumes[k]; total += volumes[k]; }
-        w.Length = length; w.Shape = shape; w.ShapeSum = total;
+            for (int k = 0; k < volumes.Length; k++)
+            {
+                total += volumes[k];
+                if (k < length) { shape[k] += volumes[k]; shapeSum += volumes[k]; }
+            }
+        w.Length = length; w.Shape = shape; w.ShapeSum = shapeSum;
         w.Parent = _sizing == ExecutionSizing.Units ? _units : total / _history.Count * _percent / 100;
         w.Scored = w.Parent > 0;
         return w;

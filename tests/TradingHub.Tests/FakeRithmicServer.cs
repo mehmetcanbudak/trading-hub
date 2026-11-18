@@ -83,6 +83,10 @@ internal sealed class FakeRithmicServer : IDisposable
     public double AvgPrice { get; private set; }
     public List<string> Received { get; } = new();
 
+    /// <summary>Runs as each request arrives, after it was added to <see cref="Received"/> and before it is handled:
+    /// tests record facts at the exact arrival of a request instead of timing it.</summary>
+    public Action<string>? OnReceived { get; set; }
+
     /// <summary>User tag of every new-order request, in arrival order (lock the list to read it).</summary>
     public List<string> Tags { get; } = new();
 
@@ -182,6 +186,7 @@ internal sealed class FakeRithmicServer : IDisposable
                 var m = ProtoMessage.Parse(ms.ToArray());
                 int tpl = (int)m.Int(154467);
                 lock (Received) Received.Add(tpl.ToString());
+                OnReceived?.Invoke(tpl.ToString());
                 switch (tpl)
                 {
                     case 16:

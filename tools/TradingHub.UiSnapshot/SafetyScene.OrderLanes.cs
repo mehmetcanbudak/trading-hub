@@ -19,18 +19,30 @@ using TradingHub.Trading;
 
 internal static partial class SafetyScene
 {
-    /// <summary>Slows each durable flush and records which thread waited for it.</summary>
+    /// <summary>Slows each durable flush and records which thread waited for it, and how many flushes are running or
+    /// finished.</summary>
     private sealed class SlowDurability(TimeSpan delay) : DurabilityOperations
     {
-        private int _ui, _other;
+        private int _ui, _other, _inFlight, _completed;
         public int UiThreadFlushes => Volatile.Read(ref _ui);
         public int OtherFlushes => Volatile.Read(ref _other);
+        public int InFlight => Volatile.Read(ref _inFlight);
+        public int Completed => Volatile.Read(ref _completed);
 
         public override void Flush(Stream stream)
         {
             Interlocked.Increment(ref Dispatcher.UIThread.CheckAccess() ? ref _ui : ref _other);
-            Thread.Sleep(delay); // the injected slow drive, not synchronization
-            base.Flush(stream);
+            Interlocked.Increment(ref _inFlight);
+            try
+            {
+                Thread.Sleep(delay); // the injected slow drive, not synchronization
+                base.Flush(stream);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+                Interlocked.Increment(ref _completed);
+            }
         }
     }
 
@@ -67,12 +79,18 @@ internal static partial class SafetyScene
             var delay = TimeSpan.FromSeconds(1.5);
             var slow = new SlowDurability(delay);
             // Dispatcher responsiveness: a background timer posts an input-priority job every 50 ms; each job records how
-            // long it waited for the UI thread. A UI thread stuck in a durable write leaves them all waiting.
+            // long it waited for the UI thread and whether a slowed flush was running when the UI thread ran it. A UI
+            // thread stuck in a durable write runs none of them while a flush is in progress.
             var waits = new System.Collections.Concurrent.ConcurrentQueue<double>();
+            int probesDuringFlush = 0; // written and read on the UI thread only
             using var ticker = new Timer(_ =>
             {
                 long posted = Stopwatch.GetTimestamp();
-                Dispatcher.UIThread.Post(() => waits.Enqueue(Stopwatch.GetElapsedTime(posted).TotalSeconds), DispatcherPriority.Input);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    waits.Enqueue(Stopwatch.GetElapsedTime(posted).TotalSeconds);
+                    if (slow.InFlight > 0) probesDuringFlush++;
+                }, DispatcherPriority.Input);
             }, null, 0, 50);
             pump(0.3);
 
@@ -80,6 +98,10 @@ internal static partial class SafetyScene
             Task<Order?> trade;
             using (UseDurability(slow)) trade = tv.TradeAsync(chart, OrderTypes.Limit, OrderDirections.Buy, price, 1);
             double handOff = call.Elapsed.TotalSeconds;
+            // Ordering, not wall clock: each slowed flush takes the whole delay, so a UI thread that waited for any of
+            // them returns only after that flush finished.
+            int flushesDoneAtHandOff = slow.Completed;
+            bool pendingAtHandOff = !trade.IsCompleted;
             string pendingStatus = status();
             var pendingLabels = svc.OrderLanes.Pending;
             var deadline = DateTime.UtcNow.AddSeconds(60);
@@ -93,8 +115,13 @@ internal static partial class SafetyScene
                 $"the gesture completes through the unchanged account call ({trade.Status}, {trade.Exception?.GetBaseException()?.Message})");
             check(slow.OtherFlushes > 0, $"the gesture's durable writes went through the slowed storage seam ({slow.OtherFlushes} off the UI thread)");
             check(slow.UiThreadFlushes == 0, $"no durable flush ran on the UI thread ({slow.UiThreadFlushes})");
-            check(handOff < delay.TotalSeconds / 3, $"the UI thread returned from the gesture in {handOff:0.000}s while each flush took {delay.TotalSeconds:0.0}s");
-            check(worstLatency < delay.TotalSeconds / 3, $"the UI thread kept processing input during the durable writes (worst wait {worstLatency:0.000}s)");
+            check(pendingAtHandOff && flushesDoneAtHandOff == 0,
+                $"the UI thread returned from the gesture before its first durable flush finished ({flushesDoneAtHandOff} finished, " +
+                $"returned in {handOff:0.000}s while each flush took {delay.TotalSeconds:0.0}s)");
+            // A UI thread blocked through a flush leaves a probe waiting at least the whole injected delay; the bound is
+            // that delay, not a scheduler budget.
+            check(probesDuringFlush > 0 && worstLatency < delay.TotalSeconds,
+                $"the UI thread kept processing input during the durable writes ({probesDuringFlush} probes ran while a flush was in progress, worst wait {worstLatency:0.000}s)");
             check(pendingLabels.Count == 1 && pendingStatus == Lang.T(pendingLabels[0] + ": pending…"),
                 $"while journaling, the gesture is shown pending in the status line («{pendingStatus}», {pendingLabels.Count} pending)");
             check(svc.OrderLanes.Pending.Count == 0, "the lane is empty once the gesture returned");
@@ -221,9 +248,12 @@ internal static partial class SafetyScene
             var held = svc.OrderLanes.RunAsync(account, "Fixture slow durable write", () => durableWrite.Wait(TimeSpan.FromSeconds(30)));
             var refused = tv.AccountActionAsync(chart, a => a.CancelAll(), "Cancel all orders"); // the fixture reports an error
             var clearing = tv.AccountActionAsync(chart, a => a.CancelAt(1m), "Fixture clearing gesture"); // the next one clears it
+            // A no-op entry queued behind both gestures in the account's FIFO lane. Each entry leaves the pending set before
+            // it completes, so the marker's completion means both account calls ran and left it. The UI thread blocks on
+            // that completion (not pumped here), so neither gesture's continuation runs first.
+            var marker = svc.OrderLanes.RunAsync(account, "Fixture lane marker", () => { });
             durableWrite.Set();
-            // Both lane entries finish before the UI thread (not pumped here) runs either gesture's continuation.
-            bool drained = SpinWait.SpinUntil(() => svc.OrderLanes.Pending.Count == 0, TimeSpan.FromSeconds(30));
+            bool drained = marker.Wait(TimeSpan.FromSeconds(30)) && svc.OrderLanes.Pending.Count == 0;
             Settle(held);
             Settle(refused);
             Settle(clearing);

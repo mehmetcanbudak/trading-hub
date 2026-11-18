@@ -16,7 +16,8 @@ namespace TradingHub.Indicators.Native;
 /// default). Each of those prints met resting liquidity at that price, so the passive side took it all. The mark records
 /// what traded (a circle at the price, in the absorbing side's color); it says nothing about what price did next and is
 /// not proof of an iceberg. Only individually observed prints with a known side are used: compact packets cannot be
-/// split into milliseconds. The threshold is fixed notional or automatic (mean + k deviations of recent window sums).
+/// split into milliseconds. The threshold is fixed notional or automatic: mean + k deviations of the window sums in the
+/// 100 bars before each bar, so a bar's marks never depend on which bars were drawn first.
 /// </summary>
 [DisplayName("Print absorption (heuristic)")]
 [Category(IndicatorCategories.OrderFlow)]
@@ -26,9 +27,10 @@ public sealed class PrintAbsorption : Indicator
     /// <summary>An absorption: time, price, notional and whether the aggressors were buying (the ask absorbed).</summary>
     public readonly record struct Mark(DateTime Time, decimal Price, decimal Notional, bool AggressorBuy, int Fills);
 
+    // Automatic threshold: the group window sums of the bars before a bar (cached per closed bar).
+    private const int AutomaticBars = 100;
     private readonly Dictionary<int, (DateTime Time, long Revision, decimal Trades, List<Mark> Marks)> _cache = new();
-    private readonly List<decimal> _recentSums = new();
-    private readonly HashSet<int> _learned = new();
+    private readonly Dictionary<int, (DateTime Time, long Revision, decimal Trades, double Count, double Sum, double Squares)> _sums = new();
     private readonly List<BarTrade> _trades = new();
     private readonly LiveAlertGate _gate = new();
     private readonly RenderFont _font = new("Arial", 7);
@@ -68,8 +70,7 @@ public sealed class PrintAbsorption : Indicator
     protected override void OnRecalculate()
     {
         _cache.Clear();
-        _recentSums.Clear();
-        _learned.Clear();
+        _sums.Clear();
     }
 
     /// <summary>
@@ -119,29 +120,62 @@ public sealed class PrintAbsorption : Indicator
         public DateTime Last, BestAt;
     }
 
-    private decimal Threshold()
+    /// <summary>Bar <paramref name="bar"/>'s threshold: fixed, or mean + k deviations of the window sums of the preceding bars.</summary>
+    private decimal Threshold(int bar)
     {
         if (ThresholdNotional > 0) return ThresholdNotional;
-        if (_recentSums.Count < 50) return 250_000;
-        decimal mean = _recentSums.Average();
-        double deviation = Math.Sqrt(_recentSums.Sum(x => (double)((x - mean) * (x - mean))) / _recentSums.Count);
-        return mean + K * (decimal)deviation;
+        double count = 0, sum = 0, squares = 0;
+        for (int b = Math.Max(0, bar - AutomaticBars); b < bar; b++)
+        {
+            var s = SumsOf(b);
+            count += s.Count;
+            sum += s.Sum;
+            squares += s.Squares;
+        }
+        if (count < 50) return 250_000;
+        double mean = sum / count;
+        return (decimal)(mean + (double)K * Math.Sqrt(Math.Max(0, squares / count - mean * mean)));
     }
 
-    /// <summary>The bar's marks; closed bars are cached and feed the automatic threshold once.</summary>
+    /// <summary>Count, sum and sum of squares of a bar's group window sums; closed bars are cached.</summary>
+    private (double Count, double Sum, double Squares) SumsOf(int bar)
+    {
+        var c = GetCandle(bar);
+        if (_sums.TryGetValue(bar, out var hit) && hit.Time == c.Time && hit.Revision == c.Revision && hit.Trades == c.Ticks) return (hit.Count, hit.Sum, hit.Squares);
+        var sums = new List<decimal>();
+        Find(SortedTrades(bar), WindowMilliseconds, decimal.MaxValue, sums, FlowFormat.PointValue(this));
+        return Remember(bar, c, sums);
+    }
+
+    private (double Count, double Sum, double Squares) Remember(int bar, IndicatorCandle c, List<decimal> sums)
+    {
+        double sum = 0, squares = 0;
+        foreach (var s in sums)
+        {
+            double v = (double)s;
+            sum += v;
+            squares += v * v;
+        }
+        if (c.IsCandleFinished) _sums[bar] = (c.Time, c.Revision, c.Ticks, sums.Count, sum, squares);
+        return (sums.Count, sum, squares);
+    }
+
+    private List<BarTrade> SortedTrades(int bar)
+    {
+        GetBarTrades(bar, _trades);
+        _trades.Sort((a, b) => a.Time.CompareTo(b.Time));
+        return _trades;
+    }
+
+    /// <summary>The bar's marks; closed bars are cached.</summary>
     internal List<Mark> MarksOf(int bar)
     {
         var c = GetCandle(bar);
         if (_cache.TryGetValue(bar, out var hit) && hit.Time == c.Time && hit.Revision == c.Revision && hit.Trades == c.Ticks) return hit.Marks;
-        GetBarTrades(bar, _trades);
-        _trades.Sort((a, b) => a.Time.CompareTo(b.Time));
+        decimal threshold = Threshold(bar);
         var sums = new List<decimal>();
-        var marks = Find(_trades, WindowMilliseconds, Threshold(), sums, FlowFormat.PointValue(this));
-        if (c.IsCandleFinished && _learned.Add(bar))
-        {
-            _recentSums.AddRange(sums);
-            if (_recentSums.Count > 20_000) _recentSums.RemoveRange(0, _recentSums.Count - 20_000);
-        }
+        var marks = Find(SortedTrades(bar), WindowMilliseconds, threshold, sums, FlowFormat.PointValue(this));
+        Remember(bar, c, sums);
         _cache[bar] = (c.Time, c.Revision, c.Ticks, marks);
         return marks;
     }
@@ -198,6 +232,8 @@ public sealed class TrappedTraders : Indicator
 
     private readonly List<Trap> _traps = new();
     private readonly HashSet<int> _decided = new();
+    // Traps already notified; kept across recalculations so a re-decided trap never alerts twice.
+    private readonly HashSet<(DateTime Time, bool Buyers)> _notified = new();
     private readonly LiveAlertGate _gate = new();
     private readonly RenderFont _font = new("Arial", 7);
     private int _atr = 14, _keep = 12;
@@ -309,8 +345,9 @@ public sealed class TrappedTraders : Indicator
             if (!(buyers ? c.Close <= average - atr : c.Close >= average + atr)) continue;
             _traps.Add(new Trap(decide, c.Time, lo, hi, average, net, buyers));
             var end = decide + 1 < CurrentBar ? GetCandle(decide + 1).Time : c.LastTime;
-            if (Notify && _gate.Allow(end))
+            if (Notify && !_notified.Contains((c.Time, buyers)) && _gate.Allow(end))
             {
+                _notified.Add((c.Time, buyers));
                 string amount = FlowFormat.Compact(net);
                 AddAlert("alert2", buyers ? UiText.Tr($"Trapped buyers heuristic: wick with {amount} net rejected") : UiText.Tr($"Trapped sellers heuristic: wick with {amount} net rejected"));
             }
@@ -375,6 +412,8 @@ public sealed class HighlightsAndNotifications : Indicator
     private readonly List<decimal> _flowHistory = new();
     private readonly RenderFont _font = new("Arial", 7);
     private DateTime _bookStart = DateTime.MinValue, _flowSlot = DateTime.MinValue;
+    // Wall price bin of this book session, fixed from its first mid so a wall keeps its key while the mid moves.
+    private decimal _bin;
     private decimal _slotDelta;
     private bool _slotNotified;
     private int _balance;
@@ -438,6 +477,7 @@ public sealed class HighlightsAndNotifications : Indicator
         _slotDelta = 0;
         _balance = 0;
         _bookStart = DateTime.MinValue;
+        _bin = 0;
     }
 
     private double? VolumeOf(int bar) => GetCandle(bar).CanCalculateCausally ? (double)GetCandle(bar).Volume : null;
@@ -523,7 +563,8 @@ public sealed class HighlightsAndNotifications : Indicator
         if (mid <= 0) return;
         if (NotifyWalls)
         {
-            decimal bin = Math.Max(tick, mid * 0.0002m);
+            if (_bin <= 0) _bin = tick * Math.Max(1, Math.Ceiling(mid * 0.0002m / tick));
+            decimal bin = _bin;
             var sizes = new Dictionary<long, decimal>();
             foreach (var level in book.Bids.Concat(book.Asks))
             {

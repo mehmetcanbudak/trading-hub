@@ -177,8 +177,10 @@ public sealed class CTraderFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     public async Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
         Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
     {
+        // ProtoOATrendbarPeriod values; a resolution without an exact period is rejected rather than substituted.
+        int period = minutes switch { 1 => 1, 2 => 2, 3 => 3, 4 => 4, 5 => 5, 10 => 6, 15 => 7, 30 => 8, 60 => 9, 240 => 10, 720 => 11,
+            _ => throw new ArgumentOutOfRangeException(nameof(minutes)) };
         long id = await SymbolIdAsync(instrument, ct).ConfigureAwait(false);
-        int period = minutes >= 15 ? 7 : minutes >= 5 ? 5 : 1; // M15, M5, M1
         long chunk = (minutes >= 5 ? 28L : 7L) * 24 * 3600 * 1000;
         long from = Ms(fromUtc), to = Ms(toUtc);
         double total = Math.Max(1, to - from);

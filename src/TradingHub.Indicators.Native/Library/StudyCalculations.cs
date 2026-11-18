@@ -100,10 +100,15 @@ public sealed class LocalSessionWindow
         return inside && tradingDate.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday);
     }
 
+    /// <summary>The UTC instant the window of <paramref name="tradingDate"/> opens (an overnight window opens the day before).</summary>
+    public DateTime StartUtc(DateOnly tradingDate) => Utc(Overnight ? tradingDate.AddDays(-1) : tradingDate, Start);
+
     /// <summary>The UTC instant the window of <paramref name="tradingDate"/> closes (DST-correct; skipped local times move forward).</summary>
-    public DateTime EndUtc(DateOnly tradingDate)
+    public DateTime EndUtc(DateOnly tradingDate) => Utc(tradingDate, End);
+
+    private DateTime Utc(DateOnly day, TimeSpan time)
     {
-        var local = DateTime.SpecifyKind(tradingDate.ToDateTime(TimeOnly.FromTimeSpan(End)), DateTimeKind.Unspecified);
+        var local = DateTime.SpecifyKind(day.ToDateTime(TimeOnly.FromTimeSpan(time)), DateTimeKind.Unspecified);
         while (Zone.IsInvalidTime(local)) local = local.AddMinutes(30);
         return TimeZoneInfo.ConvertTimeToUtc(local, Zone);
     }

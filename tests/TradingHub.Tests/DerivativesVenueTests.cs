@@ -145,7 +145,9 @@ public sealed class DerivativesVenueTests
         Assert.Equal((64735.6m - 64767.5m) / 64767.5m * 100, stats.PremiumPercent);
 
         var ls = await data.LoadLongShortAsync(DerivativesData.Okx, "BTCUSDT", Now.AddHours(-24), Now, CancellationToken.None);
-        Assert.Equal(OpenInterestAvailability.Available, ls.Availability);
+        // Two rows from the last half hour cannot stand for the whole 24 h range: earlier values are unknown.
+        Assert.Equal(OpenInterestAvailability.Partial, ls.Availability);
+        Assert.Contains("only from", ls.Message);
         Assert.Equal(new[] { 0.75m, 0.25m }, new[] { ls.Samples[0].LongShare, ls.Samples[0].ShortShare });
         Assert.True(Math.Abs(ls.Samples[1].Ratio!.Value - 2.2528827188590502m) < 1e-20m);
         var lsQuery = Query(handler.Requests.Last().Uri);

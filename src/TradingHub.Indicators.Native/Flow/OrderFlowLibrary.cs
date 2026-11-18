@@ -86,7 +86,8 @@ public sealed class SpotPerpetualDominance : Indicator
     /// <summary>Spot and perpetual delta of a bar; a side is null when none of its markets printed.</summary>
     internal (decimal? Spot, decimal? Perpetual) Deltas(int bar)
     {
-        var f = _cache.Get(this, bar, GetBarTrades);
+        // Each bar is read once per calculation: built without keeping the whole history of per-market summaries.
+        var f = _cache.Compute(bar, GetBarTrades);
         var sources = _cache.Sources;
         decimal spot = 0, perpetual = 0;
         bool hasSpot = false, hasPerpetual = false;
@@ -172,17 +173,15 @@ public sealed class DecisionBoard : Indicator
 
     internal DerivativesContext Derivatives => _derivatives;
 
-    protected override void OnRecalculate()
-    {
-        _rsi.Clear();
-        if (CurrentBar > 0)
-            _derivatives.Ensure(DerivativesPane.DerivedSymbol(InstrumentInfo?.Instrument ?? "", InstrumentInfo?.BaseAsset ?? "", InstrumentInfo?.QuoteAsset ?? ""), GetCandle(Math.Max(0, CurrentBar - 1000)).Time);
-    }
+    protected override void OnRecalculate() => _rsi.Clear();
 
     protected override void OnDispose() => _derivatives.Dispose();
 
     protected override void OnCalculate(int bar, decimal value)
     {
+        // Loads, then refreshes open interest as live time advances (a no-op while fresh).
+        if (bar == CurrentBar - 1)
+            _derivatives.Ensure(DerivativesPane.DerivedSymbol(InstrumentInfo?.Instrument ?? "", InstrumentInfo?.BaseAsset ?? "", InstrumentInfo?.QuoteAsset ?? ""), GetCandle(Math.Max(0, CurrentBar - 1000)).Time);
         var c = GetCandle(bar);
         decimal k = 2m / (_emaLength + 1);
         _ema[bar] = bar == 0 ? c.Close : _ema[bar - 1] + k * (c.Close - _ema[bar - 1]);
@@ -315,7 +314,8 @@ public sealed class DeltaDeviationBands : Indicator
 
     private readonly OptionalValueDataSeries _delta = new("VD", "Delta") { VisualType = VisualMode.Histogram, ShowZeroValue = true };
     private readonly OptionalValueDataSeries[] _bands = Enumerable.Range(0, 6).Select(k => new OptionalValueDataSeries("B" + k, (k < 3 ? "+" : "−") + (k % 3 + 1) + "σ") { ShowZeroValue = false, Width = 1 }).ToArray();
-    private readonly List<decimal?> _raw = new();
+    // Measured delta per bar, and the value before smoothing (the delta or its rolling sum) that smoothing averages.
+    private readonly List<decimal?> _raw = new(), _unsmoothed = new();
     private DeltaMode _mode = DeltaMode.PerBar;
     private int _rolling = 50, _smooth, _lookback = 50;
     private bool _notional, _fill = true, _show = true;
@@ -344,6 +344,7 @@ public sealed class DeltaDeviationBands : Indicator
     protected override void OnRecalculate()
     {
         _raw.Clear();
+        _unsmoothed.Clear();
         foreach (var b in _bands) b.VisualType = _show && !_fill ? VisualMode.Line : VisualMode.Hide;
     }
 
@@ -369,12 +370,14 @@ public sealed class DeltaDeviationBands : Indicator
                 if (_raw[k] is { } r) sum += r; else v = null;
             if (v.HasValue) v = sum;
         }
+        while (_unsmoothed.Count <= bar) _unsmoothed.Add(null);
+        _unsmoothed[bar] = v;
         if (_smooth > 1 && v.HasValue)
         {
-            decimal sum = v.Value;
-            int count = 1;
-            for (int k = bar - 1; k >= Math.Max(0, bar - _smooth + 1); k--)
-                if (_delta.IsAvailable(k)) { sum += _delta[k]; count++; }
+            decimal sum = 0;
+            int count = 0;
+            for (int k = Math.Max(0, bar - _smooth + 1); k <= bar; k++)
+                if (_unsmoothed[k] is { } u) { sum += u; count++; }
             v = sum / count;
         }
         _delta.Set(bar, v ?? 0, v.HasValue);
@@ -433,6 +436,7 @@ public sealed class VolumeConcentrationBubbles : Indicator
 
     private readonly List<Bubble> _bubbles = new();
     private readonly int[] _tiers = new int[3];
+    private readonly Dictionary<int, int> _tierOf = new();
     private readonly RenderFont _font = new("Arial", 7, FontStyle.Bold);
     private int _lookback = 50, _maxPerBar = 3;
     private decimal _z1 = 1.5m, _z2 = 2.5m, _z3 = 3.5m, _share = 0.35m, _minimum = 50_000;
@@ -460,6 +464,7 @@ public sealed class VolumeConcentrationBubbles : Indicator
     {
         _bubbles.Clear();
         Array.Clear(_tiers);
+        _tierOf.Clear();
     }
 
     /// <summary>Tier (0 = none) of a volume against the preceding volumes' mean and population deviation.</summary>
@@ -476,12 +481,15 @@ public sealed class VolumeConcentrationBubbles : Indicator
     protected override void OnCalculate(int bar, decimal value)
     {
         _bubbles.RemoveAll(b => b.Bar >= bar);
+        // A closed bar is recalculated after clock closes and live appends: it replaces its own count, never adds one.
+        if (_tierOf.Remove(bar, out int counted)) _tiers[counted - 1]--;
         var c = GetCandle(bar);
         if (!c.IsCandleFinished || bar < _lookback || !c.CanCalculateCausally) return;
         var preceding = new List<decimal>(_lookback);
         for (int i = bar - _lookback; i < bar; i++) preceding.Add(GetCandle(i).Volume);
         int tier = Tier(c.Volume, preceding, _z1, _z2, _z3);
         if (tier == 0) return;
+        _tierOf[bar] = tier;
         _tiers[tier - 1]++;
         if (!c.HasObservedFootprint && !c.HasAggregatedFootprint) return;
         var levels = c.GetProfilePriceLevels().ToList();

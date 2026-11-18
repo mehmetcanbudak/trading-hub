@@ -146,6 +146,12 @@ public sealed partial class TradingView
             tools.Check(view.Controller?.ActiveTool);
             if (!_svc.Settings.DrawingBarAfterDrawing) drawingBar.Suppress(chart.Model?.Drawings.FirstOrDefault(d => d.Selected));
         };
+        // drawing with a tool shows hidden drawings again, as a gesture does: the strip follows and the chart keeps it
+        view.DrawingsShown += () =>
+        {
+            SyncDrawingTools(chart);
+            Workspace.Save(this);
+        };
         view.DrawingSelected += _ => drawingBar.Suppress(null);
         view.InkFinished += r => OnInkFinished(chart, r);
         view.ModelChanged += () => SyncDrawingTools(chart);
@@ -214,7 +220,7 @@ public sealed partial class TradingView
             chart.Model.Invalidate();
             Workspace.Save(this);
             _toolbar.Sync();
-            _status($"{info.Name} added");
+            _status($"{info.Name} added to the chart");
         }
         catch (Exception ex)
         {

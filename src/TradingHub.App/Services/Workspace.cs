@@ -63,6 +63,12 @@ internal static partial class Workspace
 
         /// <summary>Chart alerts (absent in workspaces saved before they existed).</summary>
         public List<ChartAlert>? ChartAlerts { get; set; }
+
+        /// <summary>Chart alerts of the instruments the chart showed before, by "feed/symbol" (absent when none).</summary>
+        public Dictionary<string, List<ChartAlert>>? ParkedChartAlerts { get; set; }
+
+        /// <summary>Indicators hidden with the drawing bar's eye, as positions in <see cref="Indicators"/> (absent when not hidden).</summary>
+        public List<int>? HiddenIndicators { get; set; }
     }
 
     /// <summary>Una estrategia puesta en un gráfico.</summary>
@@ -227,6 +233,8 @@ internal static partial class Workspace
             TraderVisible = t.TraderVisible,
             Settings = JObject.FromObject(t.Model.Settings, Serializer),
             ChartAlerts = t.Model.Alerts.Count > 0 ? t.Model.Alerts.ToList() : null,
+            ParkedChartAlerts = t.ParkedAlerts.Count > 0 ? t.ParkedAlerts.ToDictionary(p => p.Key, p => p.Value.ToList()) : null,
+            HiddenIndicators = t.HiddenIndicators is { } hidden ? hidden.Select(s => t.Model!.Indicators.IndexOf(s)).Where(i => i >= 0).ToList() : null,
         };
         foreach (var slot in t.Model.Indicators) td.Indicators.Add(ToIndicatorDto(slot));
         foreach (var cs in t.Strategies)
@@ -255,15 +263,20 @@ internal static partial class Workspace
         };
     }
 
-    /// <summary>Agrega al gráfico los indicadores guardados (del espacio de trabajo o de una plantilla).</summary>
-    private static void AddIndicators(TradingView w, ChartModel model, IEnumerable<IndicatorDto> list)
+    /// <summary>
+    /// Agrega al gráfico los indicadores guardados (del espacio de trabajo o de una plantilla). Returns the slot made for
+    /// each saved indicator, in order (null when it could not be created).
+    /// </summary>
+    private static List<IndicatorSlot?> AddIndicators(TradingView w, ChartModel model, IEnumerable<IndicatorDto> list)
     {
+        var slots = new List<IndicatorSlot?>();
         foreach (var idto in list)
         {
             var ind = w.Services.Catalog.Create(idto.Type);
             if (ind == null)
             {
                 w.SetStatus($"Indicator not found: {idto.Type} (deleted or failing to compile?)");
+                slots.Add(null);
                 continue;
             }
 
@@ -271,7 +284,10 @@ internal static partial class Workspace
             var slot = model.AddIndicator(ind, applyDefaultColors: false);
             slot.Visible = idto.Visible;
             if (slot.Panel != null && idto.PanelHeight is double h) slot.Panel.HeightRatio = h;
+            slots.Add(slot);
         }
+
+        return slots;
     }
 
     private static bool Saveable(ChartTab t) => t.Model != null && !t.IsReplay;
@@ -349,8 +365,15 @@ internal static partial class Workspace
         if (!string.IsNullOrWhiteSpace(td.CrossSymbol)) _ = w.SetCrossTradingAsync(tab, td.CrossSymbol, save: false);
         if (tab.Model == null) return;
         if (td.BarWidth > 0) tab.Model.Viewport.BarWidth = td.BarWidth;
-        AddIndicators(w, tab.Model, td.Indicators);
-        RestoreChartAlerts(tab.Model, td.ChartAlerts);
+        var slots = AddIndicators(w, tab.Model, td.Indicators);
+        if (td.HiddenIndicators != null)
+        {
+            // the drawing bar's eye shows again the indicators it hid before the restart
+            tab.HiddenIndicators = td.HiddenIndicators.Where(i => i >= 0 && i < slots.Count).Select(i => slots[i]).OfType<IndicatorSlot>().ToList();
+            w.SyncDrawingTools(tab);
+        }
+
+        RestoreChartAlerts(tab, td);
 
         // estrategias: las visuales vuelven a correr; las que ejecutaban quedan pausadas hasta que las reanudes
         foreach (var sd in td.Strategies)
@@ -437,13 +460,22 @@ internal static partial class Workspace
     /// </summary>
     private static readonly Dictionary<string, List<ChartDrawing>> Shared = new();
 
+    /// <summary>
+    /// Drawings files that could not be read this session, and whether a copy of the unreadable file was kept beside it.
+    /// A failed read never destroys drawings: the file is written over only once its copy exists, and alerts on its
+    /// drawings are not removed as if the drawings were deleted.
+    /// </summary>
+    private static readonly Dictionary<string, bool> Unreadable = new();
+
     public static void SaveDrawings(ChartTab t)
     {
         if (t.Model == null) return;
+        var f = DrawingsFile(t);
+        if (Unreadable.TryGetValue(f, out bool kept) && !kept) return;
         try
         {
             DurableFile.EnsureDirectory(AppPaths.Drawings);
-            ReplaceIfChanged(DrawingsFile(t), System.Text.Json.JsonSerializer.Serialize(t.Model.Drawings));
+            ReplaceIfChanged(f, System.Text.Json.JsonSerializer.Serialize(t.Model.Drawings));
         }
         catch (Exception ex)
         {
@@ -465,11 +497,28 @@ internal static partial class Workspace
             catch (Exception ex)
             {
                 CrashLog.Write(ex);
+                Unreadable[f] = KeepUnreadable(f);
             }
 
             Shared[f] = list;
         }
 
         t.Model.Drawings = list;
+        t.Model.DrawingsUnreadable = Unreadable.ContainsKey(f);
+    }
+
+    /// <summary>Copies a drawings file that could not be read next to it ("….json.unreadable-{UTC time}").</summary>
+    private static bool KeepUnreadable(string file)
+    {
+        try
+        {
+            File.Copy(file, $"{file}.unreadable-{DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture)}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            return false;
+        }
     }
 }

@@ -82,16 +82,21 @@ public sealed class LocalApiSettingsTests
         finally { await host.ShutdownAsync(); }
     }
 
-    public static TheoryData<string> Occupants => new() { "loopback", "any", "dual-stack" };
+    public static TheoryData<string> Occupants => new() { "loopback", "any", "dual-stack", "ipv6-loopback", "ipv6-any" };
 
     [Theory]
     [MemberData(nameof(Occupants))]
     public async Task A_port_held_by_another_listener_is_reported_and_reapplying_after_it_is_freed_starts(string occupant)
     {
+        // Without IPv6 nothing can listen on ::1 or [::], so there is nothing to detect.
+        if (occupant.StartsWith("ipv6", StringComparison.Ordinal) && !Socket.OSSupportsIPv6) return;
         var holder = occupant switch
         {
             "loopback" => new TcpListener(IPAddress.Loopback, 0),
             "any" => new TcpListener(IPAddress.Any, 0),
+            // A program on ::1 would receive the connections of clients that resolve "localhost" to ::1.
+            "ipv6-loopback" => new TcpListener(IPAddress.IPv6Loopback, 0),
+            "ipv6-any" => new TcpListener(IPAddress.IPv6Any, 0) { Server = { DualMode = false } },
             _ => new TcpListener(IPAddress.IPv6Any, 0) { Server = { DualMode = true } },
         };
         holder.Start();

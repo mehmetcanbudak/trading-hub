@@ -3,7 +3,10 @@ using TradingHub.Scripting;
 
 namespace TradingHub.App.Services;
 
-/// <summary>File operations never rename C# types or saved indicator identities, and never overwrite a collision. Handles C# sources and KVS scripts.</summary>
+/// <summary>
+/// Handles C# sources and KVS scripts and never overwrites a collision. C# file operations never rename types or saved
+/// indicator identities; a KVS script's type is <c>Kvs_</c> + its file name, so renaming a script renames its type.
+/// </summary>
 public sealed class IndicatorSourceFiles(string folder)
 {
     public string Folder { get; } = Path.GetFullPath(folder);
@@ -49,6 +52,7 @@ public sealed class IndicatorSourceFiles(string folder)
         string name = FileName(fileName);
         Directory.CreateDirectory(Folder);
         EnsureNoCollision(Folder, name);
+        EnsureNoScriptTypeCollision(name, except: null);
         string path = Path.Combine(Folder, name);
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -82,9 +86,22 @@ public sealed class IndicatorSourceFiles(string folder)
         string directory = Path.GetDirectoryName(path)!;
         string destination = Path.Combine(directory, name);
         if (string.Equals(path, destination, StringComparison.Ordinal)) return path;
-        EnsureNoCollision(directory, name);
+        EnsureNoCollision(directory, name, except: path);
+        EnsureNoScriptTypeCollision(name, except: path);
         Unchanged(path, expectedText);
-        File.Move(path, destination); // preserves the complete source, including all type and persisted series identities
+        if (string.Equals(path, destination, StringComparison.OrdinalIgnoreCase))
+        {
+            // case only: a case-insensitive volume sees the destination as this very file, so move through a unique name
+            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.Move(path, temporary);
+            try { File.Move(temporary, destination); }
+            catch
+            {
+                File.Move(temporary, path);
+                throw;
+            }
+        }
+        else File.Move(path, destination); // preserves the complete source, including all type and persisted series identities
         return destination;
     }
 
@@ -128,11 +145,24 @@ public sealed class IndicatorSourceFiles(string folder)
         return name;
     }
 
-    private static void EnsureNoCollision(string directory, string name)
+    /// <summary>Entries named <paramref name="name"/> in any letter case, other than <paramref name="except"/> itself.</summary>
+    private static void EnsureNoCollision(string directory, string name, string? except = null)
     {
-        if (Directory.EnumerateFileSystemEntries(directory).Any(p => string.Equals(Path.GetFileName(p), name, StringComparison.OrdinalIgnoreCase)))
+        if (Directory.EnumerateFileSystemEntries(directory).Any(p => string.Equals(Path.GetFileName(p), name, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(p, except, StringComparison.Ordinal)))
             throw new IOException("A file or folder with that name already exists. Nothing was overwritten.");
     }
+
+    /// <summary>Two KVS scripts compiling to the same type (x.kvs in two folders, my-ind.kvs and my_ind.kvs) would break every custom indicator.</summary>
+    private void EnsureNoScriptTypeCollision(string name, string? except)
+    {
+        if (!KvsTranslator.IsScript(name)) return;
+        string type = KvsTranslator.ClassNameFor(Path.GetFileNameWithoutExtension(name));
+        if (EditablePaths().Any(p => KvsTranslator.IsScript(p) && !string.Equals(p, except, StringComparison.Ordinal) &&
+                KvsTranslator.ClassNameFor(Path.GetFileNameWithoutExtension(p)) == type))
+            throw new IOException("Another KVS script already compiles to that indicator type. Choose another name; nothing was changed.");
+    }
+
     private static void Unchanged(string path, string expectedText)
     {
         if (!File.Exists(path) || !string.Equals(File.ReadAllText(path), expectedText, StringComparison.Ordinal))

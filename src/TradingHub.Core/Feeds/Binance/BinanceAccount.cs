@@ -66,7 +66,9 @@ public sealed record BinancePosition(string Symbol, decimal Quantity, decimal En
 /// (fields an answer leaves out are empty or 0).
 /// </summary>
 /// <param name="Time">When the order was placed (Binance's "time", epoch milliseconds); 0 if the answer leaves it out.</param>
-public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, string Type, decimal Price, decimal StopPrice, decimal Quantity, decimal Executed, string Status, bool ReduceOnly = false, string ClientOrderId = "", long Time = 0);
+/// <param name="UpdateTime">When Binance last changed the order (its "updateTime": a fill, its end), epoch milliseconds; 0
+/// if the answer leaves it out.</param>
+public sealed record BinanceOpenOrder(long OrderId, string Symbol, string Side, string Type, decimal Price, decimal StopPrice, decimal Quantity, decimal Executed, string Status, bool ReduceOnly = false, string ClientOrderId = "", long Time = 0, long UpdateTime = 0);
 
 /// <summary>
 /// A USD-M futures conditional (algo) order as Binance reports it: in the open algo-order list, when looked up, and in the
@@ -192,7 +194,7 @@ public sealed class BinanceAccountClient : IDisposable
     private static BinanceOpenOrder ParseOrder(JsonElement o, string symbol) => new(
         o.GetProperty("orderId").GetInt64(), S(o, "symbol") is { Length: > 0 } nativeSymbol ? nativeSymbol : symbol, S(o, "side"), S(o, "type"),
         D(o, "price"), D(o, "stopPrice"), D(o, "origQty"), D(o, "executedQty"), S(o, "status"),
-        o.TryGetProperty("reduceOnly", out var ro) && ro.ValueKind == JsonValueKind.True, S(o, "clientOrderId"), IdOrZero(o, "time"));
+        o.TryGetProperty("reduceOnly", out var ro) && ro.ValueKind == JsonValueKind.True, S(o, "clientOrderId"), IdOrZero(o, "time"), IdOrZero(o, "updateTime"));
 
     private static BinanceAlgoOrder ParseAlgoOrder(JsonElement a, string symbol) => new(
         a.GetProperty("algoId").GetInt64(), S(a, "symbol") is { Length: > 0 } nativeSymbol ? nativeSymbol : symbol, S(a, "side"), S(a, "orderType"),
@@ -350,6 +352,36 @@ public sealed class BinanceAccountClient : IDisposable
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// One symbol's position and when Binance last changed it ("updateTime", epoch milliseconds; 0 when not reported): the
+    /// USD-M position amount, flat included, or the Spot base-asset wallet with the account's update time.
+    /// </summary>
+    internal async Task<(decimal Quantity, long UpdateTime)> GetPositionSnapshotAsync(string symbol, string spotBaseAsset, CancellationToken ct)
+    {
+        if (_s.Futures)
+        {
+            using var doc = await SignedAsync(HttpMethod.Get, "/fapi/v2/positionRisk", "", ct).ConfigureAwait(false);
+            long flatUpdated = 0;
+            foreach (var p in doc.RootElement.EnumerateArray())
+            {
+                if (S(p, "symbol") != symbol) continue;
+                decimal quantity = D(p, "positionAmt");
+                if (quantity != 0) return (quantity, IdOrZero(p, "updateTime"));
+                flatUpdated = Math.Max(flatUpdated, IdOrZero(p, "updateTime"));
+            }
+            return (0, flatUpdated);
+        }
+        using var account = await SignedAsync(HttpMethod.Get, "/api/v3/account", "omitZeroBalances=true", ct).ConfigureAwait(false);
+        decimal wallet = 0;
+        foreach (var b in account.RootElement.GetProperty("balances").EnumerateArray())
+        {
+            if (S(b, "asset") != spotBaseAsset) continue;
+            wallet = D(b, "free") + D(b, "locked");
+            break;
+        }
+        return (wallet, IdOrZero(account.RootElement, "updateTime"));
     }
 
     public async Task<IReadOnlyList<BinanceOpenOrder>> GetOpenOrdersAsync(string symbol, CancellationToken ct)
@@ -2228,22 +2260,38 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         public bool Claimed { get; set; }
     }
 
+    /// <summary>Binance's "too many requests" code (HTTP 429, and 418 once it bans the IP): polling must stop.</summary>
+    private const int RateLimitedCode = -1003;
+    private static readonly TimeSpan FirstPositionPollDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan LastPositionPollDelay = TimeSpan.FromSeconds(2);
+
     /// <summary>
     /// The position a position order is planned from: once every market order in flight when it was issued is known to
-    /// have ended at Binance, the venue's position read then; past the deadline, the best known position, with the signed
-    /// unfilled quantity of those orders still working.
+    /// have ended at Binance, a venue position read at least as recent as their last execution (by Binance's own update
+    /// times; Binance does not document that a position read follows an order read, and one that missed a fill would
+    /// over-size a reverse or under-close a close); past the deadline, or once Binance rate-limits these reads, the best
+    /// known position, unconfirmed, with the signed unfilled quantity of those orders still working. Reads back off.
     /// </summary>
     private async Task<(decimal Net, decimal Pending, bool Confirmed)> PositionAfterAsync(Tracked[] earlier, DateTime until)
     {
+        // When each ended order last changed, if it executed (0 when it did not): its end is final, so it is read once.
+        // An executed order whose time is unknown can never be proven included.
+        var ended = new Dictionary<Tracked, long>(ReferenceEqualityComparer.Instance);
+        var delay = FirstPositionPollDelay;
         while (true)
         {
-            bool settled = true;
+            bool settled = true, limited = false;
             foreach (var t in earlier)
             {
+                if (ended.ContainsKey(t)) continue;
                 long id;
                 lock (_gate)
                 {
-                    if (t.Order.State is OrderStates.Done or OrderStates.Failed) continue;
+                    if (t.Order.State is OrderStates.Done or OrderStates.Failed && t.Order.Filled <= 0)
+                    {
+                        ended[t] = 0;
+                        continue;
+                    }
                     if (!t.Accepted || t.SubmissionUnknown) { settled = false; continue; }
                     id = t.Id;
                 }
@@ -2252,7 +2300,15 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
                     var native = await _client.GetOrderAsync(Instrument.Symbol, id, _cts.Token).ConfigureAwait(false);
                     lock (_gate)
                         if (native != null && t.Id == id && _byOrder.ContainsKey(t.Order)) Apply(t, native);
-                    if (native?.Status is not ("FILLED" or "CANCELED" or "EXPIRED" or "EXPIRED_IN_MATCH" or "REJECTED")) settled = false;
+                    if (native is { Status: "FILLED" or "CANCELED" or "EXPIRED" or "EXPIRED_IN_MATCH" or "REJECTED" })
+                        ended[t] = native.Executed <= 0 ? 0 : native.UpdateTime > 0 ? native.UpdateTime : long.MaxValue;
+                    else settled = false;
+                }
+                catch (BinanceRejectedException ex) when (ex.Code == RateLimitedCode)
+                {
+                    settled = false;
+                    limited = true;
+                    break;
                 }
                 catch (Exception) when (!_cts.IsCancellationRequested) { settled = false; }
             }
@@ -2260,13 +2316,18 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
             {
                 try
                 {
-                    decimal volume = await ReadPositionVolumeAsync().ConfigureAwait(false);
-                    lock (_gate) Position.Volume = volume; // admission checks the position this order is planned from
-                    return (volume, 0, true);
+                    var (volume, updated) = await ReadPositionAsync().ConfigureAwait(false);
+                    long lastExecution = ended.Count == 0 ? 0 : ended.Values.Max();
+                    if (lastExecution == 0 || updated >= lastExecution)
+                    {
+                        lock (_gate) Position.Volume = volume; // admission checks the position this order is planned from
+                        return (volume, 0, true);
+                    }
                 }
+                catch (BinanceRejectedException ex) when (ex.Code == RateLimitedCode) { limited = true; }
                 catch (Exception) when (!_cts.IsCancellationRequested) { }
             }
-            if (DateTime.UtcNow >= until)
+            if (limited || DateTime.UtcNow >= until)
             {
                 decimal pending;
                 lock (_gate)
@@ -2274,18 +2335,17 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
                         .Sum(t => (t.Order.Direction == OrderDirections.Buy ? 1 : -1) * t.Order.Unfilled);
                 return (Position.Volume, pending, false);
             }
-            await Task.Delay(50, _cts.Token).ConfigureAwait(false);
+            await Task.Delay(delay, _cts.Token).ConfigureAwait(false);
+            delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, LastPositionPollDelay.Ticks));
         }
     }
 
-    /// <summary>The venue's current position in this instrument (futures position; spot base-asset balance).</summary>
-    private async Task<decimal> ReadPositionVolumeAsync()
+    /// <summary>The venue's current position in this instrument (futures position; spot base-asset balance) and when
+    /// Binance last changed it.</summary>
+    private async Task<(decimal Volume, long UpdateTime)> ReadPositionAsync()
     {
-        if (_settings.Futures)
-            return (await _client.GetPositionsAsync(_cts.Token).ConfigureAwait(false)).FirstOrDefault(p => p.Symbol == Instrument.Symbol)?.Quantity ?? 0;
-        _spotBaseAsset ??= await _client.GetSpotBaseAssetAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false);
-        var balances = await _client.GetBalancesAsync(_cts.Token).ConfigureAwait(false);
-        return balances.FirstOrDefault(balance => balance.Asset == _spotBaseAsset)?.Wallet ?? 0;
+        if (!_settings.Futures) _spotBaseAsset ??= await _client.GetSpotBaseAssetAsync(Instrument.Symbol, _cts.Token).ConfigureAwait(false);
+        return await _client.GetPositionSnapshotAsync(Instrument.Symbol, _spotBaseAsset ?? "", _cts.Token).ConfigureAwait(false);
     }
 
     private Order Submit(PreparedOrderIntent intent, HandedTurn? handed)
@@ -2437,6 +2497,15 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         {
             if (intent.Id == order.IntentId) return order;
             var validationError = OrderContext.Validate(intent, order);
+            if (validationError == null && intent.Request.Type == OrderTypes.Stop && order.Type != OrderTypes.Stop &&
+                _byOrder.TryGetValue(order, out var triggered) && triggered.Own)
+            {
+                // Prepared for the stop, which triggered meanwhile: the handle now follows the order executing its exit,
+                // which an amendment meant for the stop must never cancel or replace.
+                LastError = StopAlreadyTriggered;
+                RecordRejected(intent, StopAlreadyTriggered);
+                return order;
+            }
             if (validationError == null && (intent.Request.Instrument != Instrument.Key ||
                 intent.Request.Direction != order.Direction || intent.Request.Type != order.Type || intent.Request.ReduceOnly != order.ReduceOnly))
                 validationError = "A native amendment cannot change the instrument, direction, type or reduce-only identity.";
@@ -3034,6 +3103,7 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
     private readonly NativeSendTurns _sendTurns = new();
 
     internal int QueuedSends => _sendTurns.Waiting;
+    internal int GaveUpSends => _sendTurns.GaveUp;
 
     /// <summary>Requests this broker issued that wait for an earlier reply.</summary>
     public int QueuedRequests => _sendTurns.Queued;

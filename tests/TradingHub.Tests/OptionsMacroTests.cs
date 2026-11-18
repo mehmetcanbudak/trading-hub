@@ -523,6 +523,45 @@ public sealed class OptionsDataHubTests
         Assert.Equal(all.Count, all.Select(t => t.Time).Distinct().Count());
     }
 
+    /// <summary>Two loads of one underlying (a scheduled background load and a direct caller) read the store, await the
+    /// provider and write the store back. Overlapping them lets the slower writer replace the faster one's progress,
+    /// which left a window reported as not covered on a loaded runner. Their provider requests must not overlap.</summary>
+    [Fact]
+    public async Task Concurrent_trade_loads_for_one_underlying_never_overlap_their_provider_requests()
+    {
+        var end = ProfileStart.AddDays(2);
+        var provider = new OverlapProbe();
+        var hub = new OptionsData(null, () => end) { MaxTradeDays = 2, Provider = provider };
+        await Task.WhenAll(
+            hub.LoadTradesAsync("BTC", end.AddDays(-2), end, CancellationToken.None),
+            hub.LoadTradesAsync("BTC", end.AddDays(-2), end, CancellationToken.None));
+        Assert.Equal(1, provider.MaxActive);
+        Assert.True(hub.TradesCovered("BTC", end.AddDays(-2), end));
+    }
+
+    private sealed class OverlapProbe : IOptionsProvider, IOptionTradeWindows
+    {
+        private int _active, _max;
+        public int MaxActive => Volatile.Read(ref _max);
+
+        public string Name => "Overlap";
+        public int TradesPerWindow => 1000;
+        public bool Supports(string underlying) => true;
+        public Task<OptionsChain?> ChainAsync(string underlying, CancellationToken ct) => Task.FromResult<OptionsChain?>(null);
+        public Task<IReadOnlyList<OptionDaily>> DailyAsync(string underlying, DateTime from, DateTime to, CancellationToken ct) => Task.FromResult<IReadOnlyList<OptionDaily>>(Array.Empty<OptionDaily>());
+        public async Task<IReadOnlyList<OptionTrade>> TradesAsync(string underlying, DateTime from, DateTime to, CancellationToken ct) => (await TradesWindowAsync(underlying, from, to, ct)).Trades;
+
+        public async Task<OptionTradeWindow> TradesWindowAsync(string underlying, DateTime from, DateTime to, CancellationToken ct)
+        {
+            int now = Interlocked.Increment(ref _active);
+            int seen;
+            while (now > (seen = Volatile.Read(ref _max)) && Interlocked.CompareExchange(ref _max, now, seen) != seen) { }
+            try { await Task.Delay(100, ct); }
+            finally { Interlocked.Decrement(ref _active); }
+            return new OptionTradeWindow(new List<OptionTrade>(), to);
+        }
+    }
+
     /// <summary>A provider whose every trade request stops after one hour of its window, like a page cap.</summary>
     private sealed class CappedTrades : IOptionsProvider, IOptionTradeWindows
     {

@@ -875,6 +875,8 @@ public class GapFillBreakouts : ClosedBarStudy
         public bool Bull, Used, HasLevel, LevelDone;
         public int LevelBar = -1;
         public StudyBox? Box;
+        /// <summary>The gap's first box: every redrawn (shrinking) box keeps its alert identity.</summary>
+        public StudyBox? First;
         public StudyLine? Level;
     }
 
@@ -911,6 +913,14 @@ public class GapFillBreakouts : ClosedBarStudy
     public override bool IsShown(StudyLine line) => ShowLevels;
     public override bool IsShown(StudyTag tag) => ShowLabels;
 
+    // a partly filled gap is redrawn from the filling bar; its edges stay one alertable level pair with moving prices
+    protected override StudyBox AlertIdentity(StudyBox box)
+    {
+        foreach (var gap in _book)
+            if (ReferenceEquals(gap.Box, box)) return gap.First ?? box;
+        return box;
+    }
+
     protected override void ResetState() { _atr = new(14); _book.Clear(); _bullBreaks = _bearBreaks = 0; }
 
     protected override void OnCoverageGap(int bar)
@@ -925,7 +935,7 @@ public class GapFillBreakouts : ClosedBarStudy
         if (SweepMath.Gap(Bars, bar, atr * AtrMult) is { } g)
         {
             var gap = new FillGap { Bar = bar - 1, Top = g.Top, Bottom = g.Bottom, Remain = g.Bull ? g.Top : g.Bottom, Bull = g.Bull };
-            gap.Box = Draw(gap, bar - 1, bar);
+            gap.Box = gap.First = Draw(gap, bar - 1, bar);
             _book.Add(gap);
             if (_book.Count > MaxGaps) { Retire(_book[0], bar); _book.RemoveAt(0); }
         }

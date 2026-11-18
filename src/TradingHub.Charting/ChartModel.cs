@@ -196,6 +196,12 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
     public Instrument Instrument => Data.Instrument;
     /// <summary>Changes for every rebuild, append and correction, even when candle count is unchanged.</summary>
     public long DataGeneration { get; private set; }
+
+    /// <summary>
+    /// Changes whenever the candles are rebuilt from the trades (another timeframe or price step, loaded or extended
+    /// history, a correction): bar indices and values of different generations are not comparable.
+    /// </summary>
+    public long HistoryGeneration { get; private set; }
     public string SourceIdentity => $"{Instrument.FeedId}/{Instrument.Symbol}/{Instrument.TickSize.ToString(CultureInfo.InvariantCulture)}";
 
     public string DepthStatusText
@@ -343,6 +349,7 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
     public void Rebuild()
     {
         DataGeneration++;
+        HistoryGeneration++;
         int step = BaseStepFor(Settings.PriceStep);
         var session = (Data.Feed as TradingHub.Feeds.ISessionSettingsFeed)?.GetSessionSettings(Instrument);
         Series = new CandleSeries(Instrument, Period, step, session);
@@ -538,7 +545,7 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
         var result = Series.Append(Data.Trades, CandleSeries.InitialBatchSize);
         Series.AdvanceAvailability(AvailabilityClock);
         bool rebuilt = Series.CorrectionRevision != correction;
-        if (rebuilt) { _wrappers.Clear(); _openCumulative = null; }
+        if (rebuilt) { _wrappers.Clear(); _openCumulative = null; HistoryGeneration++; }
         for (int i = _wrappers.Count; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
         if (!result.Changed && !rebuilt) return;
         DataGeneration++;
@@ -635,6 +642,7 @@ public sealed partial class ChartModel : IIndicatorHost, IIndicatorDataProvider,
         if (rebuilt)
         {
             _openCumulative = null;
+            HistoryGeneration++;
             _wrappers.Clear();
             foreach (var slot in Indicators) slot.NeedsRecalc = true;
         }

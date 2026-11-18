@@ -851,11 +851,19 @@ public class OiChanges : OptionsOverlay
     [Range(40, 600)]
     public int Width { get; set; } = 160;
 
-    /// <summary>Per strike: open interest now minus then (a strike absent then counts as zero then).</summary>
+    /// <summary>
+    /// Per strike of either snapshot, in strike order: open interest now minus then (a strike absent then counts as zero
+    /// then; a strike absent now, all of its interest closed or expired, counts as zero now).
+    /// </summary>
     internal static List<(double Strike, double Call, double Put)> Changes(StrikeSnapshot now, StrikeSnapshot old)
     {
         var before = old.Rows.ToDictionary(r => r.Strike);
-        return now.Rows.Select(r => (r.Strike, r.CallOi - (before.TryGetValue(r.Strike, out var b) ? b.CallOi : 0), r.PutOi - (before.TryGetValue(r.Strike, out var b2) ? b2.PutOi : 0))).ToList();
+        var after = now.Rows.ToDictionary(r => r.Strike);
+        return after.Keys.Union(before.Keys).Order().Select(k =>
+        {
+            var (n, b) = (after.GetValueOrDefault(k), before.GetValueOrDefault(k));
+            return (k, (n?.CallOi ?? 0) - (b?.CallOi ?? 0), (n?.PutOi ?? 0) - (b?.PutOi ?? 0));
+        }).ToList();
     }
 
     internal override void Build(OptionsScene s, OptionsData data)

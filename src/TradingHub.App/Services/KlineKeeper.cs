@@ -16,7 +16,8 @@ public sealed record KlineMaintenanceSettings
     public int MaxInstruments { get; set; } = 30;
     public List<TrackedCandleInstrument> Instruments { get; set; } = new();
 }
-public sealed record KlineMaintenanceFailure(string InstrumentKey, DateTime MonthUtc, int Minutes, string Message);
+/// <param name="CoverageOnly">The provider answered with incomplete or invalid candles; its transport and the cache worked.</param>
+public sealed record KlineMaintenanceFailure(string InstrumentKey, DateTime MonthUtc, int Minutes, string Message, bool CoverageOnly = false);
 public sealed record KlineKeeperStatus(bool IsRunning, string Message, DateTime? LastRunUtc,
     IReadOnlyDictionary<string, string> Instruments)
 {
@@ -39,6 +40,8 @@ public sealed class KlineKeeper : IAsyncDisposable
 {
     public const int MaxTrackedInstruments = 60;
     public const int MaxMonthlyLoadsPerCycle = 24;
+    /// <summary>Bound of one maintenance cycle; remaining work continues in later cycles.</summary>
+    internal TimeSpan CycleLimit { get; init; } = TimeSpan.FromMinutes(5);
     private static readonly int[] Resolutions = { 1, 5, 15, 60 };
     private readonly object _sync = new();
     private readonly SemaphoreSlim _run = new(1, 1);
@@ -164,6 +167,7 @@ public sealed class KlineKeeper : IAsyncDisposable
         CancellationTokenSource? active = null;
         TaskCompletionSource? cycle = null;
         long served;
+        int visited = 0, tracked = 0;
         try
         {
             KlineMaintenanceSettings settings;
@@ -175,14 +179,15 @@ public sealed class KlineKeeper : IAsyncDisposable
                 _cycles++;
                 _cycle = cycle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 active = _active = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
-                active.CancelAfter(TimeSpan.FromMinutes(5));
+                active.CancelAfter(CycleLimit);
                 _running = true;
                 _message = "Updating saved candle history.";
             }
             Notify();
             var now = DateTime.SpecifyKind(_utcNow(), DateTimeKind.Utc);
             var thisMonth = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-            int loads = 0, visited = 0;
+            int loads = 0;
+            tracked = settings.Instruments.Count;
             for (int offset = 0; offset < settings.Instruments.Count && loads < MaxMonthlyLoadsPerCycle; offset++)
             {
                 var item = settings.Instruments[(_instrumentCursor + offset) % settings.Instruments.Count];
@@ -203,7 +208,10 @@ public sealed class KlineKeeper : IAsyncDisposable
                         if (error != null) continue;
                         int plannedOffset = 1 + cursor / Resolutions.Length % months;
                         if (pending.MonthUtc == thisMonth.AddMonths(-plannedOffset) && minutes == Resolutions[cursor % Resolutions.Length])
+                        {
                             cursor = (cursor + 1) % (months * Resolutions.Length);
+                            lock (_sync) _cursors[item.Key] = cursor;
+                        }
                         if (loads >= MaxMonthlyLoadsPerCycle) break;
                     }
                     await UpdateAsync(item, thisMonth, now, minutes, active.Token).ConfigureAwait(false);
@@ -213,19 +221,20 @@ public sealed class KlineKeeper : IAsyncDisposable
                 {
                     int monthOffset = 1 + cursor / Resolutions.Length % months;
                     int minutes = Resolutions[cursor % Resolutions.Length];
-                    // A failure at this resolution must be retried in its own slot before later catch-up.
+                    // A failed slot at this resolution must be retried in its own slot before later catch-up; that includes a
+                    // current month whose cache cannot be written, since more months would only go to the failing store. Only
+                    // a current month the provider covers partially (its retained window) does not block older months.
                     bool unresolved;
-                    lock (_sync) unresolved = _failures.ContainsKey((item.Key, minutes));
+                    lock (_sync) unresolved = _failures.TryGetValue((item.Key, minutes), out var failed) && !(failed.MonthUtc == thisMonth && failed.CoverageOnly);
                     if (unresolved) break;
                     var month = thisMonth.AddMonths(-monthOffset);
                     var error = await UpdateAsync(item, month, month.AddMonths(1), minutes, active.Token).ConfigureAwait(false);
                     loads++;
                     if (error != null) break;
                     cursor = (cursor + 1) % (months * Resolutions.Length);
+                    lock (_sync) _cursors[item.Key] = cursor;
                 }
-                lock (_sync) _cursors[item.Key] = cursor;
             }
-            if (settings.Instruments.Count > 0) _instrumentCursor = (_instrumentCursor + visited) % settings.Instruments.Count;
             lock (_sync)
             {
                 _lastRun = now;
@@ -237,6 +246,9 @@ public sealed class KlineKeeper : IAsyncDisposable
         { lock (_sync) _message = "Candle maintenance cancelled; completed cache months remain available."; }
         finally
         {
+            // Also after a cycle cut by its time limit or cancelled: the next cycle starts after every instrument this one
+            // reached, so one slow instrument cannot starve the others.
+            if (tracked > 0) _instrumentCursor = (_instrumentCursor + visited) % tracked;
             lock (_sync)
             {
                 _running = false;
@@ -269,7 +281,7 @@ public sealed class KlineKeeper : IAsyncDisposable
     {
         ct.ThrowIfCancellationRequested();
         using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        bounded.CancelAfter(TimeSpan.FromSeconds(45));
+        bounded.CancelAfter(UpdateDeadline(from, to, minutes));
         string? error = null;
         string detail;
         try
@@ -285,7 +297,8 @@ public sealed class KlineKeeper : IAsyncDisposable
         {
             error = ex.Message;
             detail = "Candle maintenance unavailable: " + error;
-            lock (_sync) _failures[(item.Key, minutes)] = new(item.Key, from, minutes, error);
+            // InvalidDataException: the provider's data was incomplete or invalid while transport and cache worked.
+            lock (_sync) _failures[(item.Key, minutes)] = new(item.Key, from, minutes, error, ex is InvalidDataException);
         }
         lock (_sync)
         {
@@ -297,6 +310,14 @@ public sealed class KlineKeeper : IAsyncDisposable
         Notify();
         return error;
     }
+
+    /// <summary>
+    /// The bound of one monthly update: 45 s plus time for the slowest public candle pagination (about 100 bars per
+    /// paced request, as OKX serves them), so a closed month of 1-minute bars (447 pages) can complete.
+    /// </summary>
+    internal static TimeSpan UpdateDeadline(DateTime from, DateTime to, int minutes) =>
+        TimeSpan.FromSeconds(45) + TimeSpan.FromMilliseconds(Math.Max(0, (to - from).TotalMinutes / minutes) * 4);
+
     private async Task LoopAsync()
     {
         bool first = true;

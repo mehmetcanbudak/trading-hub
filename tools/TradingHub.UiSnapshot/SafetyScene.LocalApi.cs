@@ -48,6 +48,11 @@ internal static partial class SafetyScene
             var secrets = svc.Connections.Profiles.Select(p => p.ApiKey).Where(k => k.Length >= 6).ToArray();
             check(connections.StartsWith("HTTP/1.1 200", StringComparison.Ordinal) && secrets.All(s => !connections.Contains(s, StringComparison.Ordinal))
                   && !connections.Contains("apiKey", StringComparison.OrdinalIgnoreCase), "connections expose no keys or credentials");
+            string notOpen = Await(RawAsync(port, "GET", "/api/v1/klines?conn=binance-futures&symbol=NOTOPENUSDT&tf=1m", $"127.0.0.1:{port}"));
+            check(notOpen.Contains(" 404 ", StringComparison.Ordinal) && notOpen.Contains("\"not_open\"", StringComparison.Ordinal),
+                "candles of an instrument that is not open are refused: the API opens no feed and requests no history");
+            string candles = Await(RawAsync(port, "GET", $"/api/v1/klines?conn={Uri.EscapeDataString(connection)}&symbol={Uri.EscapeDataString(symbol)}&tf=1m", $"127.0.0.1:{port}"));
+            check(candles.StartsWith("HTTP/1.1 200", StringComparison.Ordinal), "candles of an open instrument come from its loaded trades");
 
             using var stream = new ClientWebSocket();
             var connect = stream.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/api/v1/stream?conn={Uri.EscapeDataString(connection)}&symbol={Uri.EscapeDataString(symbol)}"), CancellationToken.None);

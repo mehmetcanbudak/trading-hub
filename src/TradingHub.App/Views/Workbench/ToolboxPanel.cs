@@ -81,7 +81,7 @@ internal sealed class ToolboxPanel : WorkbenchPanel
 
         var grid = new WrapPanel { Orientation = Orientation.Horizontal, ItemWidth = 420 };
         foreach (var c in new[] { size, liquidation, funding, clock, structure }) grid.Children.Add(c);
-        Content = new ScrollViewer { Content = Ui.V(10, Note("Calculations run locally from the values entered; nothing is sent and no order is placed. Inputs are remembered."), grid) };
+        Content = new ScrollViewer { Content = Ui.V(10, Note("Calculations run locally from the values entered; nothing is sent and no order is placed. Balance, risk, fee, leverage, margin and funding inputs are remembered; point value, quantity step and an empty entry price are filled in from the selected instrument."), grid) };
         foreach (var box in new[] { _balance, _risk, _fee, _leverage, _maintenance, _fundNotional, _fundRate, _fundEvery, _fundHold })
             box.ValueChanged += (_, _) => Recalculate();
         _riskUnit.SelectionChanged += _ => Recalculate();
@@ -195,6 +195,7 @@ internal sealed class ToolboxPanel : WorkbenchPanel
         var now = _structureLoadedAt;
         decimal price = sel.Data.LastPrice;
         var session = (sel.Data.Feed as ISessionSettingsFeed)?.GetSessionSettings(sel.Instrument);
+        var ct = ActivityToken;
         _ = Task.Run(async () =>
         {
             StructureSummaryResult? result = null;
@@ -203,14 +204,21 @@ internal sealed class ToolboxPanel : WorkbenchPanel
             try
             {
                 var candles = await KlineHistory.LoadAsync(source, sel.Instrument, now - StructureSummary.History(timeframe), now, StructureSummary.SourceMinutes(timeframe), 0, null,
-                    CancellationToken.None, warning: notes.Add).ConfigureAwait(false);
+                    ct, warning: notes.Add).ConfigureAwait(false);
                 result = StructureSummary.Build(sel.Instrument, candles, timeframe, price, now, session);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
             catch (Exception ex) { error = ex.Message; }
             Dispatcher.UIThread.Post(() =>
             {
                 if (generation != _structureGeneration) return;
                 _structureLoading = false;
+                // Hidden meanwhile: the load was cancelled, so summarize again once the panel is visible.
+                if (ct.IsCancellationRequested)
+                {
+                    _structureLoadedAt = DateTime.MinValue;
+                    return;
+                }
                 if (result == null)
                 {
                     _structureStatus.Text = $"Candles: {error}";

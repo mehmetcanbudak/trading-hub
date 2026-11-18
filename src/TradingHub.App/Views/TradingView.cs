@@ -67,8 +67,16 @@ public sealed class ChartTab
     /// <summary>Chip shown after a gesture (switch type, delete, undo).</summary>
     internal InkChip? InkChip { get; set; }
 
-    /// <summary>Indicators hidden with "hide indicators" (shown again when unhidden).</summary>
+    /// <summary>Indicators hidden with "hide indicators" (shown again when unhidden); saved with the chart.</summary>
     internal List<IndicatorSlot>? HiddenIndicators { get; set; }
+
+    /// <summary>
+    /// Chart alerts of the instruments this chart showed before ("feed/symbol"): they are prices and drawings of that
+    /// market, so they wait (saved with the chart) and come back when the chart shows it again.
+    /// </summary>
+    internal Dictionary<string, List<ChartAlert>> ParkedAlerts { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    internal static string AlertsKey(string feedId, string symbol) => feedId + "/" + symbol;
 
     internal ChartPage? Page { get; set; }
     internal ChartWindow? Window { get; set; }
@@ -631,7 +639,12 @@ public sealed partial class TradingView : UserControl
             }
 
             bool instrumentChanged = tab.Model != null && (tab.FeedId != profile.Id || !tab.Symbol.Equals(inst.Symbol, StringComparison.OrdinalIgnoreCase));
-            var oldIndicators = copyIndicatorsFrom?.Model?.Indicators.Select(s => s.Indicator).ToList();
+            var source = copyIndicatorsFrom?.Model;
+            var oldSlots = source?.Indicators.ToList();
+            var oldKeys = oldSlots?.Select(s => ChartAlertEngine.KeyOf(source!, s)).ToList();
+            var oldHidden = copyIndicatorsFrom?.HiddenIndicators;
+            var oldAlerts = tab.Model?.Alerts.ToList();
+            string oldSymbol = tab.Symbol, oldAlertsKey = ChartTab.AlertsKey(tab.FeedId, tab.Symbol);
             tab.Model?.Dispose();
             var data = _svc.Open(profile.Id, inst);
             bool preserveAccount = expectedModel != null || tab.AccountSelectionUnavailable;
@@ -671,14 +684,36 @@ public sealed partial class TradingView : UserControl
             Workspace.LoadDrawings(tab);
             if (tab.HistoryHours != 0) _ = LoadHistoryAsync(tab, tab.HistoryHours, quiet: true);
 
-            if (oldIndicators != null)
+            // the indicators as they were (hidden ones stay hidden, the drawing bar's eye too); alert keys follow the copies
+            var copiedKeys = new Dictionary<string, string?>(StringComparer.Ordinal);
+            if (oldSlots != null)
             {
-                foreach (var ind in oldIndicators)
+                var hidden = oldHidden != null ? new List<IndicatorSlot>() : null;
+                for (int i = 0; i < oldSlots.Count; i++)
                 {
-                    var copy = Workspace.CloneIndicator(_svc, ind);
-                    if (copy != null) model.AddIndicator(copy, applyDefaultColors: false);
+                    var old = oldSlots[i];
+                    var copy = Workspace.CloneIndicator(_svc, old.Indicator);
+                    if (copy == null)
+                    {
+                        copiedKeys[oldKeys![i]] = null;
+                        continue;
+                    }
+
+                    var slot = model.AddIndicator(copy, applyDefaultColors: false);
+                    slot.Visible = old.Visible;
+                    copiedKeys[oldKeys![i]] = ChartAlertEngine.KeyOf(model, slot);
+                    if (oldHidden?.Contains(old) == true) hidden!.Add(slot);
                 }
+
+                tab.HiddenIndicators = hidden;
+                SyncDrawingTools(tab);
             }
+
+            // chart alerts stay with their instrument: the same one keeps them; another one's wait on this chart until it
+            // shows that instrument again (they are its prices and drawings)
+            var (alerts, parked, resumed, lost) = Workspace.CarryChartAlerts(oldAlerts, copiedKeys, instrumentChanged,
+                oldAlertsKey, ChartTab.AlertsKey(profile.Id, inst.Symbol), tab.ParkedAlerts);
+            model.Alerts.AddRange(alerts);
 
             UpdateTitles(tab);
             if (tab.Strategies.Count > 0) RestartStrategies(tab, instrumentChanged);
@@ -687,6 +722,10 @@ public sealed partial class TradingView : UserControl
             tab.Window?.Toolbar.Sync();
             if (!_linkSync) _ = PropagateSymbolAsync(tab);
             _status($"Opening {inst.Symbol} on {profile.Name}…");
+            if (resumed > 0) _status($"{resumed} chart alert(s) of {inst.Symbol} resumed");
+            if (parked > 0) _status($"{parked} chart alert(s) of {oldSymbol} are kept and resume when this chart shows it again");
+            if (model.DrawingsUnreadable) _status($"Drawings of {inst.Symbol} could not be read: the file is kept and alerts on them are not removed");
+            if (lost > 0) _status($"{lost} chart alert(s) removed: their indicator could not be copied");
             void Ready()
             {
                 data.HistoryLoaded -= Ready;

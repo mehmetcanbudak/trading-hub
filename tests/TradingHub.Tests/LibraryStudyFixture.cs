@@ -19,18 +19,34 @@ internal static class LibraryStudyFixture
     {
         var instrument = new Instrument { Symbol = "LIBRARY-STUDY-FIXTURE", FeedId = "sim", TickSize = tick, VolumeStep = 1 };
         IMarketDataFeed feed = session == null ? new SimulatedFeed() : new SessionFeed(session);
-        var data = new InstrumentData(instrument, feed); long id = 1;
-        var step = period.ApproxDuration;
+        var data = new InstrumentData(instrument, feed);
         for (int i = 0; i < bars.Count; i++)
-        {
-            var bar = bars[i]; DateTime time = start + step * i;
-            // open, high, low and close prints so observed footprint rows exist across the range
-            data.Trades.Add(new Trade(id++, time, bar.Open, bar.Volume / 4, TradeSide.Buy));
-            data.Trades.Add(new Trade(id++, time.AddSeconds(1), bar.High, bar.Volume / 4, TradeSide.Buy));
-            data.Trades.Add(new Trade(id++, time.AddSeconds(2), bar.Low, bar.Volume / 4, TradeSide.Sell));
-            data.Trades.Add(new Trade(id++, time.AddSeconds(3), bar.Close, bar.Volume / 4, TradeSide.Sell));
-        }
+            foreach (var trade in Prints(start, period, i, bars[i])) data.Trades.Add(trade);
         return new ChartModel(data, period, new ChartSettings());
+    }
+
+    /// <summary>The open, high, low and close prints of bar <paramref name="index"/>, so observed footprint rows exist across its range.</summary>
+    internal static Trade[] Prints(DateTime start, ChartPeriod period, int index, Ohlc bar)
+    {
+        DateTime time = start + period.ApproxDuration * index; long id = 4L * index + 1;
+        return new[]
+        {
+            new Trade(id, time, bar.Open, bar.Volume / 4, TradeSide.Buy),
+            new Trade(id + 1, time.AddSeconds(1), bar.High, bar.Volume / 4, TradeSide.Buy),
+            new Trade(id + 2, time.AddSeconds(2), bar.Low, bar.Volume / 4, TradeSide.Sell),
+            new Trade(id + 3, time.AddSeconds(3), bar.Close, bar.Volume / 4, TradeSide.Sell),
+        };
+    }
+
+    /// <summary>Appends bar <paramref name="index"/> to a live chart print by print, as a feed would, updating after each.</summary>
+    internal static void Append(ChartModel model, DateTime start, ChartPeriod period, int index, Ohlc bar, Action<int>? afterPrint = null)
+    {
+        var prints = Prints(start, period, index, bar);
+        for (int k = 0; k < prints.Length; k++)
+        {
+            model.Data.Trades.Add(prints[k]); model.Update(); model.Update();
+            afterPrint?.Invoke(k);
+        }
     }
 
     internal static ChartModel Model(params Ohlc[] bars) => Model(new DateTime(2026, 3, 2, 0, 0, 0, DateTimeKind.Utc), ChartPeriod.M1, null, bars);
@@ -98,6 +114,67 @@ internal static class LibraryStudyFixture
                 Assert.True(xa == ya && (!xa || x[bar] == y[bar]), $"{create().GetType().Name} series {x.Id} changed at bar {bar}: {x[bar]} -> {y[bar]}");
             }
         }
+    }
+
+    /// <summary>
+    /// The live path: the second half of <paramref name="bars"/> arrives print by print. While only the forming bar receives
+    /// prints nothing published changes; each new bar processes exactly the bar it closes; an earlier bar reported again and a
+    /// retracted close both replay; the result always equals a fresh full calculation over the same bars.
+    /// </summary>
+    internal static void AssertLiveMatchesReplay(Func<ClosedBarStudy> create, IReadOnlyList<Ohlc> bars, ChartPeriod? period = null, DateTime? start = null, SessionSettings? session = null)
+    {
+        var at = start ?? new DateTime(2026, 3, 2, 0, 0, 0, DateTimeKind.Utc); var p = period ?? ChartPeriod.M5;
+        int seeded = bars.Count / 2, last = bars.Count - 1;
+        using var live = Model(at, p, session, bars.Take(seeded).ToList());
+        var study = Add(live, create());
+        string name = study.GetType().Name;
+        for (int i = seeded; i < bars.Count; i++)
+        {
+            string published = "";
+            Append(live, at, p, i, bars[i], k =>
+            {
+                Assert.Equal(i + 1, live.Series.Count);
+                Assert.Equal(i, study.Bars.Count); // bar i forms; every earlier bar was processed once it had a successor
+                string now = Snapshot(study, i);
+                Assert.True(k == 0 || published == now, $"{name}: print {k} into forming bar {i} changed what the study publishes");
+                published = now;
+            });
+        }
+
+        using var fresh = Model(at, p, session, bars);
+        string expected = Snapshot(Add(fresh, create()), bars.Count);
+        Assert.True(expected == Snapshot(study, bars.Count), $"{name}: the live path differs from a fresh calculation");
+        // an earlier bar reported again (an open-interest correction, for example) replays from the start
+        study.HostCalculate(last / 2);
+        Assert.True(expected == Snapshot(study, bars.Count), $"{name}: an earlier bar reported again did not replay to the same result");
+        // a close that is retracted replays without it
+        live.Series[last].IsClosed = true; study.HostCalculate(last);
+        Assert.Equal(bars.Count, study.Bars.Count);
+        live.Series[last].IsClosed = false; study.HostCalculate(last);
+        Assert.Equal(last, study.Bars.Count);
+        Assert.True(expected == Snapshot(study, bars.Count), $"{name}: a retracted close did not replay to the same result");
+    }
+
+    /// <summary>
+    /// What a closed-bar study publishes: every scene shape with its ends, colors and fill, the dashboard, the alert levels and
+    /// every series value and availability before bar <paramref name="bars"/>.
+    /// </summary>
+    internal static string Snapshot(ClosedBarStudy study, int bars)
+    {
+        var text = new System.Text.StringBuilder();
+        foreach (var s in study.Scene.Boxes) text.AppendLine($"box {s.From}/{s.Available}/{s.To}/{s.EndAvailable}/{s.Top}/{s.Bottom}/{s.Text}/{s.Alert}/{s.Color.ToArgb()}/{s.FillAlpha}");
+        foreach (var s in study.Scene.Lines) text.AppendLine($"line {s.From}/{s.Available}/{s.To}/{s.EndAvailable}/{s.Price}/{s.EndPrice}/{s.Label}/{s.Alert}/{s.Color.ToArgb()}");
+        foreach (var m in study.Scene.Marks) text.AppendLine($"mark {m}");
+        foreach (var t in study.Scene.Tags) text.AppendLine($"tag {t}");
+        foreach (var (bar, color) in study.Scene.Tints.OrderBy(t => t.Key)) text.AppendLine($"tint {bar}/{color.ToArgb()}");
+        foreach (var path in study.Scene.Paths) text.AppendLine($"path {path.Available}/{path.Color.ToArgb()}/{string.Join(";", path.Points)}");
+        text.AppendLine($"dash {study.Scene.DashTitle}");
+        foreach (var row in study.Scene.Dash) text.AppendLine($"row {row.Name}/{row.Value}/{row.Color.ToArgb()}");
+        foreach (var level in study.GetAlertLevels()) text.AppendLine($"level {level}");
+        foreach (var series in study.DataSeries.OfType<ValueDataSeries>())
+            for (int bar = 0; bar < bars; bar++)
+                text.AppendLine(series is IValueDataSeriesAvailability a && !a.IsAvailable(bar) ? $"{series.Id}[{bar}] -" : $"{series.Id}[{bar}] {series[bar]}");
+        return text.ToString();
     }
 
     /// <summary>

@@ -166,9 +166,13 @@ internal static class AuthoringScriptsScene
         Until(() => svc.Catalog.Items.Any(i => i.Type.FullName == copy.CopyType), "the copy compiles as its own type while the original stays listed");
         Check(svc.Catalog.Items.Any(i => i.Type == typeof(MovingAverage)), "the built-in original remains available");
         string entry = Path.Combine(copy.Directory, copy.Manifest.EntryFile);
-        File.AppendAllText(entry, "// scene edit\n");
+        // the copy was generated from an earlier original (different generated text) and then edited by the user: the
+        // current original regenerates a different copy, so this is a genuine update, not only a changed source hash
+        string earlier = "// generated from an earlier version of the original\n" + File.ReadAllText(entry);
+        File.WriteAllText(entry, earlier + "// scene edit\n");
         var manifest = IndicatorSourceCopies.ReadManifest(copy.Directory)!;
         manifest.Originals = manifest.Originals.ToDictionary(p => p.Key, _ => "previous-version", StringComparer.Ordinal);
+        manifest.Files[manifest.EntryFile] = IndicatorSourceCopies.Hash(earlier);
         IndicatorSourceCopies.WriteManifest(copy.Directory, manifest);
         var reviewed = Await(svc.ReviewSourceCopiesAsync());
         Check(reviewed.Single(s => s.CopyType == copy.CopyType).State == SourceCopyState.OriginalUpdated && File.ReadAllText(entry).EndsWith("// scene edit\n", StringComparison.Ordinal),

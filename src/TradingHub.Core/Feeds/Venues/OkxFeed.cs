@@ -98,11 +98,12 @@ public sealed class OkxFeed(bool spot, PublicVenueTransport? transport = null) :
     {
         var bars = new List<Kline>();
         long cursor = toMs;
+        string bar = minutes == 60 ? "1H" : $"{minutes}m"; // OKX writes hours in upper case.
         for (int page = 0; page < 10_000 && cursor > fromMs; page++)
         {
             ct.ThrowIfCancellationRequested();
             // history-candles pages backwards: "after" returns bars strictly older than the cursor.
-            using var doc = await GetJsonAsync($"/api/v5/market/history-candles?instId={Uri.EscapeDataString(spec.Native)}&bar={minutes}m&after={cursor}&limit=100", ct).ConfigureAwait(false);
+            using var doc = await GetJsonAsync($"/api/v5/market/history-candles?instId={Uri.EscapeDataString(spec.Native)}&bar={bar}&after={cursor}&limit=100", ct).ConfigureAwait(false);
             var page0 = ParseCandles(doc.RootElement, spot);
             if (page0.Count == 0) break;
             bars.AddRange(page0);

@@ -72,6 +72,8 @@ public class MultiPeriodVwap : Indicator
     [Display(Name = "Second band (deviations)", GroupName = "Bands"), Range(0.1, 10)]
     public decimal SecondBandDeviations { get => _second; set { _second = Math.Clamp(value, 0.1m, 10); RecalculateValues(); } }
     [Display(Name = "Price at the end of the line", GroupName = "Visualization")] public bool ShowPriceLabels { get; set; }
+    /// <summary>False when a composite (the VWAP suite) draws one combined fidelity legend for all its parts.</summary>
+    internal bool DrawLegend { get; set; } = true;
     [Browsable(false)] public StudyCoverage Coverage => _states[0].Count == 0 ? 0 : _states[0][^1].Coverage;
     [Browsable(false)] public string Status => FootprintStudyData.Label(Coverage);
     public StudyCoverage CoverageAt(StudyTimeFrame period, int bar)
@@ -109,7 +111,7 @@ public class MultiPeriodVwap : Indicator
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (ChartInfo == null) return;
-        FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Multi-period VWAP: {Status}", Color.LightSkyBlue);
+        if (DrawLegend) FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Multi-period VWAP: {Status}", Color.LightSkyBlue);
         int bar = _states[0].Count - 1;
         if (!ShowPriceLabels || bar < 0) return;
         int x = ChartInfo.GetXByBar(bar, false) + 8; decimal tick = InstrumentInfo?.TickSize is > 0 and var t ? t : 0.01m;

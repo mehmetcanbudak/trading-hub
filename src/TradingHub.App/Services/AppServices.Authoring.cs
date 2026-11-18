@@ -20,14 +20,25 @@ public sealed partial class AppServices
     /// <summary>The tracked copy whose compiled type is <paramref name="copyType"/>, if any.</summary>
     public SourceCopyStatus? SourceCopyFor(string copyType) => SourceCopies.FirstOrDefault(s => s.CopyType == copyType);
 
-    /// <summary>Re-reads every tracked copy off the UI thread; untouched copies of updated originals are regenerated.</summary>
+    /// <summary>One review at a time: an overlapping older review could otherwise publish its list after a newer one.</summary>
+    private readonly SemaphoreSlim _sourceCopyReview = new(1, 1);
+
+    /// <summary>
+    /// Re-reads every tracked copy off the UI thread; untouched copies of updated originals are regenerated. Reviews run one
+    /// after another, so the last published list reflects the folder after every earlier review and copy operation.
+    /// </summary>
     public async Task<IReadOnlyList<SourceCopyStatus>> ReviewSourceCopiesAsync(string? folder = null)
     {
         string root = folder ?? AppPaths.UserIndicators;
-        var result = await Task.Run(() => IndicatorSourceCopies.Review(root));
-        SourceCopies = result;
-        SourceCopiesChanged?.Invoke();
-        return result;
+        await _sourceCopyReview.WaitAsync();
+        try
+        {
+            var result = await Task.Run(() => IndicatorSourceCopies.Review(root));
+            SourceCopies = result;
+            SourceCopiesChanged?.Invoke();
+            return result;
+        }
+        finally { _sourceCopyReview.Release(); }
     }
 
     /// <summary>
@@ -41,7 +52,12 @@ public sealed partial class AppServices
             var result = await ReviewSourceCopiesAsync();
             var refreshed = result.Where(s => s.State == SourceCopyState.Refreshed).Select(s => s.Manifest.ClassName).ToList();
             var updated = result.Where(s => s.State == SourceCopyState.OriginalUpdated).Select(s => s.Manifest.ClassName).ToList();
-            if (refreshed.Count > 0) status($"Unchanged indicator copies now follow their updated originals: {string.Join(", ", refreshed)}");
+            if (refreshed.Count > 0)
+            {
+                // a whole-directory swap is not a source-file event for every monitor: load the regenerated copies now
+                Scripts?.CompileAll();
+                status($"Unchanged indicator copies now follow their updated originals: {string.Join(", ", refreshed)}");
+            }
             if (updated.Count > 0)
                 Alerts.Raise(AlertKind.System, "", "Indicators",
                     $"The original of your edited indicator copy was updated: {string.Join(", ", updated)}. Your edits were kept. Right-click the copy in the indicator library to keep your edits or restore the new original.",

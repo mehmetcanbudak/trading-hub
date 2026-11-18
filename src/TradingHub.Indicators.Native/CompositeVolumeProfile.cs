@@ -46,6 +46,10 @@ public partial class CompositeVolumeProfile : Indicator
     private readonly List<(decimal Low, decimal High)> _ranges = new();
     private ProfilePeriod _period;
     private int _last = -1, _count = 10, _untested;
+    // Live updates of the developing profile only mark it; POC/value area and the display lists are rebuilt once per read
+    // (render, alerts, menus, properties), never per trade batch. _unfinished is the raw profile whose levels are stale.
+    private bool _displayStale;
+    private Profile? _unfinished;
     private decimal _group = 20, _va = 70;
     private decimal _effectiveGroup = 20;
     private bool _estimate, _compose = true;
@@ -78,15 +82,16 @@ public partial class CompositeVolumeProfile : Indicator
     [Display(Name = "Profile color", GroupName = "Visualization")] public Color ProfileColor { get; set; } = Color.FromArgb(70, 70, 130, 190);
     [Display(Name = "Value area color", GroupName = "Visualization")] public Color ValueAreaColor { get; set; } = Color.FromArgb(130, 30, 144, 255);
     [Display(Name = "POC color", GroupName = "Visualization")] public Color PocColor { get; set; } = Color.DarkOrange;
-    [Browsable(false)] public IReadOnlyList<Profile> Profiles => _displayView;
-    [Browsable(false)] public IReadOnlyList<PocProjection> PocProjections => _pocView;
+    [Browsable(false)] public IReadOnlyList<Profile> Profiles { get { lock (_sync) { RefreshDisplay(); return _displayView; } } }
+    [Browsable(false)] public IReadOnlyList<PocProjection> PocProjections { get { lock (_sync) { RefreshDisplay(); return _pocView; } } }
     [Browsable(false)] public int RawProfileCount => _raw.Count;
     [Browsable(false)] public decimal EffectivePriceGrouping => _effectiveGroup;
     internal IReadOnlyList<Profile> RawProfiles => _raw;
-    [Browsable(false)] public string Status => (_display.Count == 0 ? "Missing footprint" : FootprintStudyData.Label(_display[^1].Coverage)) + $"; effective price row {_effectiveGroup}" +
+    [Browsable(false)] public string Status { get { lock (_sync) { RefreshDisplay(); return StatusText(); } } }
+    private string StatusText() => (_display.Count == 0 ? "Missing footprint" : FootprintStudyData.Label(_display[^1].Coverage)) + $"; effective price row {_effectiveGroup}" +
         (_display.Count > 0 && (_display[^1].Coverage & StudyCoverage.Compact) != 0 ? _display[^1].ResolutionSeconds > 0 ? $"; compact time resolution {_display[^1].ResolutionSeconds}s" : "; exchange-packet aggregation (time window unspecified)" : "");
     protected override void OnRecalculate() { lock (_sync) Reset(); }
-    private void Reset() { _raw.Clear(); _display.Clear(); _pocs.Clear(); _closed.Clear(); _touches.Clear(); _closedRawCount = 0; _latest.Clear(); _latestSides.Clear(); _ranges.Clear(); _last = -1; ResetReuse(); }
+    private void Reset() { _raw.Clear(); _display.Clear(); _pocs.Clear(); _closed.Clear(); _touches.Clear(); _closedRawCount = 0; _latest.Clear(); _latestSides.Clear(); _ranges.Clear(); _last = -1; _displayStale = false; _unfinished = null; ResetReuse(); }
     private bool Boundary(int bar) => bar > 0 && _period switch
     {
         ProfilePeriod.Session => IsNewSession(bar), ProfilePeriod.Week => IsNewWeek(bar), ProfilePeriod.Month => IsNewMonth(bar),
@@ -114,7 +119,7 @@ public partial class CompositeVolumeProfile : Indicator
                 if (!_latestCausal) profile.NonCausalBars--;
                 UndoSideRows(profile);
                 if (CalculateDisplayProfiles) _ranges.RemoveAt(bar); _last--;
-                if (profile.StartBar == bar) _raw.RemoveAt(_raw.Count - 1);
+                if (profile.StartBar == bar) { _raw.RemoveAt(_raw.Count - 1); if (ReferenceEquals(_unfinished, profile)) _unfinished = null; }
             }
             for (int i = _last + 1; i <= bar; i++) Step(i);
         }
@@ -133,6 +138,8 @@ public partial class CompositeVolumeProfile : Indicator
         if (bar == 0) _effectiveGroup = EffectiveGroupFor(candle);
         if (_raw.Count == 0 || Boundary(bar))
         {
+            // the last developing update of the period that ends here was not read yet: finish it before it closes
+            if (_unfinished != null) { Finish(_unfinished); _unfinished = null; }
             _raw.Add(new Profile { StartBar = bar, IsPartialPeriod = bar == 0 && !IsCalendarPeriodStart(candle) });
             if (!CalculateDisplayProfiles && _raw.Count > 2) _raw.RemoveAt(0);
             BeginClosedReuse(_raw[^1], bar);
@@ -161,8 +168,17 @@ public partial class CompositeVolumeProfile : Indicator
         }
         _last = bar;
         // No sorting/cloning the growing profile during historical replay. Closed profiles are finalized once.
-        if (CalculateDisplayProfiles && bar == CurrentBar - 1 || bar < CurrentBar - 1 && Boundary(bar + 1)) Finish(profile, bar < CurrentBar - 1 && Boundary(bar + 1));
-        if (CalculateDisplayProfiles && bar == CurrentBar - 1) BuildDisplay();
+        bool completed = bar < CurrentBar - 1 && Boundary(bar + 1);
+        if (completed) { Finish(profile, true); if (ReferenceEquals(_unfinished, profile)) _unfinished = null; }
+        if (CalculateDisplayProfiles && bar == CurrentBar - 1) { _unfinished = profile; _displayStale = true; }
+    }
+    /// <summary>Applies the pending developing update (see <see cref="_displayStale"/>); call under <see cref="_sync"/>.</summary>
+    private void RefreshDisplay()
+    {
+        if (!_displayStale) return;
+        _displayStale = false;
+        if (_unfinished != null) { Finish(_unfinished); _unfinished = null; }
+        BuildDisplay();
     }
     private void Finish(Profile profile, bool completed = false)
     {
@@ -203,8 +219,9 @@ public partial class CompositeVolumeProfile : Indicator
         var kind = JoinKind(current, raw, group);
         if (kind == MergeKind.None)
         {
-            var copy = Copy(raw); copy.ManualGroup = group; copy.Parts = 1; copy.Merge = group >= 0 ? MergeKind.Manual : MergeKind.None;
-            destination.Add(copy); return;
+            // The developing period is shown as is (refreshed before every read); a closed period is copied once.
+            var shown = developing ? raw : Copy(raw); shown.ManualGroup = group; shown.Parts = 1; shown.Merge = group >= 0 ? MergeKind.Manual : MergeKind.None;
+            destination.Add(shown); return;
         }
         // Head-to-tail: the next period is appended to the last profile; volumes are conserved and POC/VA recomputed.
         if (developing) { current = Copy(current); destination[^1] = current; }
@@ -235,7 +252,8 @@ public partial class CompositeVolumeProfile : Indicator
             var source = display[i]; if (source.Total <= 0) continue;
             var scan = _touches.TryGetValue(source, out var saved) ? saved : (Scanned: source.EndBar, Touch: -1);
             int touch = scan.Touch;
-            if (touch == _last) touch = -1; // Latest replacement can undo a previous first touch.
+            // A touch at the bar that was the last one at the previous scan may have come from a replaced forming bar.
+            if (touch >= 0 && touch >= Math.Min(scan.Scanned, _last)) touch = -1;
             int from = Math.Max(source.EndBar + 1, Math.Min(scan.Scanned, _last));
             if (touch < 0)
                 for (int bar = from; bar <= _last; bar++)
@@ -258,7 +276,8 @@ public partial class CompositeVolumeProfile : Indicator
         if (ChartInfo == null) return;
         lock (_sync)
         {
-            FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Composite profile ({_period}): {Status}; POC: 60-profile lookback, up to 10 tested", Color.LightSkyBlue);
+            RefreshDisplay();
+            FootprintStudyData.Legend(context, ChartInfo.PriceChartContainer.Region, 2, $"Composite profile ({_period}): {StatusText()}; POC: 60-profile lookback, up to 10 tested", Color.LightSkyBlue);
             _pocPen.Color = PocColor; _outerPen.Color = Color.FromArgb(130, PocColor);
             int first = FirstVisibleBarNumber, last = Math.Min(LastVisibleBarNumber, _last);
             for (int i = Math.Max(0, _display.Count - _count); i < _display.Count; i++)

@@ -1375,11 +1375,34 @@ internal static class KvpProvidersScene
                 }
             }
         }
+        /// <summary>Reads a store file the application may be replacing at this moment. The product's durable rename
+        /// (MoveFileEx with REPLACE_EXISTING) holds the target open with delete access while it swaps the file in, and the
+        /// replaced file is delete-pending for a moment afterwards: Windows then refuses the open with a sharing violation
+        /// (IOException) or ERROR_ACCESS_DENIED (UnauthorizedAccessException). Both are retried for a bounded 10 s,
+        /// pumping the UI thread between attempts; every file is still read in full.</summary>
+        private string ReadStore(string file)
+        {
+            var until = DateTime.UtcNow.AddSeconds(10);
+            while (true)
+            {
+                try
+                {
+                    using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var reader = new StreamReader(stream);
+                    return reader.ReadToEnd();
+                }
+                catch (Exception ex) when (ex is IOException and not FileNotFoundException and not DirectoryNotFoundException or UnauthorizedAccessException &&
+                    DateTime.UtcNow < until)
+                {
+                    pump(0.025);
+                }
+            }
+        }
         private void CheckOrdinaryStores()
         {
             string[] files = new[] { Path.Combine(AppPaths.Root, "connections.json"), Path.Combine(AppPaths.Root, "settings.json"), AppPaths.WorkspaceFile }
                 .Concat(Directory.Exists(Path.Combine(AppPaths.Accounts, "Bybit")) ? Directory.EnumerateFiles(Path.Combine(AppPaths.Accounts, "Bybit"), "*.json", SearchOption.AllDirectories) : Array.Empty<string>()).Where(File.Exists).ToArray();
-            Check(files.Length > 0 && files.All(file => { string text = File.ReadAllText(file); return _secrets.All(secret => !text.Contains(secret, StringComparison.Ordinal)); }),
+            Check(files.Length > 0 && files.All(file => { string text = ReadStore(file); return _secrets.All(secret => !text.Contains(secret, StringComparison.Ordinal)); }),
                 "ordinary settings and provider intent state contain no API keys, signing secrets or OAuth tokens", new { filesInspected = files.Length });
         }
     }

@@ -1072,6 +1072,11 @@ public sealed class BracketManager : IDisposable
         exit.Side == Math.Sign(Volume) && order.Direction == ExitDirection &&
         Account.OrderContext.FindExecutingProtection(order, Account.OrderContext.ManualOwner) != null;
 
+    // Brackets place stops as stops: a current stop exit shown at MARKET is a triggered stop's child.
+    private bool TriggeredStopChild(ExitIntent exit, OrderTypes type) =>
+        exit.Role == BracketRole.StopLoss && type == OrderTypes.Market && exit.Quantity > 0 &&
+        exit.Generation == _generation && exit.Side == Math.Sign(Volume);
+
     private static decimal Executed(Order order) => order.Status == OrderStatus.Filled
         ? Math.Max(Math.Max(0, order.Filled), order.QuantityToFill)
         : Math.Max(0, order.Filled);
@@ -1085,6 +1090,10 @@ public sealed class BracketManager : IDisposable
             if (intent.Current is not { } owned) continue;
             var order = Current(owned);
             if (Terminal(order)) continue;
+            // The broker updates this order on its own threads: a triggered stop's child answer can make it MARKET between
+            // these reads. One type decides; an amendment is pinned to it, so the broker refuses one meant for the stop
+            // instead of cancelling and replacing the order that is executing it.
+            var type = order.Type;
             // A broker thread may apply an execution after ObserveExits booked this order. Comparing the intent with it
             // would read that fill as a resize request (an executing child would be enlarged or cancelled); book it first.
             if (Executed(order) > owned.Booked)
@@ -1096,10 +1105,19 @@ public sealed class BracketManager : IDisposable
             // A triggered stop's executing child is reducing a same-side position. A position report can lead its fills, so
             // a reduction would be computed from a stale fill count and cancel or shrink the order closing the position.
             // Its venue order is reduce-only; a closed or flipped position, or an explicit cancel, ends the exemption.
-            bool executing = ExecutingStopChild(intent, order);
+            // A stop exit shown at MARKET is that child even before its ownership proof is readable: a market order has no
+            // price to amend, and its reduce-only remainder is never shrunk from a position report.
+            bool executing = ExecutingStopChild(intent, order) || TriggeredStopChild(intent, type);
+            decimal working = type == OrderTypes.Stop ? order.TriggerPrice : order.Price;
             bool change = (intent.Quantity != order.Unfilled && !(executing && intent.Quantity < order.Unfilled)) ||
-                (intent.Price != PriceOf(order) && !executing);
+                (intent.Price != working && !executing);
             if (intent.Phase != ExitPhase.CancelPending && !change) continue;
+            // An execution or a working type applied while this was decided is booked and read again first.
+            if (Executed(order) > owned.Booked || order.Type != type)
+            {
+                _syncAgain = true;
+                continue;
+            }
             if (intent.Phase != ExitPhase.CancelPending)
             {
                 if (!allowPlacement && intent.Quantity > 0) continue;
@@ -1110,12 +1128,12 @@ public sealed class BracketManager : IDisposable
                 {
                     if (tracked.IsReplacementPending(owned.Handle)) continue;
                     decimal total = order.Filled + intent.Quantity;
-                    decimal price = order.Type == OrderTypes.Market ? 0 : intent.Price;
+                    decimal price = type == OrderTypes.Market ? 0 : intent.Price;
                     if (intent.FailedTotal == total && intent.FailedPrice == price) continue;
                     intent.RequestedTotal = total;
                     intent.RequestedPrice = price;
                     intent.Phase = ExitPhase.Replacing;
-                    OrderActions.Replace(Account, order, price, intent.Quantity);
+                    OrderActions.Replace(Account, order, price, intent.Quantity, type);
                     _syncAgain = true;
                     continue;
                 }

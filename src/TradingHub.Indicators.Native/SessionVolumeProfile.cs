@@ -44,6 +44,9 @@ public partial class SessionVolumeProfile : Indicator
         public decimal Val;
         public decimal MaxVolume;
         public decimal Total;
+        // first later bar trading through Poc (-1 = none) scanned through TouchScanned, for the POC value TouchPoc
+        public int Touch = -1, TouchScanned = -1;
+        public decimal TouchPoc;
     }
 
     private readonly List<Profile> _profiles = new();
@@ -201,6 +204,23 @@ public partial class SessionVolumeProfile : Indicator
         p.Vah = area.High; p.Val = area.Low;
     }
 
+    /// <summary>
+    /// The first bar after <paramref name="p"/> through <paramref name="last"/> that trades through its POC, or -1. Bars are
+    /// scanned once per POC value; the bar that was the last one at the previous scan is checked again (it may have been forming).
+    /// </summary>
+    private int PocTouch(Profile p, int last)
+    {
+        if (p.TouchPoc != p.Poc || p.TouchScanned < 0) { p.TouchPoc = p.Poc; p.Touch = -1; p.TouchScanned = p.EndBar; }
+        if (p.Touch >= 0 && p.Touch < p.TouchScanned) return p.Touch;
+        p.Touch = -1;
+        for (int b = Math.Max(p.EndBar + 1, Math.Min(p.TouchScanned, last)); b <= last; b++)
+        {
+            var c = GetCandle(b);
+            if (c.Low <= p.Poc && c.High >= p.Poc) { p.Touch = b; break; }
+        }
+        p.TouchScanned = Math.Max(p.TouchScanned, last);
+        return p.Touch;
+    }
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
@@ -255,16 +275,8 @@ public partial class SessionVolumeProfile : Indicator
             int xEnd = x1;
             if (ExtendPoc)
             {
-                xEnd = ChartInfo.GetXByBar(Math.Min(CurrentBar - 1, last), false);
-                for (int b = p.EndBar + 1; b <= Math.Min(last, CurrentBar - 1); b++)
-                {
-                    var c = GetCandle(b);
-                    if (c.Low <= p.Poc && c.High >= p.Poc)
-                    {
-                        xEnd = ChartInfo.GetXByBar(b, false);
-                        break;
-                    }
-                }
+                int touch = PocTouch(p, CurrentBar - 1);
+                xEnd = ChartInfo.GetXByBar(touch >= 0 && touch <= last ? touch : Math.Min(CurrentBar - 1, last), false);
             }
 
             context.DrawLine(_pocPen, x0, yPoc, Math.Max(x1, xEnd), yPoc);

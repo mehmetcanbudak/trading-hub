@@ -44,7 +44,18 @@ public sealed partial class ConnectionManager
     /// <summary>Isolated runs point Deribit at a fake origin; production uses Deribit's public REST root.</summary>
     private static Uri? DeribitRoot => Environment.GetEnvironmentVariable("TRADINGHUB_DERIBIT_REST") is { Length: > 0 } u ? new Uri(u) : null;
 
-    /// <summary>The options provider of a connection; null when a custom API has no URL.</summary>
+    /// <summary>
+    /// Why a custom options or ETF-flows API URL cannot be used, or null. The key is sent with every request, so the URL
+    /// must use HTTPS; plain HTTP is accepted only for loopback (a local fixture or self-hosted proxy on this machine).
+    /// </summary>
+    public static string? ExternalUrlProblem(string url)
+    {
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri)) return "Enter the API base URL.";
+        if (uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)) return null;
+        return "The API base URL must use https:// (plain http only for localhost): the API key is sent with every request.";
+    }
+
+    /// <summary>The options provider of a connection; null when a custom API has no usable URL.</summary>
     private IOptionsProvider? OptionsProviderOf(ConnectionProfile p, List<HttpClient> clients)
     {
         if (p.OptionsSource == OptionsSource.Deribit)
@@ -54,16 +65,16 @@ public sealed partial class ConnectionManager
             return new DeribitOptions(http, DeribitRoot);
         }
 
-        if (!Uri.TryCreate(p.ExternalUrl.Trim(), UriKind.Absolute, out _)) return null;
+        if (ExternalUrlProblem(p.ExternalUrl) != null) return null;
         var client = CreatePrivateHttpClient(TimeSpan.FromSeconds(30));
         clients.Add(client);
         return new JsonOptionsApi(client, p.ExternalUrl, p.ExternalHeader, GetSecret(p), p.ExternalUnderlyingList);
     }
 
-    /// <summary>The ETF flows provider of a connection; null without a URL.</summary>
+    /// <summary>The ETF flows provider of a connection; null without a usable URL.</summary>
     private IEtfFlowsProvider? EtfProviderOf(ConnectionProfile p, List<HttpClient> clients)
     {
-        if (!Uri.TryCreate(p.ExternalUrl.Trim(), UriKind.Absolute, out _)) return null;
+        if (ExternalUrlProblem(p.ExternalUrl) != null) return null;
         var client = CreatePrivateHttpClient(TimeSpan.FromSeconds(30));
         clients.Add(client);
         return new JsonEtfFlowsApi(client, p.ExternalUrl, p.ExternalHeader, GetSecret(p), p.ExternalUnderlyingList);
@@ -114,7 +125,7 @@ public sealed partial class ConnectionManager
             if (p.Kind == ConnectionKind.OptionsData)
             {
                 var provider = OptionsProviderOf(p, clients);
-                if (provider == null) return (false, "Enter the API base URL.");
+                if (provider == null) return (false, ExternalUrlProblem(p.ExternalUrl) ?? "Enter the API base URL.");
                 string under = p.OptionsSource == OptionsSource.Deribit ? "BTC" : p.ExternalUnderlyingList.FirstOrDefault() ?? "BTC";
                 var chain = await provider.ChainAsync(under, ct);
                 if (chain == null || chain.Contracts.Count == 0) return (false, $"{provider.Name} returned no options on {under}.");
@@ -124,7 +135,7 @@ public sealed partial class ConnectionManager
             }
 
             var etf = EtfProviderOf(p, clients);
-            if (etf == null) return (false, "Enter the API base URL.");
+            if (etf == null) return (false, ExternalUrlProblem(p.ExternalUrl) ?? "Enter the API base URL.");
             string asset = p.ExternalUnderlyingList.FirstOrDefault() ?? "BTC";
             var days = await etf.DailyAsync(asset, DateTime.UtcNow.AddDays(-14), DateTime.UtcNow, ct);
             if (days.Count == 0) return (false, $"The API returned no {asset} days in the last two weeks.");

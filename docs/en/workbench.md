@@ -16,9 +16,14 @@ applications are involved. **Nothing on this page places, changes or cancels ord
 - Choose a panel in the left list. The **open-in-window** button next to each panel detaches it into its own window;
   closing that window returns the panel to the page, and windows that were open at quit reopen the next time the
   Workbench page is opened. Several panels can be visible at once this way.
-- A panel works only while it is visible (in the page or in its window): hidden panels release their streams and stop
-  requesting data.
-- Choices (selected panel, thresholds, ranges and calculator inputs) are remembered in the settings file.
+- A panel works only while it is visible (in the page or in its window): hidden panels release their streams, start no
+  new requests and cancel the ones still running.
+- Simulator instruments (such as SIM-BTC) are generated locally, not markets: the tape, derivatives, liquidation-map and
+  options panels attach no exchange liquidations, funding, open interest, third-party levels or options to them and make
+  no requests for them.
+- Choices are remembered in the settings file: the selected panel, thresholds, ranges and the calculators' balance, risk,
+  fee, leverage, margin and funding inputs. Prices are not remembered; point value, quantity step and an empty entry
+  price are filled in from the selected instrument.
 
 ## Aggregated trades
 
@@ -29,18 +34,22 @@ separately (for example Binance Futures, Bybit and OKX), so this is a multi-venu
   are not listed; **Large** and **Huge** lines are highlighted. Thresholds are in quote notional (price × size × point
   value).
 - The right side shows the price with large-trade bubbles and liquidation diamonds, per-venue buy (up) and sell (down)
-  notional per bar of the chosen length, and liquidations per bar (longs below, shorts above). Volume bars always count
-  every print, whatever the display threshold.
+  notional per bar of the chosen length, and liquidations per bar (longs below, shorts above). Volume bars count every
+  print, whatever the display threshold; a print the connection merges in late (out of order) is counted when the tape
+  rebuilds, at most every five seconds. If prints arrive faster than the tape can list, it says the bars may be
+  incomplete.
 - **Coverage is explicit.** The coverage line names each venue's state (live, partial, connecting, reconnecting,
-  error, missing); bars of a venue that was not connected are outlined as partial. Time before the panel started
-  observing is hatched, not drawn as zero.
+  error, missing) for the selected instrument as soon as it is chosen; bars of a venue that was not connected are
+  outlined as partial. Time before the panel started observing is hatched, not drawn as zero.
 - **Liquidations** come from the public Binance and Bybit liquidation streams for USD-quoted crypto perpetuals, only
-  while the panel listens. Bars the streams did not observe are hatched; partly observed bars are outlined. Binance
-  publishes at most one liquidation per symbol per second, so its stream is a sample.
+  while the panel listens. Bars neither stream observed are hatched; bars only one stream observed (or observed only
+  partly) are outlined. Events that arrive up to two minutes late are still counted. Binance publishes at most one
+  liquidation per symbol per second, so its stream is a sample.
 - Venue buttons hide a venue's lines from the tape (bars still include it).
 - **Alert on large trades / Alert on liquidations** (off by default) raise a *local* alert in the alert history at most
-  every three seconds. Its sound follows **Settings → Sound alerts**; these alerts are never forwarded to external
-  destinations, even when you have authorized some.
+  every three seconds, only for prints and liquidations that arrive while the panel is open (never for the history shown
+  when it opens or rebuilds) and never for partial or candle-derived prints. Its sound follows **Settings → Sound
+  alerts**; these alerts are never forwarded to external destinations, even when you have authorized some.
 
 ## Depth heat map
 
@@ -137,15 +146,19 @@ Calculators that only compute from the values you type:
 ## Local market-data API
 
 An optional, **read-only** HTTP/WebSocket API on `127.0.0.1` lets tools you run yourself on this computer read the
-market data Trading Hub already has. It is **off by default**: enable it in **Settings → Local market-data API**.
+market data Trading Hub already has for instruments that are open. It is **off by default**: enable it in **Settings →
+Local market-data API**.
 
 ### Security model
 
 - Listens on `127.0.0.1` only; other computers on your network cannot reach it. If another program already listens on
-  the chosen port (on loopback or on all interfaces), Settings reports "Port … is already in use." and the API does not
-  start, so it never silently takes over that program's local connections.
-- Read-only: every route is `GET`. Nothing can be created, changed or deleted; the API never opens new market
-  subscriptions, places orders or touches accounts or positions.
+  the chosen port (on `127.0.0.1`, on the IPv6 loopback `::1` or on all interfaces), Settings reports "Port … is already
+  in use." and the API does not start, so it never silently takes over that program's local connections and clients
+  that resolve `localhost` to `::1` cannot reach another program instead.
+- Read-only: every route is `GET`. Nothing can be created, changed or deleted. The API serves only instruments that are
+  already open: it never creates a connection's feed, reads saved credentials, logs in, downloads instrument lists,
+  requests provider history or opens market subscriptions, and it never places orders or touches accounts or
+  positions.
 - No credentials, API keys, user names, account ids, gateway URLs, trading namespaces, device ids or order permissions
   are ever returned.
 - DNS-rebinding defense: the `Host` header is required and must be `127.0.0.1:<port>` or `localhost:<port>` with the
@@ -156,11 +169,14 @@ market data Trading Hub already has. It is **off by default**: enable it in **Se
   never answers `*` and never allows credentials. Non-browser tools (curl, scripts) send no `Origin` and need no entry.
 - Bounds: one request per connection; request line ≤ 2048 bytes (`414`); headers ≤ 8 KiB and ≤ 64 lines (`431`);
   headers within 5 s (`408`); request bodies rejected (`413`); at most 16 concurrent connections and 4 streams (`503`);
-  about 30 requests per second with bursts of 60 (`429` with `Retry-After`).
+  about 30 requests per second with bursts of 60 (`429` with `Retry-After`). Each response, and each stream message,
+  must be written within 30 s, and stream clients must answer keep-alive pings within 30 s; slower clients are
+  disconnected. Candle and recorded-depth requests run one at a time.
 - Every response carries `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and
   `Content-Type: application/json; charset=utf-8`.
 - Quitting Trading Hub (or turning the setting off) closes the listener and every stream as part of the app's owned
-  shutdown drain.
+  shutdown drain. If the listener stops on its own, Settings shows "The local market-data API stopped: …"; changing or
+  re-applying a setting (for example turning it off and on) starts it again.
 
 Anything running under your user account on this computer can read the data while the API is on. Turn it off when you
 do not need it.
@@ -173,14 +189,14 @@ Errors are JSON objects such as `{"error":{"code":"not_open","message":"…"}}`.
 | --- | --- |
 | 400 | `bad_request`, `bad_host` (missing Host), `bad_timeframe`, `bad_range` |
 | 403 | `origin_not_allowed` |
-| 404 | `not_found` (unknown route), `not_open`, `unknown_connection`, `unknown_symbol`, `no_klines` |
+| 404 | `not_found` (unknown route), `not_open` |
 | 405 | `method_not_allowed` (with `Allow: GET`) |
 | 408 / 413 / 414 / 431 | `request_timeout`, `body_not_allowed`, `uri_too_long`, `headers_too_large` |
 | 421 | `bad_host` (Host is not loopback with the bound port) |
 | 426 | `websocket_required`, `websocket_version` |
 | 429 | `rate_limited` |
 | 502 | `provider_error` |
-| 503 | `busy`, `too_many_streams`, `unavailable` (for example while Trading Hub shuts down) |
+| 503 | `busy`, `too_many_streams`, `unavailable` (while Trading Hub shuts down, or when the instrument's history changed while it was read; retry) |
 
 `OPTIONS` preflight requests are answered with `204` only for allowed origins (`Access-Control-Allow-Methods: GET`),
 otherwise `403`. Other methods return `405`.
@@ -196,11 +212,11 @@ case-insensitive.
 | `GET /info` | `{"app","version","apiVersion":1,"readOnly":true,"port"}` |
 | `GET /connections` | `[{"id","name","kind","enabled","marketData"}]` for connections with chart market data. |
 | `GET /open` | Instruments open in Trading Hub: `[{"connection","symbol","tickSize","lastPrice","trades","hasDepth"}]` (`lastPrice` is `null` before the first trade). |
-| `GET /klines?conn=&symbol=&tf=1m\|5m\|15m\|1h\|4h\|1d&from=&to=&limit=` | `[[openTime, open, high, low, close, volume, buyVolume\|null]]` from the candle cache; missing bars are filled from the connection's own provider exactly as a chart would. `limit` ≤ 5000 (default 1000); `from` is raised to `to − limit × tf`. 4h/1d are built from 1-hour candles aligned to UTC. |
+| `GET /klines?conn=&symbol=&tf=1m\|5m\|15m\|1h\|4h\|1d&from=&to=&limit=` | `[[openTime, open, high, low, close, volume, buyVolume\|null]]` built from the trades Trading Hub has loaded for an **already open** instrument (`404 not_open` otherwise), in bars aligned to UTC. No history is requested: time outside the loaded history has no bars, and history coarser than the timeframe (for example 5-minute compact or candle history at `tf=1m`) is left out rather than split. `buyVolume` is `null` when a trade in the bar has no known aggressor side. `limit` ≤ 5000 (default 1000); `from` is raised to `to − limit × tf`. |
 | `GET /trades?conn=&symbol=&limit=` | `[[time, price, size, "b"\|"s"\|null, venue\|null]]`, latest trades of an **already open** instrument (`404 not_open` otherwise); `limit` ≤ 5000 (default 500); `venue` is set on aggregate connections. |
-| `GET /depth?conn=&symbol=&levels=` | `{"time","bids":[[price,size]],"asks":[...]}` of an open instrument; `levels` ≤ 500 (default 100). |
+| `GET /depth?conn=&symbol=&levels=` | `{"time","bids":[[price,size]],"asks":[...]}` of an open instrument; `levels` ≤ 500 (default 100). The sides are empty while the current book is unavailable (disconnected, out of order or stale). |
 | `GET /liquidity?conn=&symbol=&minutes=&levels=` | `{"recording","tickSize","truncated","samples":[{"time","usable","gapBefore","bids","asks"}]}` from the opt-in depth recorder; `minutes` ≤ 120 (default 30), `levels` ≤ 100 (default 20), newest 2000 samples. With recording off: `{"recording":false,…,"samples":[]}` — nothing is synthesized. |
-| `WS /stream?conn=&symbol=` | RFC 6455 WebSocket for an open instrument (same Host/Origin rules). Every 250 ms: `{"type":"trades","symbol","data":[[time,price,size,side,venue]]}` (≤ 5000) and, when the book changed, `{"type":"book","symbol","time","bids","asks"}` (≤ 100 levels). A slow client gets `{"type":"gap","symbol","dropped":n}` before newer trades. Client messages are ignored (≤ 4 KiB each); the server closes normally when the API is turned off or Trading Hub quits. |
+| `WS /stream?conn=&symbol=` | RFC 6455 WebSocket for an open instrument (same Host/Origin rules). Every 250 ms: `{"type":"trades","symbol","data":[[time,price,size,side,venue]]}` (≤ 5000) and, when the book changed, `{"type":"book","symbol","time","bids","asks"}` (≤ 100 levels; the same book as `/depth`, so its sides are empty while the book is unavailable). A slow client gets `{"type":"gap","symbol","dropped":n}` before newer trades. Client messages are ignored (≤ 4 KiB each); the server closes normally when the API is turned off or Trading Hub quits. |
 
 Example:
 
@@ -214,8 +230,8 @@ Trading Hub does not bundle, download or launch any external analysis applicatio
 for example a self-hosted aggregated-trades page (such as aggr) or a heat-map tool (such as FlowMap), or a script — you
 can feed it from this API:
 
-1. Turn the API on, note the base URL shown in Settings, and open the instruments you want in Trading Hub (the trades,
-   depth, liquidity and stream routes serve open instruments only).
+1. Turn the API on, note the base URL shown in Settings, and open the instruments you want in Trading Hub (every
+   market-data route serves open instruments only).
 2. **Scripts and native tools** (curl, Python, Node, a desktop app) need no further setup: they send no `Origin`.
 3. **Browser-based tools served from your own local web server** (for example `http://localhost:3000`) must have that
    exact origin added to **Allowed browser origins**; requests from any other web page are refused.

@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using TradingHub.Common;
 using TradingHub.Trading;
 using TradingHub.Data;
@@ -1121,7 +1122,33 @@ public static class LiveStore
     private static string ProposalsPath => Path.Combine(Root, "propuestas.json");
     private static string PortfoliosPath => Path.Combine(Root, "portafolios.json");
     private static string? _lastRunnersJson;
+    private static string? _lastRunnersState;
     private static string? _lastRunnersPath;
+    private static long _lastRunnersWrite; // Environment.TickCount64
+
+    /// <summary>How often the open P&amp;L marks alone refresh the saved runners (the headless lab reports them as its open
+    /// P&amp;L estimate); any other change is written at the next save. Tests shorten it.</summary>
+    internal static TimeSpan RunnerMarkRefresh { get; set; } = TimeSpan.FromMinutes(1);
+
+    // The saved runners without their open P&L marks: what decides whether a periodic save has something to write at
+    // once. The marks move with every price while a runner holds a position; a runner recomputes them from its ledger
+    // and live prices, so the saved values are only the last estimate.
+    private static readonly JsonSerializerOptions RunnerState = new()
+    {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers =
+            {
+                info =>
+                {
+                    if (info.Type != typeof(LiveRunnerInfo)) return;
+                    foreach (var property in info.Properties)
+                        if (property.Name is nameof(LiveRunnerInfo.OpenPnL) or nameof(LiveRunnerInfo.AvailableOpenPnL))
+                            property.ShouldSerialize = static (_, _) => false;
+                },
+            },
+        },
+    };
 
     /// <summary>
     /// Appends a ledger event; identical legacy fills remain distinct. Returns null only after the durable intent,
@@ -1692,13 +1719,21 @@ public static class LiveStore
         string path = RunnersPath;
         try
         {
-            // solo si cambió algo (se llama cada pocos segundos)
-            var json = JsonSerializer.Serialize(all.Values.ToList(), Json);
-            if (json == _lastRunnersJson && _lastRunnersPath == path && File.Exists(path)) return RecordStateSave(path, null);
+            // Called every few seconds. Anything but the open P&L marks is written at once; the marks alone at most once
+            // per RunnerMarkRefresh, so a held position does not cost a durable replace on the UI thread every period.
+            var list = all.Values.ToList();
+            string state = JsonSerializer.Serialize(list, RunnerState);
+            bool saved = state == _lastRunnersState && _lastRunnersPath == path && File.Exists(path);
+            if (saved && Environment.TickCount64 - _lastRunnersWrite < (long)RunnerMarkRefresh.TotalMilliseconds)
+                return RecordStateSave(path, null);
+            var json = JsonSerializer.Serialize(list, Json);
+            if (saved && json == _lastRunnersJson) return RecordStateSave(path, null);
             DurableFile.EnsureDirectory(Root);
             DurableFile.ReplaceAtomically(path, json);
             _lastRunnersJson = json;
+            _lastRunnersState = state;
             _lastRunnersPath = path;
+            _lastRunnersWrite = Environment.TickCount64;
             return RecordStateSave(path, null);
         }
         catch (Exception ex)
@@ -1723,7 +1758,7 @@ public static class LiveStore
             all.RemoveAll(r => r.Key == key);
             DurableFile.EnsureDirectory(Root);
             DurableFile.ReplaceAtomically(RunnersPath, JsonSerializer.Serialize(all, Json));
-            _lastRunnersJson = null;
+            _lastRunnersState = null;
         }
     }
 
@@ -1746,7 +1781,7 @@ public static class LiveStore
                 else all.Add(info);
                 DurableFile.EnsureDirectory(root);
                 DurableFile.ReplaceAtomically(runnersPath, JsonSerializer.Serialize(all, Json));
-                _lastRunnersJson = null;
+                _lastRunnersState = null;
                 return null;
             }
             catch (Exception ex)
@@ -1771,7 +1806,7 @@ public static class LiveStore
                 {
                     change(info);
                     DurableFile.ReplaceAtomically(path, JsonSerializer.Serialize(all, Json));
-                    _lastRunnersJson = null;
+                    _lastRunnersState = null;
                     report = RecordStateSave(path, null);
                 }
             }
