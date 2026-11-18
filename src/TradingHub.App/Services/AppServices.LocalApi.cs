@@ -139,7 +139,8 @@ internal sealed class LocalApiHost(Func<ILocalMarketDataSource> source)
     /// another user, and succeeds beside specific-address holders. An IPv4 wildcard bind did not conflict with an
     /// existing dual-stack [::] listener on the Windows CI runners, so a second probe binds a dual-stack [::] socket:
     /// per the same page, a dual-stack wildcard bind reserves the port on both stacks and its checks must succeed on
-    /// both, so it fails beside an IPv4 or IPv6 wildcard holder. A specific [::1] bind with no options fails beside a
+    /// both, so it fails beside an IPv4 or IPv6 wildcard holder — except an IPv6-only [::] holder, which the Windows CI
+    /// runners let a dual-stack probe coexist with, so an IPv6-only [::] probe is bound as well. A specific [::1] bind with no options fails beside a
     /// [::1] holder. SO_REUSEADDR is never set on Windows: there it can bind over (hijack) a holder that set it instead
     /// of detecting it.</para>
     /// </summary>
@@ -152,6 +153,7 @@ internal sealed class LocalApiHost(Func<ILocalMarketDataSource> source)
                          Conflicts(new IPEndPoint(IPAddress.IPv6Loopback, port), reuseAddress: true, dualMode: null));
         return Conflicts(new IPEndPoint(IPAddress.Any, port), reuseAddress: false, dualMode: null) ||
             ipv6 && (Conflicts(new IPEndPoint(IPAddress.IPv6Any, port), reuseAddress: false, dualMode: true) ||
+                     Conflicts(new IPEndPoint(IPAddress.IPv6Any, port), reuseAddress: false, dualMode: false) ||
                      Conflicts(new IPEndPoint(IPAddress.IPv6Loopback, port), reuseAddress: false, dualMode: null));
     }
 
