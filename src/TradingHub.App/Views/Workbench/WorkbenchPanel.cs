@@ -24,12 +24,19 @@ internal sealed record WorkbenchSelection(string ProfileId, Instrument Instrumen
     /// <summary>Base asset plus USDT for USD-family crypto (BTCUSDT); the derivatives and liquidation services use this symbol.</summary>
     public string DerivativesSymbol => DerivativesPane.DerivedSymbol(Instrument.Symbol, Instrument.BaseAsset, Instrument.QuoteAsset);
 
-    public string Underlying => OptionsData.UnderlyingOf(Instrument.Symbol, Instrument.BaseAsset);
+    /// <summary>The options underlying; empty for simulated instruments, which no options venue lists.</summary>
+    public string Underlying => IsSimulated ? "" : OptionsData.UnderlyingOf(Instrument.Symbol, Instrument.BaseAsset);
 
     public string Display => $"{Instrument.Symbol} · {Instrument.Exchange}".TrimEnd(' ', '·');
 
-    /// <summary>Crypto USD-family instruments, the only ones the public derivatives venues list.</summary>
-    public bool IsCryptoUsd => Instrument.BaseAsset.Length > 0 && AggregateFeed.IsUsdFamily(Instrument.QuoteAsset);
+    /// <summary>
+    /// Simulator instruments (feed id <see cref="SimulatedFeed.FeedId"/>) are generated locally: their BTC/ETH-like base
+    /// assets are not real markets, so no venue's liquidations, funding, open interest or options belong to them.
+    /// </summary>
+    public bool IsSimulated => Instrument.FeedId == SimulatedFeed.FeedId;
+
+    /// <summary>Real crypto USD-family instruments, the only ones the public derivatives venues list.</summary>
+    public bool IsCryptoUsd => !IsSimulated && Instrument.BaseAsset.Length > 0 && AggregateFeed.IsUsdFamily(Instrument.QuoteAsset);
 }
 
 /// <summary>Services the panels read; the defaults are the application's shared instances, swapped only by isolated scenes and tests.</summary>
@@ -64,6 +71,10 @@ internal abstract class WorkbenchPanel : UserControl, IDisposable
     public WorkbenchSelection? Selection { get; private set; }
     public bool IsActive { get; private set; }
     protected bool Disposed { get; private set; }
+    private CancellationTokenSource? _activity;
+
+    /// <summary>Cancelled when the panel is hidden or disposed, so requests started while it was visible stop with it.</summary>
+    protected CancellationToken ActivityToken => _activity?.Token ?? new CancellationToken(canceled: true);
 
     public void Follow(WorkbenchSelection? selection)
     {
@@ -76,7 +87,16 @@ internal abstract class WorkbenchPanel : UserControl, IDisposable
     {
         if (Disposed || active == IsActive) return;
         IsActive = active;
-        if (active) OnActivated(); else OnDeactivated();
+        if (active)
+        {
+            _activity = new CancellationTokenSource();
+            OnActivated();
+        }
+        else
+        {
+            EndActivity();
+            OnDeactivated();
+        }
     }
 
     /// <summary>About four times a second while active.</summary>
@@ -88,6 +108,7 @@ internal abstract class WorkbenchPanel : UserControl, IDisposable
     public void Dispose()
     {
         if (Disposed) return;
+        EndActivity();
         if (IsActive) OnDeactivated();
         IsActive = false;
         Disposed = true;
@@ -95,6 +116,13 @@ internal abstract class WorkbenchPanel : UserControl, IDisposable
     }
 
     protected virtual void OnDispose() { }
+
+    // Not disposed: running requests may still observe the cancelled token after the panel moved on.
+    private void EndActivity()
+    {
+        _activity?.Cancel();
+        _activity = null;
+    }
 
     protected static TextBlock Note(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Classes = { "faint", "small" } };
 

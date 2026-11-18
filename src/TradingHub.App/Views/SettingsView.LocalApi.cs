@@ -1,6 +1,7 @@
 using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Material.Icons;
 using TradingHub.App.Services.LocalApi;
 
@@ -21,6 +22,15 @@ internal sealed partial class SettingsView
             address.Text = $"Base URL: http://127.0.0.1:{bound.ToString(CultureInfo.InvariantCulture)}/api/v1";
             status.Text = _svc.LocalApiStatus;
         }
+
+        // The API can stop on its own (its accept loop failed): show it while this section is on screen.
+        void OnStatusChanged() => Dispatcher.UIThread.Post(Refresh);
+        status.AttachedToVisualTree += (_, _) =>
+        {
+            _svc.LocalApiStatusChanged += OnStatusChanged;
+            Refresh();
+        };
+        status.DetachedFromVisualTree += (_, _) => _svc.LocalApiStatusChanged -= OnStatusChanged;
 
         void Apply()
         {

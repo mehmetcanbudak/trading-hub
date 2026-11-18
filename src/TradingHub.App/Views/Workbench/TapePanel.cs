@@ -8,6 +8,7 @@ using Material.Icons;
 using SkiaSharp;
 using TradingHub.App.Services;
 using TradingHub.App.Services.Workbench;
+using TradingHub.Data;
 using TradingHub.Feeds;
 using TradingHub.Feeds.Derivatives;
 using TradingHub.Market;
@@ -25,6 +26,11 @@ internal sealed class TapePanel : WorkbenchPanel
 {
     private const int MaxPrintsPerTick = 50_000;
     private static readonly TimeSpan AlertSpacing = TimeSpan.FromSeconds(3);
+    // Liquidations are re-read over this trailing window and deduplicated, so a venue that publishes late (Binance sends
+    // at most one event per second, stamped with its order time) is not lost behind the other venue's newer events.
+    private static readonly TimeSpan LateLiquidations = TimeSpan.FromMinutes(2);
+    // A correction that inserted prints before the read cursor rebuilds the tape, at most this often.
+    private static readonly TimeSpan RebuildSpacing = TimeSpan.FromSeconds(5);
     private readonly TradeTape _tape;
     private readonly TapeListCanvas _list;
     private readonly TapeChartCanvas _chart;
@@ -33,15 +39,15 @@ internal sealed class TapePanel : WorkbenchPanel
     private readonly TextBlock _liquidationState = new() { Name = "TapeLiquidationCoverage", TextWrapping = TextWrapping.Wrap, Classes = { "faint", "small" } };
     private readonly WrapPanel _venueFilters = new() { Name = "TapeVenues", Orientation = Orientation.Horizontal };
     private readonly Dictionary<string, ToggleButton> _venueButtons = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<LiquidationEvent> _seenLiquidations = new();
     private IDisposable? _liquidationWatch;
     private string? _liquidationSymbol;
     private long _liquidationGeneration = -1;
-    private DateTime _liquidationCursor;
-    private readonly HashSet<LiquidationEvent> _liquidationsAtCursor = new();
+    private DateTime _liquidationFrom;
     private long _cursorTicks;
     private int _seenAtCursor;
-    private Guid _store;
-    private DateTime _lastWindows, _lastAlert = DateTime.MinValue;
+    private TradeStoreView _view;
+    private DateTime _lastWindows, _lastAlert = DateTime.MinValue, _alertFrom = DateTime.MaxValue, _rebuiltAt;
     private int _skipped;
 
     public TapePanel(WorkbenchContext context) : base(context)
@@ -58,7 +64,7 @@ internal sealed class TapePanel : WorkbenchPanel
             if (bucket.SelectedItem is not int seconds) return;
             s.TapeBucketSeconds = seconds;
             Changed();
-            Restart();
+            Rebuild();
         };
         var soundLarge = new CheckBox { Name = "TapeSoundLarge", Content = "Alert on large trades", IsChecked = s.TapeSoundLarge };
         soundLarge.IsCheckedChanged += (_, _) => { s.TapeSoundLarge = soundLarge.IsChecked == true; context.Save(); };
@@ -105,6 +111,9 @@ internal sealed class TapePanel : WorkbenchPanel
     public override MaterialIconKind Icon => MaterialIconKind.FormatListBulleted;
     internal TradeTape Tape => _tape;
 
+    /// <summary>Whether the panel currently holds the liquidation streams (scenes check that hidden panels release them).</summary>
+    internal bool WatchingLiquidations => _liquidationWatch != null;
+
     private TapeSettings Settings()
     {
         var s = Context.Settings;
@@ -134,33 +143,13 @@ internal sealed class TapePanel : WorkbenchPanel
         _liquidationSymbol = null;
     }
 
-    /// <summary>Starts observing again: backfills the recent window from the shared trade store and resubscribes liquidations.</summary>
+    /// <summary>Starts observing again (selection or visibility changed): resubscribes liquidations and rebuilds the tape.</summary>
     private void Restart()
     {
-        _tape.Clear();
         _venueButtons.Clear();
         _venueFilters.Children.Clear();
-        _tape.Configure(Settings());
-        _skipped = 0;
-        _liquidationGeneration = -1;
-        _liquidationsAtCursor.Clear();
         ReleaseLiquidations();
-        if (!IsActive || Selection is not { } sel)
-        {
-            Redraw();
-            return;
-        }
-        var now = Context.Clock();
-        var store = sel.Data.Trades;
-        var window = TimeSpan.FromSeconds(_tape.Settings.BucketSeconds * _tape.Settings.MaxBuckets);
-        var from = now - (window < TimeSpan.FromMinutes(30) ? window : TimeSpan.FromMinutes(30));
-        var historyFrom = sel.Data.HistoryFrom == DateTime.MaxValue ? (store.Count > 0 ? store.FirstTime : now) : sel.Data.HistoryFrom;
-        _tape.Observe(historyFrom > from ? historyFrom : from);
-        _store = store.Identity;
-        _cursorTicks = from.Ticks;
-        _seenAtCursor = 0;
-        _liquidationCursor = from;
-        if (sel.IsCryptoUsd && Context.Derivatives() is { } derivatives)
+        if (IsActive && Selection is { IsCryptoUsd: true } sel && Context.Derivatives() is { } derivatives)
         {
             try
             {
@@ -169,16 +158,54 @@ internal sealed class TapePanel : WorkbenchPanel
             }
             catch (ObjectDisposedException) { }
         }
+        Rebuild();
+    }
+
+    /// <summary>
+    /// Backfills the recent window from the shared trade store and the liquidations observed in it, and shows the coverage
+    /// of the current selection at once. Alerts only consider prints and liquidations from now on.
+    /// </summary>
+    private void Rebuild()
+    {
+        _tape.Clear();
+        _tape.Configure(Settings());
+        _skipped = 0;
+        _liquidationGeneration = -1;
+        _seenLiquidations.Clear();
+        _lastWindows = DateTime.MinValue;
+        if (!IsActive || Selection is not { } sel)
+        {
+            _coverage.Text = "";
+            _liquidationState.Text = "";
+            _skippedNote.IsVisible = false;
+            Redraw();
+            return;
+        }
+        var now = Context.Clock();
+        _rebuiltAt = now;
+        _alertFrom = now;
+        var store = sel.Data.Trades;
+        var window = TimeSpan.FromSeconds(_tape.Settings.BucketSeconds * _tape.Settings.MaxBuckets);
+        var from = now - (window < TimeSpan.FromMinutes(30) ? window : TimeSpan.FromMinutes(30));
+        var historyFrom = sel.Data.HistoryFrom == DateTime.MaxValue ? (store.Count > 0 ? store.FirstTime : now) : sel.Data.HistoryFrom;
+        _tape.Observe(historyFrom > from ? historyFrom : from);
+        _view = TradeStoreView.Capture(store);
+        _cursorTicks = from.Ticks;
+        _seenAtCursor = 0;
+        _liquidationFrom = from;
         Pull(now);
+        UpdateCoverage(now);
         Redraw();
     }
 
     public override void Tick(DateTime now)
     {
-        if (Selection == null) return;
-        if (Selection.Data.Trades.Identity != _store)
+        if (Selection is not { } sel) return;
+        var store = sel.Data.Trades;
+        // A replaced store, or a correction that may have merged prints before the read cursor (an out-of-order arrival).
+        if (store.Identity != _view.Identity || (store.CorrectionRevision != _view.CorrectionRevision && now - _rebuiltAt >= RebuildSpacing))
         {
-            Restart();
+            Rebuild();
             return;
         }
         var shown = Pull(now);
@@ -222,12 +249,13 @@ internal sealed class TapePanel : WorkbenchPanel
             if (generation != _liquidationGeneration)
             {
                 _liquidationGeneration = generation;
-                var snapshot = derivatives.Liquidations(_liquidationSymbol, _liquidationCursor, now.AddSeconds(5));
-                var fresh = snapshot.Events.Where(e => e.Time > _liquidationCursor || e.Time == _liquidationCursor && !_liquidationsAtCursor.Contains(e)).ToArray();
-                foreach (var e in fresh)
+                var snapshot = derivatives.Liquidations(_liquidationSymbol, _liquidationFrom, now.AddSeconds(5));
+                var fresh = snapshot.Events.Where(_seenLiquidations.Add).ToArray();
+                var floor = now - LateLiquidations;
+                if (floor > _liquidationFrom)
                 {
-                    if (e.Time > _liquidationCursor) { _liquidationCursor = e.Time; _liquidationsAtCursor.Clear(); }
-                    _liquidationsAtCursor.Add(e);
+                    _liquidationFrom = floor;
+                    _seenLiquidations.RemoveWhere(e => e.Time < floor);
                 }
                 liquidations.AddRange(_tape.AddLiquidations(fresh));
                 changed |= fresh.Length > 0;
@@ -240,7 +268,8 @@ internal sealed class TapePanel : WorkbenchPanel
                 _tape.ApplyLiquidationWindows(windows, DerivativesData.Venues, now);
             }
         }
-        Alert(emphasized, liquidations, instrument, now);
+        // Only what happened since the tape (re)started, and never partial or synthetic prints: backfilled history is not news.
+        Alert(emphasized.Where(r => r.Time >= _alertFrom && !r.Partial).ToList(), liquidations.Where(r => r.Time >= _alertFrom).ToList(), instrument, now);
         return changed;
     }
 
@@ -487,7 +516,8 @@ internal sealed class TapeChartCanvas(TradeTape tape) : WorkbenchCanvas
                 down += hs;
                 if (v.TradesPartial) canvas.DrawRect(x, up, w, down - up, outline);
             }
-            var coverage = b.Venues.Values.Select(v => v.Liquidations).DefaultIfEmpty(LiquidationCoverage.NotObserved).Max();
+            // A stream without an entry was not observed: one silent stream makes the bar partial, never an observed zero.
+            var coverage = TradeTape.BucketCoverage(b, DerivativesData.Venues);
             if (coverage == LiquidationCoverage.NotObserved)
             {
                 Hatch(canvas, new SKRect(x, liq.Top, x + w, liq.Bottom));

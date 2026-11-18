@@ -178,6 +178,12 @@ internal static class WorkbenchScene
             Check(false, "the Workbench page opens");
             return failures;
         }
+        // The page first follows the active chart, the simulator's SIM-BTC: it is not a real perpetual, so nothing may open
+        // liquidation streams or request derivatives or options data for it (and the scene stays offline before the fixtures).
+        if (view.Selection is { IsSimulated: true } simulated)
+            Check(!simulated.IsCryptoUsd && simulated.Underlying.Length == 0
+                  && !view.Panels.OfType<TapePanel>().Single().WatchingLiquidations && !view.Panels.OfType<DerivativesPanel>().Single().WatchingLiquidations,
+                $"the simulated chart ({simulated.Instrument.Symbol}) is never treated as a real perpetual: no liquidation streams, derivatives or options");
         view.Context.Derivatives = () => derivatives;
         view.Context.Levels = () => levels;
         view.Context.Options = () => options;
@@ -191,18 +197,20 @@ internal static class WorkbenchScene
             // ---- aggregated trades
             view.Select("tape");
             var tape = view.Panels.OfType<TapePanel>().Single();
-            Until(() => tape.Tape.RowCount > 0 && tape.Tape.Rows.Any(r => r.IsLiquidation), 20);
-            Check(tape.IsActive, "the visible panel is active");
+            string Coverage() => view.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "TapeCoverage")?.Text ?? "";
+            bool OkxPartial() => tape.Tape.Buckets.Any(b => b.Venues.TryGetValue("okx-swap", out var okx) && okx.TradesPartial);
+            bool BothStreams() => tape.Tape.Rows.Any(r => r.IsLiquidation && r.Venue == DerivativesData.Binance) && tape.Tape.Rows.Any(r => r.IsLiquidation && r.Venue == DerivativesData.Bybit);
+            // Waits on the asserted state itself: the restart shows the fixture's coverage at once, liquidations arrive from the fixture sockets.
+            Until(() => BothStreams() && Coverage().Contains("OKX", StringComparison.Ordinal) && OkxPartial(), 20);
+            Check(tape.IsActive && tape.WatchingLiquidations, "the visible panel is active and listens to the liquidation streams");
             Check(tape.Tape.Totals.Keys.Intersect(venues.Select(v => v.Id)).Count() == 3, "the tape counts prints from all three venues: " + string.Join(", ", tape.Tape.Totals.Keys));
             Check(tape.Tape.Rows.All(r => r.IsLiquidation || r.Notional >= 1_000), "lines below the notional threshold are hidden");
             Check(tape.Tape.Rows.Any(r => r.Emphasis == TapeEmphasis.Huge), "huge prints are highlighted");
-            Check(tape.Tape.Rows.Any(r => r.IsLiquidation && r.Venue == DerivativesData.Binance) && tape.Tape.Rows.Any(r => r.IsLiquidation && r.Venue == DerivativesData.Bybit),
-                "observed liquidations from both streams appear as tape lines");
-            Check(tape.Tape.Buckets.Any(b => b.Venues.Values.Any(v => v.Liquidations == LiquidationCoverage.NotObserved || v.Liquidations == LiquidationCoverage.Partial)),
+            Check(BothStreams(), "observed liquidations from both streams appear as tape lines");
+            Check(tape.Tape.Buckets.Any(b => TradeTape.BucketCoverage(b, DerivativesData.Venues) != LiquidationCoverage.Observed),
                 "buckets before the liquidation streams connected are not reported as observed zeros");
-            string coverage = view.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "TapeCoverage")?.Text ?? "";
-            Check(coverage.Contains("OKX", StringComparison.Ordinal) && tape.Tape.Buckets.Any(b => b.Venues.TryGetValue("okx-swap", out var okx) && okx.TradesPartial),
-                "a reconnecting venue is shown and its volume is flagged partial: " + coverage);
+            string coverage = Coverage();
+            Check(coverage.Contains("OKX", StringComparison.Ordinal) && OkxPartial(), "a reconnecting venue is shown and its volume is flagged partial: " + coverage);
             Inspect(window, view, "tape");
 
             // ---- depth heat map, with recording and without
@@ -233,9 +241,21 @@ internal static class WorkbenchScene
             // ---- derivatives dashboard
             view.Select("derivatives");
             var deriv = view.Panels.OfType<DerivativesPanel>().Single();
-            // all five venues post together; the funding board reads each venue's bulk endpoint
-            Until(() => deriv.Inputs.Count == 5 && deriv.Boards.Count == 5 && deriv.Flow != null, 30);
-            pump(2.5);
+            // The selected panel joins the visual tree on the next layout pass.
+            Until(() => view.GetVisualDescendants().OfType<Grid>().Any(g => g.Name == "DerivativesTable"), 10);
+            var table = view.GetVisualDescendants().OfType<Grid>().Single(g => g.Name == "DerivativesTable");
+            string? TableCell(string venueName, int column)
+            {
+                int? row = table.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetColumn(t) == 0 && t.Text == venueName) is { } name ? Grid.GetRow(name) : null;
+                return row == null ? null : table.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetRow(t) == row && Grid.GetColumn(t) == column)?.Text;
+            }
+            var liquidationFeed = view.GetVisualDescendants().OfType<Grid>().Single(g => g.Name == "DerivativesLiquidationFeed");
+            string FeedCoverage() => view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "DerivativesLiquidationCoverage").Text ?? "";
+            string observing = Lang.T($"Liquidation stream observed: {WorkbenchFormat.Venue(DerivativesData.Binance)}");
+            // All five venues post together, the funding board reads each venue's bulk endpoint, and the liquidation feed
+            // lists the fixture stream's events once they arrive: wait for each asserted state rather than a fixed time.
+            Until(() => deriv.Inputs.Count == 5 && deriv.Boards.Count == 5 && deriv.Flow != null && TableCell(WorkbenchFormat.Venue(DerivativesData.Hyperliquid), 9) != null
+                        && liquidationFeed.RowDefinitions.Count > 1 && FeedCoverage().Contains(observing, StringComparison.Ordinal), 30);
             Check(deriv.Inputs.Count == 5 && DerivativesData.PerpetualVenues.All(deriv.Inputs.ContainsKey), "all five venues load: " + string.Join(", ", deriv.Inputs.Keys));
             Check(deriv.Inputs.TryGetValue(DerivativesData.Binance, out var binance) && binance.Funding != null && binance.OpenInterest != null && binance.Stats != null && binance.LongShort != null,
                 "Binance funding, open interest, premium and long/short load");
@@ -244,13 +264,7 @@ internal static class WorkbenchScene
             Check(new[] { DerivativesData.Okx, DerivativesData.Bitget, DerivativesData.Hyperliquid }.All(v => deriv.Inputs.TryGetValue(v, out var i) && i.Funding is { Samples.Count: > 0 } && i.Stats != null && i.Errors.Count == 0),
                 "OKX, Bitget and Hyperliquid funding and premium load from their published shapes: "
                 + string.Join(" | ", deriv.Inputs.Values.SelectMany(i => i.Errors)));
-            var table = view.GetVisualDescendants().OfType<Grid>().Single(g => g.Name == "DerivativesTable");
             Check(table.Children.OfType<TextBlock>().Count(t => t.Text == WorkbenchFormat.Missing) >= 1, "missing values are dashes, not zeros");
-            string? TableCell(string venueName, int column)
-            {
-                int? row = table.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetColumn(t) == 0 && t.Text == venueName) is { } name ? Grid.GetRow(name) : null;
-                return row == null ? null : table.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetRow(t) == row && Grid.GetColumn(t) == column)?.Text;
-            }
             Check(TableCell(WorkbenchFormat.Venue(DerivativesData.Hyperliquid), 9) == Lang.T("not published"),
                 "Hyperliquid's long/short ratio says 'not published' instead of a value: " + TableCell(WorkbenchFormat.Venue(DerivativesData.Hyperliquid), 9));
             var board = view.GetVisualDescendants().OfType<Grid>().Single(g => g.Name == "DerivativesFundingBoard");
@@ -258,10 +272,9 @@ internal static class WorkbenchScene
             Check(boardCoins.SequenceEqual(DerivativesDashboard.BoardCoins) && deriv.Boards.Values.All(b => b is { Count: 5 })
                   && !board.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == Lang.T("failed")),
                 $"the funding board lists five coins with every venue's bulk rate ({string.Join(", ", boardCoins)})");
-            var liquidationFeed = view.GetVisualDescendants().OfType<Grid>().Single(g => g.Name == "DerivativesLiquidationFeed");
-            string feedCoverage = view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "DerivativesLiquidationCoverage").Text ?? "";
+            string feedCoverage = FeedCoverage();
             Check(liquidationFeed.RowDefinitions.Count > 1 && liquidationFeed.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == Lang.T(WorkbenchFormat.Venue(DerivativesData.Binance)))
-                  && feedCoverage.Contains(Lang.T($"Liquidation stream observed: {WorkbenchFormat.Venue(DerivativesData.Binance)}"), StringComparison.Ordinal),
+                  && feedCoverage.Contains(observing, StringComparison.Ordinal),
                 $"the liquidation feed lists observed liquidations and names the observing streams ({liquidationFeed.RowDefinitions.Count - 1} rows): {feedCoverage}");
             Check(deriv.Flow is { FirstTrade: not null, MeasuredVolume: > 0 } flow && flow.Price.Any(p => p != null) && flow.Cvd.Any(c => c != null),
                 $"price and CVD are computed from the instrument's measured trades ({deriv.Flow?.MeasuredVolume} measured)");
@@ -270,8 +283,11 @@ internal static class WorkbenchScene
             // ---- options: unconfigured, then a fixture provider
             view.Context.Options = () => unconfigured;
             view.Select("options");
-            pump(1.2);
-            Check(view.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "OptionsConnect").IsVisible, "without an options-data connection the panel asks to connect one");
+            // The selected panel joins the visual tree on the next layout pass.
+            Until(() => view.GetVisualDescendants().OfType<Border>().Any(b => b.Name == "OptionsConnect"), 10);
+            Border OptionsConnect() => view.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "OptionsConnect");
+            Until(() => OptionsConnect().IsVisible, 5);
+            Check(OptionsConnect().IsVisible, "without an options-data connection the panel asks to connect one");
             Inspect(window, view, "options_unconfigured", canvases: false);
             var optionsPanel = view.Panels.OfType<OptionsPanel>().Single();
             TextBlock DvolStatus() => view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "OptionsDvolStatus");
@@ -292,6 +308,8 @@ internal static class WorkbenchScene
             Inspect(window, view, "options");
 
             // ---- toolbox
+            var accountBefore = (svc.Portfolio.Balance, svc.Portfolio.RealizedPnL, svc.Portfolio.Commission,
+                svc.Journal.RevisionOf(svc.Portfolio.AccountID), svc.SimBrokers.Sum(b => b.Orders.Count));
             view.Select("toolbox");
             var toolbox = view.Panels.OfType<ToolboxPanel>().Single();
             Until(() => toolbox.StructureResult != null, 30);
@@ -312,12 +330,14 @@ internal static class WorkbenchScene
             Check(sizeText.Contains("0.092", StringComparison.Ordinal) && !sizeText.Contains("0.0926", StringComparison.Ordinal), "position size floors to the instrument's step: " + sizeText);
             var liqText = string.Join(" ", view.GetVisualDescendants().OfType<StackPanel>().Single(s => s.Name == "ToolLiquidationResult").GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
             Check(liqText.Contains("72,361.81", StringComparison.Ordinal), "approximate isolated liquidation price for 10× and 0.5 %: " + liqText);
-            Check(svc.Portfolio.Balance == svc.Settings.SimStartBalance || svc.Portfolio.Balance > 0, "calculators never touch an account");
+            var accountAfter = (svc.Portfolio.Balance, svc.Portfolio.RealizedPnL, svc.Portfolio.Commission,
+                svc.Journal.RevisionOf(svc.Portfolio.AccountID), svc.SimBrokers.Sum(b => b.Orders.Count));
+            Check(accountAfter == accountBefore, $"calculators never touch an account: balance, P&L, journal and simulated orders are unchanged ({accountBefore} → {accountAfter})");
             Inspect(window, view, "toolbox", canvases: false);
 
             // ---- detachable panel window
             view.Detach("derivatives");
-            pump(0.5);
+            Until(() => view.PanelWindow("derivatives") is { IsVisible: true }, 5);
             var floating = view.PanelWindow("derivatives");
             Check(floating is { IsVisible: true } && deriv.IsActive, "a panel opens in its own window and stays active there");
             if (floating != null)
@@ -330,8 +350,9 @@ internal static class WorkbenchScene
             Check(view.PanelWindow("derivatives") == null && svc.Settings.PanelWindows.TryGetValue("workbench-derivatives", out var st) && !st.Floating,
                 "closing the window returns the panel to the page");
             view.Select("tape");
-            pump(0.2);
-            Check(!deriv.IsActive && tape.IsActive, "hidden panels release their work; only the visible one is active");
+            Until(() => !deriv.IsActive && tape.IsActive, 5);
+            Check(!deriv.IsActive && !deriv.WatchingLiquidations && tape.IsActive && tape.WatchingLiquidations,
+                "hidden panels release their work: only the visible one is active and holds the liquidation streams");
         }
         finally
         {
@@ -455,6 +476,8 @@ internal static class WorkbenchScene
                 (_, "/fapi/v1/premiumIndex") when symbol == null => (200, "[" + string.Join(",", Coins.Select(c => $$"""{"symbol":"{{c.Coin}}USDT","markPrice":"{{F(c.Price)}}","indexPrice":"{{F(c.Price)}}","lastFundingRate":"0.0001","nextFundingTime":{{nextSettle}},"time":{{now}}}""")) + "]"),
                 (_, "/fapi/v1/premiumIndex") => (200, $$"""{"symbol":"BTCUSDT","markPrice":"80010","indexPrice":"80000","lastFundingRate":"0.0001","nextFundingTime":{{now + 3_600_000}},"time":{{now}}}"""),
                 (_, "/fapi/v1/fundingInfo") => (200, "[]"),
+                (_, "/fapi/v1/exchangeInfo") => (200, """{"symbols":[""" + string.Join(",", Coins.Select(c =>
+                    $$"""{"symbol":"{{c.Coin}}USDT","status":"TRADING","contractType":"PERPETUAL","baseAsset":"{{c.Coin}}","quoteAsset":"USDT","filters":[]}""")) + "]}"),
                 (_, "/v5/market/tickers") when symbol == null => (200, """{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[""" + string.Join(",", Coins.Select(c => $$"""{"symbol":"{{c.Coin}}USDT","markPrice":"{{F(c.Price)}}","indexPrice":"{{F(c.Price)}}","fundingRate":"-0.00005","nextFundingTime":"{{nextSettle}}","fundingIntervalHour":"8"}""")) + $$"""]},"time":{{now}}}"""),
                 (_, "/v5/market/tickers") => (200, $$"""{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","markPrice":"79990","indexPrice":"80000","fundingRate":"-0.00005","nextFundingTime":"{{now + 3_600_000}}"}]},"time":{{now}}}"""),
                 (_, "/futures/data/globalLongShortAccountRatio") => (200, "[" + string.Join(",", Every(300_000, 500).Select(t => $$"""{"symbol":"BTCUSDT","longShortRatio":"1.4","longAccount":"{{F(0.58 + 0.02 * Math.Sin(t / 1e7))}}","shortAccount":"{{F(0.42 - 0.02 * Math.Sin(t / 1e7))}}","timestamp":{{t}}}""")) + "]"),
@@ -519,6 +542,8 @@ internal static class WorkbenchScene
         {
             long now = Ms(DateTime.UtcNow);
             bool binance = endpoint.AbsolutePath.Contains("forceOrder", StringComparison.Ordinal);
+            // Bybit acknowledges the subscription before it publishes events.
+            if (!binance) _messages.Enqueue(Encoding.UTF8.GetBytes("""{"success":true,"ret_msg":"subscribe","conn_id":"fixture","op":"subscribe"}"""));
             foreach (var (ago, quantity, longLiquidated) in new[] { (60_000L, 4.0, true), (20_000L, 1.5, false), (5_000L, 9.0, true) })
             {
                 string text = binance

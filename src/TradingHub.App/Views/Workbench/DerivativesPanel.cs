@@ -49,7 +49,8 @@ internal sealed class DerivativesPanel : WorkbenchPanel
     // Price/CVD re-reads the trade store in the background, one read at a time; the UI thread only snapshots the row range.
     private readonly SingleFlightRefresher<PriceCvdSeries> _flowRefresh = new(work => Task.Run(work), work => Dispatcher.UIThread.Post(work));
     private (long Generation, decimal Minimum, long Minute, string? Symbol) _feedKey;
-    private int _generation;
+    private (int Inputs, long Liquidations, long Minute) _tableKey;
+    private int _generation, _inputsVersion;
     private bool _loading, _boardLoading, _boardDirty = true;
 
     public DerivativesPanel(WorkbenchContext context) : base(context)
@@ -100,12 +101,16 @@ internal sealed class DerivativesPanel : WorkbenchPanel
     internal IReadOnlyDictionary<string, IReadOnlyDictionary<string, FundingSnapshot>?> Boards => _boards;
     internal PriceCvdSeries? Flow => _flow;
 
+    /// <summary>Whether the panel currently holds the liquidation streams (scenes check that hidden panels release them).</summary>
+    internal bool WatchingLiquidations => _watch != null;
+
     private static TextBlock Heading(string text) => new() { Text = text, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 6, 0, 0) };
 
     protected override void OnSelectionChanged()
     {
         _generation++;
         _inputs.Clear();
+        _inputsVersion++;
         _loading = false;
         _boardLoading = false;
         _loadedAt = DateTime.MinValue;
@@ -164,8 +169,14 @@ internal sealed class DerivativesPanel : WorkbenchPanel
     {
         if (now - _loadedAt >= Reload) Load();
         LoadBoard();
-        if (now - _lastTable >= TimeSpan.FromSeconds(2)) Refresh();
+        if (Selection is { } sel && now - _flowAt >= FlowReload) RequestFlow(sel, now);
+        // The table and charts are rebuilt only when an input changed: venue data, a liquidation or stream window, or the minute.
+        if (now - _lastTable >= TimeSpan.FromSeconds(2) && TableKey(now) != _tableKey) Refresh();
     }
+
+    private (int Inputs, long Liquidations, long Minute) TableKey(DateTime now) =>
+        (_inputsVersion, Selection is { IsCryptoUsd: true } sel && Context.Derivatives() is { } service ? service.LiquidationGeneration(sel.DerivativesSymbol) : 0,
+            now.Ticks / TimeSpan.TicksPerMinute);
 
     private void Load()
     {
@@ -182,29 +193,39 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         string symbol = sel.DerivativesSymbol;
         var now = _loadedAt;
         var from = now.AddHours(-Math.Clamp(Context.Settings.DerivativesHours, 1, 24 * 30));
+        var ct = ActivityToken;
         _status.Text = $"Loading {symbol} from Binance, Bybit, OKX, Bitget and Hyperliquid…";
         _ = Task.Run(async () =>
         {
             // Venues are separate hosts and load side by side; each venue's requests stay sequential.
-            var results = await Task.WhenAll(DerivativesData.PerpetualVenues.Select(venue => LoadVenueAsync(service, venue, symbol, from, now))).ConfigureAwait(false);
+            var results = await Task.WhenAll(DerivativesData.PerpetualVenues.Select(venue => LoadVenueAsync(service, venue, symbol, from, now, ct))).ConfigureAwait(false);
             Dispatcher.UIThread.Post(() =>
             {
                 if (generation != _generation) return;
                 _loading = false;
+                // Hidden meanwhile: the requests were cancelled, so load again once the panel is visible.
+                if (ct.IsCancellationRequested)
+                {
+                    _loadedAt = DateTime.MinValue;
+                    return;
+                }
                 foreach (var r in results) _inputs[r.Venue] = r;
+                _inputsVersion++;
                 Refresh();
             });
         });
     }
 
-    private static async Task<DerivativesVenueInputs> LoadVenueAsync(DerivativesData service, string venue, string symbol, DateTime from, DateTime now)
+    private static async Task<DerivativesVenueInputs> LoadVenueAsync(DerivativesData service, string venue, string symbol, DateTime from, DateTime now, CancellationToken ct)
     {
         var errors = new List<string>();
         // One complete template per metric: the venue and the venue's message are the only data holes.
         async Task<T?> Try<T>(Func<string, string> failed, Func<Task<T>> load) where T : class
         {
+            if (ct.IsCancellationRequested) return null;
             try { return await load().ConfigureAwait(false); }
             catch (ObjectDisposedException) { return null; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return null; }
             catch (Exception ex)
             {
                 errors.Add(failed(ex.Message));
@@ -212,10 +233,10 @@ internal sealed class DerivativesPanel : WorkbenchPanel
             }
         }
         string name = WorkbenchFormat.Venue(venue);
-        var funding = await Try(m => $"{name} funding failed: {m}", () => service.LoadFundingAsync(venue, symbol, from.AddHours(-8), now, CancellationToken.None)).ConfigureAwait(false);
-        var oi = await Try(m => $"{name} open interest failed: {m}", () => service.LoadOpenInterestAsync(venue, symbol, from.AddHours(-1), now, CancellationToken.None)).ConfigureAwait(false);
-        var stats = await Try(m => $"{name} premium failed: {m}", () => service.LoadMarketStatsAsync(venue, symbol, CancellationToken.None)).ConfigureAwait(false);
-        var ls = await Try(m => $"{name} long/short ratio failed: {m}", () => service.LoadLongShortAsync(venue, symbol, from, now, CancellationToken.None)).ConfigureAwait(false);
+        var funding = await Try(m => $"{name} funding failed: {m}", () => service.LoadFundingAsync(venue, symbol, from.AddHours(-8), now, ct)).ConfigureAwait(false);
+        var oi = await Try(m => $"{name} open interest failed: {m}", () => service.LoadOpenInterestAsync(venue, symbol, from.AddHours(-1), now, ct)).ConfigureAwait(false);
+        var stats = await Try(m => $"{name} premium failed: {m}", () => service.LoadMarketStatsAsync(venue, symbol, ct)).ConfigureAwait(false);
+        var ls = await Try(m => $"{name} long/short ratio failed: {m}", () => service.LoadLongShortAsync(venue, symbol, from, now, ct)).ConfigureAwait(false);
         return new DerivativesVenueInputs(venue, funding, oi, stats, ls, null, errors);
     }
 
@@ -230,19 +251,26 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         _boardLoading = true;
         _boardLoadedAt = now;
         int generation = _generation;
+        var ct = ActivityToken;
         _ = Task.Run(async () =>
         {
             var wanted = symbols.Select(s => s.Symbol).ToArray();
             var results = await Task.WhenAll(DerivativesData.PerpetualVenues.Select(async venue =>
             {
-                try { return (venue, Board: await service.LoadFundingBoardAsync(venue, wanted, CancellationToken.None).ConfigureAwait(false), Error: (string?)null); }
+                try { return (venue, Board: await service.LoadFundingBoardAsync(venue, wanted, ct).ConfigureAwait(false), Error: (string?)null); }
                 catch (ObjectDisposedException) { return (venue, Board: (IReadOnlyDictionary<string, FundingSnapshot>?)null, Error: (string?)null); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { return (venue, Board: null, Error: null); }
                 catch (Exception ex) { return (venue, Board: null, Error: $"{WorkbenchFormat.Venue(venue)}: {ex.Message}"); }
             })).ConfigureAwait(false);
             Dispatcher.UIThread.Post(() =>
             {
                 _boardLoading = false;
                 if (generation != _generation) return;
+                if (ct.IsCancellationRequested)
+                {
+                    _boardLoadedAt = DateTime.MinValue;
+                    return;
+                }
                 _boardSymbols = symbols;
                 _boards.Clear();
                 _boardErrors.Clear();
@@ -265,6 +293,7 @@ internal sealed class DerivativesPanel : WorkbenchPanel
     {
         _lastTable = Context.Clock();
         var now = _lastTable;
+        _tableKey = TableKey(now);
         if (_boardDirty) RenderBoard();
         if (Selection is not { } sel)
         {
@@ -278,7 +307,7 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         var from = now.AddHours(-hours);
         var step = TimeSpan.FromHours(hours) / 96;
         var charts = new List<DerivativesChart>();
-        AddFlowCharts(sel, charts, from, now, step);
+        AddFlowCharts(sel, charts);
         RenderFeed(now, force: false);
         if (_inputs.Count == 0)
         {
@@ -322,10 +351,9 @@ internal sealed class DerivativesPanel : WorkbenchPanel
         if (!_loading) _status.Text = notes.Length == 0 ? $"{sel.DerivativesSymbol} · updated {_loadedAt.ToLocalTime():HH:mm:ss}" : string.Join(" · ", notes);
     }
 
-    /// <summary>Price and CVD panes from the instrument's own trades, re-read in the background at most every few seconds.</summary>
-    private void AddFlowCharts(WorkbenchSelection sel, List<DerivativesChart> charts, DateTime from, DateTime now, TimeSpan step)
+    /// <summary>Price and CVD panes from the instrument's own trades (re-read in the background by <see cref="RequestFlow"/>).</summary>
+    private void AddFlowCharts(WorkbenchSelection sel, List<DerivativesChart> charts)
     {
-        if (IsActive && now - _flowAt >= FlowReload) RequestFlow(sel, from, now, step);
         var flow = _flow;
         charts.Add(new($"{sel.Instrument.Symbol} · price", flow?.Price ?? Array.Empty<double?>(), false, v => WorkbenchFormat.Price(v)));
         charts.Add(new($"{sel.Instrument.Symbol} · CVD (measured aggressor side)", flow?.Cvd ?? Array.Empty<double?>(), true, v => WorkbenchFormat.Compact(v), Flagged: flow?.Flagged));
@@ -334,11 +362,14 @@ internal sealed class DerivativesPanel : WorkbenchPanel
     /// <summary>
     /// Snapshots the store's published row count and the range's first row on the UI thread (a binary search), reads those
     /// rows in the background and applies the result only if the selection is unchanged and no correction moved rows meanwhile.
-    /// A request while a read runs waits for it (coalesced), so reads never overlap.
+    /// A request while a read runs waits for it (coalesced), so reads never overlap. Called at most every few seconds while visible.
     /// </summary>
-    private void RequestFlow(WorkbenchSelection sel, DateTime from, DateTime now, TimeSpan step)
+    private void RequestFlow(WorkbenchSelection sel, DateTime now)
     {
         _flowAt = now;
+        var hours = Math.Clamp(Context.Settings.DerivativesHours, 1, 24 * 30);
+        var from = now.AddHours(-hours);
+        var step = TimeSpan.FromHours(hours) / 96;
         var store = sel.Data.Trades;
         var view = TradingHub.Data.TradeStoreView.Capture(store);
         int first = store.LowerBound(from);

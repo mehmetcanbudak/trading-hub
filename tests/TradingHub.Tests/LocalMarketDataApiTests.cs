@@ -7,6 +7,7 @@ using System.Text.Json;
 using TradingHub.App.Services;
 using TradingHub.App.Services.LocalApi;
 using TradingHub.Feeds;
+using TradingHub.Market;
 
 namespace TradingHub.Tests;
 
@@ -137,9 +138,9 @@ public sealed class LocalMarketDataApiTests
             Assert.Equal(400, badTimeframe.Status);
             Assert.Equal("bad_timeframe", ErrorCode(badTimeframe));
 
-            var unknown = await SendAsync(port, Request("GET", "/api/v1/klines?conn=bf&symbol=NOPE&tf=1m", host));
-            Assert.Equal(404, unknown.Status);
-            Assert.Equal("unknown_symbol", ErrorCode(unknown));
+            var notOpenKlines = await SendAsync(port, Request("GET", "/api/v1/klines?conn=bf&symbol=NOPE&tf=1m", host));
+            Assert.Equal(404, notOpenKlines.Status);
+            Assert.Equal("not_open", ErrorCode(notOpenKlines));
 
             var liquidity = await SendAsync(port, Request("GET", "/api/v1/liquidity?conn=binance-futures&symbol=BTCUSDT&minutes=9999", host));
             Assert.Equal(200, liquidity.Status);
@@ -483,21 +484,22 @@ public sealed class LocalMarketDataApiTests
     }
 
     [Fact]
-    public void CandlesAggregateIntoUtcAlignedBucketsAndKeepUnknownBuyVolumeNull()
+    public void CandlesAggregateLoadedTradesIntoUtcAlignedBarsAndKeepUnknownBuyVolumeNull()
     {
-        var bars = new List<Kline>
-        {
-            new(0, 1, 2, 0.5m, 1.5m, 10, 4, true),
-            new(60_000, 1.5m, 3, 1, 2.5m, 5, 1, true),
-            new(300_000, 2.5m, 2.6m, 2.4m, 2.5m, 1, 0, false),
-        };
-        var result = ApiKlineAggregation.Aggregate(bars, 5);
-        Assert.Equal(2, result.Count);
-        Assert.Equal(new ApiKline(0, 1, 3, 0.5m, 2.5m, 15, 5), result[0]);
-        Assert.Equal(new ApiKline(300_000, 2.5m, 2.6m, 2.4m, 2.5m, 1, null), result[1]);
-        Assert.Equal(60, ApiKlineAggregation.BaseMinutes(240));
-        Assert.Equal(60, ApiKlineAggregation.BaseMinutes(1440));
-        Assert.Equal(15, ApiKlineAggregation.BaseMinutes(15));
+        var instrument = new Instrument { Symbol = "TEST", FeedId = "test", TickSize = 0.5m };
+        var store = new TradingHub.Data.TradeStore(instrument);
+        var t0 = new DateTime(2026, 1, 5, 10, 0, 0, DateTimeKind.Utc);
+        store.Add(new Trade(1, t0.AddSeconds(5), 1m, 10m, TradeSide.Buy));
+        store.Add(new Trade(2, t0.AddSeconds(70), 3m, 5m, TradeSide.Sell));
+        store.Add(new Trade(3, t0.AddSeconds(80), 2.5m, 1m, TradeSide.Buy));
+        store.Add(new Trade(4, t0.AddMinutes(5).AddSeconds(1), 2.5m, 1m, TradeSide.None));
+        var view = TradingHub.Data.TradeStoreView.Capture(store);
+        var result = ApiKlineAggregation.FromTrades(store, view, 0, view.Count, 5, default);
+        long open = new DateTimeOffset(t0).ToUnixTimeMilliseconds();
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.Count);
+        Assert.Equal(new ApiKline(open, 1, 3, 1, 2.5m, 16, 11), result[0]);
+        Assert.Equal(new ApiKline(open + 300_000, 2.5m, 2.5m, 2.5m, 2.5m, 1, null), result[1]);
     }
 
     [Fact]
@@ -633,7 +635,7 @@ public sealed class LocalMarketDataApiTests
         {
             Calls.Enqueue("klines");
             if (!request.Symbol.Equals("BTCUSDT", StringComparison.OrdinalIgnoreCase))
-                return Task.FromResult(ApiResult<IReadOnlyList<ApiKline>>.NotFound("unknown_symbol", "Unknown symbol."));
+                return Task.FromResult(ApiResult<IReadOnlyList<ApiKline>>.NotOpen("Not open."));
             KlineRequests.Enqueue(request);
             IReadOnlyList<ApiKline> bars =
             [

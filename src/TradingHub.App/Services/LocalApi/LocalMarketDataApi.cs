@@ -32,6 +32,12 @@ public sealed class LocalMarketDataApiOptions
     public TimeSpan StreamInterval { get; init; } = TimeSpan.FromMilliseconds(250);
     public int StreamQueueCapacity { get; init; } = 20_000;
 
+    /// <summary>Deadline of each response write and stream message; a client that stops reading is disconnected.</summary>
+    public TimeSpan WriteTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Time a stream client has to answer a keep-alive ping before the stream is closed.</summary>
+    public TimeSpan KeepAliveTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
     /// <summary>Clock of the request rate limiter.</summary>
     public TimeProvider Time { get; init; } = TimeProvider.System;
 
@@ -71,7 +77,8 @@ public sealed class LocalMarketDataApiOptions
 /// <summary>
 /// Opt-in, read-only market-data API on 127.0.0.1 for the user's own local tools. Minimal HTTP/1.1 (one request per
 /// connection) and RFC 6455 streams over a loopback <see cref="TcpListener"/>. Host and Origin are validated against
-/// DNS rebinding and cross-site requests; every input and response is bounded. No route mutates anything.
+/// DNS rebinding and cross-site requests; every input and response is bounded, every write has a deadline, and the
+/// projection-heavy routes run one at a time. No route mutates anything.
 /// </summary>
 public sealed class LocalMarketDataApi
 {
@@ -94,9 +101,12 @@ public sealed class LocalMarketDataApi
     private readonly HashSet<string> _origins;
     private readonly OwnedOperationRegistry _operations = new();
     private readonly RateLimiter _limiter;
+    // Candles and recorded depth project large ranges: one at a time bounds their memory and CPU.
+    private readonly SemaphoreSlim _heavy = new(1, 1);
     private readonly object _gate = new();
     private TcpListener? _listener;
     private Task? _stop;
+    private string? _fault;
     private int _connections;
     private int _streams;
 
@@ -111,10 +121,20 @@ public sealed class LocalMarketDataApi
     /// <summary>The bound loopback endpoint once started.</summary>
     public IPEndPoint? Endpoint { get; private set; }
 
+    /// <summary>True while the listener accepts connections: false once stopped or after the accept loop failed (see <see cref="Fault"/>).</summary>
     public bool IsRunning
     {
-        get { lock (_gate) return _listener != null && _stop == null; }
+        get { lock (_gate) return _listener != null && _stop == null && _fault == null; }
     }
+
+    /// <summary>Why the listener stopped accepting on its own, or null.</summary>
+    public string? Fault
+    {
+        get { lock (_gate) return _fault; }
+    }
+
+    /// <summary>Raised once, on the accept loop's thread, when the listener stops accepting on its own.</summary>
+    public event Action? Faulted;
 
     /// <summary>Binds 127.0.0.1 only. Throws <see cref="SocketException"/> when the port is unavailable.</summary>
     public void Start()
@@ -173,17 +193,48 @@ public sealed class LocalMarketDataApi
 
     private async Task AcceptLoopAsync(TcpListener listener, CancellationToken ct)
     {
+        int failures = 0;
         while (!ct.IsCancellationRequested)
         {
             TcpClient client;
-            try { client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
-            catch (ObjectDisposedException) { return; }
-            catch (SocketException) when (Stopping || ct.IsCancellationRequested) { return; }
-            catch (SocketException) { continue; }
-            catch (InvalidOperationException) { return; }
+            try
+            {
+                client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                failures = 0;
+            }
+            catch (Exception) when (Stopping || ct.IsCancellationRequested) { return; }
+            catch (SocketException error) when (error.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionAborted)
+            {
+                continue; // that client gave up before it was accepted
+            }
+            catch (SocketException error)
+            {
+                // Persistent accept failures (such as too many open files) back off instead of spinning; logged once per run.
+                if (++failures == 1) this.LogWarn($"Local market-data API: accepting a connection failed: {error.Message}");
+                try { await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(1000, 50 << Math.Min(failures, 5))), ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                continue;
+            }
+            catch (Exception error) when (error is ObjectDisposedException or InvalidOperationException)
+            {
+                Fail(listener, error.Message);
+                return;
+            }
             Admit(client);
         }
+    }
+
+    /// <summary>The listener stopped on its own: report it so the host shows it and the next settings apply restarts the server.</summary>
+    private void Fail(TcpListener listener, string reason)
+    {
+        lock (_gate)
+        {
+            if (_stop != null) return;
+            _fault = reason;
+        }
+        listener.Stop();
+        this.LogWarn($"Local market-data API stopped accepting connections: {reason}");
+        Faulted?.Invoke();
     }
 
     private void Admit(TcpClient client)
@@ -343,7 +394,7 @@ public sealed class LocalMarketDataApi
                 await WriteErrorAsync(stream, 403, "origin_not_allowed", "Preflight requests need an allowed Origin.", null, ct).ConfigureAwait(false);
                 return true;
             }
-            await WriteResponseAsync(stream, 204, [], allowedOrigin,
+            await WriteResponseAsync(stream, 204, ReadOnlyMemory<byte>.Empty, allowedOrigin,
                 [("Access-Control-Allow-Methods", "GET"), ("Access-Control-Max-Age", "600")], ct).ConfigureAwait(false);
             return true;
         }
@@ -462,7 +513,7 @@ public sealed class LocalMarketDataApi
 
     // ===================================================================== routes
 
-    private async Task<(int Status, byte[] Body)> RouteAsync(HttpRequest request, CancellationToken ct)
+    private async Task<(int Status, ReadOnlyMemory<byte> Body)> RouteAsync(HttpRequest request, CancellationToken ct)
     {
         try
         {
@@ -514,7 +565,7 @@ public sealed class LocalMarketDataApi
                         w.WriteEndArray();
                     });
                 case "/api/v1/klines":
-                    return await KlinesAsync(request, ct).ConfigureAwait(false);
+                    return await HeavyAsync(() => KlinesAsync(request, ct), ct).ConfigureAwait(false);
                 case "/api/v1/trades":
                 {
                     if (!Instrument(request, out var conn, out var symbol, out var missing)) return missing;
@@ -538,34 +589,7 @@ public sealed class LocalMarketDataApi
                     });
                 }
                 case "/api/v1/liquidity":
-                {
-                    if (!Instrument(request, out var conn, out var symbol, out var missing)) return missing;
-                    if (!Bounded(request, "minutes", DefaultLiquidityMinutes, MaxLiquidityMinutes, out int minutes, out var bad)) return bad;
-                    if (!Bounded(request, "levels", DefaultLiquidityLevels, MaxLiquidityLevels, out int levels, out bad)) return bad;
-                    var result = await _source.GetLiquidityAsync(conn, symbol, TimeSpan.FromMinutes(minutes), levels, MaxLiquiditySamples, ct).ConfigureAwait(false);
-                    return Result(result, (w, liquidity) =>
-                    {
-                        int skip = Math.Max(0, liquidity.Samples.Count - MaxLiquiditySamples);
-                        w.WriteStartObject();
-                        w.WriteBoolean("recording", liquidity.Recording);
-                        w.WriteNumber("tickSize", liquidity.TickSize);
-                        w.WriteBoolean("truncated", liquidity.Truncated || skip > 0);
-                        w.WriteStartArray("samples");
-                        for (int i = skip; i < liquidity.Samples.Count; i++)
-                        {
-                            var sample = liquidity.Samples[i];
-                            w.WriteStartObject();
-                            w.WriteNumber("time", sample.TimeMs);
-                            w.WriteBoolean("usable", sample.Usable);
-                            w.WriteBoolean("gapBefore", sample.GapBefore);
-                            WriteLevels(w, "bids", sample.Bids, levels);
-                            WriteLevels(w, "asks", sample.Asks, levels);
-                            w.WriteEndObject();
-                        }
-                        w.WriteEndArray();
-                        w.WriteEndObject();
-                    });
-                }
+                    return await HeavyAsync(() => LiquidityAsync(request, ct), ct).ConfigureAwait(false);
                 default:
                     return (404, ErrorBody("not_found", "Unknown endpoint."));
             }
@@ -578,7 +602,45 @@ public sealed class LocalMarketDataApi
         }
     }
 
-    private async Task<(int Status, byte[] Body)> KlinesAsync(HttpRequest request, CancellationToken ct)
+    /// <summary>Runs a projection-heavy route alone, so local clients cannot run several large projections at once.</summary>
+    private async Task<(int Status, ReadOnlyMemory<byte> Body)> HeavyAsync(Func<Task<(int Status, ReadOnlyMemory<byte> Body)>> route, CancellationToken ct)
+    {
+        await _heavy.WaitAsync(ct).ConfigureAwait(false);
+        try { return await route().ConfigureAwait(false); }
+        finally { _heavy.Release(); }
+    }
+
+    private async Task<(int Status, ReadOnlyMemory<byte> Body)> LiquidityAsync(HttpRequest request, CancellationToken ct)
+    {
+        if (!Instrument(request, out var conn, out var symbol, out var missing)) return missing;
+        if (!Bounded(request, "minutes", DefaultLiquidityMinutes, MaxLiquidityMinutes, out int minutes, out var bad)) return bad;
+        if (!Bounded(request, "levels", DefaultLiquidityLevels, MaxLiquidityLevels, out int levels, out bad)) return bad;
+        var result = await _source.GetLiquidityAsync(conn, symbol, TimeSpan.FromMinutes(minutes), levels, MaxLiquiditySamples, ct).ConfigureAwait(false);
+        return Result(result, (w, liquidity) =>
+        {
+            int skip = Math.Max(0, liquidity.Samples.Count - MaxLiquiditySamples);
+            w.WriteStartObject();
+            w.WriteBoolean("recording", liquidity.Recording);
+            w.WriteNumber("tickSize", liquidity.TickSize);
+            w.WriteBoolean("truncated", liquidity.Truncated || skip > 0);
+            w.WriteStartArray("samples");
+            for (int i = skip; i < liquidity.Samples.Count; i++)
+            {
+                var sample = liquidity.Samples[i];
+                w.WriteStartObject();
+                w.WriteNumber("time", sample.TimeMs);
+                w.WriteBoolean("usable", sample.Usable);
+                w.WriteBoolean("gapBefore", sample.GapBefore);
+                WriteLevels(w, "bids", sample.Bids, levels);
+                WriteLevels(w, "asks", sample.Asks, levels);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+            w.WriteEndObject();
+        });
+    }
+
+    private async Task<(int Status, ReadOnlyMemory<byte> Body)> KlinesAsync(HttpRequest request, CancellationToken ct)
     {
         if (!Instrument(request, out var conn, out var symbol, out var missing)) return missing;
         string tf = request.Param("tf");
@@ -612,15 +674,16 @@ public sealed class LocalMarketDataApi
         });
     }
 
-    private static bool Instrument(HttpRequest request, out string conn, out string symbol, out (int, byte[]) error)
+    private static bool Instrument(HttpRequest request, out string conn, out string symbol, out (int, ReadOnlyMemory<byte>) error)
     {
         conn = request.Param("conn");
         symbol = request.Param("symbol");
-        error = (400, ErrorBody("bad_request", "conn and symbol are required."));
-        return conn.Length is > 0 and <= 128 && symbol.Length is > 0 and <= 64;
+        bool valid = conn.Length is > 0 and <= 128 && symbol.Length is > 0 and <= 64;
+        error = valid ? default : (400, ErrorBody("bad_request", "conn and symbol are required."));
+        return valid;
     }
 
-    private static bool Bounded(HttpRequest request, string name, int fallback, int max, out int value, out (int, byte[]) error)
+    private static bool Bounded(HttpRequest request, string name, int fallback, int max, out int value, out (int, ReadOnlyMemory<byte>) error)
     {
         error = default;
         string text = request.Param(name);
@@ -638,7 +701,7 @@ public sealed class LocalMarketDataApi
         return true;
     }
 
-    private static bool Millis(HttpRequest request, string name, out DateTime? value, out (int, byte[]) error)
+    private static bool Millis(HttpRequest request, string name, out DateTime? value, out (int, ReadOnlyMemory<byte>) error)
     {
         value = null;
         error = default;
@@ -653,7 +716,7 @@ public sealed class LocalMarketDataApi
         return true;
     }
 
-    private static (int Status, byte[] Body) Result<T>(ApiResult<T> result, Action<Utf8JsonWriter, T> write) => result.Status switch
+    private static (int Status, ReadOnlyMemory<byte> Body) Result<T>(ApiResult<T> result, Action<Utf8JsonWriter, T> write) => result.Status switch
     {
         ApiResultStatus.Ok when result.Value is { } value => (200, Json(w => write(w, value))),
         ApiResultStatus.Ok => (500, ErrorBody("internal", "The source returned no value.")),
@@ -723,8 +786,12 @@ public sealed class LocalMarketDataApi
             {
                 string accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(key + WebSocketGuid)));
                 byte[] handshake = Encoding.ASCII.GetBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n");
-                await stream.WriteAsync(handshake, ct).ConfigureAwait(false);
-                using var socket = WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) });
+                await WriteBoundedAsync(stream, handshake, ReadOnlyMemory<byte>.Empty, ct).ConfigureAwait(false);
+                // A peer that stops answering pings (connected but not reading) is closed instead of holding a stream slot.
+                using var socket = WebSocket.CreateFromStream(stream, new WebSocketCreationOptions
+                {
+                    IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30), KeepAliveTimeout = _options.KeepAliveTimeout,
+                });
                 await RunStreamAsync(socket, subscription.Symbol, queue, book, ct).ConfigureAwait(false);
             }
         }
@@ -789,7 +856,7 @@ public sealed class LocalMarketDataApi
         }
     }
 
-    private static async Task FlushAsync(WebSocket socket, string symbol, TradeQueue queue, BookSlot book, CancellationToken ct)
+    private async Task FlushAsync(WebSocket socket, string symbol, TradeQueue queue, BookSlot book, CancellationToken ct)
     {
         var trades = queue.Take(StreamTradesPerMessage, out long dropped);
         if (dropped > 0)
@@ -826,8 +893,13 @@ public sealed class LocalMarketDataApi
         }
     }
 
-    private static Task SendAsync(WebSocket socket, byte[] message, CancellationToken ct) =>
-        socket.SendAsync(message, WebSocketMessageType.Text, true, ct);
+    /// <summary>One stream message within the write deadline; a client that stops reading aborts its stream.</summary>
+    private async Task SendAsync(WebSocket socket, ReadOnlyMemory<byte> message, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_options.WriteTimeout);
+        await socket.SendAsync(message, WebSocketMessageType.Text, true, deadline.Token).ConfigureAwait(false);
+    }
 
     /// <summary>Bounded trade queue: overflow drops the oldest trades and reports how many were dropped.</summary>
     private sealed class TradeQueue(int capacity)
@@ -906,14 +978,15 @@ public sealed class LocalMarketDataApi
         w.WriteEndArray();
     }
 
-    private static byte[] Json(Action<Utf8JsonWriter> write)
+    /// <summary>The written JSON without a further copy.</summary>
+    private static ReadOnlyMemory<byte> Json(Action<Utf8JsonWriter> write)
     {
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer)) write(writer);
-        return buffer.WrittenSpan.ToArray();
+        return buffer.WrittenMemory;
     }
 
-    private static byte[] ErrorBody(string code, string message) => Json(w =>
+    private static ReadOnlyMemory<byte> ErrorBody(string code, string message) => Json(w =>
     {
         w.WriteStartObject();
         w.WriteStartObject("error");
@@ -923,10 +996,10 @@ public sealed class LocalMarketDataApi
         w.WriteEndObject();
     });
 
-    private static Task WriteErrorAsync(Stream stream, int status, string code, string message, string? origin, CancellationToken ct) =>
+    private Task WriteErrorAsync(Stream stream, int status, string code, string message, string? origin, CancellationToken ct) =>
         WriteResponseAsync(stream, status, ErrorBody(code, message), origin, [], ct);
 
-    private static async Task WriteResponseAsync(Stream stream, int status, byte[] body, string? origin,
+    private Task WriteResponseAsync(Stream stream, int status, ReadOnlyMemory<byte> body, string? origin,
         IReadOnlyList<(string Name, string Value)> extra, CancellationToken ct)
     {
         var head = new StringBuilder(256);
@@ -940,11 +1013,16 @@ public sealed class LocalMarketDataApi
         if (origin != null) head.Append("Access-Control-Allow-Origin: ").Append(origin).Append("\r\nVary: Origin\r\n");
         foreach (var (name, value) in extra) head.Append(name).Append(": ").Append(value).Append("\r\n");
         head.Append("\r\n");
-        byte[] headBytes = Encoding.ASCII.GetBytes(head.ToString());
-        var response = new byte[headBytes.Length + (status == 204 ? 0 : body.Length)];
-        headBytes.CopyTo(response, 0);
-        if (status != 204) body.CopyTo(response, headBytes.Length);
-        await stream.WriteAsync(response, ct).ConfigureAwait(false);
+        return WriteBoundedAsync(stream, Encoding.ASCII.GetBytes(head.ToString()), status == 204 ? ReadOnlyMemory<byte>.Empty : body, ct);
+    }
+
+    /// <summary>Head then body, both within the write deadline: a client that stops reading releases its connection slot.</summary>
+    private async Task WriteBoundedAsync(Stream stream, ReadOnlyMemory<byte> head, ReadOnlyMemory<byte> body, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_options.WriteTimeout);
+        await stream.WriteAsync(head, deadline.Token).ConfigureAwait(false);
+        if (!body.IsEmpty) await stream.WriteAsync(body, deadline.Token).ConfigureAwait(false);
     }
 
     private static string Reason(int status) => status switch

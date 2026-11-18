@@ -246,6 +246,23 @@ public sealed class TradeTape
         return any ? LiquidationCoverage.Partial : LiquidationCoverage.NotObserved;
     }
 
+    /// <summary>
+    /// A bucket's liquidation coverage across <paramref name="venues"/> (the liquidation streams): a venue without an entry
+    /// was not observed. Observed when every stream was; NotObserved when none was; otherwise Partial, so one stream that
+    /// never connected is never drawn as an observed zero.
+    /// </summary>
+    public static LiquidationCoverage BucketCoverage(TapeBucket bucket, IEnumerable<string> venues)
+    {
+        bool any = false, all = true;
+        foreach (var venue in venues)
+        {
+            var state = bucket.Venues.TryGetValue(venue, out var v) ? v.Liquidations : LiquidationCoverage.NotObserved;
+            any |= state != LiquidationCoverage.NotObserved;
+            all &= state == LiquidationCoverage.Observed;
+        }
+        return !any ? LiquidationCoverage.NotObserved : all ? LiquidationCoverage.Observed : LiquidationCoverage.Partial;
+    }
+
     /// <summary>Flags the bucket at <paramref name="time"/> as partial for a venue whose feed is not connected.</summary>
     public void MarkPartial(DateTime time, string venue)
     {

@@ -115,10 +115,11 @@ internal sealed class OptionsPanel : WorkbenchPanel
         UpdateDvol(hub, underlying);
         var chain = hub.Chain(underlying);
         var now = Context.Clock();
-        var trades = hub.TradesBetween(underlying, now.AddHours(-24), now);
         string key = $"{underlying}|{hub.Generation}|{chain?.Time.Ticks}";
         if (key == _key) return;
         _key = key;
+        // Read (and, when missing, scheduled) only when the key changed: each load or chain refresh advances the generation.
+        var trades = hub.TradesBetween(underlying, now.AddHours(-24), now);
         if (chain == null)
         {
             Summary = null;
