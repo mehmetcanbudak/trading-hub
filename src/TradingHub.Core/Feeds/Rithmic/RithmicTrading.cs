@@ -130,22 +130,18 @@ public sealed partial class RithmicTradingSession : IDisposable
     /// before it is sent anyway; tests shorten it.</summary>
     internal TimeSpan SendTurnWait { get; set; } = NativeSendTurns.ReducingWait;
 
-    /// <summary>The send-turn queue identity of one account: the native account evidence identity when known, else the
-    /// session-scoped account, matching the close reservation's contract key. One queue per native account.</summary>
-    internal string SendTurnKey(string account) =>
-        NativeAccountOf(account) is { Length: > 0 } native ? native : "session:" + _closeSessionNamespace + "|" + account;
-
     /// <summary>
-    /// The send turns of one native account, shared by every broker (instrument) and the bounded close: each order,
-    /// change, cancel or close request takes its turn where it is issued and is sent only after earlier requests of
-    /// that native account were answered.
+    /// The send turns of one account, shared by every broker (instrument) and the bounded close: each order, change,
+    /// cancel or close request takes its turn where it is issued and is sent only after earlier requests of that account
+    /// were answered. Queues are per session, where an account id names one native account; keyed by the id, not by the
+    /// native identity the account list reports later, so a request issued before that list arrived (a restored chart
+    /// during login) shares its queue with every later cancel or close of the account.
     /// </summary>
     internal NativeSendTurns SendTurns(string account)
     {
         lock (_sendTurns)
         {
-            string key = SendTurnKey(account);
-            if (!_sendTurns.TryGetValue(key, out var turns)) _sendTurns[key] = turns = new NativeSendTurns(SendTurnWait);
+            if (!_sendTurns.TryGetValue(account, out var turns)) _sendTurns[account] = turns = new NativeSendTurns(SendTurnWait);
             return turns;
         }
     }
@@ -847,7 +843,13 @@ public sealed partial class RithmicTradingSession : IDisposable
         finally { if (heldTurn == null && turn != null) turn.Release(); }
     }
 
-    public Task ModifyAsync(string accountId, RithmicOrderState order, int quantity, decimal priceOrTrigger, CancellationToken ct) =>
+    /// <summary>
+    /// Amends a working order in the account's send-turn order, like <see cref="CancelAsync"/>. An amendment of an order
+    /// that can only reduce the reported position waits for earlier sends at most the reducing bound, then is sent anyway
+    /// and returns <see cref="NativeSendTurns.UnsettledMessage"/>; one that can add exposure (also while the position is
+    /// not reported) waits for every earlier reply without a bound, so it never reaches the venue ahead of an earlier order.
+    /// </summary>
+    public Task<string?> ModifyAsync(string accountId, RithmicOrderState order, int quantity, decimal priceOrTrigger, CancellationToken ct) =>
         ModifyCoreAsync(accountId, order, quantity, priceOrTrigger, ct, null, joinSendTurn: true);
 
     internal Task ModifyOwnedAsync(string accountId, RithmicOrderState order, int quantity, decimal priceOrTrigger,
@@ -858,10 +860,9 @@ public sealed partial class RithmicTradingSession : IDisposable
     /// Amends a working order. The public path takes the account's send turn synchronously, before any wait, and holds
     /// it until the venue answers, refuses, or the call fails, so a close or cancel issued after this amendment cannot
     /// reach the venue first. A broker that already waited on its own turn passes <paramref name="joinSendTurn"/> false
-    /// and must not take a second turn (that would deadlock behind the turn it still holds). A session-level amendment
-    /// waits at most the reducing bound, then is sent anyway, matching cancel.
+    /// and must not take a second turn (that would deadlock behind the turn it still holds).
     /// </summary>
-    private async Task ModifyCoreAsync(string accountId, RithmicOrderState o, int quantity, decimal priceOrTrigger, CancellationToken ct,
+    private async Task<string?> ModifyCoreAsync(string accountId, RithmicOrderState o, int quantity, decimal priceOrTrigger, CancellationToken ct,
         Action? finalAdmission, bool joinSendTurn)
     {
         if (!NativeFuturesQuantity.TryConvert(quantity, out _)) throw new RithmicRejectedException(NativeFuturesQuantity.Error);
@@ -872,12 +873,15 @@ public sealed partial class RithmicTradingSession : IDisposable
             .Int(RpO.Quantity, quantity).Int(RpO.PriceType, o.PriceType).Int(RpO.ManualOrAuto, 1);
         if (o.PriceType is 1 or 3) w.Double(RpO.Price, (double)(o.PriceType == 1 ? priceOrTrigger : o.Price));
         if (o.PriceType is 3 or 4) w.Double(RpO.TriggerPrice, (double)priceOrTrigger);
-        // Taken before the first await so the turn exists before the caller can issue the next request.
+        // Taken before the first await so the turn exists before the caller can issue the next request; whether the
+        // amendment reduces is decided against the position reported when it is issued.
         NativeSendTurns.Turn? turn = joinSendTurn ? SendTurns(accountId).Take() : null;
-        bool admitted = false;
+        bool reducing = joinSendTurn && !RealOrderPermission.IncreasesExposure(
+            PositionSnapshotFor(accountId, o.Symbol, o.Exchange).Net, (o.IsBuy ? 1 : -1) * Math.Max(0, quantity - o.Filled));
+        bool admitted = false, inOrder = true;
         try
         {
-            if (turn != null) await turn.WaitAsync(bounded: true, ct).ConfigureAwait(false);
+            if (turn != null) inOrder = await turn.WaitAsync(bounded: reducing, ct).ConfigureAwait(false);
             await RequestAsync(w, ct, request =>
             {
                 CheckRawCloseReservation(accountId, o.Symbol, o.Exchange, finalAdmission != null);
@@ -891,6 +895,7 @@ public sealed partial class RithmicTradingSession : IDisposable
                 }
                 return request;
             }).ConfigureAwait(false);
+            return inOrder ? null : NativeSendTurns.UnsettledMessage;
         }
         catch (RithmicRejectedException)
         {

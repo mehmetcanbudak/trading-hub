@@ -54,7 +54,11 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
     private bool? _shutdownRecoveryRequired;
     private long _mutationVersion;
     private long _executionRevision = Interlocked.Increment(ref _nextExecutionRevision);
-    private string? _storageError;
+    // Sticky: without the loaded state and its lease this context cannot know what it already owns.
+    private string? _loadError;
+    // Cleared by the next successful save; every save writes the whole tracked state, including what the failed one carried.
+    private string? _saveError;
+    private string? StorageError => _loadError ?? _saveError;
     private DateTime _executionWatermark;
     private int _terminalReviewCursor;
 
@@ -645,10 +649,10 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
                 if (closed != null) _closedPnl = closed;
                 _executionWatermark = now;
                 OrdersReady = unresolved == null && !_byLink.Values.Any(t => t.SubmissionUnconfirmed || t.Sending || t.CancelRequested || t.Amendment != null);
-                LastError = _storageError ?? unresolved ?? executionError ??
+                Save(); // first: a save that succeeds again lifts an earlier failure's block before the status is composed
+                LastError = StorageError ?? unresolved ?? executionError ??
                     (executionGap ? "Bybit reported fills exceed available actual execution identities; financial results remain unknown while exact-order history reconciles." : closedError);
                 if (!PositionReady) LastError ??= "Bybit position snapshot overlapped an order request; refreshing before new exposure.";
-                Save();
             }
             PublishExecutionFacts();
             foreach (var fill in publish)
@@ -809,7 +813,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         if (!_validated || AccountIdentity.Length == 0) return "Bybit authenticated account identity is unknown; wait for account validation before submitting an order.";
         if (reduceOnly) return null;
         if (_retired) return "Bybit credentials were replaced; this context may only cancel or send native reducing exits.";
-        if (_storageError != null) return _storageError;
+        if (StorageError is { } storageError) return storageError;
         if (_flattening.ContainsKey(symbol)) return "A Bybit flatten is pending; new exposure is blocked until its tracked close reconciles.";
         if (!PositionReady || !OrdersReady) return "Bybit position or working orders are unknown; new exposure is blocked until reconciliation completes.";
         decimal position = _positions.GetValueOrDefault(symbol)?.Size ?? 0;
@@ -823,7 +827,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             if (!_validated) return "Bybit authenticated account identity is unknown; wait for account validation before submitting an order.";
             if (reduceOnly) return null;
             if (_retired) return "Bybit credential context was retired before transport; no new exposure was sent.";
-            if (_storageError != null) return _storageError;
+            if (StorageError is { } storageError) return storageError;
             if (_flattening.ContainsKey(symbol)) return "A Bybit flatten is pending; new exposure is blocked until its tracked close reconciles.";
             if (viewGuard?.Invoke() is { } viewError) return viewError;
             return _sendGuard?.Invoke(symbol, _positions.GetValueOrDefault(symbol)?.Size ?? 0, signedQuantity, false);
@@ -883,7 +887,7 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             if (!Save() && (!reduceOnly || reservedLinkId != null))
             {
                 order.State = OrderStates.Failed; order.Status = OrderStatus.Rejected; tracked.SubmissionUnconfirmed = tracked.Sending = false;
-                OrderContext.RecordRejected(prepared, _storageError ?? "The native state could not be committed before transport.");
+                OrderContext.RecordRejected(prepared, StorageError ?? "The native state could not be committed before transport.");
                 Publish();
                 return order;
             }
@@ -1166,14 +1170,14 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _storageError = LastError = "Bybit durable order state is unavailable; new exposure is blocked: " + ex.Message;
+            _loadError = LastError = "Bybit durable order state is unavailable; new exposure is blocked: " + ex.Message;
         }
     }
     private bool Save()
     {
         Publish(); // Every mutation of the published state that persists ends here; readers never wait for the write.
         if (_statePath == null) return true;
-        if (_lease == null || _storageError != null) return false;
+        if (_lease == null || _loadError != null) return false;
         try
         {
             var orders = _byLink.Values.Select(t => new SavedOrder(t.Symbol, t.LinkId, t.Own, t.Order.ExchangeOrderId, t.Order.Direction,
@@ -1187,12 +1191,17 @@ public sealed class BybitTradingSession : IDisposable, IAsyncDisposable
             string data = JsonSerializer.Serialize(new Envelope(payload, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)))));
             // Acknowledged only after the file flush, atomic rename and directory synchronization all succeed.
             DurableFile.ReplaceAtomically(_statePath, data);
+            if (_saveError != null)
+            {
+                if (LastError == _saveError) LastError = null;
+                _saveError = null;
+            }
             return true;
         }
         catch (Exception ex)
         {
             OrdersReady = false;
-            _storageError = LastError = "Bybit durable order state could not be saved; new exposure is blocked: " + ex.Message;
+            _saveError = LastError = "Bybit durable order state could not be saved; new exposure is blocked: " + ex.Message;
             return false;
         }
     }

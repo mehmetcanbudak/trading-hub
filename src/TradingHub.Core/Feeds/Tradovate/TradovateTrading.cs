@@ -739,11 +739,20 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
     private readonly Dictionary<Order, Replacement> _replacements = new();
     private readonly Dictionary<Order, PreparedOrderIntent> _queuedReprices = new();
     private (long Id, string Name)? _contract;
+    private const string ContractLookupError = "Could not determine Tradovate's active contract: ";
+    private readonly object _contractGate = new();
+    // The contract lookup in flight, shared by its callers; a failed one is forgotten so the next caller looks again.
+    private Task<(long Id, string Name)>? _contractLookup;
+    private int _contractFailures;
+    private long _contractRetryAt; // Environment.TickCount64 from which a session change retries a failed lookup
     private bool _nativeAccountVerified;
     private readonly Func<bool> _nativeProtectionEnabled;
     private LinkScope? _link;
     private volatile string? _nativeFault; // set under _gate; read and cleared lock-free by CurrentNativeFault
     private readonly HashSet<long> _recoveryChecked = new();
+    // Linked legs whose re-ownership check failed, by native order ID; each is checked again on the next sync.
+    private readonly Dictionary<long, string> _recoveryFaults = new();
+    private volatile string? _recoveryFault; // the first of _recoveryFaults, read lock-free by LastError
     // Every order this app asked Tradovate to cancel, in request order. An entry outlives the acknowledgment by one sync
     // (consumers read it on the change that reports the cancellation) and while its OCO partner still works; beyond the
     // cap the oldest ended entries go first, and a working order's entry is never evicted.
@@ -1176,7 +1185,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
     {
         get
         {
-            string? fault = _executionError ?? _ownershipFault ?? OrderContext.LastError;
+            string? fault = _executionError ?? _ownershipFault ?? _recoveryFault ?? OrderContext.LastError;
             return fault == null ? _lastError : _lastError == null ? fault : _lastError + "; " + fault;
         }
         private set => _lastError = value;
@@ -1203,22 +1212,64 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
     /// <summary>Raíz del contrato (NQ) aunque el gráfico sea de otra conexión.</summary>
     private string Root => _data.Instrument.Symbol.Split(' ', ':')[0];
 
-    private async Task<(long Id, string Name)> ContractAsync()
+    /// <summary>The contract this broker trades. Callers share the lookup in flight; a failure is reported, and the next
+    /// call looks it up again.</summary>
+    private Task<(long Id, string Name)> ContractAsync()
     {
-        if (_contract is { } c) return c;
+        if (_contract is { } known) return Task.FromResult(known);
+        TaskCompletionSource<(long Id, string Name)> lookup;
+        lock (_contractGate)
+        {
+            if (_contract is { } c) return Task.FromResult(c);
+            if (_contractLookup is { } running) return running;
+            lookup = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _contractLookup = lookup.Task;
+        }
+        _ = LookUpContractAsync(lookup);
+        return lookup.Task;
+    }
+
+    // Runs synchronously up to its first incomplete await: a contract the session already reported is known, and
+    // synced, before the constructor returns.
+    private async Task LookUpContractAsync(TaskCompletionSource<(long Id, string Name)> lookup)
+    {
+        (long Id, string Name) contract;
         try
         {
-            var r = await _session.Connection.ContractAsync(Root, DateTime.UtcNow, CancellationToken.None).ConfigureAwait(false);
-            _contract = r;
-            Sync();
-            return r;
+            contract = await _session.Connection.ContractAsync(Root, DateTime.UtcNow, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            LastError = "Could not determine Tradovate's active contract: " + ex.Message;
-            Changed?.Invoke();
-            throw;
+            // Forgotten before it is reported, so a session change after the report looks it up again.
+            lock (_contractGate)
+            {
+                _contractLookup = null;
+                int failures = ++_contractFailures;
+                Volatile.Write(ref _contractRetryAt, failures == 1 ? 0 :
+                    Environment.TickCount64 + (long)LiveSubscription.Backoff(failures - 1).TotalMilliseconds);
+            }
+            LastError = ContractLookupError + ex.Message;
+            try { Changed?.Invoke(); }
+            finally { lookup.SetException(ex); }
+            return;
         }
+        lock (_contractGate)
+        {
+            _contract = contract;
+            _contractLookup = null;
+        }
+        if (_lastError?.StartsWith(ContractLookupError, StringComparison.Ordinal) == true) LastError = null;
+        try { Sync(); }
+        finally { lookup.SetResult(contract); }
+    }
+
+    /// <summary>While the contract is unknown, each session change (its replay, a reconnect, the periodic balance refresh)
+    /// looks it up again: at once after the first failure, then backing off. Never from a loop of its own, so readiness
+    /// does not wait for an order that would look it up.</summary>
+    private void RetryContract()
+    {
+        if (_disposed || Environment.TickCount64 < Volatile.Read(ref _contractRetryAt)) return;
+        _ = ContractAsync();
     }
 
     private void Apply(TradovateOrderState s, Order o)
@@ -1247,7 +1298,11 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
     private void Sync()
     {
-        if (_contract is not { } c) return;
+        if (_contract is not { } c)
+        {
+            RetryContract();
+            return;
+        }
         List<Order>? cancellations = null;
         var active = new List<Order>();
         lock (_gate)
@@ -1460,16 +1515,22 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
         // Register ownership before any send or websocket event can race the HTTP reply.
         string clientOrderId = intent.ClientOrderId;
+        NativeSendTurns.Turn turn;
         lock (_gate)
         {
             if (_byClientId.TryGetValue(clientOrderId, out var existing)) return existing;
+            // Taken where the order is issued, with its registration, so before any sync can publish it: a request a
+            // Changed subscriber issues on seeing it, or a cancel that sync dispatches, goes after it. A position order
+            // hands over the turn it took when it was issued.
+            turn = handed?.Turn ?? _session.SendTurns(_account.Id).Take();
+            if (handed != null) handed.Claimed = true;
             _byClientId.Add(clientOrderId, order);
             _pending.Add(order);
             _pendingSnapshot = _pending.ToArray();
             _intents[order] = intent;
         }
-        var leg = new PendingLeg(order, intent, dir, type, price, q, handed);
-        // A registered order is always dispatched (and claims its turn), even when publishing it throws.
+        var leg = new PendingLeg(order, intent, dir, type, price, q, turn, handed);
+        // A registered order is always dispatched (and releases its turn), even when publishing it throws.
         try { Sync(); }
         finally
         {
@@ -1478,8 +1539,10 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         return order;
     }
 
+    /// <summary>An order to send with the send turn taken when it was issued; a deferred linked leg keeps its turn until
+    /// its link scope closes.</summary>
     private sealed record PendingLeg(Order Order, PreparedOrderIntent Intent, OrderDirections Direction, OrderTypes Type, decimal Price, int Quantity,
-        HandedTurn? Handed = null);
+        NativeSendTurns.Turn Turn, HandedTurn? Handed = null);
 
     /// <summary>
     /// The position a position order is planned from: confirmed once every market order in flight when it was issued has
@@ -1512,12 +1575,8 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
     private void DispatchSingle(PendingLeg leg)
     {
-        var (order, intent, dir, type, price, q, handed) = leg;
+        var (order, intent, dir, type, price, q, turn, handed) = leg;
         string clientOrderId = intent.ClientOrderId;
-        // Taken where the order is issued, so the account's requests reach Tradovate in issue order (a position order
-        // hands over the turn it took when it was issued).
-        var turn = handed?.Turn ?? _session.SendTurns(_account.Id).Take();
-        if (handed != null) handed.Claimed = true;
         _ = Task.Run(async () =>
         {
             bool placementStarted = false;
@@ -1665,26 +1724,32 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
 
     // Called under the broker gate. After a restart, a still-working OCO leg of manual (chart) protection is re-owned only
     // from its exact durable native claim or uncertain clOrdId dispatch in this account's journal; it is never resent and
-    // a foreign OCO stays unowned. Strategy legs keep their runner's own kept-protection adoption.
+    // a foreign OCO stays unowned. Strategy legs keep their runner's own kept-protection adoption. A leg counts as checked
+    // once its check completes: one that failed (a journal read another process held, say) is checked on the next sync.
     private void RecoverLinkedLeg(Order order, TradovateOrderState state, string contract)
     {
-        if (!_recoveryChecked.Add(state.Id)) return;
+        if (_recoveryChecked.Contains(state.Id)) return;
         var native = new NativeOrderIdentity("tradovate:order", state.Id.ToString(CultureInfo.InvariantCulture));
         try
         {
-            if (OrderContext.FindNativeSubmission(state.ClientOrderId, native) is not { } claim ||
-                claim.Owner != OrderContext.ManualOwner) return;
-            // Tradovate reports no reduce-only flag; the durable request is the authority for this owned exit.
-            order.ReduceOnly = claim.Request.ReduceOnly;
-            if (OrderContext.RecoverNativeOrder(order, state.ClientOrderId, native, Instrument.Key, contract, notify: false) is not { } ticket)
-                return;
-            _byClientId[state.ClientOrderId] = order;
-            _intents[order] = ticket;
-            _ownershipNotificationPending = true;
+            if (OrderContext.FindNativeSubmission(state.ClientOrderId, native) is { } claim && claim.Owner == OrderContext.ManualOwner)
+            {
+                // Tradovate reports no reduce-only flag; the durable request is the authority for this owned exit.
+                order.ReduceOnly = claim.Request.ReduceOnly;
+                if (OrderContext.RecoverNativeOrder(order, state.ClientOrderId, native, Instrument.Key, contract, notify: false) is { } ticket)
+                {
+                    _byClientId[state.ClientOrderId] = order;
+                    _intents[order] = ticket;
+                    _ownershipNotificationPending = true;
+                }
+            }
+            _recoveryChecked.Add(state.Id);
+            if (_recoveryFaults.Remove(state.Id)) _recoveryFault = _recoveryFaults.Values.FirstOrDefault();
         }
         catch (Exception ex)
         {
-            _ownershipFault = "Tradovate linked protection could not be re-owned after restart: " + ex.Message;
+            _recoveryFaults[state.Id] = "Tradovate linked protection could not be re-owned after restart: " + ex.Message;
+            _recoveryFault = _recoveryFaults.Values.First();
         }
     }
 
@@ -1723,13 +1788,17 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         bool pair = legs.Count == 2 && stop != null && target != null && stop.Direction == target.Direction &&
             stop.Quantity == target.Quantity && stop.Price > 0 && target.Price > 0 &&
             (NativeProtection & NativeProtectionFeatures.LinkedStopAndTarget) != 0;
-        if (pair) DispatchLinked(stop!, target!);
+        if (pair)
+        {
+            // One request sends both legs, in the turn of the leg issued first; the other leg's turn is not needed.
+            legs[1].Turn.Release();
+            DispatchLinked(stop!, target!, legs[0].Turn);
+        }
         else foreach (var leg in legs) DispatchSingle(leg);
     }
 
-    private void DispatchLinked(PendingLeg stop, PendingLeg target)
+    private void DispatchLinked(PendingLeg stop, PendingLeg target, NativeSendTurns.Turn turn)
     {
-        var turn = _session.SendTurns(_account.Id).Take(); // issue order, as for a single order
         _ = Task.Run(async () =>
         {
             bool placementStarted = false;
@@ -1981,8 +2050,10 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                     }
                     if (submission == null)
                     {
-                        // Not sendable yet (unknown or unreported order): later requests need not wait for it.
-                        turn.Release();
+                        // Not sendable yet (unknown or unreported order). A reducing amendment, which already waited at
+                        // most the reducing bound, lets later requests go meanwhile; an entry's keeps its turn, so nothing
+                        // issued after it reaches the venue first. A cancel (Close position cancels too) ends this wait above.
+                        if (Reducing(intent)) turn.Release();
                         await Task.Delay(100, _cts.Token).ConfigureAwait(false);
                     }
                 }

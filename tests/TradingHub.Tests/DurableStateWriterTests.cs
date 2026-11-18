@@ -381,8 +381,8 @@ public sealed class DurableStateWriterTests : IDisposable
 
         result = 2;
         Assert.Throws<FileNotFoundException>(() => StorageSync.Rename(source, destination, true, true, Native));
-        result = 5;
-        Assert.Throws<UnauthorizedAccessException>(() => StorageSync.Rename(source, destination, true, true, Native));
+        result = 5; // persistent: retried within the bound (see DurableReviewWindowsRenameTests), then mapped
+        Assert.Throws<UnauthorizedAccessException>(() => StorageSync.Rename(source, destination, true, true, Native, pause: _ => { }));
         result = 183;
         var exists = Assert.Throws<IOException>(() => StorageSync.Rename(source, destination, false, true, Native));
         Assert.Contains("OS error 183", exists.Message);

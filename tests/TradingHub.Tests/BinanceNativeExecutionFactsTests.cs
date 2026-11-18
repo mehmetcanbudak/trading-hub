@@ -2213,8 +2213,10 @@ public sealed class BinanceNativeExecutionFactsTests
             fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
             await ConditionalState(() => broker.Position.Volume == 3m && (runner == null || runner.OwnPosition == 3m), broker, fake);
             using var brackets = strategyProtection ? null : new BracketManager(broker);
+            var messages = new System.Collections.Concurrent.ConcurrentQueue<string>();
             if (brackets != null)
             {
+                brackets.Message += messages.Enqueue;
                 brackets.SetStopLoss(59000m);
                 brackets.AddTarget(61000m);
             }
@@ -2232,8 +2234,10 @@ public sealed class BinanceNativeExecutionFactsTests
                 await ConditionalState(() => broker.Position.Volume == remaining && (runner == null || runner.OwnPosition == remaining) &&
                     broker.ActiveOrders.Any(order => order.Type == OrderTypes.Limit && order.Unfilled == remaining && !broker.IsReplacementPending(order)), broker, fake);
                 await ConditionalPolls(fake, broker);
-                // The venue-created child has started executing; a drift reconciler must not cancel it.
-                Assert.Equal(("MARKET", "PARTIALLY_FILLED"), (fake.Order(childId).Type, fake.Order(childId).Status));
+                // The venue-created child has started executing; a drift reconciler must not cancel it. A failure names the
+                // request that cancelled it (a replacement's POST follows its DELETE).
+                if (fake.Order(childId) is not { Type: "MARKET", Status: "PARTIALLY_FILLED" })
+                    Assert.Fail($"remaining {remaining}: " + ChildCancelDiagnostics(fake, broker, childId, messages));
                 Assert.Same(stop, Assert.Single(broker.ActiveOrders, order => order.NativeIdentity == childNative));
                 Assert.Equal((OrderTypes.Market, childId.ToString(CultureInfo.InvariantCulture), originalIntent, (decimal)remaining),
                     (stop.Type, stop.ExchangeOrderId, stop.IntentId, stop.Unfilled));
@@ -2298,6 +2302,173 @@ public sealed class BinanceNativeExecutionFactsTests
             Assert.Null(broker.LastError);
             Assert.Empty(fake.Refused);
         });
+    }
+
+    [Theory]
+    [InlineData(false)] // the child's answer lands after the bracket decided, before the amendment is prepared
+    [InlineData(true)] // it lands after the amendment was prepared for the stop, before the broker takes it
+    public async Task Bracket_stop_moved_as_it_triggers_never_cancels_the_executing_market_child(bool afterPreparation)
+    {
+        await WithRecoveryRoot(async root =>
+        {
+            using var orders = new NativeOrderTestFixture();
+            using var fake = new FakeBinance(futures: true);
+            using var feed = new SimulatedFeed();
+            using var data = RecoveryData(feed, futures: true);
+            data.Trades.Add(new Trade(6, DateTime.UtcNow, 60000m, 1m, TradeSide.Buy));
+            var context = RecoveryContext(root, fake);
+            using var broker = orders.Binance(data, fake.Settings, "Bracket stop moved as it triggers", context);
+            await ConditionalState(() => broker.OrdersReady && broker.PositionReady &&
+                broker.Executions.Capture(ExecutionCursor.Start).Availability == ExecutionAvailability.Ready, broker, fake);
+            var opening = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 3m, 59990m);
+            await ConditionalState(() => opening.ExchangeOrderId.Length > 0, broker, fake);
+            fake.Fill(long.Parse(opening.ExchangeOrderId, CultureInfo.InvariantCulture), 3m);
+            await ConditionalState(() => broker.Position.Volume == 3m, broker, fake);
+            var account = new AmendmentGatedAccount(broker);
+            using var brackets = new BracketManager(account);
+            var messages = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            brackets.Message += messages.Enqueue;
+            brackets.SetStopLoss(59000m);
+            brackets.AddTarget(61000m);
+            await ConditionalState(() => broker.ActiveOrders.Count() == 2 && broker.ActiveOrders.All(order =>
+                order.ExchangeOrderId.Length > 0 && !broker.IsReplacementPending(order)), broker, fake);
+            var stop = Assert.Single(broker.ActiveOrders, order => order.Type == OrderTypes.Stop);
+            string originalIntent = Assert.IsType<string>(stop.IntentId);
+            long parentId = Assert.Single(fake.PlacedAlgo).AlgoId;
+
+            // A poll holds its open-orders body, captured before the stop triggers.
+            var pollHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePoll = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fake.BeforeGetReply = (request, ct) =>
+            {
+                if (request.Route != "/fapi/v1/openOrders" || releasePoll.Task.IsCompleted) return Task.CompletedTask;
+                pollHeld.TrySetResult();
+                return releasePoll.Task.WaitAsync(ct);
+            };
+            long childId;
+            bool childApplied = false;
+            try
+            {
+                await pollHeld.Task.WaitAsync(TimeSpan.FromSeconds(12));
+                childId = fake.Trigger(parentId, fill: 1m);
+                // The user moves the stop as it triggers. The bracket decides to reprice the untriggered stop it still sees;
+                // then the released poll applies the child's answer: the handle now follows the executing MARKET child (as a
+                // broker thread can between the bracket's unlocked reads).
+                void ApplyChild(Order order)
+                {
+                    if (!ReferenceEquals(order, stop)) return;
+                    account.BeforeAmendment = account.BeforeReplace = null;
+                    releasePoll.TrySetResult();
+                    childApplied = SpinWait.SpinUntil(() => stop.Type == OrderTypes.Market && stop.Unfilled == 2m, TimeSpan.FromSeconds(12));
+                }
+                if (afterPreparation) account.BeforeReplace = ApplyChild;
+                else account.BeforeAmendment = ApplyChild;
+                brackets.SetStopLoss(59100m);
+            }
+            finally
+            {
+                account.BeforeAmendment = account.BeforeReplace = null;
+                releasePoll.TrySetResult();
+                fake.BeforeGetReply = null;
+            }
+            Assert.True(childApplied, "The released poll did not apply the triggered child's answer.");
+            await ConditionalPolls(fake, broker);
+            if (fake.Order(childId) is not { Type: "MARKET", Status: "PARTIALLY_FILLED" })
+                Assert.Fail(ChildCancelDiagnostics(fake, broker, childId, messages));
+            var amendments = account.Amendments.Where(sent => ReferenceEquals(sent.Order, stop)).Select(sent => sent.Intent).ToList();
+            if (afterPreparation)
+            {
+                // Prepared for the stop just before its child's answer: the broker refuses it as already triggered.
+                var amendment = Assert.Single(amendments);
+                Assert.Equal(OrderTypes.Stop, amendment.Request.Type);
+                Assert.Equal(BinanceBroker.StopAlreadyTriggered, context.Find(amendment.Id)?.Rejection);
+            }
+            // Decided for the stop, which triggered before it was prepared: nothing reaches the broker.
+            else Assert.Empty(amendments);
+
+            await ConditionalState(() => broker.Position.Volume == 2m && broker.ActiveOrders.Any(order =>
+                order.Type == OrderTypes.Limit && order.Unfilled == 2m && !broker.IsReplacementPending(order)), broker, fake);
+            await ConditionalPolls(fake, broker);
+            if (fake.Order(childId) is not { Type: "MARKET", Status: "PARTIALLY_FILLED" })
+                Assert.Fail(ChildCancelDiagnostics(fake, broker, childId, messages));
+            var childNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + childId.ToString(CultureInfo.InvariantCulture));
+            Assert.Equal((OrderTypes.Market, childNative, originalIntent, OrderStates.Active, 2m),
+                (stop.Type, stop.NativeIdentity, stop.IntentId, stop.State, stop.Unfilled));
+            Assert.DoesNotContain(fake.Deletes, delete => delete.Contains("orderId=" + childId.ToString(CultureInfo.InvariantCulture) + " ", StringComparison.Ordinal));
+            Assert.Equal(amendments.Count, account.Amendments.Count(sent => ReferenceEquals(sent.Order, stop)));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.All(fake.Placed.Where(order => order.Side == "SELL"), order => Assert.Equal("LIMIT", order.Type));
+
+            fake.Fill(childId, 2m);
+            await ConditionalState(() => broker.Position.Volume == 0m && !broker.ActiveOrders.Any(), broker, fake);
+            await ConditionalPolls(fake, broker);
+            Assert.Equal(("MARKET", "FILLED", 3m), (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.Single(fake.PlacedAlgo);
+            Assert.Empty(fake.Refused);
+        });
+    }
+
+    // Names the request behind an unexpected end of a triggered stop's child: the cancels sent and their targets, the
+    // orders sent (a replacement's MARKET follows its DELETE; an explicit cancel looks the MARKET order up first), the
+    // bracket and broker messages and the latest routes.
+    private static string ChildCancelDiagnostics(FakeBinance fake, BinanceBroker broker, long childId, IEnumerable<string> messages) =>
+        $"child {childId} is {fake.Order(childId).Type}/{fake.Order(childId).Status}; " +
+        $"cancels: {string.Join(" | ", fake.Deletes)}; " +
+        $"sent: {string.Join(" | ", fake.Sent.Select(order => $"{order.ExchangeId} {order.Type} {order.Status} {order.Qty}"))}; " +
+        $"broker: {broker.LastError ?? "(none)"}; messages: {string.Join(" | ", messages)}; " +
+        $"recent routes: {string.Join(" | ", fake.Calls.TakeLast(30))}";
+
+    /// <summary>
+    /// The broker as a bracket manager sees it, with two gates: a test can let a broker thread run between the manager's
+    /// decision to amend an order and that amendment's preparation (the adoption check is an amendment's first step), or
+    /// between its preparation and the broker taking it.
+    /// </summary>
+    private sealed class AmendmentGatedAccount : ITradingAccount, ITrackedOrderReplacement, IThreadSafeOrderEntry, IAuthoritativeAdoption
+    {
+        private readonly BinanceBroker _inner;
+
+        public AmendmentGatedAccount(BinanceBroker inner) => _inner = inner;
+
+        public Action<Order>? BeforeAmendment { get; set; }
+        public Action<Order>? BeforeReplace { get; set; }
+        public System.Collections.Concurrent.ConcurrentQueue<(Order Order, PreparedOrderIntent Intent)> Amendments { get; } = new();
+        public string Name => _inner.Name;
+        public bool IsReal => _inner.IsReal;
+        public Instrument Instrument => _inner.Instrument;
+        public Position Position => _inner.Position;
+        public IEnumerable<Order> ActiveOrders => _inner.ActiveOrders;
+        public bool PositionReady => _inner.PositionReady;
+        public bool OrdersReady => _inner.OrdersReady;
+        public string? LastError => _inner.LastError;
+        public decimal LastPrice => _inner.LastPrice;
+        public OrderContext OrderContext => _inner.OrderContext;
+        public IExecutionSource Executions => _inner.Executions;
+
+        public event Action? Changed
+        {
+            add => _inner.Changed += value;
+            remove => _inner.Changed -= value;
+        }
+
+        public Order Submit(PreparedOrderIntent intent) => _inner.Submit(intent);
+
+        public Order Replace(Order order, PreparedOrderIntent intent)
+        {
+            Amendments.Enqueue((order, intent));
+            BeforeReplace?.Invoke(order);
+            return _inner.Replace(order, intent);
+        }
+
+        public void Cancel(Order order) => _inner.Cancel(order);
+        public void CancelAt(decimal price) => _inner.CancelAt(price);
+        public void CancelAll() => _inner.CancelAll();
+        public bool IsReplacementPending(Order order) => _inner.IsReplacementPending(order);
+
+        public bool TryAdoptAndReplace(Order order, decimal price, decimal? quantity)
+        {
+            BeforeAmendment?.Invoke(order);
+            return _inner.TryAdoptAndReplace(order, price, quantity);
+        }
     }
 
     [Fact]

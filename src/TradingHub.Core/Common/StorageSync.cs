@@ -78,6 +78,15 @@ public static class StorageSync
     }
 
     internal const int MoveFileReplaceExisting = 0x1, MoveFileWriteThrough = 0x8;
+    private const int AccessDenied = 5, SharingViolation = 32, LockViolation = 33;
+
+    /// <summary>Growing pauses between Windows move attempts, about 1 s in total, before a sharing conflict becomes the
+    /// visible failure.</summary>
+    internal static IReadOnlyList<TimeSpan> WindowsRetryDelays { get; } =
+    [
+        TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(40), TimeSpan.FromMilliseconds(80),
+        TimeSpan.FromMilliseconds(150), TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(450),
+    ];
 
     /// <summary>Same-volume rename. On Windows it uses MoveFileEx with MOVEFILE_WRITE_THROUGH so the rename is flushed
     /// before returning (Windows has no directory-handle synchronization); elsewhere <see cref="File.Move(string, string, bool)"/>,
@@ -85,11 +94,17 @@ public static class StorageSync
     /// it (error 5, <see cref="UnauthorizedAccessException"/>), but a POSIX rename only needs write access to the
     /// directory and would silently publish over a file the user or another program made read-only, so that case is
     /// refused the same way here, as the direct writes these renames replaced were.</summary>
+    /// <remarks>Another process that holds the source or destination open without FILE_SHARE_DELETE (antivirus, search
+    /// indexer, backup) fails a Windows move with access denied or a sharing/lock violation until it closes its handle,
+    /// so those errors are retried within <see cref="WindowsRetryDelays"/>; a persistent one still throws. POSIX renames
+    /// are not blocked by open handles and are never retried.</remarks>
     public static void Rename(string source, string destination, bool overwrite) =>
         Rename(source, destination, overwrite, OperatingSystem.IsWindows(), WindowsMove);
 
-    /// <summary>Platform dispatch with an injectable native mover returning a Win32 error code (0 on success).</summary>
-    internal static void Rename(string source, string destination, bool overwrite, bool windows, Func<string, string, int, int> windowsMove)
+    /// <summary>Platform dispatch with an injectable native mover returning a Win32 error code (0 on success) and an
+    /// injectable pause between Windows retries (<see cref="Thread.Sleep(TimeSpan)"/> when omitted).</summary>
+    internal static void Rename(string source, string destination, bool overwrite, bool windows, Func<string, string, int, int> windowsMove,
+        Action<TimeSpan>? pause = null)
     {
         if (!windows)
         {
@@ -99,8 +114,16 @@ public static class StorageSync
             return;
         }
         int flags = MoveFileWriteThrough | (overwrite ? MoveFileReplaceExisting : 0);
-        int error = windowsMove(WindowsPath(source), WindowsPath(destination), flags);
-        if (error == 0) return;
+        string from = WindowsPath(source), to = WindowsPath(destination);
+        int error;
+        for (int attempt = 0; ; attempt++)
+        {
+            error = windowsMove(from, to, flags);
+            if (error == 0) return;
+            if (attempt == WindowsRetryDelays.Count || !TransientWindowsMoveError(error, destination)) break;
+            if (pause != null) pause(WindowsRetryDelays[attempt]);
+            else Thread.Sleep(WindowsRetryDelays[attempt]);
+        }
         string message = $"Write-through rename to '{destination}' failed (OS error {error}).";
         throw error switch
         {
@@ -109,6 +132,17 @@ public static class StorageSync
             5 => new UnauthorizedAccessException(message, new Win32Exception(error)),
             _ => new IOException(message, new Win32Exception(error)),
         };
+    }
+
+    // A read-only destination also reports access denied, but that refusal does not clear by waiting.
+    private static bool TransientWindowsMoveError(int error, string destination) =>
+        error is SharingViolation or LockViolation || (error == AccessDenied && !IsReadOnly(destination));
+
+    private static bool IsReadOnly(string path)
+    {
+        try { return File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly); }
+        catch (IOException) { return false; } // missing or itself contended: not a read-only refusal
+        catch (UnauthorizedAccessException) { return false; }
     }
 
     // MoveFileExW accepts paths beyond MAX_PATH only with the extended-length prefix.

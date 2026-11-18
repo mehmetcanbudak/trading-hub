@@ -86,7 +86,9 @@ public sealed class RithmicSendTurnTests : IDisposable
 
     /// <summary>
     /// A close behind an unanswered earlier protective amendment is sent after one reducing bound, not two: its
-    /// dispatch expires the bound once, then cancels the working protection and sends without waiting again.
+    /// dispatch gives up the bound once, then cancels the working protection and sends without waiting again. Proven by
+    /// the account's bounded waits that gave up when the close arrives, with the amendment still unanswered, not by
+    /// timing it.
     /// </summary>
     [Fact]
     public async Task A_close_behind_an_unanswered_earlier_amendment_is_sent_after_one_bound()
@@ -94,43 +96,227 @@ public sealed class RithmicSendTurnTests : IDisposable
         using var server = new FakeRithmicServer { MarketPrice = 5000 };
         server.SeedPosition(true, 2, 5000);
         using var session = new RithmicTradingSession(Settings(server));
+        session.SendTurnWait = TimeSpan.FromMilliseconds(300);
         using var data = new InstrumentData(Es, new SimulatedFeed());
         using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
             _ => Task.FromResult(("ESZ6", "CME")));
         session.Start();
-        var bound = TimeSpan.FromMilliseconds(1500);
-        session.SendTurnWait = bound;
         await Until(() => broker.OrdersReady && broker.PositionReady);
         var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 1m, 4900m);
         await Until(() => stop.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(stop), () => broker.LastError ?? "stop not working");
+        var turns = session.SendTurns("ACC1");
         try
         {
             var amendReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             server.ModifyResponseRelease = amendReply;
             OrderActions.Reprice(broker, stop, 4901m);
             await Until(() => server.ModifyRequests == 1, () => broker.LastError ?? "amend not sent");
+            Assert.Equal(0, turns.GaveUp);
 
-            var issued = DateTime.UtcNow;
-            var confirmation = broker.CapturePositionClose(2m);
-            Task<string?> close = session.ClosePositionAsync(confirmation);
-            long closeArrived = 0;
-            _ = Task.Run(async () =>
+            int gaveUpAtClose = -1;
+            bool answeredAtClose = true;
+            server.OnReceived = template =>
             {
-                while (Interlocked.Read(ref closeArrived) == 0)
-                {
-                    if (Requests(server, "312") >= 2) { Interlocked.CompareExchange(ref closeArrived, DateTime.UtcNow.Ticks, 0); return; } // the stop's placement is the first 312
-                    await Task.Delay(15);
-                }
-            });
-            await Until(() => Interlocked.Read(ref closeArrived) != 0, () => broker.LastError ?? "close not sent");
-            var waited = new DateTime(Interlocked.Read(ref closeArrived), DateTimeKind.Utc) - issued;
-            Assert.True(waited >= bound - TimeSpan.FromMilliseconds(60), $"The close was sent after {waited.TotalMilliseconds} ms, before its bound.");
-            Assert.True(waited < bound * 2 - TimeSpan.FromMilliseconds(300), $"The close waited {waited.TotalMilliseconds} ms: a second bound.");
+                // The stop's placement was the first new order; the close is the second.
+                if (template != "312" || Requests(server, "312") != 2) return;
+                answeredAtClose = server.ModifyResponseSent.Task.IsCompleted;
+                Volatile.Write(ref gaveUpAtClose, turns.GaveUp);
+            };
+            Task<string?> close = session.ClosePositionAsync(broker.CapturePositionClose(2m));
             Assert.Equal(NativeSendTurns.UnsettledMessage, await close.WaitAsync(Deadline));
             await Until(() => server.Position == 0 && !session.HasUnresolvedPositionClose, () => broker.LastError ?? "close pending");
+            // Sent while the amendment was unanswered, after exactly one bounded wait gave up: the protection cancel rode
+            // the close's turn instead of waiting a second bound.
+            Assert.False(answeredAtClose, "The close waited for the amendment's reply instead of its bound.");
+            Assert.Equal(1, Volatile.Read(ref gaveUpAtClose));
+            Assert.Equal(1, turns.GaveUp);
         }
-        finally { server.ModifyResponseRelease?.TrySetResult(); }
+        finally
+        {
+            server.OnReceived = null;
+            server.ModifyResponseRelease?.TrySetResult();
+        }
         await Until(() => session.SendsIdle.IsCompleted, () => "sends not idle after the amend reply");
+    }
+
+    /// <summary>
+    /// A close that waited out its reducing bound behind an unanswered amendment still has its whole close budget: the
+    /// budget starts once its turn came. Here the bound outlasts the budget, so a budget spent waiting would cancel the
+    /// close before anything was sent ("A task was canceled", no close) instead of sending it anyway.
+    /// </summary>
+    [Fact]
+    public async Task A_close_that_waited_out_its_bound_still_has_its_whole_budget()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        server.SeedPosition(true, 2, 5000);
+        using var session = new RithmicTradingSession(Settings(server));
+        session.SendTurnWait = TimeSpan.FromSeconds(4);
+        session.CloseBudget = TimeSpan.FromSeconds(2);
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 1m, 4900m);
+        await Until(() => stop.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(stop), () => broker.LastError ?? "stop not working");
+        var amendReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.ModifyResponseRelease = amendReply;
+        try
+        {
+            OrderActions.Reprice(broker, stop, 4901m);
+            await Until(() => server.ModifyRequests == 1, () => broker.LastError ?? "amend not sent");
+            Task<string?> close = session.ClosePositionAsync(broker.CapturePositionClose(2m));
+            Assert.Equal(NativeSendTurns.UnsettledMessage, await close.WaitAsync(Deadline));
+            await Until(() => server.Position == 0 && !session.HasUnresolvedPositionClose, () => broker.LastError ?? "close pending");
+            Assert.False(server.ModifyResponseSent.Task.IsCompleted, "The amendment was answered before the close went.");
+            Assert.Equal(1, session.SendTurns("ACC1").GaveUp);
+        }
+        finally { amendReply.TrySetResult(); }
+        await Until(() => session.SendsIdle.IsCompleted, () => "sends not idle after the amend reply");
+    }
+
+    /// <summary>
+    /// A session-level amendment of an entry (it can add exposure) waits for the earlier unanswered amendment without the
+    /// reducing bound: a cancel issued after it gives up its bound and is sent while the entry amendment is still held,
+    /// and the entry amendment goes once the earlier one was answered. (The earlier request is an amendment: the fake
+    /// holds its reply without stalling the connection, so the later requests still reach it.)
+    /// </summary>
+    [Fact]
+    public async Task A_session_entry_amendment_waits_for_earlier_replies_without_the_reducing_bound()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        using var session = new RithmicTradingSession(Settings(server));
+        session.SendTurnWait = TimeSpan.FromMilliseconds(300);
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        var earlier = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1m, 4890m);
+        var entry = OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1m, 4900m);
+        await Until(() => broker.ActiveOrders.Count(order => order.ExchangeOrderId.Length > 0) == 2, () => broker.LastError ?? "entries not working");
+        var working = Assert.Single(session.OrdersOf("ACC1"), order => order.BasketId == entry.ExchangeOrderId);
+        var turns = session.SendTurns("ACC1");
+        var earlierReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.ModifyResponseRelease = earlierReply;
+        try
+        {
+            OrderActions.Reprice(broker, earlier, 4891m);
+            await Until(() => server.ModifyRequests == 1, () => broker.LastError ?? "earlier amendment not sent");
+            server.ModifyResponseRelease = null; // only the earlier amendment's reply stays held
+            Task<string?> amendment = session.ModifyAsync("ACC1", working, 2, 4901m, CancellationToken.None);
+            await Until(() => turns.Waiting == 1, () => "entry amendment not waiting for its turn");
+            // A later reducing request gives up its bound behind the same earlier amendment and is sent.
+            Task cancel = session.CancelAsync("ACC1", "later-cancel-target", CancellationToken.None).ContinueWith(_ => { });
+            await Until(() => Requests(server, "316") == 1, () => "later cancel not sent after its bound");
+            Assert.Equal(1, server.ModifyRequests);
+            Assert.False(amendment.IsCompleted);
+            Assert.Equal(1, turns.GaveUp);
+
+            earlierReply.TrySetResult();
+            Assert.Null(await amendment.WaitAsync(Deadline));
+            Assert.Equal(2, server.ModifyRequests);
+            await cancel.WaitAsync(Deadline);
+        }
+        finally { earlierReply.TrySetResult(); }
+        await Until(() => session.SendsIdle.IsCompleted, () => "sends not idle");
+    }
+
+    /// <summary>
+    /// A session-level amendment of a protective stop (it only reduces the long position) waits for the earlier
+    /// unanswered amendment at most the reducing bound, is sent anyway, and reports that it went out of order.
+    /// </summary>
+    [Fact]
+    public async Task A_session_reducing_amendment_sent_after_its_bound_reports_the_unsettled_note()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        server.SeedPosition(true, 2, 5000);
+        using var session = new RithmicTradingSession(Settings(server));
+        session.SendTurnWait = TimeSpan.FromMilliseconds(300);
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        var earlier = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 1m, 4890m);
+        var stop = OrderActions.Manual(broker, OrderTypes.Stop, OrderDirections.Sell, 1m, 4900m);
+        await Until(() => broker.ActiveOrders.Count(order => order.ExchangeOrderId.Length > 0) == 2, () => broker.LastError ?? "stops not working");
+        var working = Assert.Single(session.OrdersOf("ACC1"), order => order.BasketId == stop.ExchangeOrderId);
+        var turns = session.SendTurns("ACC1");
+        var earlierReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.ModifyResponseRelease = earlierReply;
+        try
+        {
+            OrderActions.Reprice(broker, earlier, 4891m);
+            await Until(() => server.ModifyRequests == 1, () => broker.LastError ?? "earlier amendment not sent");
+            server.ModifyResponseRelease = null; // only the earlier amendment's reply stays held
+            Assert.Equal(NativeSendTurns.UnsettledMessage,
+                await session.ModifyAsync("ACC1", working, 1, 4899m, CancellationToken.None).WaitAsync(Deadline));
+            Assert.Equal(2, server.ModifyRequests);
+            Assert.Equal(1, turns.GaveUp);
+            Assert.False(earlierReply.Task.IsCompleted);
+        }
+        finally { earlierReply.TrySetResult(); }
+        await Until(() => session.SendsIdle.IsCompleted, () => "sends not idle");
+    }
+
+    /// <summary>
+    /// A request issued before the session's first account list (a restored chart clicking during login) and every later
+    /// request of that account share one send-turn queue: the queue does not switch to the native account identity once
+    /// the list arrives, so a later cancel or close still waits for that earlier request.
+    /// </summary>
+    [Fact]
+    public async Task Requests_before_and_after_the_account_list_share_one_send_turn_queue()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        using var session = new RithmicTradingSession(Settings(server));
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        var beforeLogin = session.SendTurns("ACC1");
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady && session.Accounts.Any(account => account.AccountId == "ACC1"));
+        Assert.Same(beforeLogin, session.SendTurns("ACC1"));
+    }
+
+    /// <summary>
+    /// An order takes its send turn before it is published: a request that a synchronous Changed subscriber issues
+    /// when the new order first appears is sent after that order's reply, not ahead of it.
+    /// </summary>
+    [Fact]
+    public async Task A_request_issued_while_an_order_is_published_is_sent_after_that_order()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        using var session = new RithmicTradingSession(Settings(server));
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1",
+            _ => Task.FromResult(("ESZ6", "CME")));
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        var orderReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.NewOrderResponseRelease = orderReply;
+        int armed = 1;
+        Task? published = null;
+        broker.Changed += () =>
+        {
+            if (broker.ActiveOrders.Any(order => order.ExchangeOrderId.Length == 0) && Interlocked.Exchange(ref armed, 0) == 1)
+                Volatile.Write(ref published, session.CancelAsync("ACC1", "published-cancel-target", CancellationToken.None).ContinueWith(_ => { }));
+        };
+        try
+        {
+            OrderActions.Manual(broker, OrderTypes.Limit, OrderDirections.Buy, 1m, 4900m);
+            await Until(() => Volatile.Read(ref published) != null, () => "no request was issued while the order was published");
+            await server.NewOrderResponseRequested.Task.WaitAsync(Deadline);
+            // The order reached the venue first; the subscriber's cancel waits behind its unanswered reply.
+            Assert.Equal(0, Requests(server, "316"));
+            await Until(() => session.SendTurns("ACC1").Waiting == 1, () => "published cancel not waiting for the order's reply");
+            orderReply.TrySetResult();
+            await published!.WaitAsync(Deadline);
+            lock (server.Received)
+                Assert.True(server.Received.IndexOf("312") < server.Received.IndexOf("316"), string.Join(", ", server.Received));
+        }
+        finally { orderReply.TrySetResult(); }
+        await Until(() => session.SendsIdle.IsCompleted, () => "sends not idle");
     }
 
     /// <summary>

@@ -56,7 +56,7 @@ public sealed class NativeSendTurns
     private readonly object _gate = new();
     private readonly TimeSpan _reducingWait;
     private Task _tail = Task.CompletedTask;
-    private int _waiting, _outstanding;
+    private int _waiting, _outstanding, _gaveUp;
 
     public NativeSendTurns() : this(ReducingWait) { }
 
@@ -70,6 +70,10 @@ public sealed class NativeSendTurns
     /// Counted from the moment a turn is taken, so it already includes a request issued a moment ago.
     /// </summary>
     public int Queued => Math.Max(0, Volatile.Read(ref _outstanding) - 1);
+
+    /// <summary>Bounded waits that gave up after the reducing bound: requests sent anyway, ahead of an unanswered
+    /// earlier one. Ordering checks count these instead of timing the bound.</summary>
+    public int GaveUp => Volatile.Read(ref _gaveUp);
 
     /// <summary>Completes once every turn taken so far was released: the requests already issued were answered, refused
     /// or failed (quit waits for it before connections close). Never faults.</summary>
@@ -124,7 +128,11 @@ public sealed class NativeSendTurns
                     await _previous.WaitAsync(_owner._reducingWait, ct).ConfigureAwait(false);
                     return true;
                 }
-                catch (TimeoutException) { return false; }
+                catch (TimeoutException)
+                {
+                    Interlocked.Increment(ref _owner._gaveUp);
+                    return false;
+                }
             }
             finally { Interlocked.Decrement(ref _owner._waiting); }
         }

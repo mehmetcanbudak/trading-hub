@@ -978,14 +978,17 @@ public sealed partial class AppServices
 
     private TimeSpan? _nativeSendDrainLimit;
 
-    private DateTime? _nativeDrainDeadline;
+    // Environment.TickCount64 milliseconds: monotonic, so a system clock adjustment while quitting can neither cut the
+    // drain short nor stretch it past the limit.
+    private long? _nativeDrainDeadline;
 
     /// <summary>
-    /// Waits until every order request already issued on a Tradovate session or a Binance broker was answered, refused
+    /// Waits until every order request already issued on a Tradovate or Rithmic session or a Binance broker was answered, refused
     /// or failed: a confirmed Close or Cancel queued behind an earlier order's reply is sent before quit closes brokers
     /// and connections. Quit and shutdown (both on the UI thread) each drain what was issued by then, against one
-    /// deadline, <see cref="NativeSendDrainLimit"/> after the first drain: quitting never waits for it twice. Logged when
-    /// the deadline is reached.
+    /// deadline, <see cref="NativeSendDrainLimit"/> after the first drain that found a request pending: quitting never waits
+    /// for it twice, and a drain with nothing pending (quit, before a dialog that may stay open) leaves the whole limit to
+    /// the requests issued after it. Logged when the deadline is reached.
     /// </summary>
     internal async Task DrainNativeSendsAsync()
     {
@@ -994,16 +997,16 @@ public sealed partial class AppServices
         foreach (var broker in _realBrokers.Values.Concat(_replacedBrokers).OfType<BinanceBroker>().Distinct()) idle.Add(broker.SendsIdle);
         foreach (var session in _rithmicSessions.Values.Concat(_retiredRithmicSessions)) idle.Add(session.SendsIdle);
         var all = Task.WhenAll(idle);
-        var deadline = _nativeDrainDeadline ??= DateTime.UtcNow + NativeSendDrainLimit;
         if (all.IsCompleted) return;
-        var left = deadline - DateTime.UtcNow;
-        if (left > TimeSpan.Zero)
+        long deadline = _nativeDrainDeadline ??= Environment.TickCount64 + (long)NativeSendDrainLimit.TotalMilliseconds;
+        long left = deadline - Environment.TickCount64;
+        if (left > 0)
         {
             _live?.Notify("Sending queued order requests before quitting…");
             // The caller's context is kept: shutdown continues on it and reads UI-owned broker maps afterwards.
-            if (await Task.WhenAny(all, Task.Delay(left)) == all) return;
+            if (await Task.WhenAny(all, Task.Delay(TimeSpan.FromMilliseconds(left))) == all) return;
             // A timer can complete before the stored instant. Mark the deadline reached so shutdown does not start another wait.
-            _nativeDrainDeadline = DateTime.UtcNow;
+            _nativeDrainDeadline = Environment.TickCount64;
         }
         this.LogWarn("Order requests were still waiting to be sent or answered when Trading Hub quit; check orders and positions at the broker.");
     }

@@ -420,11 +420,61 @@ public sealed class TradovateNativeProtectionTests : IDisposable
         await AssertAdoptedWithoutSendingAgain(fake, restarted, adopted, stopClient, targetClient);
     }
 
+    /// <summary>Another process holding a journal record exclusively, as backup or antivirus software can: reads of it fail
+    /// until the returned handle is closed.</summary>
+    private FileStream HoldClientIndex(string clientOrderId)
+    {
+        string name = OrderContext.Hash(clientOrderId) + ".json";
+        string path = Directory.EnumerateFiles(Path.Combine(_root, _contextId), name, SearchOption.AllDirectories)
+            .Single(file => Path.GetFileName(Path.GetDirectoryName(file)) == "client");
+        return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+    }
+
+    /// <summary>
+    /// A transient journal error while the restarted account first checks its linked legs (their client index records
+    /// are held by another process): each leg is checked again on the next sync and re-owned then, and the adopted pair
+    /// is never sent again.
+    /// </summary>
+    [Fact]
+    public async Task A_restarted_app_re_owns_its_oco_after_a_transient_journal_error()
+    {
+        using var fake = new FakeTradovate();
+        var (stopClient, targetClient) = await ProtectAndStop(fake);
+
+        var (feed2, session2, account2) = await Connect(fake);
+        using var _f2 = feed2;
+        using var _s2 = session2;
+        var context = Context();
+        using var heldStop = HoldClientIndex(stopClient);
+        using var heldTarget = HoldClientIndex(targetClient);
+        using var restarted = new TradovateBroker(new InstrumentData(Es, new SimulatedFeed()), session2, account2, "DEMO101", context, () => true);
+        string manual = restarted.OrderContext.ManualOwner.Id;
+        int OwnedLegs() => restarted.ActiveOrders.Count(o => o.OwnerId == manual && restarted.ProtectionGroupOf(o) != null);
+        await Until(() => restarted.LastError?.Contains("could not be re-owned after restart", StringComparison.Ordinal) == true,
+            () => $"error {restarted.LastError}");
+        Assert.Equal(0, OwnedLegs());
+
+        heldStop.Dispose();
+        heldTarget.Dispose();
+        // Any later change syncs the account; this one repeats the position the venue holds.
+        await fake.PublishPosition(new JsonObject { ["id"] = 1, ["accountId"] = 101, ["contractId"] = 555, ["netPos"] = 2, ["netPrice"] = 5000.25m,
+            ["bought"] = 2, ["boughtValue"] = 10000.5m, ["sold"] = 0, ["soldValue"] = 0 });
+        await Until(() => OwnedLegs() == 2, () => $"owned {OwnedLegs()}; error {restarted.LastError}");
+        Assert.DoesNotContain("could not be re-owned", restarted.LastError ?? "", StringComparison.Ordinal);
+
+        using var adopted = Brackets(restarted);
+        UseTargetOnly(adopted);
+        await Until(() => adopted.Mode == ProtectionMode.ExchangeSide, () => $"mode {adopted.Mode}; error {restarted.LastError}");
+        await AssertAdoptedWithoutSendingAgain(fake, restarted, adopted, stopClient, targetClient);
+    }
+
     public void Dispose()
     {
         // Execution projection outlives the adapters and may still write their journals; delete after it settles.
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (!AccountExecutionProjector.BackgroundWorkIdle && DateTime.UtcNow < deadline) Thread.Sleep(20);
+        if (!AccountExecutionProjector.BackgroundWorkIdle)
+            throw new InvalidOperationException("Execution projection did not settle before journal cleanup.");
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 }

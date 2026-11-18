@@ -462,35 +462,44 @@ public sealed class NativeSendOrderTests : IDisposable
     }
 
     /// <summary>A close whose bounded wait behind an unanswered buy timed out is sent right then: its order does not wait
-    /// a second bound when it is submitted.</summary>
+    /// a second bound when it is submitted. Proven by the account's bounded waits that gave up when the close arrives,
+    /// with the buy still unanswered, not by timing it.</summary>
     [Fact]
     public async Task Tradovate_close_behind_an_unanswered_buy_is_sent_after_one_bounded_wait()
     {
         using var rig = new TradovateRig(1);
         var buyReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        long sellArrived = 0;
+        NativeSendTurns? turns = null;
+        int gaveUpAtSell = -1;
+        bool buyAnsweredAtSell = true;
         rig.Intercept = async (_, arrival) =>
         {
-            if (arrival.Action == "Sell") Interlocked.CompareExchange(ref sellArrived, DateTime.UtcNow.Ticks, 0);
+            if (arrival.Action == "Sell" && turns != null && Volatile.Read(ref gaveUpAtSell) < 0)
+            {
+                buyAnsweredAtSell = buyReply.Task.IsCompleted;
+                Volatile.Write(ref gaveUpAtSell, turns.GaveUp);
+            }
             if (arrival.Action == "Buy") await buyReply.Task;
             return null;
         };
-        var bound = TimeSpan.FromMilliseconds(1500);
-        rig.Session.SendTurnWait = bound;
+        rig.Session.SendTurnWait = TimeSpan.FromMilliseconds(300);
         await rig.StartAsync(_orders, 1);
         rig.Broker.CloseConfirmationWait = TimeSpan.FromMilliseconds(100);
+        turns = rig.Session.SendTurns(Assert.Single(rig.Session.Accounts).Id);
         try
         {
             OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Buy, 1);
             await Until(() => rig.Placed("Buy").Length == 1, () => rig.Broker.LastError);
-            var issued = DateTime.UtcNow;
+            Assert.Equal(0, turns.GaveUp);
             OrderActions.Flatten(rig.Broker);
-            await Until(() => Interlocked.Read(ref sellArrived) != 0, () => rig.Broker.LastError);
-            var waited = new DateTime(Interlocked.Read(ref sellArrived), DateTimeKind.Utc) - issued;
-            Assert.True(waited >= bound - TimeSpan.FromMilliseconds(50), $"The close was sent after {waited.TotalMilliseconds} ms, before its bound.");
-            Assert.True(waited < bound * 2 - TimeSpan.FromMilliseconds(300), $"The close waited {waited.TotalMilliseconds} ms: a second bound.");
+            await Until(() => Volatile.Read(ref gaveUpAtSell) >= 0, () => rig.Broker.LastError);
+            // Sent while the buy was unanswered, after exactly one bounded wait gave up: no second bound.
+            Assert.False(buyAnsweredAtSell, "The close waited for the buy's reply instead of its bound.");
+            Assert.Equal(1, Volatile.Read(ref gaveUpAtSell));
         }
         finally { buyReply.TrySetResult(); }
+        await rig.Session.SendsIdle.WaitAsync(Deadline);
+        Assert.Equal(1, turns.GaveUp);
     }
 
     /// <summary>Submitting a planned close throws after its send turn was handed over (here, a Changed subscriber that

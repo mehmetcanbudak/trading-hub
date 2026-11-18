@@ -289,7 +289,9 @@ public sealed partial class OrderContext
         }
     }
 
-    public PreparedOrderIntent PrepareReplacement(Order order, decimal price, decimal quantity)
+    /// <param name="type">The order type the amendment was decided for (default: the order's type now). A broker
+    /// refuses the amendment once the order shows another type, for example a stop that triggered meanwhile.</param>
+    public PreparedOrderIntent PrepareReplacement(Order order, decimal price, decimal quantity, OrderTypes? type = null)
     {
         var previous = FindBoundOrder(order);
         if (previous != null) RestoreBinding(order, previous);
@@ -297,7 +299,7 @@ public sealed partial class OrderContext
             previous = Adopt(order, ManualOwner, order.Filled, Array.Empty<ExecutionIdentity>(), order.Filled == 0,
                 protective: order.ReduceOnly);
         var owner = previous?.Owner ?? new OrderOwner(order.OwnerId ?? "");
-        return Prepare(owner, new(previous?.Request.Instrument ?? order.Security.SecurityId, order.Direction, order.Type, quantity, price, order.ReduceOnly,
+        return Prepare(owner, new(previous?.Request.Instrument ?? order.Security.SecurityId, order.Direction, type ?? order.Type, quantity, price, order.ReduceOnly,
             order.Comment, previous?.Request.StrategyQuantity ?? 0, previous?.Request.Protective ?? false,
             previous?.Request.MaximumOwnedQuantity), order);
     }
@@ -1761,9 +1763,12 @@ public static class OrderActions
         return Place(account, account.OrderContext.ManualOwner, type, direction, quantity, price, comment, reduceOnly,
             protective: reducing, maximumOwnedQuantity: Math.Max(Math.Abs(before), Math.Abs(after)));
     }
-    public static Order Replace(ITradingAccount account, Order order, decimal price, decimal quantity) =>
+    /// <param name="type">The order type the caller decided the amendment for. Once the order shows another type (a stop
+    /// that triggered meanwhile) nothing is prepared or sent; a broker refuses one prepared just before the change.</param>
+    public static Order Replace(ITradingAccount account, Order order, decimal price, decimal quantity, OrderTypes? type = null) =>
         account is IAuthoritativeAdoption venue && venue.TryAdoptAndReplace(order, price, quantity) ? order
-            : account.Replace(order, account.OrderContext.PrepareReplacement(order, price, quantity));
+            : type is { } decided && order.Type != decided ? order
+            : account.Replace(order, account.OrderContext.PrepareReplacement(order, price, quantity, type));
     public static Order Reprice(ITradingAccount account, Order order, decimal price) =>
         account is IAuthoritativeAdoption venue && venue.TryAdoptAndReplace(order, price, null) ? order
             : account.Replace(order, account.OrderContext.PreparePriceUpdate(order, price));
