@@ -12,11 +12,15 @@ namespace TradingHub.App.Views;
 /// <summary>Chart alerts: evaluation after each update, right-click line capture and the alert dialog.</summary>
 public sealed partial class TradingView
 {
-    /// <summary>What the last evaluation of a chart saw: alerts are only re-checked when a bar price or the alert list changes.</summary>
+    /// <summary>
+    /// What the last evaluation of a chart saw: alerts are only re-checked when a bar price, the alert list or the candles
+    /// (a rebuild, where alerts re-arm before the next market move) change.
+    /// </summary>
     private sealed class ChartAlertWatch
     {
         public int Count;
         public long Time, Close, High, Low;
+        public long History = long.MinValue;
         public int Alerts = -1;
         public int Drawings = -1;
     }
@@ -28,9 +32,10 @@ public sealed partial class TradingView
     private void CheckChartAlerts(ChartTab t)
     {
         var m = t.Model;
-        if (m == null || m.Alerts.Count == 0) return;
+        if (m == null || (m.Alerts.Count == 0 && !m.HasAlertsAwaitingDrawings)) return;
         var watch = _chartAlertWatch.GetOrCreateValue(m);
-        bool changed = watch.Alerts != m.Alerts.Count || watch.Drawings != m.Drawings.Count;
+        bool changed = watch.Alerts != m.Alerts.Count || watch.Drawings != m.Drawings.Count || watch.History != m.HistoryGeneration;
+        watch.History = m.HistoryGeneration;
         if (m.Series.Count > 0)
         {
             var c = m.Series[^1];
@@ -39,7 +44,9 @@ public sealed partial class TradingView
         }
 
         if (!changed) return;
-        bool save = ChartAlertEngine.Prune(m).Count > 0;
+        // an erased drawing that comes back (undo) brings its alerts back; a drawing that is gone takes them away
+        bool save = ChartAlertEngine.RestoreWithDrawings(m).Count > 0;
+        save |= ChartAlertEngine.Prune(m).Count > 0;
         watch.Alerts = m.Alerts.Count;
         watch.Drawings = m.Drawings.Count;
         foreach (var fire in ChartAlertEngine.Evaluate(m, DateTime.UtcNow))

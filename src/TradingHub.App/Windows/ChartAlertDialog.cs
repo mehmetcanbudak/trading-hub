@@ -24,7 +24,7 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
     private readonly NumericUpDown _rightValue = new() { Name = "ChartAlertRightValue", FormatString = "0.########", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _lower = new() { Name = "ChartAlertLower", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly NumericUpDown _lowerValue = new() { Name = "ChartAlertLowerValue", FormatString = "0.########", HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly NumericUpDown _percent = new() { Name = "ChartAlertPercent", Minimum = 0, Maximum = 1000, Value = 1, Increment = 0.1m, FormatString = "0.##", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly NumericUpDown _percent = new() { Name = "ChartAlertPercent", Minimum = 0.01m, Maximum = 1000, Value = 1, Increment = 0.1m, FormatString = "0.##", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly NumericUpDown _bars = new() { Name = "ChartAlertBars", Minimum = 1, Maximum = 1000, Value = 1, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _trigger = new() { Name = "ChartAlertTrigger", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _message = new() { Name = "ChartAlertMessage", Watermark = "Optional note added to the notification", MaxLength = MaxMessageLength };
@@ -115,9 +115,16 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
         FillList();
     }
 
-    /// <summary>Opens the dialog over <paramref name="owner"/>; true when alerts were added, paused or deleted.</summary>
-    public static Task<bool> ShowAsync(Window? owner, ChartModel model, ChartAlertOperand? right = null, ChartAlertOperand? lower = null, ChartAlertCondition? condition = null) =>
-        new ChartAlertDialog(model, right, lower, condition).ShowOverAsync(owner);
+    /// <summary>
+    /// Opens the dialog over <paramref name="owner"/>; true when alerts were added, paused or deleted, however it is closed
+    /// (Done, Esc or the window's close button).
+    /// </summary>
+    public static async Task<bool> ShowAsync(Window? owner, ChartModel model, ChartAlertOperand? right = null, ChartAlertOperand? lower = null, ChartAlertCondition? condition = null)
+    {
+        var dialog = new ChartAlertDialog(model, right, lower, condition);
+        await dialog.ShowOverAsync(owner);
+        return dialog._changed;
+    }
 
     private static ComboBoxItem Item(ChartAlertOperand op) =>
         new() { Content = (op.Source == ChartAlertSource.Drawing ? "✎ " : "") + op.DisplayLabel(), Tag = op };
@@ -210,7 +217,14 @@ internal sealed class ChartAlertDialog : TradingHubDialog<bool>
         };
         if (ChartAlert.IsPercent(condition))
         {
-            alert.Right = ChartAlertOperand.Fixed(_percent.Value ?? 0);
+            // 0 % would hold on every flat bar and flood the destinations
+            if (_percent.Value is not { } percent || percent <= 0)
+            {
+                _error.Text = "Enter a percent above 0.";
+                return null;
+            }
+
+            alert.Right = ChartAlertOperand.Fixed(percent);
             alert.Bars = (int)(_bars.Value ?? 1);
             return alert;
         }

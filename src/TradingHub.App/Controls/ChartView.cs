@@ -79,6 +79,7 @@ public sealed class ChartView : SkiaView
             _controller = value != null ? new ChartController(value, _state) : null;
             if (_controller != null) _controller.ToolFinished += () => ToolFinished?.Invoke();
             if (_controller != null) _controller.DrawingsChanged += () => DrawingsChanged?.Invoke();
+            if (_controller != null) _controller.DrawingsShown += () => DrawingsShown?.Invoke();
             if (_controller != null) _controller.OrderDragged += (o, p) => OrderDragged?.Invoke(o, p);
             if (_controller != null) _controller.BracketDropped += (d, p) => BracketDropped?.Invoke(d, p);
             if (_controller != null) _controller.DrawingDoubleClicked += d => DrawingDoubleClicked?.Invoke(d);
@@ -171,6 +172,10 @@ public sealed class ChartView : SkiaView
 
     public event Action? ToolFinished;
     public event Action? DrawingsChanged;
+
+    /// <summary>Drawing with a tool showed the hidden drawings again.</summary>
+    public event Action? DrawingsShown;
+
     /// <summary>Committed text only: keyboard layouts and IME determine the text, never key-code guesses.</summary>
     public event Action<string>? CommittedText;
     public event Action? ModelChanged;

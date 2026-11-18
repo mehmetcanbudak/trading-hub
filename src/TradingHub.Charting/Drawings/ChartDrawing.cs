@@ -232,11 +232,12 @@ public sealed partial class ChartDrawing
 
     /// <summary>
     /// Arrastre de un manejador. En la posición: 0 = entrada, 1 = objetivo, 2 = stop (solo precio) y 3 = largo
-    /// (hasta cuándo). En el resto, el punto correspondiente.
+    /// (hasta cuándo). En el resto, el punto correspondiente. <paramref name="series"/>: the bars the drawing is shown on
+    /// (a channel's width handle measures along them, as the channel is drawn).
     /// </summary>
-    public void MoveHandle(int handle, ChartPoint p)
+    public void MoveHandle(int handle, ChartPoint p, CandleSeries? series = null)
     {
-        if (MoveChannelHandle(handle, p)) return;
+        if (MoveChannelHandle(handle, p, series)) return;
         if (IsPosition && Points.Count >= 3)
         {
             switch (handle)

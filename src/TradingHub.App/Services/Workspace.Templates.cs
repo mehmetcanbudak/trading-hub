@@ -91,6 +91,7 @@ internal static partial class Workspace
         if (dto.BarWidth > 0) m.Viewport.BarWidth = dto.BarWidth;
 
         foreach (var slot in m.Indicators.ToList()) m.RemoveIndicator(slot);
+        tab.HiddenIndicators = null; // the hidden list referred to the removed indicators
         AddIndicators(w, m, dto.Indicators);
         m.Rebuild();
         m.ApplyColors();

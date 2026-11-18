@@ -23,8 +23,11 @@ public sealed partial class ChartDrawing
         Points.Add(new ChartPoint(Points[0].Time, Points[0].Price + offset));
     }
 
-    /// <summary>Channel handles: 0 and 1 move the base line keeping the width; 2 sets the width where it is dropped.</summary>
-    private bool MoveChannelHandle(int handle, ChartPoint p)
+    /// <summary>
+    /// Channel handles: 0 and 1 move the base line keeping the width; 2 sets the width where it is dropped, measured from
+    /// the base line as it is drawn: along the bars of <paramref name="series"/> (gaps take no room), along time without it.
+    /// </summary>
+    private bool MoveChannelHandle(int handle, ChartPoint p, CandleSeries? series)
     {
         if (Kind != DrawingKind.ParallelChannel || Points.Count < 3 || handle is < 0 or > 2) return false;
         double off = ChannelOffset;
@@ -41,8 +44,19 @@ public sealed partial class ChartDrawing
             {
                 var a = Points[0];
                 var b = Points[1];
-                double span = (b.Time - a.Time).Ticks;
-                double basis = Math.Abs(span) < 1 ? a.Price : a.Price + (p.Time - a.Time).Ticks / span * (b.Price - a.Price);
+                double t;
+                if (series is { Count: > 0 })
+                {
+                    double b0 = BarPos(series, a.Time), b1 = BarPos(series, b.Time);
+                    t = Math.Abs(b1 - b0) < 1e-9 ? 0 : (BarPos(series, p.Time) - b0) / (b1 - b0);
+                }
+                else
+                {
+                    double span = (b.Time - a.Time).Ticks;
+                    t = Math.Abs(span) < 1 ? 0 : (p.Time - a.Time).Ticks / span;
+                }
+
+                double basis = a.Price + t * (b.Price - a.Price);
                 Points[2] = new ChartPoint(a.Time, a.Price + (p.Price - basis));
                 break;
             }

@@ -4,7 +4,9 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Material.Icons;
+using TradingHub.Charting;
 using TradingHub.Charting.Drawings;
+using TradingHub.Data;
 
 namespace TradingHub.App.Views;
 
@@ -20,10 +22,17 @@ internal sealed class SelectedDrawingBar : Border
         ("Red", 0xFFF0525A), ("Pink", 0xFFF472B6), ("Purple", 0xFFB478FF), ("White", 0xFFFFFFFF), ("Gray", 0xFF8B93A1),
     };
 
+    /// <summary>What the bar shows: it is rebuilt only when one of these changes.</summary>
+    private readonly record struct Shown(ChartDrawing? Drawing, DrawingKind Kind, uint Color, float Width, LineStyleKind Style, bool Locked, bool Alert, bool ChartLocked);
+
     private readonly TradingView _host;
     private readonly ChartTab _chart;
-    private string _sig = "";
+    private Shown _shown;
+    private bool _stale;
     private Guid? _suppressed;
+    private int _shownIndex = -1;
+    private ChartPeriod _codePeriod;
+    private string? _periodCode;
 
     public SelectedDrawingBar(TradingView host, ChartTab chart)
     {
@@ -42,24 +51,58 @@ internal sealed class SelectedDrawingBar : Border
         IsVisible = false;
     }
 
-    internal ChartDrawing? Selected =>
-        _chart.Model is { Settings.HideDrawings: false } m ? m.Drawings.FirstOrDefault(d => d.Selected && d.IsVisibleOn(m.Period) && d.Id != _suppressed) : null;
+    /// <summary>
+    /// The selected drawing the bar is for. Selection is single, so while the shown drawing is still selected at the
+    /// same place in the list the chart loop needs no scan.
+    /// </summary>
+    private ChartDrawing? FindSelected()
+    {
+        if (_chart.Model is not { Settings.HideDrawings: false } m) return null;
+        var drawings = m.Drawings;
+        if (_shownIndex >= 0 && _shownIndex < drawings.Count && _shown.Drawing is { } shown && ReferenceEquals(drawings[_shownIndex], shown) && Shows(shown, m)) return shown;
+        for (int i = 0; i < drawings.Count; i++)
+        {
+            if (!Shows(drawings[i], m)) continue;
+            _shownIndex = i;
+            return drawings[i];
+        }
+
+        _shownIndex = -1;
+        return null;
+    }
+
+    // ChartDrawing.IsVisibleOn's rule, without formatting the period code on every frame
+    private bool Shows(ChartDrawing d, ChartModel m) =>
+        d.Selected && !d.Hidden && d.Id != _suppressed && (d.OnlyPeriod == null || d.OnlyPeriod == PeriodCode(m.Period));
+
+    /// <summary>The period's code, computed once per period (it is a new string on every call).</summary>
+    private string PeriodCode(ChartPeriod period)
+    {
+        if (_periodCode == null || period != _codePeriod)
+        {
+            _codePeriod = period;
+            _periodCode = period.Code;
+        }
+
+        return _periodCode;
+    }
 
     /// <summary>Do not show it for this drawing (just made, with "drawing bar after drawing" off) until it is clicked; null shows it again.</summary>
     public void Suppress(ChartDrawing? d)
     {
         _suppressed = d?.Id;
-        _sig = "-";
+        _stale = true;
         Refresh();
     }
 
     /// <summary>Shows, hides or rebuilds the bar when the selected drawing changes (called from the chart loop).</summary>
     public void Refresh()
     {
-        var d = Selected;
-        string sig = d == null ? "" : $"{d.Id}|{d.Kind}|{d.ColorArgb}|{d.Width}|{d.EffectiveLineStyle}|{d.Locked}|{d.IsAlert}|{_chart.Model?.Settings.LockDrawings}";
-        if (sig == _sig) return;
-        _sig = sig;
+        var d = FindSelected();
+        var shown = d == null ? default : new Shown(d, d.Kind, d.ColorArgb, d.Width, d.EffectiveLineStyle, d.Locked, d.IsAlert, _chart.Model?.Settings.LockDrawings == true);
+        if (!_stale && shown == _shown) return;
+        _stale = false;
+        _shown = shown;
         IsVisible = d != null;
         Child = d != null ? Build(d) : null;
     }
@@ -67,7 +110,7 @@ internal sealed class SelectedDrawingBar : Border
     private void Changed()
     {
         _host.DrawingsTouched(_chart);
-        _sig = "";
+        _stale = true;
         Refresh();
     }
 
@@ -160,9 +203,17 @@ internal sealed class SelectedDrawingBar : Border
         row.Children.Add(style);
         row.Children.Add(Sep());
 
-        // lock
-        bool locked = d.Locked || _chart.Model?.Settings.LockDrawings == true;
-        var lockButton = Small(Ui.Icon(locked ? MaterialIconKind.LockOutline : MaterialIconKind.LockOpenVariantOutline, 17, locked ? Ui.Accent : Ui.Text1), locked ? "Unlock (can be moved)" : "Lock (cannot be moved)");
+        // lock: the chart-wide lock (left drawing bar) wins, so this button cannot unlock one drawing while it is on
+        bool chartLocked = _chart.Model?.Settings.LockDrawings == true;
+        bool locked = d.Locked || chartLocked;
+        var lockButton = Small(Ui.Icon(locked ? MaterialIconKind.LockOutline : MaterialIconKind.LockOpenVariantOutline, 17, locked ? Ui.Accent : Ui.Text1),
+            chartLocked ? "All drawings are locked: unlock them with the lock on the left drawing bar" : locked ? "Unlock (can be moved)" : "Lock (cannot be moved)");
+        if (chartLocked)
+        {
+            lockButton.IsEnabled = false;
+            ToolTip.SetShowOnDisabled(lockButton, true);
+        }
+
         lockButton.Click += (_, _) =>
         {
             d.Locked = !d.Locked;

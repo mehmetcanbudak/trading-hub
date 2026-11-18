@@ -48,6 +48,8 @@ public sealed partial class TradingView
         ToolTip.SetTip(_domLock, on
             ? "DOM trading on. Click to make the DOM read-only (chart trading is unaffected)."
             : "DOM trading off: the DOM is read-only. Click to enable DOM trading.");
+        // the state is otherwise only an icon (and the DOM's read-only badge is drawn): assistive technology reads this
+        Avalonia.Automation.AutomationProperties.SetName(_domLock, Localization.Lang.T(on ? "DOM trading on" : "DOM trading off: the DOM is read-only"));
     }
 
     /// <summary>Defence in depth for DOM-originated orders: the gesture router already blocks them when off.</summary>
