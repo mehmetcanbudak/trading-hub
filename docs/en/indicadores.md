@@ -136,20 +136,20 @@ onBar {
 | `input x = …` | `ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time`, `trades.volume { side: "BUY" / "SELL" }`, `trades.buy`, `trades.sell`, `trades.delta`, `trades.count`, `book.bid` / `book.ask` / `book.delta { within: ticks }` (average resting size near the best price over the bar's recorded depth samples). `open`, `high`, `low`, `close`, `volume`, `hl2`, `hlc3`, `ohlc4`, `time`, `delta`, `buyvol`, `sellvol` and `trades` work without a declaration. |
 | `output x = line \| histogram \| dots { … }` | Options: `overlay: true` (on price; otherwise every output goes to a separate panel), `color`, `width`, `opacity`, `label`, `show_zero: true`, `color_by: "sign", colors: [positive, negative]`. |
 | `level 70 { color }` | Horizontal panel line. |
-| `onStart { }` / `onBar { }` | Run before a full recalculation / for every bar (the forming bar is recalculated on updates). |
+| `onStart { }` / `onBar { }` | Run before a full recalculation / for every bar. The forming bar is recalculated on updates and starts each update fresh: a value this update does not assign is `na`, exactly as after a full recalculation. |
 | `var x = …` | Variable; also a series, so `x[1]` is its previous-bar value. |
-| `x[n]` | Value of any series `n` bars ago (missing before the first bar). |
+| `x[n]` | Value of any series `n` bars ago (missing before the first bar). `n` must be 0 or more; a negative or `na` offset reads `na`. |
 | `if (…) { } else if (…) { } else { }`, `and`, `or`, `not`, `? :` | Conditions. |
-| `alert("…")` | In-app alert, once per bar and message, only on the last bar; recalculating does not repeat it. |
+| `alert("…")` | In-app alert, once per bar for each `alert` statement, only on the last bar; recalculating does not repeat it. Numbers joined into the text use invariant formatting (`1234.5`). |
 
 Functions: `ema sma rma wma stdev highest lowest sum change cum crossover crossunder` and `abs min max sqrt log log10 exp pow round floor ceil sign nz na sin cos tan`; constants `bar_index`, `na`, `PI`. The wrun call form is accepted too: `param("n", 20, { min: 1 })`, `input("c", ohlcv.close)`, `output("x", line, overlay, { color: "#fff" })`, `function onBar() { … }` and `out_x(value)`.
 
 Semantics and data honesty:
 
-- Every function call keeps its own state, so call windowed functions on every bar (not only inside an `if`). `sma`, `wma`, `stdev`, `highest`, `lowest` and `sum` return `na` until their whole window has values; `ema` and `rma` start from the first value; `stdev` is the population deviation.
+- Every function call keeps its own state, so call windowed functions on every bar (not only inside an `if`). `sma`, `wma`, `stdev`, `highest`, `lowest` and `sum` return `na` until their whole window has values; `ema` and `rma` start from the first value; `stdev` is the population deviation. `round` takes halves away from zero, as Pine does.
 - Missing values are `na` (NaN). Outputs do not draw `na`, and also hide exact zeros unless `show_zero: true`.
 - `trades.buy`, `trades.sell`, `trades.volume { side }` and `delta` are `na` on bars that have volume but no aggressor split, instead of an invented zero. `book.*` is `na` without usable recorded depth for the bar; nothing is estimated.
-- Names cannot reuse C# keywords or members of the indicator base class (for example `Name` or `Panel`), and each name is declared once.
+- Names cannot reuse C# keywords or members of the indicator base class (for example `Name` or `Panel`), and each name is declared once. Two scripts that compile to the same indicator type are an error on the later file; numeric parameters are limited to ±7.9e28.
 
 Errors: script errors report the `.kvs` line and column; C# errors in generated code (for example assigning a comparison to a number) are mapped back to the script line, at the statement's first column. Any error fails the whole compilation, so the last successful indicators stay loaded, as with C# files.
 

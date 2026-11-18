@@ -269,13 +269,13 @@ public sealed class KvsScriptTests : IDisposable
         Assert.True(runtime.Crossover(2, 1, 3, 2));
         Assert.Equal(5, runtime.Highest(3, 0, 5, 1));
 
-        Assert.False(runtime.ShouldAlert(7, "x", lastBar: false));
-        Assert.True(runtime.ShouldAlert(7, "x", lastBar: true));
-        Assert.False(runtime.ShouldAlert(7, "x", lastBar: true));
+        Assert.False(runtime.ShouldAlert(0, 7, lastBar: false));
+        Assert.True(runtime.ShouldAlert(0, 7, lastBar: true));
+        Assert.False(runtime.ShouldAlert(0, 7, lastBar: true)); // the same alert statement, whatever its message now says
         runtime.Reset();
-        Assert.False(runtime.ShouldAlert(7, "x", lastBar: true));
-        Assert.True(runtime.ShouldAlert(7, "y", lastBar: true));
-        Assert.True(runtime.ShouldAlert(8, "x", lastBar: true));
+        Assert.False(runtime.ShouldAlert(0, 7, lastBar: true));
+        Assert.True(runtime.ShouldAlert(1, 7, lastBar: true));
+        Assert.True(runtime.ShouldAlert(0, 8, lastBar: true));
 
         Assert.Equal(System.Drawing.Color.FromArgb(0x80, 1, 2, 3), KvsRuntime.ParseColor("#80010203", System.Drawing.Color.Red));
         Assert.Equal(System.Drawing.Color.Red, KvsRuntime.ParseColor("#zzzzzz", System.Drawing.Color.Red));

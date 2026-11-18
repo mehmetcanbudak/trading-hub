@@ -53,8 +53,22 @@ public static partial class KvsTranslator
     /// <summary>Library description of a compiled script.</summary>
     public static string DescriptionFor(string fileName) => $"KVS script: {fileName}";
 
-    /// <summary>The path written in <c>#line</c> directives (a directive file name cannot contain a quote).</summary>
-    public static string LinePath(string path) => path.Replace("\"", "'", StringComparison.Ordinal);
+    /// <summary>
+    /// The file name written in <c>#line</c> directives. A directive file name cannot hold a quote or a line terminator;
+    /// diagnostics are mapped back through the syntax tree's own path, never through this text.
+    /// </summary>
+    private static string LinePath(string path) => SingleLine(path).Replace("\"", "'", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Text for a generated comment or directive: control characters and every C# line terminator (U+0085, U+2028,
+    /// U+2029 included) become «_», so a file name cannot end the comment's line and reach the generated code.
+    /// </summary>
+    private static string SingleLine(string text)
+    {
+        var sb = new StringBuilder(text.Length);
+        foreach (char c in text) sb.Append(char.IsControl(c) || c is '\u2028' or '\u2029' ? '_' : c);
+        return sb.ToString();
+    }
 
     /// <summary>1-based column of a line's first non-blank character (the statement column used for C# diagnostics).</summary>
     public static int StatementColumn(string source, int line)
@@ -72,6 +86,7 @@ public static partial class KvsTranslator
 internal static class KvsMessages
 {
     public const string OptionsBraces = "Options go between braces: { key: value, … }";
+    public const string UnterminatedString = "This text has no closing quote (\")";
     public const string TextAfterBlock = "Nothing may follow the brace that closes onBar / onStart";
     public const string NoOutput = "The script has no output (output name = line { … })";
 
@@ -93,7 +108,10 @@ internal static class KvsMessages
     public static string UnexpectedToken(string token) => $"Unexpected «{token}» in an expression";
     public static string MissingParenthesis(string name) => $"Missing «)» for «{name}(»";
     public static string EmptyArgument(string name) => $"«{name}(…)» has an empty argument";
-    public static string Usage(string signature) => $"Usage: {signature}";
+    public static string Usage(string signature) => $"Use the form {signature}";
+    public static string ParameterRange(string text) => $"«{text}» is too large for a parameter (at most ±7.9e28)";
+    public static string SameType(string other) => $"«{other}» already compiles to the same indicator type; rename one of the two files";
+    public static string TranslationFailed(string detail) => $"The script could not be translated: {detail}";
     public static string ArgumentCount(string name, string count) => $"«{name}(…)» takes {count} argument(s)";
     public static string UnknownFunction(string name, string available) => $"Unknown function «{name}» (available: {available})";
 }

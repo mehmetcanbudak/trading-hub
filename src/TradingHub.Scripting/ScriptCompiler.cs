@@ -158,8 +158,10 @@ public sealed class ScriptCompiler
         var sw = System.Diagnostics.Stopwatch.StartNew();
         cancellationToken.ThrowIfCancellationRequested();
         // KVS scripts become C# here, inside the one compile path: same references, sandbox and last-good publication.
+        // One script can only ever fail as its own diagnostic: nothing it contains may abort the compilation (or startup).
         var scriptErrors = new List<ScriptDiagnostic>();
         var scripts = new Dictionary<string, ScriptSource>(StringComparer.Ordinal);
+        var scriptTypes = new Dictionary<string, string>(StringComparer.Ordinal);
         var csharp = new List<ScriptSource>();
         foreach (var source in sources)
         {
@@ -169,14 +171,27 @@ public sealed class ScriptCompiler
                 continue;
             }
 
+            // the type is Kvs_ + the file name: x.kvs in two folders, or my-ind.kvs beside my_ind.kvs, would collide
+            string type = KvsTranslator.ClassNameFor(Path.GetFileNameWithoutExtension(source.Path));
+            if (scriptTypes.TryGetValue(type, out var first))
+            {
+                scriptErrors.Add(new ScriptDiagnostic(source.Path, 1, 1, "error", "KVS", KvsMessages.SameType(first)));
+                continue;
+            }
+
+            scriptTypes[type] = source.Path;
             try
             {
                 csharp.Add(new(source.Path, KvsTranslator.Translate(source.Text, Path.GetFileNameWithoutExtension(source.Path), source.Path)));
-                scripts[KvsTranslator.LinePath(source.Path)] = source;
+                scripts[source.Path] = source;
             }
             catch (KvsException ex)
             {
                 scriptErrors.Add(new ScriptDiagnostic(source.Path, ex.Line, ex.Column, "error", "KVS", ex.Message));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                scriptErrors.Add(new ScriptDiagnostic(source.Path, 1, 1, "error", "KVS", KvsMessages.TranslationFailed(ex.Message)));
             }
         }
 
@@ -198,7 +213,8 @@ public sealed class ScriptCompiler
 
     /// <summary>
     /// KVS diagnostics arrive through <c>#line</c> mapping with the script line; their column is the statement start,
-    /// because generated C# columns do not correspond to script text.
+    /// because generated C# columns do not correspond to script text. Generated code outside any statement (class header,
+    /// fields, constructor) has no script line and is reported at the start of the script.
     /// </summary>
     private static IReadOnlyList<ScriptDiagnostic> Describe(IEnumerable<Diagnostic> diagnostics, IReadOnlyDictionary<string, ScriptSource>? scripts = null) => diagnostics
         .Where(d => d.Severity == DiagnosticSeverity.Error || (d.Severity == DiagnosticSeverity.Warning && !IgnoredWarnings.Contains(d.Id)))
@@ -207,10 +223,12 @@ public sealed class ScriptCompiler
             var span = d.Location.GetMappedLineSpan();
             string path = span.Path ?? "";
             int line = span.StartLinePosition.Line + 1, column = span.StartLinePosition.Character + 1;
-            if (span.HasMappedPath && scripts != null && scripts.TryGetValue(path, out var script))
+            // scripts are keyed by their syntax tree's path: the #line file name is sanitized text, not an identity
+            if (scripts != null && d.Location.SourceTree is { } tree && scripts.TryGetValue(tree.FilePath, out var script))
             {
                 path = script.Path;
-                column = KvsTranslator.StatementColumn(script.Text, line);
+                if (!span.HasMappedPath) line = 1;
+                column = span.HasMappedPath ? KvsTranslator.StatementColumn(script.Text, line) : 1;
             }
 
             return new ScriptDiagnostic(path, line, column,

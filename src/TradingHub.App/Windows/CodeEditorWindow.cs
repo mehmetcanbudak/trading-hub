@@ -90,7 +90,7 @@ internal sealed class CodeEditorWindow : Window
         left.Children.Add(head);
         var note = new TextBlock
         {
-            Text = "Saving recompiles custom C# and KVS scripts with the current Trading Hub compiler. Renaming a file never renames its types, series IDs, saved chart references or templates. Pine imports stay local text until you explicitly send the reviewed source.",
+            Text = "Saving recompiles custom C# and KVS scripts with the current Trading Hub compiler. Renaming a C# file never renames its types, series IDs, saved chart references or templates; renaming a KVS script renames its indicator type. Pine imports stay local text until you explicitly send the reviewed source.",
             Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0),
         };
         DockPanel.SetDock(note, Dock.Bottom);
@@ -246,7 +246,11 @@ internal sealed class CodeEditorWindow : Window
     {
         if (_path == null || _builtIn != null) return;
         string path = _path;
-        var name = await PromptDialog.ShowAsync(this, "Rename indicator source file", "Filename only; C# types and saved identities stay unchanged", Path.GetFileNameWithoutExtension(path), "Rename file");
+        // a KVS type is Kvs_ + the file name, so only C# renames keep type identities
+        string consequence = TradingHub.Scripting.KvsTranslator.IsScript(path)
+            ? "Renaming a KVS script renames its indicator type; charts and templates that use it will no longer load it"
+            : "Filename only; C# types and saved identities stay unchanged";
+        var name = await PromptDialog.ShowAsync(this, "Rename indicator source file", consequence, Path.GetFileNameWithoutExtension(path), "Rename file");
         if (name == null || path != _path || !Save()) return;
         try
         {
