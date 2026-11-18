@@ -314,10 +314,7 @@ public sealed partial class DerivativesData
                 start = Ms(rows.Max(r => r.Time)) + 1;
             }
         }
-        var values = samples.Values.Where(s => s.Time >= from && s.Time <= to).ToArray();
-        return values.Length == 0
-            ? new(values, OpenInterestAvailability.Unavailable, $"{VenueName(venue)} reports no funding for {symbol} in this range.")
-            : new(values, OpenInterestAvailability.Available);
+        return FundingResult(venue, symbol, samples.Values.Where(s => s.Time >= from && s.Time <= to).ToArray(), from);
     }
 
     /// <summary>OKX funding-rate-history data rows {fundingRate, realizedRate, fundingTime} (fractions), newest first.</summary>
@@ -537,10 +534,7 @@ public sealed partial class DerivativesData
             using var doc = await GetVenueJsonAsync(venue, $"{BitgetOrigin}/api/v2/mix/market/account-long-short?symbol={escaped}&productType=USDT-FUTURES&period={period}", null, ct).ConfigureAwait(false);
             rows = ParseBitgetLongShort(doc.RootElement).ToArray();
         }
-        var values = rows.Where(r => r.Time >= from && r.Time <= to).OrderBy(r => r.Time).ToArray();
-        return values.Length == 0
-            ? new(values, OpenInterestAvailability.Unavailable, $"{VenueName(venue)} reports no long/short ratio for {symbol} in this range.")
-            : new(values, OpenInterestAvailability.Available);
+        return LongShortResultOf(venue, symbol, rows.Where(r => r.Time >= from && r.Time <= to).OrderBy(r => r.Time).ToArray(), from);
     }
 
     /// <summary>

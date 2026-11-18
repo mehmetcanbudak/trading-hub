@@ -33,10 +33,11 @@ public sealed record OptionsChain(string Underlying, DateTime Time, double Spot,
 
 /// <summary>
 /// One option execution. <see cref="Price"/> is USD per unit of the underlying, <see cref="Size"/> is contracts and
-/// <see cref="Aggressor"/> is +1 (bought at the ask), −1 (sold at the bid) or 0 (unknown side).
+/// <see cref="Aggressor"/> is +1 (bought at the ask), −1 (sold at the bid) or 0 (unknown side). <see cref="TradeId"/> is
+/// the provider's execution identity ("" when it publishes none): several fills of one order can share every other field.
 /// </summary>
 public sealed record OptionTrade(DateTime Time, string Symbol, DateTime Expiry, double Strike, OptionRight Right, double Price, double Size,
-    int Aggressor, double Iv, double Spot, double ContractSize, string Venue = "")
+    int Aggressor, double Iv, double Spot, double ContractSize, string Venue = "", string TradeId = "")
 {
     /// <summary>+1 for bought calls or sold puts, −1 for bought puts or sold calls, 0 when the side is unknown.</summary>
     public int Bias => Aggressor * (Right == OptionRight.Call ? 1 : -1);

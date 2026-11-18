@@ -523,7 +523,6 @@ public sealed class OptionsDataHubTests
         Assert.Equal(all.Count, all.Select(t => t.Time).Distinct().Count());
     }
 
-    /// <summary>A provider whose every trade request stops after one hour of its window, like a page cap.</summary>
     /// <summary>Two loads of one underlying (a scheduled background load and a direct caller) read the store, await the
     /// provider and write the store back. Overlapping them lets the slower writer replace the faster one's progress,
     /// which left a window reported as not covered on a loaded runner. Their provider requests must not overlap.</summary>
@@ -563,6 +562,7 @@ public sealed class OptionsDataHubTests
         }
     }
 
+    /// <summary>A provider whose every trade request stops after one hour of its window, like a page cap.</summary>
     private sealed class CappedTrades : IOptionsProvider, IOptionTradeWindows
     {
         public readonly List<OptionTrade> All = new();

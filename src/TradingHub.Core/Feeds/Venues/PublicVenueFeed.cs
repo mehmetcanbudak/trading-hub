@@ -102,7 +102,7 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
 
     protected abstract Task<IReadOnlyList<VenueInstrument>> ListAsync(CancellationToken ct);
 
-    /// <summary>Candles of 1, 5 or 15 minutes covering [from, to), any order; the base class sorts, de-duplicates and clips them.</summary>
+    /// <summary>Candles of 1, 5, 15 or 60 minutes covering [from, to), any order; the base class sorts, de-duplicates and clips them.</summary>
     protected abstract Task<IReadOnlyList<Kline>> FetchKlinesAsync(Instrument instrument, VenueSpec spec, long fromMs, long toMs, int minutes, CancellationToken ct);
 
     /// <summary>Silence after which the socket is considered stale and reconnected.</summary>
@@ -116,6 +116,9 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
 
     /// <summary>Minimum spacing between REST requests (public rate limits).</summary>
     protected virtual TimeSpan RequestSpacing => TimeSpan.FromMilliseconds(120);
+
+    /// <summary>Minimum spacing between book publications; a throttled change is published when it elapses.</summary>
+    private static readonly TimeSpan BookThrottle = TimeSpan.FromMilliseconds(100);
 
     // ======================================================================= listing
 
@@ -159,7 +162,7 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
         Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
     {
         ThrowIfDisposed();
-        if (minutes is not (1 or 5 or 15)) throw new ArgumentOutOfRangeException(nameof(minutes));
+        if (minutes is not (1 or 5 or 15 or 60)) throw new ArgumentOutOfRangeException(nameof(minutes));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
         ct = linked.Token;
         var spec = await RequireSpecAsync(instrument, ct).ConfigureAwait(false);
@@ -263,6 +266,9 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
         private readonly PublicVenueFeed _feed;
         internal bool BookChanged;
         internal bool Snapshot;
+        /// <summary>Book and sequence writes so far; a frame that fails after one has left the book half-applied.</summary>
+        internal int BookWrites;
+        private long _seq = -1;
 
         internal VenueSession(PublicVenueFeed feed, Instrument instrument, VenueSpec spec)
         {
@@ -276,7 +282,15 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
         public OrderBookBuilder Book { get; } = new();
 
         /// <summary>Venue book sequence (-1 until the first snapshot).</summary>
-        public long Seq { get; set; } = -1;
+        public long Seq
+        {
+            get => _seq;
+            set
+            {
+                _seq = value;
+                BookWrites++;
+            }
+        }
 
         /// <summary>Base-asset quantity of a native size.</summary>
         public decimal Coins(decimal size, decimal price) => Spec.Inverse ? price > 0 ? size / price : 0 : size * Spec.Multiplier;
@@ -301,6 +315,7 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
             if (price <= 0) return;
             Book.Set(side, Instrument.ToTicks(price), Math.Max(0, Coins(size, price)));
             BookChanged = true;
+            BookWrites++;
         }
 
         /// <summary>Rows [price, size, …] of one side.</summary>
@@ -317,6 +332,7 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
             Book.Clear();
             Snapshot = true;
             BookChanged = true;
+            BookWrites++;
         }
 
         /// <summary>The book lost sequence: the connection is restarted and the book requested again.</summary>
@@ -386,53 +402,82 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
 
                 var buffer = new byte[1 << 16];
                 using var message = new MemoryStream();
+                // Frame handling and the trailing timer publish under one gate, so sink callbacks never overlap.
+                var gate = new object();
+                bool open = true;
                 DateTime lastPublish = DateTime.MinValue;
-                while (ws.State == WebSocketState.Open && !token.IsCancellationRequested)
+                ITimer? trailing = null;
+                void PublishBook()
                 {
-                    message.SetLength(0);
-                    WebSocketReceiveResult received;
-                    do
+                    var now = Clock.GetUtcNow().UtcDateTime;
+                    var wait = BookThrottle - (now - lastPublish);
+                    if (!session.Snapshot && wait > TimeSpan.Zero)
                     {
-                        received = await ws.ReceiveAsync(buffer, token).ConfigureAwait(false);
-                        if (received.MessageType == WebSocketMessageType.Close) break;
-                        message.Write(buffer, 0, received.Count);
-                    } while (!received.EndOfMessage);
-                    if (received.MessageType == WebSocketMessageType.Close)
-                    {
-                        reason = "server closed the connection";
-                        break;
+                        // A quiet book would otherwise keep showing a superseded level until the next frame.
+                        trailing?.Change(wait, Timeout.InfiniteTimeSpan);
+                        return;
                     }
-                    receivedAny = true;
-                    failures = 0;
-                    connection.CancelAfter(Stale);
-                    string text = IsGzip(message) ? Gunzip(message) : Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length);
-                    try { OnMessage(text, session); }
-                    catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
+                    sink.OnDepth(instrument, session.Book.BuildUpdate(now, 500, session.Snapshot, Id, DisplayName,
+                        session.Seq >= 0 ? session.Seq : null, additionalCoverage: BookCoverage, receivedAt: now));
+                    bookPublished = true;
+                    lastPublish = now;
+                    session.Snapshot = false;
+                    session.BookChanged = false;
+                }
+                trailing = Clock.CreateTimer(_ =>
+                {
+                    lock (gate)
+                        if (open && session.BookChanged) PublishBook();
+                }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                try
+                {
+                    while (ws.State == WebSocketState.Open && !token.IsCancellationRequested)
                     {
-                        session.Trades.Clear(); // Control frames (pong, acknowledgements) have other shapes.
-                        continue;
-                    }
-
-                    if (session.Trades.Count > 0)
-                    {
-                        var trades = session.Trades.Where(t => t.Time >= connectedAt).ToArray();
-                        session.Trades.Clear();
-                        if (trades.Length > 0) sink.OnTrades(instrument, trades);
-                    }
-
-                    if (session.BookChanged)
-                    {
-                        var now = Clock.GetUtcNow().UtcDateTime;
-                        if (session.Snapshot || (now - lastPublish).TotalMilliseconds >= 100)
+                        message.SetLength(0);
+                        WebSocketReceiveResult received;
+                        do
                         {
-                            sink.OnDepth(instrument, session.Book.BuildUpdate(now, 500, session.Snapshot, Id, DisplayName,
-                                session.Seq >= 0 ? session.Seq : null, additionalCoverage: BookCoverage, receivedAt: now));
-                            bookPublished = true;
-                            lastPublish = now;
-                            session.Snapshot = false;
-                            session.BookChanged = false;
+                            received = await ws.ReceiveAsync(buffer, token).ConfigureAwait(false);
+                            if (received.MessageType == WebSocketMessageType.Close) break;
+                            message.Write(buffer, 0, received.Count);
+                        } while (!received.EndOfMessage);
+                        if (received.MessageType == WebSocketMessageType.Close)
+                        {
+                            reason = "server closed the connection";
+                            break;
+                        }
+                        receivedAny = true;
+                        failures = 0;
+                        connection.CancelAfter(Stale);
+                        string text = IsGzip(message) ? Gunzip(message) : Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length);
+                        lock (gate)
+                        {
+                            int bookWrites = session.BookWrites;
+                            try { OnMessage(text, session); }
+                            catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
+                            {
+                                // Control frames (pong, acknowledgements) have other shapes. A frame that failed after it
+                                // changed the book or its sequence left a half-applied delta: request the book again.
+                                // Trades parsed before the failure are valid prints and are still published.
+                                if (session.BookWrites != bookWrites) VenueSession.Resync("unparseable book frame");
+                            }
+
+                            if (session.Trades.Count > 0)
+                            {
+                                var trades = session.Trades.Where(t => t.Time >= connectedAt).ToArray();
+                                session.Trades.Clear();
+                                if (trades.Length > 0) sink.OnTrades(instrument, trades);
+                            }
+
+                            if (session.BookChanged) PublishBook();
                         }
                     }
+                }
+                finally
+                {
+                    // No trailing publication after the connection ends: the outage handling below owns the book.
+                    lock (gate) open = false;
+                    trailing.Dispose();
                 }
                 keepalive.Cancel();
             }
@@ -533,8 +578,9 @@ public abstract class PublicVenueFeed : IMarketDataFeed, IKlineHistory, IRecentT
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        // Cancelled, not disposed: a live loop or request that already passed its disposal check still reads the
+        // token. The source has no timer or wait handle, so there is nothing to release.
         _lifetime.Cancel();
-        _lifetime.Dispose();
         if (_ownsHttp) _http.Dispose();
         GC.SuppressFinalize(this);
     }

@@ -30,7 +30,7 @@ public static FakeHttpServer Oanda(string token = "TOKEN")
         {
             var from = DateTime.Parse(req.Query("from"), Inv, DateTimeStyles.AdjustToUniversal);
             var to = DateTime.Parse(req.Query("to"), Inv, DateTimeStyles.AdjustToUniversal);
-            int step = req.Query("granularity") switch { "S5" => 5, "M1" => 60, "M5" => 300, _ => 900 };
+            int step = req.Query("granularity") switch { "S5" => 5, "M1" => 60, "M5" => 300, "H1" => 3600, _ => 900 };
             var candles = new List<string>();
             // una hora de datos: de 13:00 a 14:00 UTC
             for (var t = start; t < start.AddHours(1); t = t.AddSeconds(step))
@@ -160,6 +160,8 @@ internal sealed class FakeCTrader : IDisposable
     public readonly List<int> Received = new();
     public int TickPage = 40;
     public int TickRequests;
+    /// <summary>ProtoOATrendbarPeriod of every trend-bar request, in arrival order.</summary>
+    public readonly System.Collections.Concurrent.ConcurrentQueue<int> TrendbarPeriods = new();
     public long DayStartMs = new DateTimeOffset(FakeBrokers.Day.ToDateTime(new TimeOnly(10, 0), DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 
     /// <summary>100 ticks del día: uno por segundo desde las 10:00, precio 20000.00 + i*0.01 (en 1/100000).</summary>
@@ -252,6 +254,7 @@ internal sealed class FakeCTrader : IDisposable
 
                     case 2137:
                     {
+                        TrendbarPeriods.Enqueue(p["period"]!.GetValue<int>());
                         var bars = new JsonArray();
                         long baseMin = DayStartMs / 60000;
                         for (int i = 0; i < 3; i++)

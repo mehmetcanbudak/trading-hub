@@ -200,14 +200,15 @@ public sealed class AlpacaFeed : IMarketDataFeed, IKlineHistory, IDayDownloader
     public async Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
         Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
     {
+        // Alpaca aggregates [1-59]Min and [1-23]Hour; only exact minutes or one hour are served, never a substitute.
+        string timeframe = minutes is >= 1 and <= 59 ? minutes.ToString(Inv) + "Min" : minutes == 60 ? "1Hour" : throw new ArgumentOutOfRangeException(nameof(minutes));
         if (toUtc > Latest) toUtc = Latest;
         if (toUtc <= fromUtc) return;
-        int m = minutes >= 15 ? 15 : minutes >= 5 ? 5 : 1;
         string? token = null;
         double total = Math.Max(1, (toUtc - fromUtc).TotalSeconds);
         do
         {
-            var url = $"{Data}/v2/stocks/{Uri.EscapeDataString(instrument.Symbol)}/bars?timeframe={m}Min&start={Uri.EscapeDataString(Rfc(fromUtc))}&end={Uri.EscapeDataString(Rfc(toUtc))}&limit=10000&feed=sip&adjustment=raw"
+            var url = $"{Data}/v2/stocks/{Uri.EscapeDataString(instrument.Symbol)}/bars?timeframe={timeframe}&start={Uri.EscapeDataString(Rfc(fromUtc))}&end={Uri.EscapeDataString(Rfc(toUtc))}&limit=10000&feed=sip&adjustment=raw"
                       + (token != null ? "&page_token=" + Uri.EscapeDataString(token) : "");
             using var doc = await GetAsync(url, ct).ConfigureAwait(false);
             var root = doc.RootElement;

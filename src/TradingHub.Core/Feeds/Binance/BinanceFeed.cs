@@ -147,13 +147,19 @@ public sealed partial class BinanceFeed : IMarketDataFeed, ITickerStatsProvider,
     }
 
     /// <summary>
-    /// Velas de 1, 5 o 15 minutos. Los meses completos salen del archivo público mensual
-    /// (data.binance.vision: un año en segundos); el resto, por REST de a 1000/1500.
+    /// Candles at an exact Binance interval (1, 3, 5, 15, 30 minutes or 1, 2, 4, 6, 8, 12 hours); any other
+    /// resolution is rejected rather than substituted. Complete months come from the public monthly archive
+    /// (data.binance.vision); the rest from REST in pages of 1000/1500.
     /// </summary>
     public async Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
         Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
     {
-        string interval = minutes switch { 5 => "5m", 15 => "15m", _ => "1m" };
+        string interval = minutes switch
+        {
+            1 => "1m", 3 => "3m", 5 => "5m", 15 => "15m", 30 => "30m",
+            60 => "1h", 120 => "2h", 240 => "4h", 360 => "6h", 480 => "8h", 720 => "12h",
+            _ => throw new ArgumentOutOfRangeException(nameof(minutes)),
+        };
         long step = minutes * 60_000L;
         long start = Ms(fromUtc) / step * step;
         long end = Ms(toUtc);

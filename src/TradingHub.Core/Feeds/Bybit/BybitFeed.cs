@@ -135,6 +135,8 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
     public async Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
         Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
     {
+        // Bybit v5 minute intervals; any other resolution is rejected rather than sent as an invalid interval.
+        if (minutes is not (1 or 3 or 5 or 15 or 30 or 60 or 120 or 240 or 360 or 720)) throw new ArgumentOutOfRangeException(nameof(minutes));
         long step = minutes * 60_000L;
         long start = new DateTimeOffset(DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc)).ToUnixTimeMilliseconds() / step * step;
         long end = new DateTimeOffset(DateTime.SpecifyKind(toUtc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();

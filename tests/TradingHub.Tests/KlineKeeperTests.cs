@@ -9,6 +9,34 @@ public sealed class KlineKeeperTests
     private static Instrument Instrument(string symbol) => new() { FeedId = "fixture", Symbol = symbol, Exchange = "Fixture candles", TickSize = 0.25m };
     private static TrackedCandleInstrument Tracked(string symbol) => new("fixture-profile", "fixture-provider", Instrument(symbol));
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnlyACurrentMonthTheProviderCoversPartiallyLetsCatchUpReachOlderMonths(bool coverageGap)
+    {
+        var thisMonth = new DateTime(Now.Year, Now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var calls = new List<(DateTime From, int Minutes)>();
+        await using var keeper = new KlineKeeper(new KlineMaintenanceSettings
+        {
+            Enabled = true, Instruments = new() { Tracked("CURRENT-FAILS") },
+        }, (_, from, _, minutes, _) =>
+        {
+            lock (calls) calls.Add((from, minutes));
+            if (from != thisMonth) return Task.FromResult(12);
+            // A provider window that starts inside the month, or a cache that cannot be written (KlineHistory's warning).
+            return Task.FromException<int>(coverageGap
+                ? new InvalidDataException("Provider candle coverage is partial; available cached data was retained.")
+                : (Exception)new IOException("Unable to write the candle history cache."));
+        }, utcNow: () => Now);
+
+        await keeper.RunNowAsync();
+
+        Assert.Equal(4, calls.Count(c => c.From == thisMonth));
+        Assert.All(keeper.Status.Failures, f => Assert.Equal(thisMonth, f.MonthUtc));
+        if (coverageGap) Assert.Contains(calls, c => c.From < thisMonth);
+        else Assert.DoesNotContain(calls, c => c.From < thisMonth); // More months would only go to the failing store.
+    }
+
     [Fact]
     public async Task DisabledMaintenanceDoesNotDiscoverFetchWriteOrTrackOpenedInstruments()
     {
@@ -336,5 +364,28 @@ public sealed class KlineKeeperTests
         await Task.WhenAll(running, queued).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(1, requests);
         Assert.False(keeper.Status.IsRunning);
+    }
+
+    [Fact]
+    public async Task ACycleCutByItsTimeLimitStartsTheNextCycleAfterTheSlowInstrument()
+    {
+        var calls = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        await using var keeper = new KlineKeeper(new KlineMaintenanceSettings
+        {
+            Enabled = true, Instruments = new() { Tracked("SLOW"), Tracked("NEXT"), Tracked("LAST") },
+        }, async (item, _, _, _, ct) =>
+        {
+            calls.Enqueue(item.Instrument.Symbol);
+            if (item.Instrument.Symbol == "SLOW") await Task.Delay(Timeout.Infinite, ct);
+            return 1;
+        }, utcNow: () => Now) { CycleLimit = TimeSpan.FromSeconds(1) };
+        await keeper.RunNowAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(new[] { "SLOW" }, calls.ToArray());
+        calls.Clear();
+        // The cut cycle reached SLOW, so the next one starts after it instead of starving the others behind it again.
+        await keeper.RunNowAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("NEXT", calls.First());
+        Assert.Contains("LAST", calls);
+        Assert.Equal("SLOW", calls.Last());
     }
 }

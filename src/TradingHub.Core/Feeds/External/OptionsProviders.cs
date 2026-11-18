@@ -43,7 +43,14 @@ public sealed class DeribitOptions : IOptionsProvider, IOptionTradeWindows, IVol
     {
         using var resp = await _http.GetAsync(new Uri(_root, method + "?" + query), ct).ConfigureAwait(false);
         string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        using var doc = JsonDocument.Parse(body);
+        JsonDocument parsed;
+        try { parsed = JsonDocument.Parse(body); }
+        catch (JsonException) when (!resp.IsSuccessStatusCode)
+        {
+            // A rate-limit or gateway page is not JSON: report its status, not a parser error.
+            throw new HttpRequestException($"HTTP {(int)resp.StatusCode} from {_root.Host}", null, resp.StatusCode);
+        }
+        using var doc = parsed;
         if (doc.RootElement.TryGetProperty("error", out var err))
             throw new InvalidOperationException("Deribit: " + (err.TryGetProperty("message", out var m) ? m.GetString() : err.ToString()));
         resp.EnsureSuccessStatusCode();
@@ -114,8 +121,9 @@ public sealed class DeribitOptions : IOptionsProvider, IOptionTradeWindows, IVol
             lastTimestamp = Math.Max(lastTimestamp, ts);
             double index = D(t, "index_price");
             string dir = t.TryGetProperty("direction", out var dd) ? dd.GetString() ?? "" : "";
+            string id = t.TryGetProperty("trade_id", out var tid) && tid.ValueKind is JsonValueKind.String or JsonValueKind.Number ? tid.ToString() : "";
             res.Add(new OptionTrade(DateTimeOffset.FromUnixTimeMilliseconds(ts).UtcDateTime, name, info.Expiry, info.Strike, info.Right,
-                D(t, "price") * index, D(t, "amount"), dir == "buy" ? 1 : dir == "sell" ? -1 : 0, D(t, "iv") / 100, index, 1, "Deribit"));
+                D(t, "price") * index, D(t, "amount"), dir == "buy" ? 1 : dir == "sell" ? -1 : 0, D(t, "iv") / 100, index, 1, "Deribit", id));
         }
 
         hasMore = result.TryGetProperty("has_more", out var hm) && hm.ValueKind == JsonValueKind.True;
@@ -226,7 +234,8 @@ internal static class CustomApi
 /// A user-configured options API (paid or self-hosted) returning documented JSON under its base URL, with an optional key
 /// sent as a Bearer token or in a named header:
 /// <c>GET {base}/chain?underlying=BTC</c> → <c>{"time","spot","contracts":[{"symbol","expiry","strike","right":"C|P","bid","ask","mark","iv","delta","gamma","vega","theta","oi","volume","contractSize"}]}</c>;
-/// <c>GET {base}/trades?underlying=BTC&amp;from=ISO&amp;to=ISO</c> → <c>[{"time","symbol","expiry","strike","right","price","size","side":"buy|sell","iv","spot","contractSize","venue"}]</c>;
+/// <c>GET {base}/trades?underlying=BTC&amp;from=ISO&amp;to=ISO</c> → <c>[{"id","time","symbol","expiry","strike","right","price","size","side":"buy|sell","iv","spot","contractSize","venue"}]</c>
+/// (<c>id</c>, optional, is the execution identity; without it identical fills are told apart only by count);
 /// <c>GET {base}/daily?underlying=BTC&amp;from=ISO&amp;to=ISO</c> → <c>[{"date","spot","atmIv","rr25","pcVolume","pcOi","callOi","putOi","callVolume","putVolume","gex","callWall","putWall","gammaFlip","expectedMove"}]</c>.
 /// IV is a fraction; prices are USD per unit of the underlying; <c>contractSize</c> (default 1) is the multiplier.
 /// Missing greeks are computed; other missing numbers are unknown, never zero.
@@ -285,9 +294,10 @@ public sealed class JsonOptionsApi : IOptionsProvider
             if (CustomApi.T(o, "time") is not { } time || CustomApi.T(o, "expiry") is not { } expiry) continue;
             string side = CustomApi.S(o, "side");
             double size = CustomApi.D(o, "contractSize");
+            string id = o.TryGetProperty("id", out var tid) && tid.ValueKind is JsonValueKind.String or JsonValueKind.Number ? tid.ToString() : "";
             res.Add(new OptionTrade(time, CustomApi.S(o, "symbol"), expiry, CustomApi.Or(CustomApi.D(o, "strike"), 0), R(o), CustomApi.Or(CustomApi.D(o, "price"), 0),
                 CustomApi.Or(CustomApi.D(o, "size"), 0), side == "buy" ? 1 : side == "sell" ? -1 : 0, CustomApi.Or(CustomApi.D(o, "iv"), 0), CustomApi.Or(CustomApi.D(o, "spot"), 0),
-                size > 0 ? size : 1, CustomApi.S(o, "venue")));
+                size > 0 ? size : 1, CustomApi.S(o, "venue"), id));
         }
 
         return res;

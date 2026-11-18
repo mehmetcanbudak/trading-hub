@@ -107,6 +107,9 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
     /// <summary>Relative price distance beyond which a venue is treated as a different asset with the same ticker.</summary>
     public const decimal MaximumPriceDeviation = 0.03m;
 
+    /// <summary>A venue whose last print is older than this is not a live price reference for the others.</summary>
+    public static readonly TimeSpan ReferenceFreshness = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// The composite symbol of a venue instrument: base asset plus quote, where the USD family (USDT, USD, USDC) is
     /// written USDT so BTC-USDT-SWAP (OKX), BTC-USD (Coinbase), BTC (Hyperliquid) and BTCUSDT (Binance) align.
@@ -189,6 +192,24 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                         if (parts[i] is { } listed && QuoteRank(_sources[i], listed.Instrument) <= QuoteRank(_sources[i], instrument)) continue;
                         parts[i] = new Part(i, _sources[i], instrument);
                     }
+                // Before the USD family was folded, aggregate symbols were the venue symbols themselves (BTCUSDC at
+                // Binance). A contract that lost its composite slot to a preferred quote, or that is written in that
+                // BASE+QUOTE form, stays listed under its own symbol so saved charts, alerts and recorded history resolve.
+                var legacy = new Dictionary<string, Part?[]>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < _sources.Length; i++)
+                    foreach (var instrument in _catalogs[i].Values)
+                    {
+                        if (bySymbol.ContainsKey(instrument.Symbol)) continue;
+                        bool chosen = bySymbol.TryGetValue(CompositeSymbol(instrument), out var composite) && ReferenceEquals(composite[i]?.Instrument, instrument);
+                        if (chosen && !string.Equals(instrument.Symbol, instrument.BaseAsset + instrument.QuoteAsset, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!legacy.TryGetValue(instrument.Symbol, out var parts)) legacy[instrument.Symbol] = parts = new Part?[_sources.Length];
+                        var first = parts.FirstOrDefault(p => p != null)?.Instrument;
+                        if (first != null && (!string.Equals(first.BaseAsset, instrument.BaseAsset, StringComparison.OrdinalIgnoreCase)
+                            || !string.Equals(first.QuoteAsset, instrument.QuoteAsset, StringComparison.OrdinalIgnoreCase) || first.PointValue != instrument.PointValue))
+                            continue;
+                        parts[i] = new Part(i, _sources[i], instrument);
+                    }
+                foreach (var (symbol, parts) in legacy) bySymbol[symbol] = parts;
                 foreach (var previous in _parts.Keys) _coverage.Remove((previous, AggregateOperation.Instruments));
                 _parts.Clear();
                 foreach (var (symbol, parts) in bySymbol)
@@ -711,7 +732,10 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
         private long _bookBaselineRevision;
         private Part?[]? _parts;
         private readonly decimal[] _lastPrice;
+        private readonly long[] _lastPriceAt;
         private readonly bool[] _priceRejected;
+        /// <summary>Each venue's own last status, restored when its price converges again.</summary>
+        private readonly AggregateConstituentStatus[] _reported;
         private readonly DepthSnapshot?[] _books;
         private readonly DepthCoverage[] _bookCoverage;
         private bool _compositeDirty;
@@ -724,7 +748,9 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             _instrument = instrument;
             _sink = sink;
             _states = owner.InitialStates();
+            _reported = (AggregateConstituentStatus[])_states.Clone();
             _lastPrice = new decimal[owner._sources.Length];
+            _lastPriceAt = new long[owner._sources.Length];
             _priceRejected = new bool[owner._sources.Length];
             _books = new DepthSnapshot?[owner._sources.Length];
             _bookCoverage = new DepthCoverage[owner._sources.Length];
@@ -776,7 +802,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                 lock (_gate)
                 {
                     if (_disposed) return;
-                    for (int i = 0; i < _states.Length; i++) _states[i] = _owner.State(i, FeedStatus.Error, ex.Message);
+                    for (int i = 0; i < _states.Length; i++) _states[i] = _reported[i] = _owner.State(i, FeedStatus.Error, ex.Message);
                     InvalidateBook(ex.Message);
                     if (_disposed) return;
                     PublishStatus();
@@ -915,16 +941,25 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
         }
 
         /// <summary>
-        /// Live guard against a same-ticker different asset: prints far from the first trading, non-rejected venue
-        /// are omitted and the venue is reported partial until its price converges again.
+        /// Live guard against a same-ticker different asset: prints far from the first venue that is trading now (printed
+        /// within <see cref="ReferenceFreshness"/>) and not rejected are omitted, and the venue is reported partial until
+        /// its price converges again. A quiet or disconnected venue's last price is never a reference, so it cannot
+        /// reject the venues that keep trading through a move; a rejected venue converges only against a live reference.
         /// </summary>
         private bool AcceptPrice(int source, decimal price)
         {
+            long now = _owner._timeProvider.GetTimestamp();
             _lastPrice[source] = price;
+            _lastPriceAt[source] = now;
             int reference = -1;
             for (int i = 0; i < _lastPrice.Length; i++)
-                if (i != source && _lastPrice[i] > 0 && !_priceRejected[i]) { reference = i; break; }
-            bool deviates = reference >= 0 && reference < source && Deviates(price, _lastPrice[reference]);
+                if (i != source && _lastPrice[i] > 0 && !_priceRejected[i] && _owner._timeProvider.GetElapsedTime(_lastPriceAt[i], now) <= ReferenceFreshness)
+                {
+                    reference = i;
+                    break;
+                }
+            bool deviates = reference < 0 ? _priceRejected[source]
+                : Deviates(price, _lastPrice[reference]) && (reference < source || _priceRejected[source]);
             if (deviates && !_priceRejected[source])
             {
                 _priceRejected[source] = true;
@@ -936,7 +971,13 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                 }
                 PublishStatus();
             }
-            else if (!deviates) _priceRejected[source] = false;
+            else if (!deviates && _priceRejected[source])
+            {
+                // Converged: the venue's own reported status applies again, so later prints are not marked partial.
+                _priceRejected[source] = false;
+                _states[source] = _reported[source];
+                PublishStatus();
+            }
             return !deviates;
         }
 
@@ -1048,7 +1089,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
                     lock (_gate)
                     {
                         if (_disposed || !_bookNeedsBaseline || baselineRevision != _bookBaselineRevision) return;
-                        _states[0] = _owner.State(0, FeedStatus.Error, "First venue book resynchronization failed: " + ex.Message);
+                        _states[0] = _reported[0] = _owner.State(0, FeedStatus.Error, "First venue book resynchronization failed: " + ex.Message);
                         PublishStatus();
                     }
                 }
@@ -1060,7 +1101,9 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, IBarHistoryF
             lock (_gate)
             {
                 if (_disposed) return;
-                _states[source] = _owner.State(source, status, message);
+                _states[source] = _reported[source] = _owner.State(source, status, message);
+                // A venue that is not streaming has no current price: its last print must not judge the others.
+                if (status != FeedStatus.Connected) _lastPrice[source] = 0;
                 if (_priceRejected[source])
                     _states[source] = _states[source] with { IsPartial = true, Message = (message == null ? "" : message + " ") + "Prints are omitted while the price deviates from the reference venue." };
                 if (_owner.IsBookConsolidated)
