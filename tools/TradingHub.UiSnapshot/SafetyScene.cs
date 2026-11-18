@@ -827,16 +827,25 @@ internal static partial class SafetyScene
             {
                 rp.RithmicSystem = oldSystem;
                 rp.AllowRealOrders = oldAllow;
+                // the settled REAL session is replaced on reconfiguration (as above): follow the replacement rather than
+                // waiting on the retired session, which never signs in again
+                var realSession = session;
                 var realLogin = session.Accounts;
                 svc.Connections.Invalidate(rp);
-                Until(() => SignedInAgain(realLogin), 30); // back on the practice system before anything else uses the session
+                Until(() =>
+                {
+                    session = svc.RithmicSessionFor(rp);
+                    return !ReferenceEquals(session, realSession) && SignedInAgain(realLogin);
+                }, 30); // back on the practice system before anything else uses the session
+                Check(!ReferenceEquals(session, realSession) && SignedInAgain(realLogin) && session.IsPractice,
+                    $"restoring the practice system signs a new practice Rithmic session in ({session.StatusText})");
                 if (brokerKey != null && cache.Remove(brokerKey, out var leftover)) (leftover as IDisposable)?.Dispose();
                 window.Navigate("trading");
                 pump(0.3);
             }
         });
 
-        Part("Tradovate reconfiguration preserves outstanding account management", () => TradovateReconfiguration(Check));
+        Part("Tradovate reconfiguration preserves outstanding account management", () => TradovateReconfiguration(Check, pump));
         Part("unavailable ledger history and GUI cache recovery", () => LedgerRecovery(window, pump, Shot, Check));
 
         cache.Remove(cacheKey);
@@ -845,7 +854,7 @@ internal static partial class SafetyScene
         return failures;
     }
 
-    private static void TradovateReconfiguration(Action<bool, string> check)
+    private static void TradovateReconfiguration(Action<bool, string> check, Action<double> pump)
     {
         if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TRADINGHUB_KEYCHAIN_FILE")))
             throw new InvalidOperationException("The service fixture requires an isolated secrets file.");
@@ -869,12 +878,12 @@ internal static partial class SafetyScene
             TradovateUser = "demo",
             TradovateCid = "123",
         };
-        // Fixture readiness poll, not a product deadline: a loaded shared runner has been seen to confirm the native
-        // snapshots about 0.2 s after a six-second wait gave up, so the wait covers a slow connect, not a hang.
-        static bool WaitFor(Func<bool> done)
+        // Fixture readiness poll, not a product deadline. It pumps the UI thread like the scene's other waits: the scene
+        // runs on the UI thread, which must keep processing while the fixture's account connects.
+        bool WaitFor(Func<bool> done)
         {
             var until = DateTime.UtcNow.AddSeconds(30);
-            while (!done() && DateTime.UtcNow < until) Thread.Sleep(10);
+            while (!done() && DateTime.UtcNow < until) pump(0.02);
             return done();
         }
         try
@@ -892,11 +901,21 @@ internal static partial class SafetyScene
             using var data = new InstrumentData(instrument, new TradingHub.Feeds.SimulatedFeed());
             string accountId = AppServices.TradovateAccountId(profile, 101);
             var broker = services.AccountFor(data, accountId);
-            check(WaitFor(() => broker.PositionReady && broker.OrdersReady), "Tradovate fixture confirms its initial native snapshots");
+            var session = services.TradovateSessionFor(profile);
+            int ContractLookups()
+            {
+                lock (fake.Server.Requests) return fake.Server.Requests.Count(r => r.Route == "/v1/contract/find");
+            }
+            // What the fixture observed: a ready session with an unready broker means the broker's contract is unknown.
+            string State() => $"position ready {broker.PositionReady}, orders ready {broker.OrdersReady}; session connected {session.IsConnected}, " +
+                $"snapshot ready {session.SnapshotReady}, status «{session.StatusText}»; logins {fake.Logins}, contract lookups {ContractLookups()}; " +
+                $"last error «{broker.LastError}»";
+            check(WaitFor(() => broker.PositionReady && broker.OrdersReady), $"Tradovate fixture confirms its initial native snapshots ({State()})");
             var entry = TradingHub.Trading.OrderActions.Manual(broker, TradingHub.Trading.OrderTypes.Market, OrderDirections.Buy, 2, comment: "Fixture entry");
-            check(WaitFor(() => entry.Status == OrderStatus.Filled && broker.Position.Volume == 2), "Tradovate fixture holds two confirmed contracts");
+            check(WaitFor(() => entry.Status == OrderStatus.Filled && broker.Position.Volume == 2), $"Tradovate fixture holds two confirmed contracts ({entry.Status}; {State()})");
             var limit = TradingHub.Trading.OrderActions.Manual(broker, TradingHub.Trading.OrderTypes.Limit, OrderDirections.Buy, 1, 4990, "Fixture working limit");
-            check(WaitFor(() => limit.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(limit)), "Tradovate fixture has a confirmed working order before reconfiguration");
+            check(WaitFor(() => limit.ExchangeOrderId.Length > 0 && broker.ActiveOrders.Contains(limit)),
+                $"Tradovate fixture has a confirmed working order before reconfiguration ({limit.Status}; {State()})");
 
             profile.TradovateUser = "changed-fixture-login";
             services.Connections.Invalidate(profile);
@@ -905,10 +924,10 @@ internal static partial class SafetyScene
                 "A replaced Tradovate login blocks new exposure while allowing reductions");
             broker.Cancel(limit);
             check(WaitFor(() => limit.Canceled && !broker.ActiveOrders.Contains(limit)) && limit.Filled == 0,
-                "The original Tradovate context still receives the working order's cancellation acknowledgment");
+                $"The original Tradovate context still receives the working order's cancellation acknowledgment ({limit.Status}; {State()})");
             var close = TradingHub.Trading.OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Sell, 2, 0, "Fixture close", reduceOnly: true);
             check(WaitFor(() => close.Status == OrderStatus.Filled && broker.Position.Volume == 0),
-                $"The original Tradovate context confirms its reduction after reconfiguration ({broker.LastError})");
+                $"The original Tradovate context confirms its reduction after reconfiguration ({close.Status}; {State()})");
             check(!ReferenceEquals(broker, services.AccountFor(data, accountId)),
                 "The next Tradovate account uses a new context rather than the retired login");
         }

@@ -7,8 +7,18 @@ using Xunit.Abstractions;
 
 namespace TradingHub.Tests;
 
+/// <summary>Fact that runs only when <c>variable</c> is set to 1 and is reported as Skipped otherwise, on every platform
+/// (the cross-platform form of <see cref="WindowsOptInFactAttribute"/>).</summary>
+public sealed class OptInFactAttribute : FactAttribute
+{
+    public OptInFactAttribute(string variable)
+    {
+        if (Environment.GetEnvironmentVariable(variable) != "1") Skip = $"Set {variable}=1 to run";
+    }
+}
+
 /// <summary>Opt-in latency measurement of durable order-path writers on the temp volume (the internal SSD on a
-/// standard Mac). Set TRADINGHUB_DURABILITY_BENCHMARK=1; otherwise it returns immediately so the suite stays fast.
+/// standard Mac). Set TRADINGHUB_DURABILITY_BENCHMARK=1; otherwise it is reported as Skipped, not Passed.
 /// It reports numbers only and asserts no timing, so machine load cannot make it flaky.</summary>
 [Collection("LiveStore")]
 public sealed class DurabilityLatencyBenchmark(ITestOutputHelper output)
@@ -16,10 +26,9 @@ public sealed class DurabilityLatencyBenchmark(ITestOutputHelper output)
     private const int Warmup = 10;
     private const int Iterations = 200;
 
-    [Fact]
+    [OptInFact("TRADINGHUB_DURABILITY_BENCHMARK")]
     public void Measures_durable_writer_latency_when_requested()
     {
-        if (Environment.GetEnvironmentVariable("TRADINGHUB_DURABILITY_BENCHMARK") != "1") return;
         string root = Path.Combine(Path.GetTempPath(), "TradingHub-durability-benchmark-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -48,7 +57,15 @@ public sealed class DurabilityLatencyBenchmark(ITestOutputHelper output)
             Report("LiveStore.AppendFill (WAL + ledger)", () => Assert.Null(LiveStore.AppendFill(live, "benchmark|test:TEST|sim",
                 new LiveFill(time.AddSeconds(ledger++), ledger % 2 == 0, 1m, 100m))));
         }
-        finally { Directory.Delete(root, recursive: true); }
+        finally
+        {
+            // Execution projection may still write the context's journal; delete after it settles, as the fixtures do.
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!AccountExecutionProjector.BackgroundWorkIdle && DateTime.UtcNow < deadline) Thread.Sleep(20);
+            if (!AccountExecutionProjector.BackgroundWorkIdle)
+                throw new InvalidOperationException("Execution projection did not settle before benchmark cleanup.");
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private void Primitive(string root, string name, byte[] record, Action<FileStream> flush, bool syncDirectory)

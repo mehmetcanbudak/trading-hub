@@ -1375,9 +1375,12 @@ internal static class KvpProvidersScene
                 }
             }
         }
-        /// <summary>Reads a store file the application may be rewriting at this moment. Windows refuses a read while the
-        /// account's own writer holds the file, so a sharing violation is retried; every file is still read in full.</summary>
-        private static string ReadStore(string file)
+        /// <summary>Reads a store file the application may be replacing at this moment. The product's durable rename
+        /// (MoveFileEx with REPLACE_EXISTING) holds the target open with delete access while it swaps the file in, and the
+        /// replaced file is delete-pending for a moment afterwards: Windows then refuses the open with a sharing violation
+        /// (IOException) or ERROR_ACCESS_DENIED (UnauthorizedAccessException). Both are retried for a bounded 10 s,
+        /// pumping the UI thread between attempts; every file is still read in full.</summary>
+        private string ReadStore(string file)
         {
             var until = DateTime.UtcNow.AddSeconds(10);
             while (true)
@@ -1388,7 +1391,11 @@ internal static class KvpProvidersScene
                     using var reader = new StreamReader(stream);
                     return reader.ReadToEnd();
                 }
-                catch (IOException ex) when (ex is not FileNotFoundException and not DirectoryNotFoundException && DateTime.UtcNow < until) { Thread.Sleep(25); }
+                catch (Exception ex) when (ex is IOException and not FileNotFoundException and not DirectoryNotFoundException or UnauthorizedAccessException &&
+                    DateTime.UtcNow < until)
+                {
+                    pump(0.025);
+                }
             }
         }
         private void CheckOrdinaryStores()
