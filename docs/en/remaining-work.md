@@ -70,7 +70,6 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 ### KVS scripting
 | P | Item |
 |---|---|
-| P1 | The ATAS namespace `Preprocess` still text-replaces across generated KVS code, including user strings; scope it to identifiers. |
 | P2 | One-line `if (a) { x = 1 } else { x = 2 }` is rejected; only the multi-line form works (undocumented until fixed). |
 | P2 | The Windows directory watcher added for edited copies has not run on Windows hands-on. |
 
