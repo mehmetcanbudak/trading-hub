@@ -24458,5 +24458,233 @@
   "IB bar history supports 1, 5, 15 and 60 minute requests.": {
     "es": "El historial de velas de IB admite solicitudes de 1, 5, 15 y 60 minutos.",
     "zh-CN": "IB K 线历史支持 1、5、15 和 60 分钟请求。"
+  },
+  "Alpaca: ": {
+    "es": "Alpaca: ",
+    "zh-CN": "Alpaca： "
+  },
+  "Alpaca: {0}": {
+    "es": "Alpaca: {0}",
+    "zh-CN": "Alpaca：{0}"
+  },
+  "Bitget: ": {
+    "es": "Bitget: ",
+    "zh-CN": "Bitget： "
+  },
+  "Bitget: {0}": {
+    "es": "Bitget: {0}",
+    "zh-CN": "Bitget：{0}"
+  },
+  "Bybit: ": {
+    "es": "Bybit: ",
+    "zh-CN": "Bybit： "
+  },
+  "Bybit: {0}": {
+    "es": "Bybit: {0}",
+    "zh-CN": "Bybit：{0}"
+  },
+  "Deribit: ": {
+    "es": "Deribit: ",
+    "zh-CN": "Deribit： "
+  },
+  "Deribit: {0}": {
+    "es": "Deribit: {0}",
+    "zh-CN": "Deribit：{0}"
+  },
+  "Hyperliquid: ": {
+    "es": "Hyperliquid: ",
+    "zh-CN": "Hyperliquid： "
+  },
+  "Hyperliquid: {0}": {
+    "es": "Hyperliquid: {0}",
+    "zh-CN": "Hyperliquid：{0}"
+  },
+  "Polymarket: ": {
+    "es": "Polymarket: ",
+    "zh-CN": "Polymarket： "
+  },
+  "Polymarket: {0}": {
+    "es": "Polymarket: {0}",
+    "zh-CN": "Polymarket：{0}"
+  },
+  "Rithmic: ": {
+    "es": "Rithmic: ",
+    "zh-CN": "Rithmic： "
+  },
+  "Rithmic: {0}": {
+    "es": "Rithmic: {0}",
+    "zh-CN": "Rithmic：{0}"
+  },
+  "Tradovate: ": {
+    "es": "Tradovate: ",
+    "zh-CN": "Tradovate： "
+  },
+  "Tradovate: {0}": {
+    "es": "Tradovate: {0}",
+    "zh-CN": "Tradovate：{0}"
+  },
+  "Coinbase: ": {
+    "es": "Coinbase: ",
+    "zh-CN": "Coinbase： "
+  },
+  "Coinbase: {0} {1}": {
+    "es": "Coinbase: {0} {1}",
+    "zh-CN": "Coinbase：{0} {1}"
+  },
+  "\nAvailable OOS {0} to {1}. {2} of {3} windows complete. Complete research coverage.\nAccounting policy {4}. Attribution policy {5}. CPCV policy {6}.": {
+    "es": "\nCobertura fuera de muestra disponible del {0} al {1}. {2} de {3} ventanas completadas. Cobertura de investigación completa.\nPolítica contable {4}. Política de atribución {5}. Política CPCV {6}.",
+    "zh-CN": "\n可用样本外区间 {0} 至 {1}。已完成 {2} / {3} 个窗口。 研究覆盖完整。\n会计政策 {4}。归属政策 {5}。CPCV 政策 {6}。"
+  },
+  "\nAvailable OOS {0} to {1}. {2} of {3} windows complete. Only the completed out-of-sample prefix is reported.\nAccounting policy {4}. Attribution policy {5}. CPCV policy {6}.": {
+    "es": "\nCobertura fuera de muestra disponible del {0} al {1}. {2} de {3} ventanas completadas. Solo se informa el tramo inicial completado fuera de muestra.\nPolítica contable {4}. Política de atribución {5}. Política CPCV {6}.",
+    "zh-CN": "\n可用样本外区间 {0} 至 {1}。已完成 {2} / {3} 个窗口。 仅报告样本外已完成的连续前段。\n会计政策 {4}。归属政策 {5}。CPCV 政策 {6}。"
+  },
+  " · REAL ACCOUNT (new orders disabled in Connections; cancel/close allowed)": {
+    "es": " · CUENTA REAL (nuevas órdenes desactivadas en Conexiones; cancelar/cerrar permitido)",
+    "zh-CN": " · 实盘账户（已在“连接”中禁用新订单；允许撤单/平仓）"
+  },
+  "Bar-based daily HLC3 estimates; full requested calendar span; current session excluded from rolling values": {
+    "es": "Estimaciones HLC3 diarias basadas en velas; intervalo de calendario solicitado completo; la sesión actual se excluye de los valores móviles",
+    "zh-CN": "基于 K 线的每日 HLC3 估算; 所请求的完整日历跨度; 滚动值不包含当前交易时段"
+  },
+  "Bar-based daily HLC3 estimates; partial loaded calendar history; current session excluded from rolling values": {
+    "es": "Estimaciones HLC3 diarias basadas en velas; historial de calendario cargado parcial; la sesión actual se excluye de los valores móviles",
+    "zh-CN": "基于 K 线的每日 HLC3 估算; 已加载的日历历史不完整; 滚动值不包含当前交易时段"
+  },
+  "Claire: {0}": {
+    "es": "Claire: {0}",
+    "zh-CN": "Claire：{0}"
+  },
+  "Delta: {0}": {
+    "es": "Delta: {0}",
+    "zh-CN": "Delta：{0}"
+  },
+  "Ended practice run · fills are deterministic estimates, not exchange executions": {
+    "es": "Sesión de práctica finalizada · las ejecuciones son estimaciones deterministas, no ejecuciones de la bolsa",
+    "zh-CN": "已结束的练习 · 成交是确定性估算，并非交易所实际成交"
+  },
+  "Error: ": {
+    "es": "Error: ",
+    "zh-CN": "错误： "
+  },
+  "Error: {0}": {
+    "es": "Error: {0}",
+    "zh-CN": "错误：{0}"
+  },
+  "Filled: {0}": {
+    "es": "Ejecutada: {0}",
+    "zh-CN": "已成交：{0}"
+  },
+  "Isolated practice account · fills are deterministic estimates, not exchange executions": {
+    "es": "Cuenta de práctica aislada · las ejecuciones son estimaciones deterministas, no ejecuciones de la bolsa",
+    "zh-CN": "隔离练习账户 · 成交是确定性估算，并非交易所实际成交"
+  },
+  "Level: ": {
+    "es": "Nivel: ",
+    "zh-CN": "级别： "
+  },
+  "Level: {0}": {
+    "es": "Nivel: {0}",
+    "zh-CN": "级别：{0}"
+  },
+  "Options: ": {
+    "es": "Opciones: ",
+    "zh-CN": "期权： "
+  },
+  "Options: {0}": {
+    "es": "Opciones: {0}",
+    "zh-CN": "期权：{0}"
+  },
+  "Quantity: {0}": {
+    "es": "Cantidad: {0}",
+    "zh-CN": "数量：{0}"
+  },
+  "Recorded L2 snapshot differences · {0} comparisons · {1} skipped (gaps/stale/source changes) · longest interval {2} s · filled/pulled split is a heuristic{3}": {
+    "es": "Diferencias entre instantáneas L2 grabadas · {0} comparaciones · {1} omitidas (huecos/obsoletas/cambios de fuente) · intervalo más largo {2} s · la separación ejecutado/cancelado es una heurística{3}",
+    "zh-CN": "已记录 L2 快照差异 · {0} 次比较 · 跳过 {1} 次（缺口/过期/数据源变化）· 最长间隔 {2} 秒 · 成交/撤单的划分是启发式判断{3}"
+  },
+  "Recorded L2 snapshot differences · {0} comparisons · {1} skipped (gaps/stale/source changes) · longest interval {2} s · filled/pulled split is a heuristic{3} · partial recorded depth": {
+    "es": "Diferencias entre instantáneas L2 grabadas · {0} comparaciones · {1} omitidas (huecos/obsoletas/cambios de fuente) · intervalo más largo {2} s · la separación ejecutado/cancelado es una heurística{3} · profundidad grabada parcial",
+    "zh-CN": "已记录 L2 快照差异 · {0} 次比较 · 跳过 {1} 次（缺口/过期/数据源变化）· 最长间隔 {2} 秒 · 成交/撤单的划分是启发式判断{3} · 已记录深度仅部分覆盖"
+  },
+  "Rejected: {0}": {
+    "es": "Rechazada: {0}",
+    "zh-CN": "已拒绝：{0}"
+  },
+  "Status: ": {
+    "es": "Estado: ",
+    "zh-CN": "状态： "
+  },
+  "Status: {0}{1}": {
+    "es": "Estado: {0}{1}",
+    "zh-CN": "状态：{0}{1}"
+  },
+  "{0}Status: {1}": {
+    "es": "{0}Estado: {1}",
+    "zh-CN": "{0}状态：{1}"
+  },
+  "Strategy: {0}": {
+    "es": "Estrategia: {0}",
+    "zh-CN": "策略：{0}"
+  },
+  "Submitted: {0}": {
+    "es": "Enviada: {0}",
+    "zh-CN": "已提交：{0}"
+  },
+  "Verdict: {0}": {
+    "es": "Veredicto: {0}",
+    "zh-CN": "结论：{0}"
+  },
+  "{0}\nAccount: {1}": {
+    "es": "{0}\nCuenta: {1}",
+    "zh-CN": "{0}\n账户：{1}"
+  },
+  "{0}\nDouble-click: keep it active": {
+    "es": "{0}\nDoble clic: mantenerla activa",
+    "zh-CN": "{0}\n双击：保持激活"
+  },
+  "{0}\nKept: stays active after each drawing (Esc releases it)": {
+    "es": "{0}\nFija: sigue activa después de cada dibujo (Esc la suelta)",
+    "zh-CN": "{0}\n已固定：每次绘图后保持激活（Esc 释放）"
+  },
+  "{0} ({1}) — previous credentials; reduce/cancel only": {
+    "es": "{0} ({1}) — credenciales anteriores; solo reducir/cancelar",
+    "zh-CN": "{0}（{1}）— 先前的凭据；仅允许减仓/撤单"
+  },
+  "{0} combinations · too many: narrow ranges or increase steps": {
+    "es": "{0} combinaciones · demasiadas: reduce los rangos o aumenta los pasos",
+    "zh-CN": "{0} 种组合 · 数量过多：请缩小范围或增大步长"
+  },
+  "{0} only {1}% probability that the edge is real (requires ≥ {2}%){3}. This is indistinguishable from chance": {
+    "es": "{0} solo {1}% de probabilidad de ventaja real (requiere ≥ {2}%){3}. Esto no se distingue del azar",
+    "zh-CN": "{0}真实优势概率仅 {1}%（要求 ≥ {2}%）{3}。这与随机结果无法区分"
+  },
+  "{0} · {1} days of Rithmic ticks · contract{2} {3}{4}": {
+    "es": "{0} · {1} días de ticks de Rithmic · contrato{2} {3}{4}",
+    "zh-CN": "{0} · {1} 天 Rithmic 逐笔 · 合约{2} {3}{4}"
+  },
+  "{0} · {1} days of Rithmic ticks · contract{2} {3}{4} An index such as ES has over a million trades daily: long ranges take time (cancel and resume later if needed).": {
+    "es": "{0} · {1} días de ticks de Rithmic · contrato{2} {3}{4} Un índice como ES tiene más de un millón de operaciones al día: los rangos largos tardan (cancela y reanuda más tarde si hace falta).",
+    "zh-CN": "{0} · {1} 天 Rithmic 逐笔 · 合约{2} {3}{4} ES 这类指数每天有超过一百万笔成交：较长的范围需要一些时间（如有需要可取消，稍后继续）。"
+  },
+  "{0} · {1} days · {2}. A long range takes time: cancel and resume later; downloaded data is retained.": {
+    "es": "{0} · {1} días · {2}. Un rango largo tarda: cancela y reanuda más tarde; los datos descargados se conservan.",
+    "zh-CN": "{0} · {1} 天 · {2}。较长的范围需要一些时间：可取消并稍后继续；已下载的数据会保留。"
+  },
+  "{0}: no new entries until the next session": {
+    "es": "{0}: sin nuevas entradas hasta la siguiente sesión",
+    "zh-CN": "{0}：在下一交易时段前不再入场"
+  },
+  "{0}: no new entries until the next session and closes the position": {
+    "es": "{0}: sin nuevas entradas hasta la siguiente sesión y cierra la posición",
+    "zh-CN": "{0}：在下一交易时段前不再入场，并平仓"
+  },
+  "{0}; numeric series causal; {1}": {
+    "es": "{0}; series numéricas causales; {1}",
+    "zh-CN": "{0}; 数值序列保持因果性; {1}"
+  },
+  "{0}; numeric series causal; {1}; unavailable (zero accumulated weight)": {
+    "es": "{0}; series numéricas causales; {1}; no disponible (peso acumulado cero)",
+    "zh-CN": "{0}; 数值序列保持因果性; {1}；不可用（累计权重为零）"
   }
 }
