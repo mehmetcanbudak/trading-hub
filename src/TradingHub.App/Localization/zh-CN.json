@@ -1841,6 +1841,7 @@
   "Candle fallback is unavailable; finer recorded history is retained: {0}": "K 线回退数据不可用；已保留更细粒度的历史记录：{0}",
   "Candle high cannot be below candle low.": "K 线最高价不能低于最低价。",
   "Candle high is below low.": "K 线最高价低于最低价。",
+  "Candle history before {0} UTC is not available from this provider; earlier months were not loaded unless already cached.": "此数据提供方不提供 {0} UTC 之前的 K 线历史；除非已有缓存，否则更早的月份未加载。",
   "Candle history contains invalid source metadata.": "K 线历史包含无效的源元数据。",
   "Candle history contains negative volume.": "K 线历史数据包含负成交量。",
   "Candle history exceeds the bounded monthly cache capacity.": "K 线历史超出月度缓存的有界容量。",

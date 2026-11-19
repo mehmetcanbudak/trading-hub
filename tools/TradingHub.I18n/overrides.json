@@ -24690,5 +24690,9 @@
   "Not amended: Tradovate has not reported this order for 30 seconds, so the amendment was not sent. Check the order at Tradovate.": {
     "es": "No modificada: Tradovate no ha informado de esta orden en 30 segundos, así que la modificación no se envió. Revisa la orden en Tradovate.",
     "zh-CN": "未修改：Tradovate 在 30 秒内未报告此订单，因此未发送修改请求。请在 Tradovate 中检查该订单。"
+  },
+  "Candle history before {0} UTC is not available from this provider; earlier months were not loaded unless already cached.": {
+    "es": "El historial de velas anterior a {0} UTC no está disponible en este proveedor; los meses anteriores no se cargaron salvo que ya estuvieran en caché.",
+    "zh-CN": "此数据提供方不提供 {0} UTC 之前的 K 线历史；除非已有缓存，否则更早的月份未加载。"
   }
 }
