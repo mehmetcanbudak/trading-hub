@@ -976,7 +976,7 @@ public sealed partial class TradingView
         message.Length == 0 && OrderActionLanes.RunsOffCaller(acc) ? label : message;
 
     /// <summary>A gesture's result; gestures still waiting in a lane, and the account's requests still waiting for an
-    /// earlier reply before they are sent (Tradovate, Binance), stay visible in the same status line.</summary>
+    /// earlier reply before they are sent (Tradovate, Binance, Rithmic), stay visible in the same status line.</summary>
     private void GestureStatus(ITradingAccount acc, string message)
     {
         int pending = _svc.OrderLanes.Pending.Count;
