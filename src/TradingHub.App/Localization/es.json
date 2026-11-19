@@ -1842,6 +1842,7 @@
   "Candle fallback is unavailable; finer recorded history is retained: {0}": "La alternativa de velas no está disponible; se conserva la historia grabada de mayor resolución: {0}",
   "Candle high cannot be below candle low.": "El máximo de la vela no puede ser inferior al mínimo.",
   "Candle high is below low.": "El máximo de la vela es inferior al mínimo.",
+  "Candle history before {0} UTC is not available from this provider; earlier months were not loaded unless already cached.": "El historial de velas anterior a {0} UTC no está disponible en este proveedor; los meses anteriores no se cargaron salvo que ya estuvieran en caché.",
   "Candle history contains invalid source metadata.": "El historial de velas contiene metadatos de fuente no válidos.",
   "Candle history contains negative volume.": "La historia de velas contiene volumen negativo.",
   "Candle history exceeds the bounded monthly cache capacity.": "El historial de velas supera la capacidad limitada de la caché mensual.",
