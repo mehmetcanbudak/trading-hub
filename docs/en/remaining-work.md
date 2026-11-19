@@ -47,7 +47,6 @@ Still open:
 |---|---|
 | P1 | IB now requests 60-minute bars (`1 hour`); verify pacing and session-aligned hours against a real TWS/Gateway session. |
 | P1 | Hyperliquid months entirely outside its 5,000-candle window return no bars and are not flagged; needs a cache-layer "unavailable" marker. |
-| P1 | `KlineHistory` refreshes closed months by replacement, so candles that aged out of a short-window venue can be lost on refresh; merge instead of replace. |
 | P2 | Legacy caches holding only sparse finer bars cannot be told apart from real hourly bars (rare; refetch on demand). |
 
 ### Charts, alerts and UI
