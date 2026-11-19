@@ -85,7 +85,7 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 | P | Item |
 |---|---|
 | P1 | macOS hosted runners are often unavailable (zero-step cancellations). Consider a self-hosted Apple Silicon runner or a scheduled re-run policy. |
-| P1 | Watch `LocalApiSettingsTests.A_port_change_restarts_on_the_new_port_and_the_old_port_refuses`: failed once under full-suite load locally, passes alone; and the Windows `vstest` testhost-connect timeout seen once on x64 (runner slowness). |
+| P1 | Watch `LocalApiSettingsTests.A_port_change_restarts_on_the_new_port_and_the_old_port_refuses`: failed once under full-suite load locally, passes alone; and the Windows `vstest` testhost-connect timeout seen once on x64 (runner slowness). A third, on the `52cf2b3` merge run: `FeedReviewDerivativesTests` failed in its temp-folder cleanup on Windows x64 because the liquidation recorder still held a CSV open; the cleanup now retries (test-only). |
 | P1 | The macOS safety-scene Tradovate fixture failure now prints diagnostics and the contract-lookup retry is fixed; confirm it stays green. |
 | P2 | Liquidation-stream tests poll a condition with a 10 s deadline because `DerivativesData` exposes no event to await. |
 | P2 | Disk headroom on this Mac swings between 3 and 21 GB (shared with other projects); one full-suite run hit `ENOSPC`. Keep evidence on the external volume and consider `TMPDIR` there for long runs. |
