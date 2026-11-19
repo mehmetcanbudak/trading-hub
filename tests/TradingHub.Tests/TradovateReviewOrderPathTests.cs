@@ -155,6 +155,27 @@ public sealed class TradovateReviewOrderPathTests : IDisposable
         await Until(() => !rig.Broker.IsReplacementPending(entry) && entry.Price == 4001m, () => rig.Broker.LastError);
     }
 
+    /// <summary>An order the venue never reports must not hold the account's send queue for good: once the bound passes the
+    /// amendment is refused unsent, its turn is released, and the request issued behind it reaches the venue.</summary>
+    [Fact]
+    public async Task Tradovate_entry_amendment_of_a_never_reported_order_is_refused_unsent_after_its_bound()
+    {
+        using var rig = new Rig { Intercept = Rig.AcceptLimitsUnreported };
+        rig.Session.UnreportedAmendmentWait = TimeSpan.FromMilliseconds(500);
+        await rig.StartAsync(_orders);
+        var entry = await PlaceUnreportedEntryAsync(rig);
+
+        OrderActions.Reprice(rig.Broker, entry, 4001m);
+        OrderActions.Manual(rig.Broker, OrderTypes.Market, OrderDirections.Buy, 1);
+
+        await Until(() => rig.Placed().Any(arrival => arrival.Type == "Market") && !rig.Broker.IsReplacementPending(entry),
+            () => rig.Broker.LastError);
+        await rig.Session.SendsIdle.WaitAsync(Deadline);
+        Assert.DoesNotContain(rig.Arrivals(), arrival => arrival.Route == "/v1/order/modifyorder");
+        Assert.Equal(4000m, entry.Price);
+        Assert.Equal(0, rig.Broker.QueuedRequests);
+    }
+
     /// <summary>Close position cancels an entry whose amendment holds its turn for the replay: the cancel ends that wait,
     /// so the cancel is sent in order (not after its reducing bound) and nothing is amended.</summary>
     [Fact]

@@ -24458,5 +24458,9 @@
   "IB bar history supports 1, 5, 15 and 60 minute requests.": {
     "es": "El historial de velas de IB admite solicitudes de 1, 5, 15 y 60 minutos.",
     "zh-CN": "IB K 线历史支持 1、5、15 和 60 分钟请求。"
+  },
+  "Not amended: Tradovate has not reported this order for 30 seconds, so the amendment was not sent. Check the order at Tradovate.": {
+    "es": "No modificada: Tradovate no ha informado de esta orden en 30 segundos, así que la modificación no se envió. Revisa la orden en Tradovate.",
+    "zh-CN": "未修改：Tradovate 在 30 秒内未报告此订单，因此未发送修改请求。请在 Tradovate 中检查该订单。"
   }
 }
