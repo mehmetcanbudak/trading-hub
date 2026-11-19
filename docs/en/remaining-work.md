@@ -4,7 +4,7 @@
 
 The single list of everything still open in the Trading Hub project: the canonical C# app (`memoshi`), its validation, release, upstream maintenance and the Rust/Swift ports. Verified results live in the [validation dashboard](./TRANSLATION_STATUS.md); checks that need accounts, networks or hardware are detailed in the [external acceptance checklist](./external-acceptance.md). This page says what is left, why, and what would close it.
 
-**Snapshot (2026-11-18):** `memoshi` is at `4f0e740`. Draft [PR #17](https://github.com/mehmetcanbudak/trading-hub/pull/17) holds the deep review of the past week (about 150 findings fixed; 2,607 tests and all 60 functional scenes pass locally; Windows x64 and ARM64 CI green; macOS CI green one commit earlier, later macOS jobs cancelled by runner capacity). The installed Mac app is still `a03e15e`. Upstream (`ralphtradesz/trading-hub`) has **0 pending commits** since the reviewed `1d5a774`. Both ports are 281 commits behind `memoshi` and paused.
+**Snapshot (2026-11-19):** `memoshi` is at `52cf2b3`: [PR #17](https://github.com/mehmetcanbudak/trading-hub/pull/17), the deep review of the past week (about 150 findings fixed), is merged with all three platforms green and installed on this Mac. Upstream (`ralphtradesz/trading-hub`) has **0 pending commits** since the reviewed `1d5a774`. Both ports are 281 commits behind `memoshi` and paused.
 
 Priorities: **P0** blocks safe use of the current code, **P1** should come next, **P2** is improvement or deferred work.
 
@@ -25,12 +25,12 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 
 ## 2. Ship the current work (P0)
 
-0. The ARM64 run on `f027aef` failed `A_protection_manager_created_after_the_restarted_account_settled_adopts_its_working_oco_at_once`: the Tradovate test fake pushed to an aborted user WebSocket (fixture race, not product code). `FakeTradovate.Push` now retries on the current socket; confirm on the next CI run.
-1. Re-run the cancelled macOS CI job of PR #17 until a runner is acquired; all three platforms must be green on the same tree.
-2. Review and merge #17 into `memoshi` (D7); delete `fix/native-drain-deadline` and `docs/pr15-receipt`.
-3. Update the dashboard header (`**Canonical branch:**` line) with the merge commit and its CI run; it still names `e4f526c`/`a03e15e`.
-4. Install on this Mac after D8, with a byte-verified backup of the current bundle and non-history app-support files, then verify the saved workspace opens and record the receipt.
-5. After installation, watch the first real sessions for the new behaviour that touches saved data: hourly candle caches written by older builds are detected and refetched (expect some extra downloads); chart alerts are now parked instead of deleted on symbol switches.
+Done 2026-11-19: all three platforms green on `bf8b4ff` (run 44409663151; the ARM64 Tradovate failure was a test-fixture race, fixed), #17 merged as `52cf2b3`, #16 closed, both branches deleted, `52cf2b3` installed after a byte-verified backup (receipt in the [dashboard](./TRANSLATION_STATUS.md)).
+
+Still open:
+1. Watch the first real sessions for the new behaviour that touches saved data: hourly candle caches written by older builds are detected and refetched (expect some extra downloads); chart alerts are now parked instead of deleted on symbol switches.
+2. Compare CPU and memory with the previous build: the installed app showed about one busy core (UI thread) and a stable ~7 GB working set with a live footprint chart on 757,020 bars. There is no baseline, so decide whether it is normal or a regression (P1).
+3. D2 (refuse every amendment of an executing child) and D4 (bound the Tradovate unreported-amendment send turn): order-path changes on their own branch and PR, each with tests (P1).
 
 ## 3. C# app — engineering follow-ups
 
@@ -58,6 +58,7 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 | P2 | Parked alerts are not updated when an indicator is removed while the chart shows another instrument. |
 | P2 | Parked/unreadable-drawings status messages can be overwritten by the "ready" message when history finishes loading. |
 | P2 | Workspace save cache keeps the full text of every saved drawings file for the session (bounded; a hash would do). |
+| P2 | `BybitFeed` pings from a fire-and-forget task; when the socket closes mid-send the fault is unobserved and lands in `crash.log` (harmless, seen once on `52cf2b3`). Observe it and log it quietly. |
 
 ### Studies
 | P | Item |
