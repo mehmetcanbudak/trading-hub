@@ -75,7 +75,6 @@ Still open:
 ### Localization tooling
 | P | Item |
 |---|---|
-| P1 | The I18n extractor misses single words with a colon (`Usage:`) and conditional string concatenation, which hid untranslated text; extend `IsText`/`Concat`. |
 | P2 | Wire URLs and JSON templates are carried as identity "translations" in `overrides.json`; teach the extractor to skip URL/JSON-shaped literals and drop those entries. |
 
 ## 4. Tests, CI and tooling

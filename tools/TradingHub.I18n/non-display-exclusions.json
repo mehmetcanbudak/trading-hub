@@ -446,5 +446,21 @@
   "{0}='{1}' ignored: use metal, opengl or software. The default rendering order is kept.": {
     "locations": "TradingHub.App/Services/RenderingDiagnostics.cs:32",
     "reason": "Startup diagnostic log line for an invalid TRADINGHUB_RENDERING developer override; written to the app log, never shown in the UI. Names environment values that are not translatable."
+  },
+  "\nAuthorization: ": {
+    "locations": "TradingHub.App/Windows/AlertsWindow.cs:175",
+    "reason": "Literal HTTP header name in the webhook request preview; it shows the exact header sent, so it must not be translated."
+  },
+  "Content-Length: ": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:1010",
+    "reason": "HTTP response header name written to the local market-data API's wire output."
+  },
+  "Access-Control-Allow-Origin: ": {
+    "locations": "TradingHub.App/Services/LocalApi/LocalMarketDataApi.cs:1013",
+    "reason": "HTTP response header name written to the local market-data API's wire output."
+  },
+  "{0}\nAuthorization: {1}\n{2}\n{3}": {
+    "locations": "TradingHub.App/Windows/AlertsWindow.cs:175",
+    "reason": "Webhook request preview template (destination, literal Authorization header, payload, delivery notice); the header line is wire text."
   }
 }

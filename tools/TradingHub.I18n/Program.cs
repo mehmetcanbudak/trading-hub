@@ -54,7 +54,7 @@ void Extract(string src, string output)
             {
                 InterpolatedStringExpressionSyntax interpolation => ExpandedTemplates(interpolation),
                 LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression) => new[] { Escape(literal.Token.ValueText) },
-                BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression) && binary.Parent is not BinaryExpressionSyntax { RawKind: (int)SyntaxKind.AddExpression } && Concat(binary) is { } key => new[] { key },
+                BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression) && binary.Parent is not BinaryExpressionSyntax { RawKind: (int)SyntaxKind.AddExpression } => Concat(binary),
                 _ => Array.Empty<string>(),
             };
             foreach (var key in keys.Where(IsText))
@@ -112,7 +112,7 @@ static IEnumerable<string> ExpandedTemplates(InterpolatedStringExpressionSyntax 
     return results;
 }
 
-static string? Concat(BinaryExpressionSyntax expression)
+static IEnumerable<string> Concat(BinaryExpressionSyntax expression)
 {
     var parts = new List<ExpressionSyntax>();
     void Walk(ExpressionSyntax node)
@@ -125,22 +125,42 @@ static string? Concat(BinaryExpressionSyntax expression)
         else parts.Add(node);
     }
     Walk(expression);
-    if (!parts.Any(p => p is LiteralExpressionSyntax { RawKind: (int)SyntaxKind.StringLiteralExpression } or InterpolatedStringExpressionSyntax)) return null;
-    var text = new StringBuilder();
-    int nextHole = 0;
-    foreach (var part in parts)
+    if (!parts.Any(p => p is LiteralExpressionSyntax { RawKind: (int)SyntaxKind.StringLiteralExpression } or InterpolatedStringExpressionSyntax)) yield break;
+    // A part that picks between two literals ("a" + (flag ? "x" : "y")) is expanded like an interpolated choice, so each
+    // complete sentence is a catalog key instead of one with an opaque hole.
+    var choices = new Dictionary<int, (string Condition, string Yes, string No)>();
+    for (int i = 0; i < parts.Count; i++)
     {
-        if (part is LiteralExpressionSyntax { RawKind: (int)SyntaxKind.StringLiteralExpression } literal) text.Append(Escape(literal.Token.ValueText));
-        else if (part is InterpolatedStringExpressionSyntax interpolation)
-        {
-            var inner = Template(interpolation);
-            text.Append(Regex.Replace(inner, @"(?<!\{)\{(\d+)\}(?!\})", m => "{" + (int.Parse(m.Groups[1].Value) + nextHole) + "}"));
-            nextHole += interpolation.Contents.OfType<InterpolationSyntax>().Count();
-        }
-        else text.Append('{').Append(nextHole++).Append('}');
+        var value = parts[i];
+        while (value is ParenthesizedExpressionSyntax parenthesized) value = parenthesized.Expression;
+        if (value is ConditionalExpressionSyntax conditional &&
+            conditional.WhenTrue is LiteralExpressionSyntax yes && yes.IsKind(SyntaxKind.StringLiteralExpression) &&
+            conditional.WhenFalse is LiteralExpressionSyntax no && no.IsKind(SyntaxKind.StringLiteralExpression))
+            choices[i] = (conditional.Condition.WithoutTrivia().ToString(), yes.Token.ValueText, no.Token.ValueText);
     }
-    var result = text.ToString();
-    return Regex.Replace(result, @"\{\d+\}", "").Trim().Length < 2 ? null : result;
+    var conditions = choices.Values.Select(c => c.Condition).Distinct(StringComparer.Ordinal).ToArray();
+    if (conditions.Length > 8) { choices.Clear(); conditions = Array.Empty<string>(); }
+    for (int state = 0; state < (1 << conditions.Length); state++)
+    {
+        var text = new StringBuilder();
+        int nextHole = 0;
+        for (int i = 0; i < parts.Count; i++)
+        {
+            var part = parts[i];
+            if (choices.TryGetValue(i, out var choice))
+                text.Append(Escape((state & (1 << Array.IndexOf(conditions, choice.Condition))) != 0 ? choice.Yes : choice.No));
+            else if (part is LiteralExpressionSyntax { RawKind: (int)SyntaxKind.StringLiteralExpression } literal) text.Append(Escape(literal.Token.ValueText));
+            else if (part is InterpolatedStringExpressionSyntax interpolation)
+            {
+                var inner = Template(interpolation);
+                text.Append(Regex.Replace(inner, @"(?<!\{)\{(\d+)\}(?!\})", m => "{" + (int.Parse(m.Groups[1].Value) + nextHole) + "}"));
+                nextHole += interpolation.Contents.OfType<InterpolationSyntax>().Count();
+            }
+            else text.Append('{').Append(nextHole++).Append('}');
+        }
+        var result = text.ToString();
+        if (Regex.Replace(result, @"\{\d+\}", "").Trim().Length >= 2) yield return result;
+    }
 }
 
 static bool IsText(string key)
@@ -151,10 +171,12 @@ static bool IsText(string key)
     if (Regex.IsMatch(plain, @"^(https?|wss?|file)://") || plain.Contains("/usr/") || plain.StartsWith("--")) return false;
     if (!plain.Contains(' '))
     {
-        if (Regex.IsMatch(plain, @"[_./\\:=<>#@\[\]]")) return false;
-        if (!char.IsUpper(plain[0])) return false;
-        if (Regex.IsMatch(plain, @"^[A-Z0-9]+$")) return false;
-        if (Regex.IsMatch(plain, @"[a-z][A-Z]")) return false;
+        // A trailing colon marks a label ("Usage:"); a colon anywhere else is a protocol, a time or a key.
+        var word = plain.EndsWith(':') ? plain[..^1] : plain;
+        if (Regex.IsMatch(word, @"[_./\\:=<>#@\[\]]")) return false;
+        if (!char.IsUpper(word[0])) return false;
+        if (Regex.IsMatch(word, @"^[A-Z0-9]+$")) return false;
+        if (Regex.IsMatch(word, @"[a-z][A-Z]")) return false;
     }
     return true;
 }
