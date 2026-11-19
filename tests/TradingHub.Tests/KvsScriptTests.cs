@@ -151,6 +151,24 @@ public sealed class KvsScriptTests : IDisposable
     }
 
     [Fact]
+    public void One_line_if_else_and_else_if_chains_match_their_multi_line_form()
+    {
+        var (oneLine, _) = Run("""
+            output step = histogram
+            output other = line
+            onBar {
+              if (bar_index == 0) { step = -1 } else { step = 5 }
+              if (bar_index < 3) { other = 1; other += 1 } else if (bar_index < 6) { other = 7 } else { other = 9 }
+            }
+            """, "OneLine");
+        Assert.Equal(-1m, Value(oneLine, 0, 0));
+        Assert.Equal(5m, Value(oneLine, 0, 1));
+        Assert.Equal(2m, Value(oneLine, 1, 2));
+        Assert.Equal(7m, Value(oneLine, 1, 4));
+        Assert.Equal(9m, Value(oneLine, 1, 8));
+    }
+
+    [Fact]
     public void Missing_aggressor_side_and_missing_recorded_depth_stay_missing_instead_of_zero()
     {
         var (indicator, _) = Run("""
