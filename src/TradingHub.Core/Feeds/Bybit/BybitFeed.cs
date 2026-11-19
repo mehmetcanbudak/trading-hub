@@ -245,11 +245,16 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
                 using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(conn.Token);
                 _ = Task.Run(async () =>
                 {
-                    while (!pingCts.IsCancellationRequested && ws.State == WebSocketState.Open)
+                    try
                     {
-                        await Task.Delay(TimeSpan.FromSeconds(20), pingCts.Token).ConfigureAwait(false);
-                        await ws.SendAsync("{\"op\":\"ping\"}"u8.ToArray(), WebSocketMessageType.Text, true, pingCts.Token).ConfigureAwait(false);
+                        while (!pingCts.IsCancellationRequested && ws.State == WebSocketState.Open)
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(20), pingCts.Token).ConfigureAwait(false);
+                            await ws.SendAsync("{\"op\":\"ping\"}"u8.ToArray(), WebSocketMessageType.Text, true, pingCts.Token).ConfigureAwait(false);
+                        }
                     }
+                    // A ping on a socket that just closed ends the keep-alive; the receive loop below owns the reconnect.
+                    catch (Exception) when (pingCts.IsCancellationRequested || ws.State != WebSocketState.Open) { }
                 }, pingCts.Token);
 
                 var buf = new byte[1 << 16];
