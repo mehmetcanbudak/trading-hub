@@ -15,7 +15,13 @@ public sealed class FeedReviewDerivativesTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+        // The liquidation recorder finishes its last write after DerivativesData is disposed; on Windows its file stays
+        // open for a moment, so the cleanup retries instead of failing a test that already passed.
+        for (int attempt = 0; Directory.Exists(_root); attempt++)
+        {
+            try { Directory.Delete(_root, recursive: true); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && attempt < 50) { Thread.Sleep(100); }
+        }
     }
 
     private static long Ms(DateTime t) => new DateTimeOffset(t).ToUnixTimeMilliseconds();
