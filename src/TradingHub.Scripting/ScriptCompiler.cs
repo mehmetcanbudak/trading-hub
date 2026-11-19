@@ -64,11 +64,34 @@ public sealed class ScriptCompiler
         global using CrossPens = TradingHub.Common.UniversalPens;
         """;
 
-    /// <summary>Adapta el código escrito para ATAS a los namespaces de Trading Hub.</summary>
+    // One alternation in map order, so a more specific namespace wins at the same position, as in sequential replacement.
+    private static readonly Regex NamespacePattern = new(string.Join("|", NamespaceMap.Select(entry => entry.Pattern.ToString())));
+
+    /// <summary>Adapta el código escrito para ATAS a los namespaces de Trading Hub. Text inside string and character
+    /// literals and comments is the user's own and is never rewritten.</summary>
     public static string Preprocess(string source)
     {
-        foreach (var (p, r) in NamespaceMap) source = p.Replace(source, r);
-        return source;
+        if (!NamespacePattern.IsMatch(source)) return source;
+        var protectedSpans = new List<Microsoft.CodeAnalysis.Text.TextSpan>();
+        var root = CSharpSyntaxTree.ParseText(source).GetRoot();
+        foreach (var token in root.DescendantTokens())
+        {
+            if (token.Kind() is SyntaxKind.StringLiteralToken or SyntaxKind.CharacterLiteralToken or SyntaxKind.InterpolatedStringTextToken
+                or SyntaxKind.SingleLineRawStringLiteralToken or SyntaxKind.MultiLineRawStringLiteralToken
+                or SyntaxKind.Utf8StringLiteralToken or SyntaxKind.Utf8SingleLineRawStringLiteralToken or SyntaxKind.Utf8MultiLineRawStringLiteralToken)
+                protectedSpans.Add(token.Span);
+            foreach (var trivia in token.GetAllTrivia())
+                if (trivia.Kind() is SyntaxKind.SingleLineCommentTrivia or SyntaxKind.MultiLineCommentTrivia or SyntaxKind.DisabledTextTrivia
+                    or SyntaxKind.SingleLineDocumentationCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia)
+                    protectedSpans.Add(trivia.Span);
+        }
+        return NamespacePattern.Replace(source, match =>
+        {
+            if (protectedSpans.Any(span => span.Contains(match.Index))) return match.Value;
+            foreach (var (pattern, replacement) in NamespaceMap)
+                if (pattern.Match(match.Value) is { Success: true } hit && hit.Length == match.Length) return replacement;
+            return match.Value;
+        });
     }
 
     private static List<MetadataReference> BuildReferences()
