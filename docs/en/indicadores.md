@@ -139,7 +139,7 @@ onBar {
 | `onStart { }` / `onBar { }` | Run before a full recalculation / for every bar. The forming bar is recalculated on updates and starts each update fresh: a value this update does not assign is `na`, exactly as after a full recalculation. |
 | `var x = …` | Variable; also a series, so `x[1]` is its previous-bar value. |
 | `x[n]` | Value of any series `n` bars ago (missing before the first bar). `n` must be 0 or more; a negative or `na` offset reads `na`. |
-| `if (…) { } else if (…) { } else { }`, `and`, `or`, `not`, `? :` | Conditions. |
+| `if (…) { } else if (…) { } else { }`, `and`, `or`, `not`, `? :` | Conditions; the whole chain may also be written on one line, as in `if (a) { x = 1 } else { x = 2 }`. |
 | `alert("…")` | In-app alert, once per bar for each `alert` statement, only on the last bar; recalculating does not repeat it. Numbers joined into the text use invariant formatting (`1234.5`). |
 
 Functions: `ema sma rma wma stdev highest lowest sum change cum crossover crossunder` and `abs min max sqrt log log10 exp pow round floor ceil sign nz na sin cos tan`; constants `bar_index`, `na`, `PI`. The wrun call form is accepted too: `param("n", 20, { min: 1 })`, `input("c", ohlcv.close)`, `output("x", line, overlay, { color: "#fff" })`, `function onBar() { … }` and `out_x(value)`.
