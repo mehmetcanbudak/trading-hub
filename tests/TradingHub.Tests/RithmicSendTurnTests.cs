@@ -378,12 +378,12 @@ public sealed class RithmicSendTurnTests : IDisposable
     }
 
     /// <summary>
-    /// The documented residual: a buy whose admission stays unresolved past the close's reducing bound. The close is
-    /// sent anyway after one bound (unsettled note) and completes; the buy is then admitted against the fresh flat
-    /// position and opens exposure after the close. Exactly what operar.md tells the user to check for.
+    /// A buy whose admission stays unresolved past the close's reducing bound. The close is sent anyway after one bound
+    /// (unsettled note) and completes; the buy, which was waiting when the close went ahead of it, is then refused instead
+    /// of opening exposure after the user closed to be flat.
     /// </summary>
     [Fact]
-    public async Task A_buy_admission_unresolved_past_the_bound_is_admitted_after_the_bound_close()
+    public async Task A_buy_admission_unresolved_past_the_bound_is_refused_after_the_bound_close()
     {
         using var server = new FakeRithmicServer { MarketPrice = 5000 };
         server.SeedPosition(true, 2, 5000);
@@ -412,11 +412,41 @@ public sealed class RithmicSendTurnTests : IDisposable
         Assert.Equal(0, server.Position);
         await Until(() => !session.HasUnresolvedPositionClose, () => "close not completed");
 
-        // Only then does the buy's admission proceed, against the fresh flat position.
+        // Only then does the buy's admission proceed; with no reservation left it would have opened a position.
+        Assert.Equal(1, session.ClosesSentAheadOfEarlierSends("ACC1"));
         contractGate.TrySetResult();
-        await Until(() => buy.State == OrderStates.Done && buy.Status == OrderStatus.Filled, () => buyBroker.LastError ?? "buy not admitted");
-        Assert.Equal(1, server.Position);
+        await Until(() => buy.State == OrderStates.Failed && buy.Status == OrderStatus.Rejected, () => buyBroker.LastError ?? "buy not refused");
+        Assert.Contains("A close was sent while this order was still waiting", buyBroker.LastError, StringComparison.Ordinal);
+        Assert.Equal(0, server.Position);
+        Assert.Single(server.Tags); // only the close's tag; the buy never reached the venue
         await session.SendsIdle.WaitAsync(Deadline);
+    }
+
+    /// <summary>An entry issued after a close that went ahead of earlier sends is a new request, not refused by it.</summary>
+    [Fact]
+    public async Task A_buy_registered_after_a_close_went_ahead_is_not_refused()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        server.SeedPosition(true, 2, 5000);
+        using var session = new RithmicTradingSession(Settings(server));
+        session.SendTurnWait = TimeSpan.FromMilliseconds(500);
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        var contractGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1", _ => Task.FromResult(("ESZ6", "CME")));
+        using var slowBroker = _orders.Rithmic(data, session, "ACC1", "delayed",
+            async ct => { await contractGate.Task.WaitAsync(ct); return ("ESZ6", "CME"); });
+        session.Start();
+        await Until(() => broker.OrdersReady && broker.PositionReady);
+        var slow = OrderActions.Manual(slowBroker, OrderTypes.Market, OrderDirections.Buy, 1m);
+        await Until(() => slow.State == OrderStates.Active && slow.ExchangeOrderId.Length == 0);
+        Assert.Equal(NativeSendTurns.UnsettledMessage, await session.ClosePositionAsync(broker.CapturePositionClose(2m)).WaitAsync(Deadline));
+        await Until(() => server.Position == 0 && !session.HasUnresolvedPositionClose, () => "close not completed");
+        Assert.Equal(1, session.ClosesSentAheadOfEarlierSends("ACC1"));
+
+        contractGate.TrySetResult(); // lets the earlier slow buy finish (refused) so the account's turns are free
+        await Until(() => slow.State == OrderStates.Failed, () => slowBroker.LastError ?? "slow buy not refused");
+        var fresh = OrderActions.Manual(broker, OrderTypes.Market, OrderDirections.Buy, 1m);
+        await Until(() => fresh.Status == OrderStatus.Filled && server.Position == 1, () => broker.LastError ?? "later buy not sent");
     }
 
     /// <summary>

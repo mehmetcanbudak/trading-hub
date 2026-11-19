@@ -346,9 +346,11 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
         string tag = intent.ClientOrderId;
         bool boundedSend = request.ReduceOnly || request.Protective;
         NativeSendTurns.Turn sendTurn;
+        int closesAhead;
         lock (_gate)
         {
             if (_byTag.TryGetValue(tag, out var existing)) return existing;
+            closesAhead = _session.ClosesSentAheadOfEarlierSends(_account);
             _byTag[tag] = order;
             _tracked = _byTag.Values.ToArray();
             _tagOf[order] = tag;
@@ -386,6 +388,9 @@ public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITra
                         RefreshAdmissionPosition(sym, exch);
                         var accountError = VerifyAccountEvidence();
                         if (accountError != null) throw new InvalidOperationException(accountError);
+                        // A close that gave up waiting for this order's turn went ahead of it: the user wanted to be flat.
+                        if (!boundedSend && _session.ClosesSentAheadOfEarlierSends(_account) != closesAhead)
+                            throw new RithmicTradingSession.RithmicRejectedException("A close was sent while this order was still waiting for admission, so the order was not sent.");
                         var reservationError = _session.CheckNativeAdmission(OrderContext, intent, _account, sym, exch, q);
                         if (reservationError != null) throw new InvalidOperationException(reservationError);
                         var dispatchError = StartOwnedDispatch(intent, sym, exch, q, px);

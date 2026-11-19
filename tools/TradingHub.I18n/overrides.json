@@ -24691,6 +24691,10 @@
     "es": "No modificada: Tradovate no ha informado de esta orden en 30 segundos, así que la modificación no se envió. Revisa la orden en Tradovate.",
     "zh-CN": "未修改：Tradovate 在 30 秒内未报告此订单，因此未发送修改请求。请在 Tradovate 中检查该订单。"
   },
+  "A close was sent while this order was still waiting for admission, so the order was not sent.": {
+    "es": "Se envió un cierre mientras esta orden seguía esperando su admisión, así que la orden no se envió.",
+    "zh-CN": "在此订单仍等待准入时已发送平仓请求，因此该订单未发送。"
+  },
   "Candle history before {0} UTC is not available from this provider; earlier months were not loaded unless already cached.": {
     "es": "El historial de velas anterior a {0} UTC no está disponible en este proveedor; los meses anteriores no se cargaron salvo que ya estuvieran en caché.",
     "zh-CN": "此数据提供方不提供 {0} UTC 之前的 K 线历史；除非已有缓存，否则更早的月份未加载。"

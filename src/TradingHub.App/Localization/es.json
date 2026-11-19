@@ -521,6 +521,7 @@
   "A chart keeps at most {0} alerts.": "Un gráfico guarda como máximo {0} alertas.",
   "A client identity already belongs to another intent.": "Un identificador de cliente ya pertenece a otra intención.",
   "A close ownership record disappeared during recovery.": "Un registro de titularidad del cierre desapareció durante la recuperación.",
+  "A close was sent while this order was still waiting for admission, so the order was not sent.": "Se envió un cierre mientras esta orden seguía esperando su admisión, así que la orden no se envió.",
   "A closing limit order is already working in the account ({0}): no additional take profit will be placed (review it in Chart Trader)": "Ya hay una orden límite de cierre activa en la cuenta ({0}): no se colocará otro objetivo de ganancia (revísala en Chart Trader)",
   "A column per day with dealer gamma (USD per 1 %; green positive, red negative) and a card placing the latest against the previous year: whether it is unusual.": "Una columna por día con la gamma de creadores de mercado (USD por 1 %; verde positiva, roja negativa) y un cuadro que compara el último valor con el año anterior: si es inusual.",
   "A command window opens": "Se abre una ventana de comandos",
