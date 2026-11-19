@@ -55,7 +55,6 @@ Still open:
 | P2 | Parked alerts are not updated when an indicator is removed while the chart shows another instrument. |
 | P2 | Parked/unreadable-drawings status messages can be overwritten by the "ready" message when history finishes loading. |
 | P2 | Workspace save cache keeps the full text of every saved drawings file for the session (bounded; a hash would do). |
-| P2 | `BybitFeed` pings from a fire-and-forget task; when the socket closes mid-send the fault is unobserved and lands in `crash.log` (harmless, seen once on `52cf2b3`). Observe it and log it quietly. |
 
 ### Studies
 | P | Item |
