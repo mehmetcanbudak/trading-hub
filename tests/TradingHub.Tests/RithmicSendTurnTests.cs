@@ -84,6 +84,26 @@ public sealed class RithmicSendTurnTests : IDisposable
         Assert.Equal(1, Requests(server, "312"));
     }
 
+    /// <summary>The account reports its requests waiting for an earlier reply, so the order status line can show them.</summary>
+    [Fact]
+    public async Task The_account_reports_the_requests_waiting_for_an_earlier_reply()
+    {
+        using var server = new FakeRithmicServer { MarketPrice = 5000 };
+        using var session = new RithmicTradingSession(Settings(server));
+        using var data = new InstrumentData(Es, new SimulatedFeed());
+        using var broker = _orders.Rithmic(data, session, "ACC1", "ACC1", _ => Task.FromResult(("ESZ6", "CME")));
+        INativeSendQueue queue = broker;
+        Assert.Equal(0, queue.QueuedRequests);
+
+        var turns = session.SendTurns("ACC1");
+        var first = turns.Take();
+        var second = turns.Take();
+        try { Assert.Equal(1, queue.QueuedRequests); }
+        finally { second.Release(); first.Release(); }
+        await turns.WhenIdle.WaitAsync(Deadline);
+        Assert.Equal(0, queue.QueuedRequests);
+    }
+
     /// <summary>
     /// A close behind an unanswered earlier protective amendment is sent after one reducing bound, not two: its
     /// dispatch gives up the bound once, then cancels the working protection and sends without waiting again. Proven by

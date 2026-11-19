@@ -5379,6 +5379,7 @@
   "Normal volatility": "Volatilidad normal",
   "Not all of them started: ": "No arrancaron todas: ",
   "Not all of them started: {0}": "No arrancaron todas: {0}",
+  "Not amended: Tradovate has not reported this order for 30 seconds, so the amendment was not sent. Check the order at Tradovate.": "No modificada: Tradovate no ha informado de esta orden en 30 segundos, así que la modificación no se envió. Revisa la orden en Tradovate.",
   "Not an active target.": "No es un objetivo activo.",
   "Not an independent completed-trade estimate": "No es una estimación basada en operaciones completas independientes",
   "Not available": "No disponible",

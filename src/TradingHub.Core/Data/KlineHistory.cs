@@ -99,7 +99,15 @@ public static class KlineHistory
                         merged.AddRange(normalized);
                         var coverageFrom = cache != null && cache.From < fetchFrom ? cache.From : fetchFrom;
                         var coverageTo = cache != null && cache.To > fetchTo ? cache.To : fetchTo;
-                        refreshed = new MonthCache(coverageFrom, coverageTo, DateTime.UtcNow, Normalize(merged, month, end, minutes, sourceIdentity));
+                        // A refresh never shrinks history: cached bars the provider no longer serves (a short-window venue) stay.
+                        var served = normalized.Select(k => k.OpenTimeMs).ToHashSet();
+                        var retained = cache?.Bars.Where(k => k.OpenTimeMs >= ToMs(fetchFrom) && k.OpenTimeMs < ToMs(fetchTo) && !served.Contains(k.OpenTimeMs)).ToList() ?? new List<Kline>();
+                        List<Kline> bars;
+                        try { bars = Normalize(merged.Concat(retained), month, end, minutes, sourceIdentity); }
+                        // shortcut: a retained bar whose window overlaps a fresh one (a venue that re-anchored its candles) is
+                        // dropped with all retained bars; upgrade to per-bar conflict resolution if venues re-anchor often.
+                        catch (InvalidDataException) when (retained.Count > 0) { bars = Normalize(merged, month, end, minutes, sourceIdentity); }
+                        refreshed = new MonthCache(coverageFrom, coverageTo, DateTime.UtcNow, bars);
                     }
                     catch (Exception error) when (error is not OperationCanceledException && cache != null)
                     {

@@ -4,7 +4,7 @@
 
 The single list of everything still open in the Trading Hub project: the canonical C# app (`memoshi`), its validation, release, upstream maintenance and the Rust/Swift ports. Verified results live in the [validation dashboard](./TRANSLATION_STATUS.md); checks that need accounts, networks or hardware are detailed in the [external acceptance checklist](./external-acceptance.md). This page says what is left, why, and what would close it.
 
-**Snapshot (2026-11-18):** `memoshi` is at `4f0e740`. Draft [PR #17](https://github.com/mehmetcanbudak/trading-hub/pull/17) holds the deep review of the past week (about 150 findings fixed; 2,607 tests and all 60 functional scenes pass locally; Windows x64 and ARM64 CI green; macOS CI green one commit earlier, later macOS jobs cancelled by runner capacity). The installed Mac app is still `a03e15e`. Upstream (`ralphtradesz/trading-hub`) has **0 pending commits** since the reviewed `1d5a774`. Both ports are 281 commits behind `memoshi` and paused.
+**Snapshot (2026-11-19):** `memoshi` is at `52cf2b3`: [PR #17](https://github.com/mehmetcanbudak/trading-hub/pull/17), the deep review of the past week (about 150 findings fixed), is merged with all three platforms green and installed on this Mac. Upstream (`ralphtradesz/trading-hub`) has **0 pending commits** since the reviewed `1d5a774`. Both ports are 281 commits behind `memoshi` and paused.
 
 Priorities: **P0** blocks safe use of the current code, **P1** should come next, **P2** is improvement or deferred work.
 
@@ -13,9 +13,9 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 | # | Decision | Context | Options |
 |---|---|---|---|
 | D1 | Trading date of evening sessions | Since `3bbedbb` a session starting at or after 12:00 (CME Sunday 18:00) belongs to the next trading date. Strategies that filter by weekday see Monday instead of Sunday; daily-loss-limit days are unchanged. | **Decided 2026-11-19: keep.** Already documented in [Strategies](./estrategias.md) and pinned by `SessionTradingDateTests`. |
-| D2 | Explicit strategy reprice of a triggered stop | A strategy's own reprice may still cancel a triggered stop's executing MARKET child and send a replacement (by design); only the automatic bracket path is now blocked. | **Decided 2026-11-19: refuse every amendment of an executing child** (order-path change; separate PR after #17). |
+| D2 | Explicit strategy reprice of a triggered stop | A strategy's own reprice may still cancel a triggered stop's executing MARKET child and send a replacement (by design); only the automatic bracket path is now blocked. | **Decided 2026-11-19: refuse every amendment of an executing child** (implemented on `fix/d2-d4-order-path`: Binance refuses a price update of a MARKET order). |
 | D3 | Binance Reverse confirmation | Reverse is refused when Binance's position `updateTime` is older than the earlier orders' last update, even by 1 ms. | **Decided 2026-11-19: keep strict.** |
-| D4 | Tradovate unreported amendment | An entry amendment of an order the venue never reports holds the account's send turn until it is cancelled or the session closes. | **Decided 2026-11-19: give it a bound** (release the send turn and reconcile from venue state; separate PR after #17). |
+| D4 | Tradovate unreported amendment | An entry amendment of an order the venue never reports holds the account's send turn until it is cancelled or the session closes. | **Decided 2026-11-19: give it a bound** (implemented on `fix/d2-d4-order-path`: 30 s, then the unsent amendment is refused and its turn released). |
 | D5 | Bybit saves on Windows | During a persistent sharing conflict each save, including the one before a reduce-only order, waits up to about 1 s. | **Decided 2026-11-19: keep.** |
 | D6 | Lab runner P&L freshness | Open P&L-only runner saves are written at most once a minute, so the headless lab's estimate can be a minute old. | **Decided 2026-11-19: keep.** |
 | D7 | Pull requests | #16 only edits the dashboard header that #17 supersedes. | **Decided:** close #16; take #17 out of draft and merge once all three platforms are green on one tree. |
@@ -25,19 +25,18 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 
 ## 2. Ship the current work (P0)
 
-0. The ARM64 run on `f027aef` failed `A_protection_manager_created_after_the_restarted_account_settled_adopts_its_working_oco_at_once`: the Tradovate test fake pushed to an aborted user WebSocket (fixture race, not product code). `FakeTradovate.Push` now retries on the current socket; confirm on the next CI run.
-1. Re-run the cancelled macOS CI job of PR #17 until a runner is acquired; all three platforms must be green on the same tree.
-2. Review and merge #17 into `memoshi` (D7); delete `fix/native-drain-deadline` and `docs/pr15-receipt`.
-3. Update the dashboard header (`**Canonical branch:**` line) with the merge commit and its CI run; it still names `e4f526c`/`a03e15e`.
-4. Install on this Mac after D8, with a byte-verified backup of the current bundle and non-history app-support files, then verify the saved workspace opens and record the receipt.
-5. After installation, watch the first real sessions for the new behaviour that touches saved data: hourly candle caches written by older builds are detected and refetched (expect some extra downloads); chart alerts are now parked instead of deleted on symbol switches.
+Done 2026-11-19: all three platforms green on `bf8b4ff` (run 44409663151; the ARM64 Tradovate failure was a test-fixture race, fixed), #17 merged as `52cf2b3`, #16 closed, both branches deleted, `52cf2b3` installed after a byte-verified backup (receipt in the [dashboard](./TRANSLATION_STATUS.md)).
+
+Still open:
+1. Watch the first real sessions for the new behaviour that touches saved data: hourly candle caches written by older builds are detected and refetched (expect some extra downloads); chart alerts are now parked instead of deleted on symbol switches.
+2. Compare CPU and memory with the previous build: the installed app showed about one busy core (UI thread) and a stable ~7 GB working set with a live footprint chart on 757,020 bars. There is no baseline, so decide whether it is normal or a regression (P1).
+3. D2 (refuse every amendment of an executing child) and D4 (bound the Tradovate unreported-amendment send turn): order-path changes on their own branch and PR, each with tests (P1).
 
 ## 3. C# app — engineering follow-ups
 
 ### Order path and durability
 | P | Item |
 |---|---|
-| P1 | Surface `INativeSendQueue.QueuedRequests` ("waiting for an earlier reply (N queued)") for Rithmic as for Tradovate/Binance. |
 | P1 | Rithmic residual: a new-exposure order whose admission stays unresolved past the 10 s bound lets the reducing close send, and can be admitted after the close completed (same bounded residual as Tradovate/Binance; documented in [Trading](./operar.md)). Decide whether to refuse such late admissions. |
 | P2 | Simulated/replay accounts and the live strategy runner still write durable state on the UI thread (~70–90 ms per order); moving it off needs a strategy-execution redesign (deliberate earlier decision). |
 | P2 | `Partial_native_close…` flake: proven durable-write latency under an fsync storm; only a longer fixture bound would cure it (needs approval). |
@@ -48,7 +47,6 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 |---|---|
 | P1 | IB now requests 60-minute bars (`1 hour`); verify pacing and session-aligned hours against a real TWS/Gateway session. |
 | P1 | Hyperliquid months entirely outside its 5,000-candle window return no bars and are not flagged; needs a cache-layer "unavailable" marker. |
-| P1 | `KlineHistory` refreshes closed months by replacement, so candles that aged out of a short-window venue can be lost on refresh; merge instead of replace. |
 | P2 | Legacy caches holding only sparse finer bars cannot be told apart from real hourly bars (rare; refetch on demand). |
 
 ### Charts, alerts and UI
@@ -58,6 +56,7 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 | P2 | Parked alerts are not updated when an indicator is removed while the chart shows another instrument. |
 | P2 | Parked/unreadable-drawings status messages can be overwritten by the "ready" message when history finishes loading. |
 | P2 | Workspace save cache keeps the full text of every saved drawings file for the session (bounded; a hash would do). |
+| P2 | `BybitFeed` pings from a fire-and-forget task; when the socket closes mid-send the fault is unobserved and lands in `crash.log` (harmless, seen once on `52cf2b3`). Observe it and log it quietly. |
 
 ### Studies
 | P | Item |
@@ -70,7 +69,6 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 ### KVS scripting
 | P | Item |
 |---|---|
-| P1 | The ATAS namespace `Preprocess` still text-replaces across generated KVS code, including user strings; scope it to identifiers. |
 | P2 | One-line `if (a) { x = 1 } else { x = 2 }` is rejected; only the multi-line form works (undocumented until fixed). |
 | P2 | The Windows directory watcher added for edited copies has not run on Windows hands-on. |
 
@@ -84,7 +82,7 @@ Priorities: **P0** blocks safe use of the current code, **P1** should come next,
 | P | Item |
 |---|---|
 | P1 | macOS hosted runners are often unavailable (zero-step cancellations). Consider a self-hosted Apple Silicon runner or a scheduled re-run policy. |
-| P1 | Watch `LocalApiSettingsTests.A_port_change_restarts_on_the_new_port_and_the_old_port_refuses`: failed once under full-suite load locally, passes alone; and the Windows `vstest` testhost-connect timeout seen once on x64 (runner slowness). |
+| P1 | Watch `LocalApiSettingsTests.A_port_change_restarts_on_the_new_port_and_the_old_port_refuses`: failed once under full-suite load locally, passes alone; and the Windows `vstest` testhost-connect timeout seen once on x64 (runner slowness). A third, on the `52cf2b3` merge run: `FeedReviewDerivativesTests` failed in its temp-folder cleanup on Windows x64 because the liquidation recorder still held a CSV open; the cleanup now retries (test-only). |
 | P1 | The macOS safety-scene Tradovate fixture failure now prints diagnostics and the contract-lookup retry is fixed; confirm it stays green. |
 | P2 | Liquidation-stream tests poll a condition with a 10 s deadline because `DerivativesData` exposes no event to await. |
 | P2 | Disk headroom on this Mac swings between 3 and 21 GB (shared with other projects); one full-suite run hit `ENOSPC`. Keep evidence on the external volume and consider `TMPDIR` there for long runs. |

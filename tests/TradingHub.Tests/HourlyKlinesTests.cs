@@ -223,6 +223,36 @@ public sealed class HourlyKlinesTests : IDisposable
         finally { KlineHistory.CacheRoot = previousRoot; }
     }
 
+    [Fact]
+    public async Task ARefreshOfAClosedMonthKeepsCachedBarsTheProviderNoLongerServes()
+    {
+        string? previousRoot = KlineHistory.CacheRoot;
+        KlineHistory.CacheRoot = Path.Combine(_root, "candles");
+        try
+        {
+            var month = ClosedMonth();
+            var hourly = new HourlySource((from, to) => Bars(from, to, TimeSpan.FromHours(1)));
+            await KlineHistory.LoadAsync(hourly, _instrument, month, month.AddDays(2), 60, 0, null, CancellationToken.None);
+            string path = Assert.Single(CacheFiles());
+            // A stale cache of the first two days (volume 42), as an earlier session stored them.
+            var stored = Enumerable.Range(0, 48).Select(i =>
+                (month.AddHours(i), new TradeProvenance(DataQuality.Synthetic, 3600, _instrument.Key, 0, 0, true, 0))).ToList();
+            RewriteCache(path, Payload(stored, volume: 42), DateTime.UtcNow.AddDays(-3));
+            // The provider has since aged out the first day: it serves only later bars.
+            var aged = new HourlySource((from, to) => Bars(from < month.AddDays(1) ? month.AddDays(1) : from, to, TimeSpan.FromHours(1)));
+
+            var loaded = await KlineHistory.LoadAsync(aged, _instrument, month, month.AddDays(2), 60, 0, null, CancellationToken.None);
+
+            Assert.Single(aged.Requests);
+            Assert.Equal(48, loaded.Count);
+            Assert.All(loaded.Take(24), bar => Assert.Equal(42m, bar.Volume)); // kept from the cache
+            Assert.All(loaded.Skip(24), bar => Assert.Equal(1m, bar.Volume));  // refreshed by the provider
+            aged.Unavailable = true;
+            Assert.Equal(loaded, await KlineHistory.LoadAsync(aged, _instrument, month, month.AddDays(2), 60, 0, null, CancellationToken.None));
+        }
+        finally { KlineHistory.CacheRoot = previousRoot; }
+    }
+
     private static IEnumerable<string> CacheFiles() => Directory.Exists(KlineHistory.CacheRoot)
         ? Directory.EnumerateFiles(KlineHistory.CacheRoot, "*.bin", SearchOption.AllDirectories).ToArray()
         : Array.Empty<string>();
@@ -270,7 +300,7 @@ public sealed class HourlyKlinesTests : IDisposable
     }
 
     /// <summary>Replaces a monthly cache payload, keeping its header and re-authenticating it as the cache writer does.</summary>
-    private static void RewriteCache(string path, byte[] payload)
+    private static void RewriteCache(string path, byte[] payload, DateTime? updatedAt = null)
     {
         int magic, minutes;
         decimal tick;
@@ -280,6 +310,7 @@ public sealed class HourlyKlinesTests : IDisposable
             magic = reader.ReadInt32(); tick = reader.ReadDecimal(); minutes = reader.ReadInt32();
             from = reader.ReadInt64(); to = reader.ReadInt64(); updated = reader.ReadInt64();
         }
+        if (updatedAt is { } stamp) updated = stamp.Ticks;
         var header = new byte[48];
         BinaryPrimitives.WriteInt32LittleEndian(header, magic);
         int[] bits = decimal.GetBits(tick);

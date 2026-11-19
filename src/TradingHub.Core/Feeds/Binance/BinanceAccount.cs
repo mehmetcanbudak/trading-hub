@@ -2546,8 +2546,10 @@ public sealed partial class BinanceBroker : ITradingAccount, IThreadSafeOrderEnt
         // A conditional order that triggered is followed through the order it placed; an own stop's is executing the
         // exit. An amendment (also a price update queued while it was pending) targeted the conditional order: like a
         // cancel that arrives past the trigger, it must not cancel that order. A foreign stop-limit's resting LIMIT, shown
-        // as a limit, stays modifiable.
+        // as a limit, stays modifiable. A price update of a MARKET order can only mean a triggered stop's executing child
+        // (a MARKET order has no price): replacing it would cancel the order that is closing the position.
         if ((tracked.ConditionalParent != null && tracked.AlgoId == 0 && order.Type == OrderTypes.Stop) ||
+            (intent.IsPriceOnlyReplacement && order.Type == OrderTypes.Market) ||
             intent.Request.Type != order.Type)
         {
             LastError = StopAlreadyTriggered;

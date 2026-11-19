@@ -9,9 +9,12 @@ namespace TradingHub.Feeds.Rithmic;
 /// Una cuenta de Rithmic operando un instrumento (el contrato del mes: ES → ESZ6). El Chart Trader, el DOM,
 /// el gráfico y el stop/objetivo operan contra esta cuenta igual que con la simulada o la de Binance.
 /// </summary>
-public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, ICoordinatedPositionClose, IDisposable
+public sealed class RithmicBroker : ITradingAccount, IThreadSafeOrderEntry, ITrackedOrderReplacement, ICoordinatedPositionClose, INativeSendQueue, IDisposable
 {
     private readonly InstrumentData? _data;
+
+    /// <summary>Requests issued on this native account (any contract) waiting for an earlier reply.</summary>
+    public int QueuedRequests => _session.SendTurns(_account).Queued;
     private readonly Instrument _instrument;
     private readonly RithmicTradingSession _session;
     private readonly Func<CancellationToken, Task<(string Symbol, string Exchange)>> _contract;

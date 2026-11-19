@@ -3066,7 +3066,7 @@ public sealed class BinanceNativeExecutionFactsTests
     }
 
     [Fact]
-    public async Task Runner_public_reprice_market_successor_survives_partial_execution()
+    public async Task Runner_public_reprice_of_a_triggered_stops_market_child_is_refused()
     {
         await WithRecoveryRoot(async root =>
         {
@@ -3108,56 +3108,29 @@ public sealed class BinanceNativeExecutionFactsTests
             var originalWorking = Assert.IsType<NativeWorkingOrder>(context.Find(originalIntent)!.WorkingOrder);
             Assert.Same(strategyStop, Assert.Single(runner.ActiveOrders, order => order.Type == StrategyOrderType.Stop));
 
-            // Exercise the strategy host's public edit path, not a direct broker replacement.
+            // The strategy host's public edit path must not cancel or replace the order that is closing the position.
             runner.Modify(strategyStop, 59000m);
 
-            await ConditionalState(() => stop.ExchangeOrderId.Length > 0 &&
-                stop.ExchangeOrderId != childId.ToString(CultureInfo.InvariantCulture) &&
-                !broker.IsReplacementPending(stop), broker, fake);
-            long successorId = long.Parse(stop.ExchangeOrderId, CultureInfo.InvariantCulture);
-            var successorNative = new NativeOrderIdentity("binance:order", "BTCUSDT:" + successorId.ToString(CultureInfo.InvariantCulture));
-            string successorIntent = Assert.IsType<string>(stop.IntentId);
-            Assert.Equal(("MARKET", "SELL", 2m, 0m, true),
-                (fake.Order(successorId).Type, fake.Order(successorId).Side, fake.Order(successorId).Qty,
-                    fake.Order(successorId).Price, fake.Order(successorId).ReduceOnly));
-            Assert.Equal("CANCELED", fake.Order(childId).Status);
-            var successor = Assert.IsType<OwnedOrderIntent>(context.Find(successorIntent));
-            Assert.Equal((originalIntent, ownerId, logicalId, OrderTypes.Market),
-                (successor.PredecessorId, successor.Owner.Id, successor.LogicalOrderId, successor.Request.Type));
-            Assert.Equal(originalWorking, successor.WorkingOrder);
-            Assert.NotEqual(originalWorking.Child, successorNative);
-
-            fake.Fill(successorId, 1m);
-            await ConditionalState(() => runner.OwnPosition == 1m && broker.Position.Volume == 1m &&
-                broker.ActiveOrders.Any(order => order.Type == OrderTypes.Limit &&
-                    order.Unfilled == 1m && !broker.IsReplacementPending(order)), broker, fake);
             await ConditionalPolls(fake, broker);
-            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m),
-                (fake.Order(successorId).Type, fake.Order(successorId).Status, fake.Order(successorId).Executed));
-            Assert.Same(strategyStop, Assert.Single(runner.ActiveOrders, order => order.Type == StrategyOrderType.Stop));
             Assert.Same(stop, strategyStop.Live);
-            Assert.Equal((OrderTypes.Market, successorNative, successorIntent, ownerId, logicalId, 1m),
-                (stop.Type, stop.NativeIdentity, stop.IntentId, stop.OwnerId, stop.LogicalOrderId, stop.Unfilled));
+            Assert.Equal((OrderTypes.Market, childId.ToString(CultureInfo.InvariantCulture), 2m),
+                (stop.Type, stop.ExchangeOrderId, stop.Unfilled));
             Assert.False(stop.Canceled);
+            Assert.Equal(("MARKET", "PARTIALLY_FILLED", 1m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
+            Assert.DoesNotContain(fake.Placed, order => order.Type == "MARKET"); // no successor was sent
             Assert.Single(fake.PlacedAlgo);
-            Assert.Single(fake.Placed, order => order.Type == "MARKET");
-            Assert.All(broker.ActiveOrders, order =>
-            {
-                Assert.True(order.ReduceOnly);
-                Assert.Equal(1m, order.Unfilled);
-            });
-            Assert.Equal(1m, strategy.Position);
-            fake.Fill(successorId, 1m);
+            Assert.Empty(fake.Refused);
+
+            fake.Fill(childId, 2m);
             await ConditionalState(() => runner.OwnPosition == 0m && broker.Position.Volume == 0m &&
                 !broker.ActiveOrders.Any(), broker, fake);
             await ConditionalPolls(fake, broker);
-            Assert.Equal(("MARKET", "FILLED", 2m),
-                (fake.Order(successorId).Type, fake.Order(successorId).Status, fake.Order(successorId).Executed));
+            Assert.Equal(("MARKET", "FILLED", 3m),
+                (fake.Order(childId).Type, fake.Order(childId).Status, fake.Order(childId).Executed));
             Assert.Equal(0m, strategy.Position);
             Assert.Single(fake.PlacedAlgo);
             Assert.Empty(broker.ActiveOrders);
-            Assert.Null(broker.LastError);
-            Assert.Empty(fake.Refused);
         });
     }
 

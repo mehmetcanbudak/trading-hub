@@ -696,6 +696,11 @@ public sealed class TradovateTradingSession : IDisposable
     /// <summary>How long a reducing request waits for earlier ones (tests shorten it before the first request).</summary>
     internal TimeSpan SendTurnWait { get; set; } = NativeSendTurns.ReducingWait;
 
+    /// <summary>How long an amendment waits for the venue to report the order it amends before it is refused unsent (tests
+    /// shorten it). An entry amendment holds its send turn meanwhile, so without a bound one order the venue never
+    /// reports would hold the account's queue until it was cancelled.</summary>
+    internal TimeSpan UnreportedAmendmentWait { get; set; } = TimeSpan.FromSeconds(30);
+
     /// <summary>Completes once every order request already issued on any account of this session was answered, refused
     /// or failed. Quit awaits it before connections close.</summary>
     public Task SendsIdle
@@ -2008,7 +2013,8 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
         var turn = _session.SendTurns(_account.Id).Take(); // issue order
         _ = Task.Run(async () =>
         {
-            bool submissionStarted = false;
+            bool submissionStarted = false, gaveUp = false;
+            long waitStarted = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 // Only a reducing amendment waits at most the reducing bound; an entry's waits for earlier replies.
@@ -2054,6 +2060,12 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                         // most the reducing bound, lets later requests go meanwhile; an entry's keeps its turn, so nothing
                         // issued after it reaches the venue first. A cancel (Close position cancels too) ends this wait above.
                         if (Reducing(intent)) turn.Release();
+                        if (System.Diagnostics.Stopwatch.GetElapsedTime(waitStarted) >= _session.UnreportedAmendmentWait)
+                        {
+                            // Nothing was sent, so refusing is definite; the venue state is what the user must check.
+                            gaveUp = true;
+                            throw new TimeoutException("Not amended: Tradovate has not reported this order for 30 seconds, so the amendment was not sent. Check the order at Tradovate.");
+                        }
                         await Task.Delay(100, _cts.Token).ConfigureAwait(false);
                     }
                 }
@@ -2080,6 +2092,7 @@ public sealed class TradovateBroker : ITradingAccount, IThreadSafeOrderEntry, IT
                             : null;
                         if (native != null) Apply(native, order);
                         _replacements.Remove(order);
+                        if (gaveUp) RejectQueuedReprice(order, ex.Message); // else it would start another unreported wait
                         if (!_queuedReprices.ContainsKey(order)) _session.ResolveReplacement(order);
                         RecordRejected(intent, ex.Message);
                     }

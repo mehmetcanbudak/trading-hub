@@ -24686,5 +24686,9 @@
   "{0}; numeric series causal; {1}; unavailable (zero accumulated weight)": {
     "es": "{0}; series numéricas causales; {1}; no disponible (peso acumulado cero)",
     "zh-CN": "{0}; 数值序列保持因果性; {1}；不可用（累计权重为零）"
+  },
+  "Not amended: Tradovate has not reported this order for 30 seconds, so the amendment was not sent. Check the order at Tradovate.": {
+    "es": "No modificada: Tradovate no ha informado de esta orden en 30 segundos, así que la modificación no se envió. Revisa la orden en Tradovate.",
+    "zh-CN": "未修改：Tradovate 在 30 秒内未报告此订单，因此未发送修改请求。请在 Tradovate 中检查该订单。"
   }
 }
