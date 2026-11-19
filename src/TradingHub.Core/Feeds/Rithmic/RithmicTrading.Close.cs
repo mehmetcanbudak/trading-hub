@@ -25,6 +25,15 @@ public sealed partial class RithmicTradingSession
     private readonly record struct NativeContract(string Environment, string Account, string Symbol, string Exchange);
     private static readonly Dictionary<NativeContract, CloseOperation> NativeCloses = new();
     private readonly Dictionary<string, CloseOperation> _ownedCloses = new(StringComparer.Ordinal);
+
+    // Closes that were sent after their bounded wait gave up on an unanswered earlier send, per account. An entry order
+    // that registered before such a close and is still awaiting admission would otherwise open exposure after it.
+    private readonly Dictionary<string, int> _closesSentAheadOfEarlierSends = new(StringComparer.Ordinal);
+
+    internal int ClosesSentAheadOfEarlierSends(string account)
+    {
+        lock (_closesSentAheadOfEarlierSends) return _closesSentAheadOfEarlierSends.GetValueOrDefault(account);
+    }
     private readonly HashSet<OrderContext> _closeContexts = new(ReferenceEqualityComparer.Instance);
     private readonly record struct PositionInvalidations(long Flat, long Long, long Short);
     private enum CurrentCloseReadiness { Unknown, NativeTerminal, SessionNonworking, Working }
@@ -232,6 +241,9 @@ public sealed partial class RithmicTradingSession
             // close's reservation meanwhile, and the close's own cancellations below ride this already-paid turn and
             // never wait a second bound.
             inOrder = await sendTurn.WaitAsync(bounded: true, _cts.Token).ConfigureAwait(false);
+            if (!inOrder)
+                lock (_closesSentAheadOfEarlierSends)
+                    _closesSentAheadOfEarlierSends[close.Account] = _closesSentAheadOfEarlierSends.GetValueOrDefault(close.Account) + 1;
             sendTurn.Release();
             timeout.CancelAfter(CloseBudget);
             var cancellations = new HashSet<string>(StringComparer.Ordinal);

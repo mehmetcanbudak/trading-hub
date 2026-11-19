@@ -80,7 +80,7 @@
     "reason": "Internal exact native-account-context, symbol and exchange broker-cache key. Preserve its stable partition prefix and separators rather than translating routing identity."
   },
   "session:{0}|{1}": {
-    "locations": "TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:77 TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:79",
+    "locations": "TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:86 TradingHub.Core/Feeds/Rithmic/RithmicTrading.Close.cs:88",
     "reason": "Private per-session fallback native-account admission partition when proven native account identity is unavailable. It is not a display label and must not merge unproven sessions by translation."
   },
   "symbol={0}&fromId={1}&limit=1000": {

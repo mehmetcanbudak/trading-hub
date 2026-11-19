@@ -521,6 +521,7 @@
   "A chart keeps at most {0} alerts.": "每个图表最多保留 {0} 个提醒。",
   "A client identity already belongs to another intent.": "一个客户端标识已属于另一意图。",
   "A close ownership record disappeared during recovery.": "恢复期间一条平仓归属记录消失.",
+  "A close was sent while this order was still waiting for admission, so the order was not sent.": "在此订单仍等待准入时已发送平仓请求，因此该订单未发送。",
   "A closing limit order is already working in the account ({0}): no additional take profit will be placed (review it in Chart Trader)": "账户已有活动的平仓限价单（{0}）：不会另设止盈单（请在图表交易中检查）",
   "A column per day with dealer gamma (USD per 1 %; green positive, red negative) and a card placing the latest against the previous year: whether it is unusual.": "每日一列显示做市商伽马(每 1 % 的 USD;绿色为正,红色为负),并以信息卡将最新值与过去一年对比,判断是否异常。",
   "A command window opens": "将打开命令窗口",

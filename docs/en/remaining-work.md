@@ -37,7 +37,6 @@ Still open:
 ### Order path and durability
 | P | Item |
 |---|---|
-| P1 | Rithmic residual: a new-exposure order whose admission stays unresolved past the 10 s bound lets the reducing close send, and can be admitted after the close completed (same bounded residual as Tradovate/Binance; documented in [Trading](./operar.md)). Decide whether to refuse such late admissions. |
 | P2 | Simulated/replay accounts and the live strategy runner still write durable state on the UI thread (~70–90 ms per order); moving it off needs a strategy-execution redesign (deliberate earlier decision). |
 | P2 | `Partial_native_close…` flake: proven durable-write latency under an fsync storm; only a longer fixture bound would cure it (needs approval). |
 | P2 | Two order-path fixes have Tradovate-only tests; Binance shares the code (parity tests are defensive). |
