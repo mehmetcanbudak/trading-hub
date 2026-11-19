@@ -253,6 +253,41 @@ public sealed class HourlyKlinesTests : IDisposable
         finally { KlineHistory.CacheRoot = previousRoot; }
     }
 
+    [Fact]
+    public async Task AMonthBeforeTheProvidersWindowIsNeitherFetchedNorCachedAsEmptyButAnOldCacheIsStillServed()
+    {
+        string? previousRoot = KlineHistory.CacheRoot;
+        KlineHistory.CacheRoot = Path.Combine(_root, "candles");
+        try
+        {
+            var month = ClosedMonth();
+            var windowed = new WindowedSource(month.AddMonths(1), (from, to) => Bars(from, to, TimeSpan.FromHours(1)));
+            var warnings = new List<string>();
+
+            var none = await KlineHistory.LoadAsync(windowed, _instrument, month, month.AddDays(2), 60, 0, null, CancellationToken.None, warnings.Add);
+            Assert.Empty(none);
+            Assert.Empty(windowed.Requests);
+            Assert.Empty(CacheFiles()); // an unavailable month is not remembered as a month without trading
+            Assert.Single(warnings);
+            Assert.Contains("not available from this provider", warnings[0], StringComparison.Ordinal);
+
+            // An earlier session cached the month while the provider still served it: it stays usable after it aged out.
+            var open = new HourlySource((from, to) => Bars(from, to, TimeSpan.FromHours(1)));
+            await KlineHistory.LoadAsync(open, _instrument, month, month.AddDays(2), 60, 0, null, CancellationToken.None);
+            string path = Assert.Single(CacheFiles());
+            var stored = Enumerable.Range(0, 48).Select(i =>
+                (month.AddHours(i), new TradeProvenance(DataQuality.Synthetic, 3600, _instrument.Key, 0, 0, true, 0))).ToList();
+            RewriteCache(path, Payload(stored, volume: 42), DateTime.UtcNow.AddDays(-3));
+            warnings.Clear();
+
+            var kept = await KlineHistory.LoadAsync(windowed, _instrument, month, month.AddDays(2), 60, 0, null, CancellationToken.None, warnings.Add);
+            Assert.Equal(48, kept.Count);
+            Assert.All(kept, bar => Assert.Equal(42m, bar.Volume));
+            Assert.Empty(windowed.Requests);
+        }
+        finally { KlineHistory.CacheRoot = previousRoot; }
+    }
+
     private static IEnumerable<string> CacheFiles() => Directory.Exists(KlineHistory.CacheRoot)
         ? Directory.EnumerateFiles(KlineHistory.CacheRoot, "*.bin", SearchOption.AllDirectories).ToArray()
         : Array.Empty<string>();
@@ -338,6 +373,21 @@ public sealed class HourlyKlinesTests : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             Requests.Enqueue(request.RequestUri!);
             return Task.FromResult(respond(request));
+        }
+    }
+
+    private sealed class WindowedSource(DateTime earliest, Func<DateTime, DateTime, IReadOnlyList<Kline>> create) : IKlineHistory, IKlineWindow
+    {
+        public List<(DateTime From, DateTime To)> Requests { get; } = new();
+        public string CacheTag => "hourly-fixture";
+        public DateTime? EarliestKline(Instrument instrument, int minutes) => earliest;
+        public Task<DateTime?> FirstAvailableAsync(Instrument instrument, CancellationToken ct) => Task.FromResult<DateTime?>(null);
+        public Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
+            Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
+        {
+            Requests.Add((fromUtc, toUtc));
+            onBatch(create(fromUtc, toUtc));
+            return Task.CompletedTask;
         }
     }
 

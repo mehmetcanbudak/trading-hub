@@ -54,6 +54,14 @@ public interface IMarketDataFeed : IDisposable
 /// </summary>
 public readonly record struct Kline(long OpenTimeMs, decimal Open, decimal High, decimal Low, decimal Close, decimal Volume, decimal BuyVolume, bool HasBuyVolume, TradeProvenance Provenance = default);
 
+/// <summary>A candle source that serves only a sliding window of candles per interval (Hyperliquid keeps the latest 5000).</summary>
+public interface IKlineWindow
+{
+    /// <summary>The first candle open the source can serve for <paramref name="minutes"/>-minute candles now; earlier ones are
+    /// unavailable, not absent, and must not be cached as empty.</summary>
+    DateTime? EarliestKline(Instrument instrument, int minutes);
+}
+
 /// <summary>Feeds que dan historia en velas (rápida). La usa la carga de historia para lo que no hay en ticks.</summary>
 public interface IKlineHistory
 {

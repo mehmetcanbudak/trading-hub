@@ -7,7 +7,7 @@ namespace TradingHub.Feeds.Venues;
 /// Hyperliquid public perpetual data (USD-settled): the l2Book stream is a full top-20 snapshot per message at exact
 /// prices, plus trades. Thousand-unit coins (kPEPE) use the 1000PEPE base asset, as Binance does.
 /// </summary>
-public sealed class HyperliquidFeed(PublicVenueTransport? transport = null) : PublicVenueFeed(transport)
+public sealed class HyperliquidFeed(PublicVenueTransport? transport = null) : PublicVenueFeed(transport), IKlineWindow
 {
     public const string PerpId = "hyperliquid";
     public override string Id => PerpId;
@@ -98,13 +98,18 @@ public sealed class HyperliquidFeed(PublicVenueTransport? transport = null) : Pu
     /// <summary>Candles the venue keeps per interval; earlier ones are unavailable, not absent.</summary>
     public const int CandleWindow = 5000;
 
+    private long Horizon(long step) => (Clock.GetUtcNow().ToUnixTimeMilliseconds() / step - (CandleWindow - 1)) * step;
+
+    public DateTime? EarliestKline(Instrument instrument, int minutes) =>
+        DateTimeOffset.FromUnixTimeMilliseconds(Horizon(minutes * 60_000L)).UtcDateTime;
+
     protected override async Task<IReadOnlyList<Kline>> FetchKlinesAsync(Instrument instrument, VenueSpec spec, long fromMs, long toMs, int minutes, CancellationToken ct)
     {
         // The venue serves only its latest 5000 candles per interval. A range that starts before that window is read
         // from the window's start, and its bars are marked partial so caches and maintenance record the missing start
         // as unknown rather than as a period without trading.
         long step = minutes * 60_000L;
-        long horizon = (Clock.GetUtcNow().ToUnixTimeMilliseconds() / step - (CandleWindow - 1)) * step;
+        long horizon = Horizon(step);
         bool partial = fromMs < horizon;
         string interval = minutes == 60 ? "1h" : $"{minutes}m";
         var bars = new List<Kline>();

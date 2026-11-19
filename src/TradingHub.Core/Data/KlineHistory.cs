@@ -60,6 +60,8 @@ public static class KlineHistory
         var months = new List<DateTime>();
         for (var month = new DateTime(fromUtc.Year, fromUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc); month < toUtc; month = month.AddMonths(1)) months.Add(month);
         string tag = source.CacheTag + (source is IDataScopeFeed scoped ? "\u001f" + scoped.DataScopeKey : "");
+        DateTime? windowStart = source is IKlineWindow window ? window.EarliestKline(inst, minutes) : null;
+        bool skippedUnavailable = false;
         for (int index = 0; index < months.Count; index++)
         {
             ct.ThrowIfCancellationRequested();
@@ -76,6 +78,15 @@ public static class KlineHistory
                 var cache = ReadCache(path, inst, minutes, month);
                 ct.ThrowIfCancellationRequested();
                 bool covered = cache != null && cache.From <= requestedFrom && cache.To >= requestedTo;
+                if (windowStart is { } earliest && end <= earliest && (cache == null || !covered || !closed || DateTime.UtcNow - cache.Updated > TimeSpan.FromDays(1)))
+                {
+                    // The provider no longer serves this month: fetching returns nothing, which must not be cached as an
+                    // empty month. Whatever an earlier session cached is still served.
+                    skippedUnavailable = true;
+                    if (cache != null) result.AddRange(cache.Bars.Where(k => k.OpenTimeMs >= ToMs(requestedFrom) && k.OpenTimeMs < ToMs(requestedTo)));
+                    progress?.Report((index + 1d) / months.Count);
+                    continue;
+                }
                 if (cache == null || !covered || !closed || DateTime.UtcNow - cache.Updated > TimeSpan.FromDays(1))
                 {
                     DateTime fetchFrom, fetchTo;
@@ -131,6 +142,8 @@ public static class KlineHistory
             finally { gate.Release(); }
             progress?.Report((index + 1d) / months.Count);
         }
+        if (skippedUnavailable)
+            warning?.Invoke($"Candle history before {windowStart:yyyy-MM-dd HH:mm} UTC is not available from this provider; earlier months were not loaded unless already cached.");
         return result;
 
         async Task Fetch(DateTime start, DateTime finish, List<Kline> target, int maximumBars)

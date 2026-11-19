@@ -88,6 +88,19 @@ public sealed class FeedReviewVenueTests
     }
 
     [Fact]
+    public void Hyperliquid_reports_where_its_candle_window_starts_for_each_interval()
+    {
+        using var feed = new HyperliquidFeed(new PublicVenueTransport(new HttpClient(new Http((_, _) => Json("[]"))), RestOrigin: new Uri("https://hyperliquid.fixture"), Delay: NoDelay, Clock: new FixedClock(Now)));
+        var instrument = new Instrument { FeedId = "hyperliquid", Symbol = "BTC", TickSize = 1m };
+        foreach (int minutes in new[] { 1, 15, 60 })
+        {
+            long step = minutes * 60_000L;
+            long horizon = (Now.ToUnixTimeMilliseconds() / step - (HyperliquidFeed.CandleWindow - 1)) * step;
+            Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(horizon).UtcDateTime, feed.EarliestKline(instrument, minutes));
+        }
+    }
+
+    [Fact]
     public void Bitget_spot_book_applies_updates_without_pseq_and_resynchronizes_only_out_of_order()
     {
         var spot = Assert.Single(BitgetFeed.ParseInstruments(Root("""
