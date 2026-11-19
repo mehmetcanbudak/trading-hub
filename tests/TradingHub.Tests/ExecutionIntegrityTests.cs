@@ -1131,7 +1131,10 @@ public class ExecutionIntegrityTests
                 Assert.Equal(90m, fill.Price);
                 Assert.Equal(nextGeneration, fill.OwnerGeneration);
             }
-            Assert.Empty(broker.OrderContext.PendingReceipts());
+            // The receipt is acknowledged after the ledger commit that the assertions above already observed, so it can
+            // still be pending for an instant; what matters is that it is acknowledged.
+            Assert.True(SpinWait.SpinUntil(() => broker.OrderContext.PendingReceipts().Count == 0, TimeSpan.FromSeconds(10)),
+                "An execution receipt stayed pending after its ledger commit.");
         }
         finally
         {

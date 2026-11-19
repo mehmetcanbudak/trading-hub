@@ -523,6 +523,18 @@ public static partial class KvsTranslator
         var t = text.Trim().TrimEnd(';').Trim();
         Match m;
         if (t is "{" or "}" or "} else {" or "else {" or "}else{" or "} else" or "else") return t;
+        // if (…) { a } else { b } and if (…) { a } else if (…) { b } else { c } on one line
+        if ((m = Regex.Match(t, @"^(\}\s*)?(else\s+)?if\s*\((.*?)\)\s*\{([^{}]*)\}\s*else\b\s*(.+)$")).Success)
+        {
+            string head = StatementBody($"{m.Groups[1].Value}{m.Groups[2].Value}if ({m.Groups[3].Value}) {{ {m.Groups[4].Value} }}", s, context);
+            string tail = m.Groups[5].Value.Trim();
+            if (tail.StartsWith('{') && tail.EndsWith('}') && !tail[1..^1].Contains('{') && !tail[1..^1].Contains('}'))
+                tail = "{ " + string.Join(" ", tail[1..^1].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(x => StatementBody(x, s, context))) + " }";
+            else tail = StatementBody(tail, s, context);
+            return $"{head} else {tail}";
+        }
+
         // if (…) { a; b } on one line
         if ((m = Regex.Match(t, @"^(\}\s*)?(else\s+)?if\s*\((.*)\)\s*\{(.+)\}$")).Success)
         {

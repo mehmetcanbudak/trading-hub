@@ -54,7 +54,6 @@ Still open:
 | P2 | Parked alerts are not updated when an indicator is removed while the chart shows another instrument. |
 | P2 | Parked/unreadable-drawings status messages can be overwritten by the "ready" message when history finishes loading. |
 | P2 | Workspace save cache keeps the full text of every saved drawings file for the session (bounded; a hash would do). |
-| P2 | `BybitFeed` pings from a fire-and-forget task; when the socket closes mid-send the fault is unobserved and lands in `crash.log` (harmless, seen once on `52cf2b3`). Observe it and log it quietly. |
 
 ### Studies
 | P | Item |
@@ -67,7 +66,6 @@ Still open:
 ### KVS scripting
 | P | Item |
 |---|---|
-| P2 | One-line `if (a) { x = 1 } else { x = 2 }` is rejected; only the multi-line form works (undocumented until fixed). |
 | P2 | The Windows directory watcher added for edited copies has not run on Windows hands-on. |
 
 ### Localization tooling
@@ -80,7 +78,7 @@ Still open:
 | P | Item |
 |---|---|
 | P1 | macOS hosted runners are often unavailable (zero-step cancellations). Consider a self-hosted Apple Silicon runner or a scheduled re-run policy. |
-| P1 | Watch `LocalApiSettingsTests.A_port_change_restarts_on_the_new_port_and_the_old_port_refuses`: failed once under full-suite load locally, passes alone; and the Windows `vstest` testhost-connect timeout seen once on x64 (runner slowness). A third, on the `52cf2b3` merge run: `FeedReviewDerivativesTests` failed in its temp-folder cleanup on Windows x64 because the liquidation recorder still held a CSV open; the cleanup now retries (test-only). |
+| P1 | Watch `LocalApiSettingsTests.A_port_change_restarts_on_the_new_port_and_the_old_port_refuses`: failed once under full-suite load locally, passes alone; and the Windows `vstest` testhost-connect timeout seen once on x64 (runner slowness). A third, on the `52cf2b3` merge run: `FeedReviewDerivativesTests` failed in its temp-folder cleanup on Windows x64 because the liquidation recorder still held a CSV open; the cleanup now retries (test-only). A fourth, on macOS: `ExecutionIntegrityTests.SuccessorCannotResetFlatHistory…` asserted an empty `PendingReceipts()` the instant after the ledger commit, before the receipt was acknowledged; it now waits for the acknowledgement (test-only; passed on re-run of the identical tree). A fifth, on Windows ARM64: `LangTests.Restart_replacement_waits_for_predecessor_exit…` timed out after 15 s waiting for a cold PowerShell child to print its first line; its waits are now 60 s (test-only). A sixth, locally under full-suite load: `BybitExecutionFactsTests.Ordinary_opposite_orders_cannot_become_opening_exposure_after_permission_is_revoked_during_metadata(Limit)` failed once and passed 5 of 5 alone (not investigated). |
 | P1 | The macOS safety-scene Tradovate fixture failure now prints diagnostics and the contract-lookup retry is fixed; confirm it stays green. |
 | P2 | Liquidation-stream tests poll a condition with a 10 s deadline because `DerivativesData` exposes no event to await. |
 | P2 | Disk headroom on this Mac swings between 3 and 21 GB (shared with other projects); one full-suite run hit `ENOSPC`. Keep evidence on the external volume and consider `TMPDIR` there for long runs. |

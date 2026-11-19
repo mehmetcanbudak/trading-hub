@@ -76,11 +76,12 @@ public sealed class LangTests : IDisposable
         Process? waiter = null;
         try
         {
-            Assert.Equal("ready", await predecessor.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15)));
+            // Starting PowerShell cold can take well over 15 s on a loaded Windows ARM64 runner, so every wait here is 60 s.
+            Assert.Equal("ready", await predecessor.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(60)));
             if (predecessorAlreadyExited)
             {
                 predecessor.StandardInput.Close();
-                await predecessor.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                await predecessor.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
             }
             var waiterStart = Lang.ReplacementStartInfo(predecessor.Id, replacementExecutable, replacementArguments);
             waiterStart.RedirectStandardError = true;
@@ -98,12 +99,12 @@ public sealed class LangTests : IDisposable
                 }
                 await predecessor.StandardInput.WriteLineAsync("release");
                 await predecessor.StandardInput.FlushAsync();
-                await predecessor.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                await predecessor.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
             }
-            await waiter!.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await waiter!.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
             Assert.True(waiter.ExitCode == 0, await waiter.StandardError.ReadToEndAsync());
             var launched = Stopwatch.StartNew();
-            while (!File.Exists(marker) && launched.Elapsed < TimeSpan.FromSeconds(15)) await Task.Delay(25);
+            while (!File.Exists(marker) && launched.Elapsed < TimeSpan.FromSeconds(60)) await Task.Delay(25);
             Assert.True(File.Exists(marker), "Replacement never ran after the predecessor exited.");
             Assert.Equal(string.Join('\0', payload) + '\0', await File.ReadAllTextAsync(marker));
         }
@@ -112,11 +113,11 @@ public sealed class LangTests : IDisposable
             if (!predecessor.HasExited)
             {
                 predecessor.StandardInput.Close();
-                await predecessor.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                await predecessor.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
             }
             if (waiter != null)
             {
-                await waiter.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                await waiter.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
                 waiter.Dispose();
             }
             Directory.Delete(directory, recursive: true);
